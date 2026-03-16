@@ -17,6 +17,15 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = ["sentence-transformers>=3.0"]
+youtube = [
+  "google-api-python-client>=2.0",
+  "google-auth-oauthlib>=1.0",
+  "youtube-transcript-api>=0.6",
+]
+whisper = [
+  "yt-dlp>=2024.1",
+  "openai-whisper>=20231117",
+]
 dev = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.scripts]
@@ -24,3 +33,4 @@ corpus = "cli.main:main"
 
 [tool.setuptools]
 packages = ["cli", "core", "storage", "plugins", "plugins.obsidian", "plugins.youtube", "api"]
+py-modules = ["setup_wizard", "structlog", "yaml"]
