@@ -32,7 +32,8 @@ class ObsidianPlugin(SourcePlugin):
             updated = datetime.fromtimestamp(file.stat().st_mtime)
             if since and updated <= since:
                 continue
-            metas.append(ItemMeta(source_id=file.name, updated_at=updated))
+            size_chars = file.stat().st_size
+            metas.append(ItemMeta(source_id=file.name, updated_at=updated, metadata={"size_bytes": size_chars}))
             if len(metas) >= limit:
                 break
         return metas
@@ -42,7 +43,7 @@ class ObsidianPlugin(SourcePlugin):
             end = raw.find("\n---\n", 4)
             if end > -1:
                 meta = yaml.safe_load(raw[4:end]) or {}
-                return meta, raw[end + 5 :]
+                return meta, raw[end + 5:]
         return {}, raw
 
     def fetch(self, item_meta: ItemMeta) -> Document:
@@ -53,6 +54,14 @@ class ObsidianPlugin(SourcePlugin):
         tags.update(re.findall(r"(?<!\w)#([\w-]+)", body))
         links = re.findall(r"\[\[([^\]]+)\]\]", body)
         plain = re.sub(r"\[\[([^\]]+)\]\]", r"\1", body)
+
+        size_bytes = (item_meta.metadata or {}).get("size_bytes", 0)
+        logger.info("indexed_note", title=path.stem, size_bytes=size_bytes, tags=len(tags))
+
+        # vault_path stored in metadata so the frontend can build obsidian:// URLs
+        metadata["vault_path"] = str(self.vault)
+        metadata["size_bytes"] = size_bytes
+
         return Document(
             source_plugin=self.name,
             source_id=item_meta.source_id,

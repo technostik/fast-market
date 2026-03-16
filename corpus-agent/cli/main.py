@@ -40,24 +40,14 @@ def setup() -> None:
 @click.option("--clean", is_flag=True, default=False, help="Wipe all indexed data before syncing")
 def sync(source: str, mode: str, limit: int | None, clean: bool) -> None:
     engine, plugins, store = build_engine()
-
     if clean:
         store.delete_all()
         logger.info("store_wiped")
-
     targets = list(plugins.keys()) if source == "all" else [source]
-
     for name in targets:
-        # Per-source sensible defaults
         effective_limit = limit if limit is not None else (5 if name == "youtube" else 10)
         result = engine.sync(plugins[name], mode=mode, limit=effective_limit)
-        logger.info(
-            "sync_done",
-            source=name,
-            indexed=result.indexed,
-            skipped=result.skipped,
-            failures=len(result.failures),
-        )
+        logger.info("sync_done", source=name, indexed=result.indexed, skipped=result.skipped, failures=len(result.failures))
         for failure in result.failures:
             logger.error("sync_failure", source=name, source_id=failure.source_id, error=failure.error)
 
@@ -84,13 +74,20 @@ def search(query: str, mode: str, limit: int) -> None:
         vector = engine.embedder.embed_texts([query])[0][1]
         results = store.semantic_search(vector, limit)
     for res in results:
-        logger.info(
-            "search_result",
-            source=res.source_plugin,
-            source_id=res.source_id,
-            title=res.title,
-            score=round(res.score, 4),
-        )
+        logger.info("search_result", source=res.source_plugin, source_id=res.source_id, title=res.title, score=round(res.score, 4))
+
+
+@main.command(name="delete")
+@click.option("--source", type=click.Choice(["obsidian", "youtube"]), required=True)
+@click.option("--id", "source_id", required=True, help="source_id of the document (e.g. Note.md or video_id)")
+def delete(source: str, source_id: str) -> None:
+    _, _, store = build_engine()
+    deleted = store.delete_document(source, source_id)
+    if deleted:
+        logger.info("deleted", source=source, source_id=source_id)
+    else:
+        logger.error("not_found", source=source, source_id=source_id)
+        raise SystemExit(1)
 
 
 @main.command()

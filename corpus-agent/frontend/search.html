@@ -9,113 +9,89 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
     --bg: #0e0e0f; --surface: #18181a; --border: #2a2a2e;
-    --accent: #c8f04a; --accent2: #4af0c8;
+    --accent: #c8f04a; --accent2: #4af0c8; --danger: #f87171;
     --text: #e8e8e6; --muted: #6b6b70;
     --obsidian: #a78bfa; --youtube: #f87171;
   }
   body { background: var(--bg); color: var(--text); font-family: 'DM Mono', monospace; min-height: 100vh; }
 
-  header {
-    padding: 1.5rem 3rem;
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 1rem;
-  }
+  header { padding: 1.5rem 3rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; }
   header a { color: var(--muted); text-decoration: none; font-size: 0.8rem; }
   header a:hover { color: var(--accent); }
   header h1 { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 800; color: var(--accent); }
   .sep { color: var(--border); }
 
-  .search-area {
-    padding: 2.5rem 3rem;
-    border-bottom: 1px solid var(--border);
-  }
+  .search-area { padding: 2.5rem 3rem; border-bottom: 1px solid var(--border); }
+  .search-row { display: flex; gap: 0.5rem; max-width: 700px; margin-bottom: 1rem; }
 
-  .search-row {
-    display: flex; gap: 0.5rem; max-width: 700px; margin-bottom: 1rem;
-  }
-
-  input[type=text] {
-    flex: 1;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-family: 'DM Mono', monospace;
-    font-size: 0.9rem;
-    padding: 0.75rem 1rem;
-  }
+  input[type=text] { flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.9rem; padding: 0.75rem 1rem; }
   input[type=text]:focus { outline: 1px solid var(--accent); }
   input[type=text]::placeholder { color: var(--muted); }
 
-  button {
-    background: var(--accent);
-    border: none;
-    color: #0e0e0f;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.85rem;
-    font-weight: 500;
-    padding: 0.75rem 1.5rem;
-    cursor: pointer;
-    transition: opacity 0.15s;
-  }
-  button:hover { opacity: 0.85; }
+  .btn-search { background: var(--accent); border: none; color: #0e0e0f; font-family: 'DM Mono', monospace; font-size: 0.85rem; font-weight: 500; padding: 0.75rem 1.5rem; cursor: pointer; }
+  .btn-search:hover { opacity: 0.85; }
 
   .mode-row { display: flex; gap: 1rem; align-items: center; }
   .mode-label { font-size: 0.75rem; color: var(--muted); }
-
-  .mode-btn {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--muted);
-    font-family: 'DM Mono', monospace;
-    font-size: 0.75rem;
-    padding: 0.3rem 0.8rem;
-    cursor: pointer;
-  }
+  .mode-btn { background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-family: 'DM Mono', monospace; font-size: 0.75rem; padding: 0.3rem 0.8rem; cursor: pointer; }
   .mode-btn.active { border-color: var(--accent2); color: var(--accent2); }
 
   .results { padding: 0 3rem 3rem; }
 
-  .result {
-    border-bottom: 1px solid var(--border);
-    padding: 1.25rem 0;
-  }
+  .result { border-bottom: 1px solid var(--border); padding: 1.25rem 0; display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: start; }
 
-  .result-header {
-    display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.4rem; flex-wrap: wrap;
-  }
-
-  .result-title {
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    font-size: 0.95rem;
-  }
-  .result-title a { color: var(--text); text-decoration: none; }
-  .result-title a:hover { color: var(--accent); }
-
-  .score {
-    font-size: 0.68rem;
-    color: var(--accent2);
-    margin-left: auto;
-  }
-
-  .source-badge {
-    font-size: 0.65rem; padding: 0.2rem 0.5rem;
-    border-radius: 2px; font-weight: 500;
-  }
+  .result-left {}
+  .result-header { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
+  .source-badge { font-size: 0.65rem; padding: 0.2rem 0.5rem; border-radius: 2px; font-weight: 500; }
   .badge-obsidian { background: rgba(167,139,250,0.15); color: var(--obsidian); }
   .badge-youtube  { background: rgba(248,113,113,0.15); color: var(--youtube); }
 
-  .excerpt {
-    color: var(--muted);
-    font-size: 0.78rem;
-    line-height: 1.6;
-    max-width: 72ch;
+  .result-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; }
+  .result-title a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
+  .result-title a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .score { font-size: 0.68rem; color: var(--accent2); white-space: nowrap; }
+
+  .result-excerpt {
+    color: var(--muted); font-size: 0.78rem; line-height: 1.6; max-width: 70ch;
+    cursor: pointer; border-left: 2px solid var(--border); padding-left: 0.75rem; margin-top: 0.4rem;
+    transition: border-color 0.15s, color 0.15s;
   }
+  .result-excerpt:hover { border-left-color: var(--accent2); color: var(--text); }
+  .result-excerpt::after { content: ' · click to expand'; color: var(--muted); font-size: 0.65rem; }
+
+  .result-actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end; padding-top: 0.2rem; }
+  .btn-delete { background: transparent; border: 1px solid var(--border); color: var(--muted); font-family: 'DM Mono', monospace; font-size: 0.7rem; padding: 0.3rem 0.6rem; cursor: pointer; }
+  .btn-delete:hover { border-color: var(--danger); color: var(--danger); }
 
   .empty, .loading { padding: 3rem; color: var(--muted); font-size: 0.85rem; }
+
+  /* Modal — same as items.html */
+  .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; align-items: center; justify-content: center; padding: 2rem; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); max-width: 800px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; }
+  .modal-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 1rem; }
+  .modal-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1rem; flex: 1; }
+  .modal-close { background: transparent; border: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; }
+  .modal-close:hover { color: var(--text); }
+  .modal-body { padding: 1.5rem; overflow-y: auto; flex: 1; }
+  .modal-body pre { white-space: pre-wrap; word-break: break-word; font-family: 'DM Mono', monospace; font-size: 0.78rem; line-height: 1.7; color: var(--text); }
+  .modal-body .md h1 { font-family: 'Syne', sans-serif; font-size: 1.3rem; font-weight: 800; margin: 1rem 0 0.5rem; color: var(--accent); }
+  .modal-body .md h2 { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; margin: 0.9rem 0 0.4rem; color: var(--accent2); }
+  .modal-body .md h3 { font-size: 0.9rem; font-weight: 500; margin: 0.75rem 0 0.3rem; }
+  .modal-body .md p  { font-size: 0.82rem; line-height: 1.7; margin-bottom: 0.6rem; }
+  .modal-body .md code { background: #222; padding: 0.1em 0.3em; font-size: 0.75rem; }
+  .modal-body .md ul, .modal-body .md ol { padding-left: 1.5rem; margin-bottom: 0.6rem; font-size: 0.82rem; line-height: 1.7; }
+  .modal-body .md blockquote { border-left: 3px solid var(--border); padding-left: 0.75rem; color: var(--muted); }
+  .modal-footer { padding: 1rem 1.5rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.75rem; }
+  .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--muted); font-family: 'DM Mono', monospace; font-size: 0.78rem; padding: 0.4rem 1rem; cursor: pointer; }
+  .btn-secondary:hover { border-color: var(--text); color: var(--text); }
+  .btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); font-family: 'DM Mono', monospace; font-size: 0.78rem; padding: 0.4rem 1rem; cursor: pointer; }
+  .btn-danger:hover { background: var(--danger); color: #000; }
 </style>
 </head>
 <body>
+
 <header>
   <a href="/ui">corpus-agent</a>
   <span class="sep">/</span>
@@ -125,7 +101,7 @@
 <div class="search-area">
   <div class="search-row">
     <input type="text" id="q" placeholder="Ask anything about your content…" autofocus>
-    <button onclick="doSearch()">Search</button>
+    <button class="btn-search" onclick="doSearch()">Search</button>
   </div>
   <div class="mode-row">
     <span class="mode-label">mode:</span>
@@ -136,8 +112,25 @@
 
 <div class="results" id="results"></div>
 
+<!-- Modal -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title"></span>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn-danger" onclick="deleteFromModal()">Delete from index</button>
+      <button class="btn-secondary" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
   let mode = 'semantic';
+  let currentResults = [];
+  let modalItem = null;
 
   function setMode(m) {
     mode = m;
@@ -145,41 +138,126 @@
     document.getElementById('mode-keyword').classList.toggle('active', m === 'keyword');
   }
 
-  document.getElementById('q').addEventListener('keydown', e => {
-    if (e.key === 'Enter') doSearch();
-  });
+  document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  // --- obsidian URL helper ---
+  function obsidianUrl(item) {
+    const vaultPath = (item.metadata || {}).vault_path || '';
+    const vaultName = vaultPath.split('/').filter(Boolean).pop() || 'vault';
+    const file = item.source_id.replace(/\.md$/, '');
+    return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(file)}`;
+  }
+
+  function sourceUrl(item) {
+    if (item.source_plugin === 'youtube') return item.url || '#';
+    return obsidianUrl(item);
+  }
+
+  // --- minimal markdown ---
+  function renderMarkdown(text) {
+    const e = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return e
+      .replace(/^### (.+)$/gm,'<h3>$1</h3>')
+      .replace(/^## (.+)$/gm,'<h2>$1</h2>')
+      .replace(/^# (.+)$/gm,'<h1>$1</h1>')
+      .replace(/`([^`]+)`/g,'<code>$1</code>')
+      .replace(/^\* (.+)$/gm,'<li>$1</li>')
+      .replace(/^> (.+)$/gm,'<blockquote>$1</blockquote>')
+      .replace(/\n\n/g,'</p><p>')
+      .replace(/^(?!<[hpulbc])(.+)$/gm,(m,l)=>l?`<p>${l}</p>`:'');
+  }
+
+  // --- modal ---
+  function openModal(item) {
+    modalItem = item;
+    document.getElementById('modal-title').textContent = item.title;
+    document.getElementById('modal-body').innerHTML = '<p style="color:var(--muted);font-size:.8rem">Loading…</p>';
+    document.getElementById('modal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    fetch(`/document/${item.source_plugin}/${encodeURIComponent(item.source_id)}`)
+      .then(r => r.json())
+      .then(doc => {
+        const body = document.getElementById('modal-body');
+        if (item.source_plugin === 'obsidian') {
+          body.innerHTML = `<div class="md">${renderMarkdown(doc.raw_text)}</div>`;
+        } else {
+          body.innerHTML = `<pre>${doc.raw_text.replace(/</g,'&lt;')}</pre>`;
+        }
+      })
+      .catch(err => {
+        document.getElementById('modal-body').innerHTML = `<p style="color:var(--danger)">Error: ${err}</p>`;
+      });
+  }
+
+  function closeModal() {
+    document.getElementById('modal').classList.remove('open');
+    document.body.style.overflow = '';
+    modalItem = null;
+  }
+
+  function deleteFromModal() {
+    if (!modalItem) return;
+    if (!confirm(`Delete "${modalItem.source_id}" from index?`)) return;
+    fetch(`/document/${modalItem.source_plugin}/${encodeURIComponent(modalItem.source_id)}`, { method: 'DELETE' })
+      .then(r => { if (!r.ok) throw new Error('Delete failed'); return r.json(); })
+      .then(() => {
+        currentResults = currentResults.filter(i => !(i.source_plugin === modalItem.source_plugin && i.source_id === modalItem.source_id));
+        closeModal();
+        renderResults(currentResults);
+      })
+      .catch(err => alert('Error: ' + err));
+  }
+
+  function renderResults(items) {
+    const el = document.getElementById('results');
+    if (!items.length) { el.innerHTML = '<div class="empty">No results.</div>'; return; }
+
+    el.innerHTML = items.map((item, idx) => {
+      const isYT = item.source_plugin === 'youtube';
+      const badgeClass = isYT ? 'badge-youtube' : 'badge-obsidian';
+      const badgeLabel = isYT ? 'YouTube' : 'Obsidian';
+      const href = sourceUrl(item);
+      const target = isYT ? 'target="_blank" rel="noopener"' : '';
+      const score = typeof item.score === 'number' ? item.score.toFixed(3) : '';
+
+      return `
+        <div class="result">
+          <div class="result-left">
+            <div class="result-header">
+              <span class="source-badge ${badgeClass}">${badgeLabel}</span>
+              <span class="result-title"><a href="${href}" ${target}>${item.title.replace(/</g,'&lt;')}</a></span>
+              <span class="score">${score}</span>
+            </div>
+            <div class="result-excerpt" onclick="openModal(currentResults[${idx}])">${item.excerpt.replace(/</g,'&lt;')}</div>
+          </div>
+          <div class="result-actions">
+            <button class="btn-delete" onclick="(function(){
+              if (!confirm('Delete from index?')) return;
+              fetch('/document/${item.source_plugin}/${encodeURIComponent(item.source_id)}', {method:'DELETE'})
+                .then(r=>{if(!r.ok)throw new Error('failed');return r.json();})
+                .then(()=>{ currentResults.splice(${idx},1); renderResults(currentResults); })
+                .catch(e=>alert('Error: '+e));
+            })()">✕ remove</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
 
   function doSearch() {
     const q = document.getElementById('q').value.trim();
     if (!q) return;
-    const results = document.getElementById('results');
-    results.innerHTML = '<div class="loading">Searching…</div>';
+    document.getElementById('results').innerHTML = '<div class="loading">Searching…</div>';
 
     fetch(`/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=10`)
       .then(r => r.json())
       .then(items => {
-        if (!items.length) {
-          results.innerHTML = '<div class="empty">No results.</div>';
-          return;
-        }
-        results.innerHTML = items.map(item => {
-          const isYT = item.source_plugin === 'youtube';
-          const badgeClass = isYT ? 'badge-youtube' : 'badge-obsidian';
-          const badgeLabel = isYT ? 'YouTube' : 'Obsidian';
-          const score = typeof item.score === 'number' ? item.score.toFixed(3) : '';
-          return `
-            <div class="result">
-              <div class="result-header">
-                <span class="source-badge ${badgeClass}">${badgeLabel}</span>
-                <span class="result-title">${item.title}</span>
-                <span class="score">${score}</span>
-              </div>
-              <div class="excerpt">${item.excerpt.replace(/</g,'&lt;')}</div>
-            </div>`;
-        }).join('');
+        currentResults = items;
+        renderResults(items);
       })
       .catch(err => {
-        results.innerHTML = `<div class="empty">Error: ${err}</div>`;
+        document.getElementById('results').innerHTML = `<div class="empty">Error: ${err}</div>`;
       });
   }
 </script>

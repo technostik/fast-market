@@ -20,7 +20,6 @@ embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
 engine = SyncEngine(store, embedder)
 plugins = build_plugins(config)
 
-# HTML files live in corpus-agent/frontend/
 _FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
 
@@ -82,6 +81,22 @@ def sources() -> list[str]:
 @app.get("/items")
 def items(source: str | None = None, limit: int = 50) -> list[dict]:
     return store.list_documents(source, limit)
+
+
+@app.get("/document/{source_plugin}/{source_id:path}")
+def get_document(source_plugin: str, source_id: str) -> dict:
+    doc = store.get_document(source_plugin, source_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@app.delete("/document/{source_plugin}/{source_id:path}")
+def delete_document(source_plugin: str, source_id: str) -> dict:
+    deleted = store.delete_document(source_plugin, source_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"deleted": True, "source_plugin": source_plugin, "source_id": source_id}
 
 
 @app.post("/sync")

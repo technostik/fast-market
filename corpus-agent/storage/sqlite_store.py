@@ -115,6 +115,31 @@ class SQLiteStore:
             )
         self.conn.commit()
 
+    def get_document(self, source_plugin: str, source_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT source_plugin, source_id, title, raw_text, url, updated_at, duration_seconds, metadata_json FROM documents WHERE source_plugin=? AND source_id=?",
+            (source_plugin, source_id),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["metadata"] = json.loads(d.pop("metadata_json") or "{}")
+        return d
+
+    def delete_document(self, source_plugin: str, source_id: str) -> bool:
+        row = self.conn.execute(
+            "SELECT id FROM documents WHERE source_plugin=? AND source_id=?",
+            (source_plugin, source_id),
+        ).fetchone()
+        if not row:
+            return False
+        self.conn.execute("DELETE FROM documents WHERE source_plugin=? AND source_id=?", (source_plugin, source_id))
+        self.conn.execute("DELETE FROM chunks WHERE source_plugin=? AND source_id=?", (source_plugin, source_id))
+        self.conn.execute("DELETE FROM chunks_fts WHERE source_plugin=? AND source_id=?", (source_plugin, source_id))
+        self.conn.commit()
+        logger.info("document_deleted", source_plugin=source_plugin, source_id=source_id)
+        return True
+
     def keyword_search(self, query: str, limit: int) -> list[SearchResult]:
         rows = self.conn.execute(
             """
@@ -166,13 +191,7 @@ class SQLiteStore:
         return results
 
     def delete_all(self) -> None:
-        self.conn.executescript(
-            """
-            DELETE FROM documents;
-            DELETE FROM chunks;
-            DELETE FROM chunks_fts;
-            """
-        )
+        self.conn.executescript("DELETE FROM documents; DELETE FROM chunks; DELETE FROM chunks_fts;")
         self.conn.commit()
         logger.info("store_cleared")
 
