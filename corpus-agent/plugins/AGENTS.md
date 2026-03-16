@@ -1,0 +1,2 @@
+- Keep code minimal and explicit.
+- Use structlog, raise explicit exceptions.
