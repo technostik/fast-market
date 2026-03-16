@@ -55,7 +55,7 @@ def reindex(req: ReindexRequest) -> dict[str, object]:
 
 
 @app.get("/search")
-def search(q: str, mode: str = "keyword", limit: int = 5) -> list[dict[str, object]]:
+def search(q: str, mode: str = "keyword", limit: int = 5) -> list["SearchResult"]:
     if mode == "keyword":
         results = store.keyword_search(q, limit)
     elif mode == "semantic":
@@ -63,4 +63,4 @@ def search(q: str, mode: str = "keyword", limit: int = 5) -> list[dict[str, obje
         results = store.semantic_search(vector, limit)
     else:
         raise HTTPException(status_code=400, detail="Invalid mode")
-    return [r.__dict__ for r in results]
+    return results
