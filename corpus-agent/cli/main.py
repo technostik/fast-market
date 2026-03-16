@@ -61,12 +61,12 @@ def reindex(source: str) -> None:
 @click.option("--mode", type=click.Choice(["semantic", "keyword"]), default="semantic")
 @click.option("--limit", type=int, default=5)
 def search(query: str, mode: str, limit: int) -> None:
-    _, _, store = build_engine()
+    engine, _, store = build_engine()
     if mode == "keyword":
         results = store.keyword_search(query, limit)
     else:
-        embedder = Embedder()
-        vector = embedder.embed_texts([query])[0][1]
+        # Re-use embedder from engine
+        vector = engine.embedder.embed_texts([query])[0][1]
         results = store.semantic_search(vector, limit)
     for res in results:
         logger.info("search_result", source=res.source_plugin, source_id=res.source_id, title=res.title, score=res.score)
