@@ -47,11 +47,11 @@ def sync(req: SyncRequest) -> "SyncResult":
 
 
 @app.post("/reindex")
-def reindex(req: ReindexRequest) -> dict[str, object]:
+def reindex(req: ReindexRequest) -> "ReindexResult":
     if req.source not in plugins:
         raise HTTPException(status_code=400, detail="Unknown source")
     result = engine.reindex(plugins[req.source])
-    return result.__dict__
+    return result
 
 
 @app.get("/search")
