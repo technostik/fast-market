@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 
 import structlog
 
@@ -13,6 +14,8 @@ logger = structlog.get_logger(__name__)
 
 class SQLiteStore:
     def __init__(self, path: str = ":memory:") -> None:
+        if path != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self._init_db()
@@ -132,7 +135,7 @@ class SQLiteStore:
         scored = []
         for row in rows:
             emb = [float(v) for v in json.loads(row["embedding_json"])]
-            score = sum(a*b for a,b in zip(q, emb))
+            score = sum(a * b for a, b in zip(q, emb))
             scored.append((score, row))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [
