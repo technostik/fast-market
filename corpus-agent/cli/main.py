@@ -30,27 +30,43 @@ def main() -> None:
 @main.command()
 def setup() -> None:
     from setup_wizard import run_wizard
-
     run_wizard()
 
 
 @main.command()
 @click.option("--source", type=click.Choice(["obsidian", "youtube", "all"]), default="all")
 @click.option("--mode", type=click.Choice(["new", "backfill"]), default="new")
-@click.option("--limit", type=int, default=10)
-def sync(source: str, mode: str, limit: int) -> None:
-    engine, plugins, _ = build_engine()
-    targets = plugins.keys() if source == "all" else [source]
+@click.option("--limit", type=int, default=None, help="Max items to sync (default: 10 obsidian, 5 youtube)")
+@click.option("--clean", is_flag=True, default=False, help="Wipe all indexed data before syncing")
+def sync(source: str, mode: str, limit: int | None, clean: bool) -> None:
+    engine, plugins, store = build_engine()
+
+    if clean:
+        store.delete_all()
+        logger.info("store_wiped")
+
+    targets = list(plugins.keys()) if source == "all" else [source]
+
     for name in targets:
-        result = engine.sync(plugins[name], mode=mode, limit=limit)
-        logger.info("sync_done", source=name, indexed=result.indexed, skipped=result.skipped, failures=len(result.failures))
+        # Per-source sensible defaults
+        effective_limit = limit if limit is not None else (5 if name == "youtube" else 10)
+        result = engine.sync(plugins[name], mode=mode, limit=effective_limit)
+        logger.info(
+            "sync_done",
+            source=name,
+            indexed=result.indexed,
+            skipped=result.skipped,
+            failures=len(result.failures),
+        )
+        for failure in result.failures:
+            logger.error("sync_failure", source=name, source_id=failure.source_id, error=failure.error)
 
 
 @main.command()
 @click.option("--source", type=click.Choice(["obsidian", "youtube", "all"]), default="all")
 def reindex(source: str) -> None:
     engine, plugins, _ = build_engine()
-    targets = plugins.keys() if source == "all" else [source]
+    targets = list(plugins.keys()) if source == "all" else [source]
     for name in targets:
         result = engine.reindex(plugins[name])
         logger.info("reindex_done", source=name, documents=result.documents, chunks=result.chunks)
@@ -61,15 +77,20 @@ def reindex(source: str) -> None:
 @click.option("--mode", type=click.Choice(["semantic", "keyword"]), default="semantic")
 @click.option("--limit", type=int, default=5)
 def search(query: str, mode: str, limit: int) -> None:
-    _, _, store = build_engine()
+    engine, _, store = build_engine()
     if mode == "keyword":
         results = store.keyword_search(query, limit)
     else:
-        embedder = Embedder()
-        vector = embedder.embed_texts([query])[0][1]
+        vector = engine.embedder.embed_texts([query])[0][1]
         results = store.semantic_search(vector, limit)
     for res in results:
-        logger.info("search_result", source=res.source_plugin, source_id=res.source_id, title=res.title, score=res.score)
+        logger.info(
+            "search_result",
+            source=res.source_plugin,
+            source_id=res.source_id,
+            title=res.title,
+            score=round(res.score, 4),
+        )
 
 
 @main.command()

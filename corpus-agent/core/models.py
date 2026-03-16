@@ -13,6 +13,7 @@ class Document:
     url: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    duration_seconds: int | None = None   # YouTube: video duration; Obsidian: None
     metadata: dict[str, object] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
     links: list[str] = field(default_factory=list)

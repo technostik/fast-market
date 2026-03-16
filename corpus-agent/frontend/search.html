@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Search — Corpus Agent</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e0f; --surface: #18181a; --border: #2a2a2e;
+    --accent: #c8f04a; --accent2: #4af0c8;
+    --text: #e8e8e6; --muted: #6b6b70;
+    --obsidian: #a78bfa; --youtube: #f87171;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Mono', monospace; min-height: 100vh; }
+
+  header {
+    padding: 1.5rem 3rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 1rem;
+  }
+  header a { color: var(--muted); text-decoration: none; font-size: 0.8rem; }
+  header a:hover { color: var(--accent); }
+  header h1 { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 800; color: var(--accent); }
+  .sep { color: var(--border); }
+
+  .search-area {
+    padding: 2.5rem 3rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .search-row {
+    display: flex; gap: 0.5rem; max-width: 700px; margin-bottom: 1rem;
+  }
+
+  input[type=text] {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.9rem;
+    padding: 0.75rem 1rem;
+  }
+  input[type=text]:focus { outline: 1px solid var(--accent); }
+  input[type=text]::placeholder { color: var(--muted); }
+
+  button {
+    background: var(--accent);
+    border: none;
+    color: #0e0e0f;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+
+  .mode-row { display: flex; gap: 1rem; align-items: center; }
+  .mode-label { font-size: 0.75rem; color: var(--muted); }
+
+  .mode-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    padding: 0.3rem 0.8rem;
+    cursor: pointer;
+  }
+  .mode-btn.active { border-color: var(--accent2); color: var(--accent2); }
+
+  .results { padding: 0 3rem 3rem; }
+
+  .result {
+    border-bottom: 1px solid var(--border);
+    padding: 1.25rem 0;
+  }
+
+  .result-header {
+    display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.4rem; flex-wrap: wrap;
+  }
+
+  .result-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .result-title a { color: var(--text); text-decoration: none; }
+  .result-title a:hover { color: var(--accent); }
+
+  .score {
+    font-size: 0.68rem;
+    color: var(--accent2);
+    margin-left: auto;
+  }
+
+  .source-badge {
+    font-size: 0.65rem; padding: 0.2rem 0.5rem;
+    border-radius: 2px; font-weight: 500;
+  }
+  .badge-obsidian { background: rgba(167,139,250,0.15); color: var(--obsidian); }
+  .badge-youtube  { background: rgba(248,113,113,0.15); color: var(--youtube); }
+
+  .excerpt {
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.6;
+    max-width: 72ch;
+  }
+
+  .empty, .loading { padding: 3rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/ui">corpus-agent</a>
+  <span class="sep">/</span>
+  <h1>Search</h1>
+</header>
+
+<div class="search-area">
+  <div class="search-row">
+    <input type="text" id="q" placeholder="Ask anything about your content…" autofocus>
+    <button onclick="doSearch()">Search</button>
+  </div>
+  <div class="mode-row">
+    <span class="mode-label">mode:</span>
+    <button class="mode-btn active" id="mode-semantic" onclick="setMode('semantic')">semantic</button>
+    <button class="mode-btn" id="mode-keyword" onclick="setMode('keyword')">keyword</button>
+  </div>
+</div>
+
+<div class="results" id="results"></div>
+
+<script>
+  let mode = 'semantic';
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('mode-semantic').classList.toggle('active', m === 'semantic');
+    document.getElementById('mode-keyword').classList.toggle('active', m === 'keyword');
+  }
+
+  document.getElementById('q').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+  });
+
+  function doSearch() {
+    const q = document.getElementById('q').value.trim();
+    if (!q) return;
+    const results = document.getElementById('results');
+    results.innerHTML = '<div class="loading">Searching…</div>';
+
+    fetch(`/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=10`)
+      .then(r => r.json())
+      .then(items => {
+        if (!items.length) {
+          results.innerHTML = '<div class="empty">No results.</div>';
+          return;
+        }
+        results.innerHTML = items.map(item => {
+          const isYT = item.source_plugin === 'youtube';
+          const badgeClass = isYT ? 'badge-youtube' : 'badge-obsidian';
+          const badgeLabel = isYT ? 'YouTube' : 'Obsidian';
+          const score = typeof item.score === 'number' ? item.score.toFixed(3) : '';
+          return `
+            <div class="result">
+              <div class="result-header">
+                <span class="source-badge ${badgeClass}">${badgeLabel}</span>
+                <span class="result-title">${item.title}</span>
+                <span class="score">${score}</span>
+              </div>
+              <div class="excerpt">${item.excerpt.replace(/</g,'&lt;')}</div>
+            </div>`;
+        }).join('');
+      })
+      .catch(err => {
+        results.innerHTML = `<div class="empty">Error: ${err}</div>`;
+      });
+  }
+</script>
+</body>
+</html>

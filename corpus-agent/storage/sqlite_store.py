@@ -16,7 +16,8 @@ class SQLiteStore:
     def __init__(self, path: str = ":memory:") -> None:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(path)
+        # check_same_thread=False required for FastAPI which runs handlers in a threadpool
+        self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._init_db()
 
@@ -31,6 +32,7 @@ class SQLiteStore:
                 raw_text TEXT NOT NULL,
                 url TEXT,
                 updated_at TEXT,
+                duration_seconds INTEGER,
                 content_hash TEXT NOT NULL,
                 metadata_json TEXT NOT NULL,
                 UNIQUE(source_plugin, source_id)
@@ -62,13 +64,14 @@ class SQLiteStore:
             return False
         self.conn.execute(
             """
-            INSERT INTO documents(source_plugin, source_id, title, raw_text, url, updated_at, content_hash, metadata_json)
-            VALUES(?,?,?,?,?,?,?,?)
+            INSERT INTO documents(source_plugin, source_id, title, raw_text, url, updated_at, duration_seconds, content_hash, metadata_json)
+            VALUES(?,?,?,?,?,?,?,?,?)
             ON CONFLICT(source_plugin, source_id) DO UPDATE SET
                 title=excluded.title,
                 raw_text=excluded.raw_text,
                 url=excluded.url,
                 updated_at=excluded.updated_at,
+                duration_seconds=excluded.duration_seconds,
                 content_hash=excluded.content_hash,
                 metadata_json=excluded.metadata_json
             """,
@@ -79,6 +82,7 @@ class SQLiteStore:
                 document.raw_text,
                 document.url,
                 document.updated_at.isoformat() if document.updated_at else None,
+                document.duration_seconds,
                 content_hash,
                 json.dumps(document.metadata),
             ),
@@ -146,15 +150,31 @@ class SQLiteStore:
     def list_documents(self, source: str | None = None, limit: int = 50) -> list[dict[str, object]]:
         if source:
             rows = self.conn.execute(
-                "SELECT source_plugin, source_id, title, updated_at FROM documents WHERE source_plugin=? ORDER BY updated_at DESC LIMIT ?",
+                "SELECT source_plugin, source_id, title, url, updated_at, duration_seconds, metadata_json FROM documents WHERE source_plugin=? ORDER BY updated_at DESC LIMIT ?",
                 (source, limit),
             ).fetchall()
         else:
             rows = self.conn.execute(
-                "SELECT source_plugin, source_id, title, updated_at FROM documents ORDER BY updated_at DESC LIMIT ?",
+                "SELECT source_plugin, source_id, title, url, updated_at, duration_seconds, metadata_json FROM documents ORDER BY updated_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["metadata"] = json.loads(d.pop("metadata_json") or "{}")
+            results.append(d)
+        return results
+
+    def delete_all(self) -> None:
+        self.conn.executescript(
+            """
+            DELETE FROM documents;
+            DELETE FROM chunks;
+            DELETE FROM chunks_fts;
+            """
+        )
+        self.conn.commit()
+        logger.info("store_cleared")
 
     def get_last_sync(self, source: str) -> datetime | None:
         row = self.conn.execute(

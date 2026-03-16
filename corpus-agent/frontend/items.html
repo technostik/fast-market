@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Browse — Corpus Agent</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e0f; --surface: #18181a; --border: #2a2a2e;
+    --accent: #c8f04a; --accent2: #4af0c8;
+    --text: #e8e8e6; --muted: #6b6b70;
+    --obsidian: #a78bfa; --youtube: #f87171;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Mono', monospace; min-height: 100vh; }
+
+  header {
+    padding: 1.5rem 3rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 1rem;
+  }
+  header a { color: var(--muted); text-decoration: none; font-size: 0.8rem; }
+  header a:hover { color: var(--accent); }
+  header h1 { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 800; color: var(--accent); }
+  .sep { color: var(--border); }
+
+  .toolbar {
+    padding: 1.5rem 3rem;
+    display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+
+  select, button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+  }
+  select:focus, button:focus { outline: 1px solid var(--accent); }
+  button.active { border-color: var(--accent); color: var(--accent); }
+
+  .count { color: var(--muted); font-size: 0.75rem; margin-left: auto; }
+
+  .list { padding: 0 3rem 3rem; }
+
+  .item {
+    border-bottom: 1px solid var(--border);
+    padding: 1.25rem 0;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .source-badge {
+    font-size: 0.65rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 2px;
+    font-weight: 500;
+    white-space: nowrap;
+    margin-top: 2px;
+  }
+  .badge-obsidian { background: rgba(167,139,250,0.15); color: var(--obsidian); }
+  .badge-youtube  { background: rgba(248,113,113,0.15); color: var(--youtube); }
+
+  .item-body {}
+  .item-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 0.3rem;
+  }
+  .item-title a { color: var(--text); text-decoration: none; }
+  .item-title a:hover { color: var(--accent); }
+
+  .item-meta { color: var(--muted); font-size: 0.72rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+
+  .item-desc {
+    color: var(--muted);
+    font-size: 0.75rem;
+    margin-top: 0.4rem;
+    line-height: 1.5;
+    max-width: 65ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .duration {
+    font-size: 0.72rem;
+    color: var(--accent2);
+    white-space: nowrap;
+  }
+
+  .empty { padding: 3rem; color: var(--muted); font-size: 0.85rem; }
+  .loading { padding: 3rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/ui">corpus-agent</a>
+  <span class="sep">/</span>
+  <h1>Browse</h1>
+</header>
+
+<div class="toolbar">
+  <button id="btn-all" class="active" onclick="filterSource('all')">All</button>
+  <button id="btn-obsidian" onclick="filterSource('obsidian')">📓 Obsidian</button>
+  <button id="btn-youtube" onclick="filterSource('youtube')">▶ YouTube</button>
+  <span class="count" id="count"></span>
+</div>
+
+<div class="list" id="list">
+  <div class="loading">Loading…</div>
+</div>
+
+<script>
+  let allItems = [];
+  let currentSource = 'all';
+
+  function formatDuration(s) {
+    if (!s) return null;
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h) return `${h}h ${String(m).padStart(2,'0')}m`;
+    return `${m}m ${String(sec).padStart(2,'0')}s`;
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '';
+    return iso.slice(0, 10);
+  }
+
+  function renderItems(items) {
+    const list = document.getElementById('list');
+    document.getElementById('count').textContent = `${items.length} document${items.length !== 1 ? 's' : ''}`;
+
+    if (!items.length) {
+      list.innerHTML = '<div class="empty">No documents found.</div>';
+      return;
+    }
+
+    list.innerHTML = items.map(item => {
+      const isYT = item.source_plugin === 'youtube';
+      const badgeClass = isYT ? 'badge-youtube' : 'badge-obsidian';
+      const badgeLabel = isYT ? 'YouTube' : 'Obsidian';
+      const href = item.url ? item.url : '#';
+      const target = item.url ? 'target="_blank" rel="noopener"' : '';
+      const dur = formatDuration(item.duration_seconds);
+      const desc = item.metadata?.description || '';
+      const chars = item.metadata?.chars;
+
+      return `
+        <div class="item">
+          <span class="source-badge ${badgeClass}">${badgeLabel}</span>
+          <div class="item-body">
+            <div class="item-title"><a href="${href}" ${target}>${item.title}</a></div>
+            <div class="item-meta">
+              <span>${formatDate(item.updated_at)}</span>
+              ${dur ? `<span class="duration">⏱ ${dur}</span>` : ''}
+              ${chars ? `<span>${chars} chars</span>` : ''}
+              ${item.source_id ? `<span style="color:#3a3a40">${item.source_id}</span>` : ''}
+            </div>
+            ${desc ? `<div class="item-desc">${desc.replace(/</g,'&lt;')}</div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function filterSource(source) {
+    currentSource = source;
+    ['all','obsidian','youtube'].forEach(s => {
+      document.getElementById('btn-' + s).classList.toggle('active', s === source);
+    });
+    const filtered = source === 'all' ? allItems : allItems.filter(i => i.source_plugin === source);
+    renderItems(filtered);
+  }
+
+  fetch('/items?limit=500')
+    .then(r => r.json())
+    .then(items => {
+      allItems = items;
+      filterSource('all');
+    })
+    .catch(err => {
+      document.getElementById('list').innerHTML = `<div class="empty">Error loading items: ${err}</div>`;
+    });
+</script>
+</body>
+</html>
