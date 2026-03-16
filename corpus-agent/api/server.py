@@ -39,11 +39,11 @@ def items(source: str | None = None, limit: int = 50) -> list[dict[str, object]]
 
 
 @app.post("/sync")
-def sync(req: SyncRequest) -> dict[str, object]:
+def sync(req: SyncRequest) -> "SyncResult":
     if req.source not in plugins:
         raise HTTPException(status_code=400, detail="Unknown source")
     result = engine.sync(plugins[req.source], mode=req.mode, limit=req.limit)
-    return result.__dict__
+    return result
 
 
 @app.post("/reindex")
