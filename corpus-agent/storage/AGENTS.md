@@ -3,6 +3,27 @@
 - Keep code minimal and explicit.
 - Use structlog, raise explicit exceptions.
 
+## SQLAlchemy storage layout
+
+- ORM models are in `storage/models.py`.
+- `DocumentModel` and `ChunkModel` map 1:1 to SQLite tables.
+- JSON payloads (`embedding_json`, `metadata_json`) are stored as JSON strings for deterministic serialization.
+- `chunks_fts` remains an SQLite FTS5 virtual table managed through raw SQL.
+
+## Migrations workflow (Alembic)
+
+- Alembic config lives in `corpus-agent/alembic.ini`.
+- Migration scripts live in `corpus-agent/migrations/versions`.
+- Store startup runs `alembic upgrade head` automatically for file-backed DBs.
+- If migration fails, code must fail loudly and raise.
+
+Create a new migration:
+
+1. Add model changes in `storage/models.py`.
+2. Add a new migration file in `migrations/versions/`.
+3. Include SQLite-specific DDL for FTS5 updates using `op.execute(...)` when needed.
+4. Keep upgrade/downgrade explicit and minimal.
+
 ## Sync cursor strategy
 
 Two methods provide cursors for incremental sync:
