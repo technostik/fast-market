@@ -196,7 +196,7 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         total = len(all_docs)
         docs = all_docs[offset : offset + limit]
         return Response(
-            content=__import__("json").dumps(docs, default=str),
+            content=json.dumps(docs, default=str),
             media_type="application/json",
             headers={"X-Total-Count": str(total)},
         )
