@@ -6,6 +6,7 @@ from datetime import datetime
 import structlog
 
 from core.embedder import Embedder
+from core.handle import make_handle
 from core.models import Chunk, Document, ReindexResult, SyncFailure, SyncResult
 from plugins.base import SourcePlugin
 from storage.sqlite_store import SQLiteStore
@@ -55,6 +56,8 @@ class SyncEngine:
             processed += 1
             try:
                 document = plugin.fetch(item)
+                # Assign stable handle before storing
+                document.handle = make_handle(document.source_plugin, document.source_id, document.title)
                 content_hash = self.embedder.hash_text(document.raw_text)
                 changed = self.store.upsert_document(document, content_hash)
 
@@ -69,12 +72,7 @@ class SyncEngine:
                 _log_item(plugin.name, document, "indexed", chunks=len(chunks))
 
             except Exception as exc:
-                logger.error(
-                    "sync_item_failed",
-                    source=plugin.name,
-                    source_id=item.source_id,
-                    error=str(exc),
-                )
+                logger.error("sync_item_failed", source=plugin.name, source_id=item.source_id, error=str(exc))
                 failures.append(SyncFailure(source_id=item.source_id, error=str(exc)))
 
         return SyncResult(plugin.name, processed, indexed, skipped, failures)
@@ -98,7 +96,7 @@ class SyncEngine:
 
 
 def _log_item(source: str, document: Document, status: str, **extra) -> None:
-    fields: dict = {"source": source, "title": document.title, "status": status}
+    fields: dict = {"source": source, "handle": document.handle, "title": document.title, "status": status}
     if source == "youtube" and document.duration_seconds:
         h, rem = divmod(document.duration_seconds, 3600)
         m, s = divmod(rem, 60)

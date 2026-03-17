@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -10,7 +11,7 @@ from core.config import load_config
 from core.embedder import Embedder
 from core.registry import build_plugins
 from core.sync_engine import SyncEngine
-from storage.sqlite_store import SQLiteStore
+from storage.sqlite_store import SQLiteStore, SearchFilters
 
 app = FastAPI(title="corpus-agent")
 
@@ -28,6 +29,31 @@ def _html(name: str) -> HTMLResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Frontend file missing: {path}")
     return HTMLResponse(path.read_text(encoding="utf-8"))
+
+
+def _make_filters(
+    source: str | None,
+    video_type: str | None,
+    min_duration: int | None,
+    max_duration: int | None,
+    since: str | None,
+    until: str | None,
+    min_size: int | None,
+    max_size: int | None,
+) -> SearchFilters | None:
+    has_filter = any(v is not None for v in [source, video_type, min_duration, max_duration, since, until, min_size, max_size])
+    if not has_filter:
+        return None
+    return SearchFilters(
+        source=source,
+        video_type=video_type,
+        min_duration=min_duration,
+        max_duration=max_duration,
+        since=since,
+        until=until,
+        min_size=min_size,
+        max_size=max_size,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -79,13 +105,32 @@ def sources() -> list[str]:
 
 
 @app.get("/items")
-def items(source: str | None = None, limit: int = 50) -> list[dict]:
-    return store.list_documents(source, limit)
+def items(
+    source: str | None = None,
+    limit: int = 50,
+    video_type: str | None = None,
+    min_duration: int | None = None,
+    max_duration: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    min_size: int | None = None,
+    max_size: int | None = None,
+) -> list[dict]:
+    filters = _make_filters(source, video_type, min_duration, max_duration, since, until, min_size, max_size)
+    return store.list_documents(source, limit, filters)
 
 
 @app.get("/document/{source_plugin}/{source_id:path}")
 def get_document(source_plugin: str, source_id: str) -> dict:
     doc = store.get_document(source_plugin, source_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@app.get("/handle/{handle}")
+def get_by_handle(handle: str) -> dict:
+    doc = store.get_document_by_handle(handle)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
@@ -116,16 +161,29 @@ def reindex(req: ReindexRequest) -> dict:
 
 
 @app.get("/search")
-def search(q: str, mode: str = "keyword", limit: int = 5) -> list[dict]:
+def search(
+    q: str,
+    mode: str = "semantic",
+    limit: int = 5,
+    source: str | None = None,
+    video_type: str | None = None,
+    min_duration: int | None = None,
+    max_duration: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    min_size: int | None = None,
+    max_size: int | None = None,
+) -> list[dict]:
+    filters = _make_filters(source, video_type, min_duration, max_duration, since, until, min_size, max_size)
     if mode == "keyword":
-        results = store.keyword_search(q, limit)
+        results = store.keyword_search(q, limit, filters)
     elif mode == "semantic":
         vector = embedder.embed_texts([q])[0][1]
-        results = store.semantic_search(vector, limit)
+        results = store.semantic_search(vector, limit, filters)
     else:
         raise HTTPException(status_code=400, detail="Invalid mode: use keyword or semantic")
     return [
-        {"source_plugin": r.source_plugin, "source_id": r.source_id,
-         "title": r.title, "excerpt": r.excerpt, "score": r.score}
+        {"handle": r.handle, "source_plugin": r.source_plugin, "source_id": r.source_id,
+         "title": r.title, "excerpt": r.excerpt, "score": r.score, "duration_seconds": r.duration_seconds}
         for r in results
     ]
