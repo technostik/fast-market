@@ -32,7 +32,7 @@ def register(config: dict) -> PluginManifest:
                     help="Maximum video duration in seconds.",
                 ),
                 click.Option(
-                    ["--privacy", "privacy_status"],
+                    ["--privacy-status", "--privacy", "privacy_status"],
                     type=click.Choice(["public", "unlisted", "private", "unknown"]),
                     default=None,
                     help="Filter by YouTube privacy status.",
@@ -58,7 +58,7 @@ def register(config: dict) -> PluginManifest:
                     help="Maximum video duration in seconds.",
                 ),
                 click.Option(
-                    ["--privacy", "privacy_status"],
+                    ["--privacy-status", "--privacy", "privacy_status"],
                     type=click.Choice(["public", "unlisted", "private", "unknown"]),
                     default=None,
                     help="Filter by YouTube privacy status.",

@@ -305,14 +305,15 @@ def test_list_command_date_filtering(mock_env, runner):
 
     result = runner.invoke(main, [
         "list",
-        "--since", "2024-01-01",
-        "--until", "2024-12-31",
+        "--since", "2000-01-01",
+        "--until", "2100-12-31",
         "--format", "json",
     ])
+    assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     for doc in data:
         date = doc["updated_at"][:10]
-        assert "2024-01-01" <= date <= "2024-12-31"
+        assert "2000-01-01" <= date <= "2100-12-31"
 
 
 def test_list_command_table_format(mock_env, runner):
