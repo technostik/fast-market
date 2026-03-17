@@ -15,6 +15,7 @@ class Document:
     created_at: datetime | None = None
     updated_at: datetime | None = None
     duration_seconds: int | None = None # YouTube: video duration; Obsidian: None
+    privacy_status: str | None = None   # YouTube: "public" | "private" | "unlisted"; Obsidian: None
     metadata: dict[str, object] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
     links: list[str] = field(default_factory=list)
@@ -62,3 +63,4 @@ class SearchResult:
     excerpt: str
     score: float
     duration_seconds: int | None = None
+    privacy_status: str | None = None   # YouTube: "public" | "private" | "unlisted"; Obsidian: None

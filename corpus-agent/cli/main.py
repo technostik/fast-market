@@ -21,9 +21,9 @@ logger = structlog.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _NOISY_LOGGERS = [
-    "core",                    # all our core.* modules (embedder, sync_engine, etc.)
-    "storage",                 # storage.*
-    "plugins",                 # plugins.*
+    "core",
+    "storage",
+    "plugins",
     "sentence_transformers",
     "transformers",
     "huggingface_hub",
@@ -38,31 +38,23 @@ def _configure_logging(verbose: bool) -> None:
     """
     Non-verbose (default): silence everything so stdout is clean JSON.
     Verbose (-v): INFO on stderr, stdout stays clean.
-
-    Uses stdlib logging directly — works regardless of whether the real
-    structlog package or the local shim is active.
     """
     level = logging.INFO if verbose else logging.CRITICAL
 
-    # Root logger to stderr
     logging.basicConfig(level=level, stream=sys.stderr,
                         format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
-                        force=True)  # force=True reconfigures even if basicConfig was called before
+                        force=True)
     logging.root.setLevel(level)
 
-    # Explicitly silence each known noisy logger
     for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(level)
 
     if not verbose:
-        # Silence tqdm progress bars
         try:
             from tqdm import tqdm
             tqdm.__init__ = _make_silent_tqdm(tqdm.__init__)
         except ImportError:
             pass
-
-        # Silence transformers/sentence-transformers verbosity APIs
         try:
             import transformers
             transformers.logging.set_verbosity_error()
@@ -205,6 +197,8 @@ def reindex(ctx: click.Context, source: str, fmt: str) -> None:
 @click.option("--until", default=None, help="YYYY-MM-DD")
 @click.option("--min-size", type=int, default=None)
 @click.option("--max-size", type=int, default=None)
+@click.option("--privacy", type=click.Choice(["public", "private", "unlisted"]), default=None,
+              help="Filter by YouTube privacy status.")
 @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
 @click.pass_context
 def search(
@@ -214,6 +208,7 @@ def search(
     min_duration: int | None, max_duration: int | None,
     since: str | None, until: str | None,
     min_size: int | None, max_size: int | None,
+    privacy: str | None,
     fmt: str,
 ) -> None:
     """Search the index.
@@ -221,6 +216,7 @@ def search(
     \b
     Examples:
       corpus search "landing page" --source youtube --type long --format json
+      corpus search "IA" --source youtube --privacy public
       corpus search "topic" --format json | jq -r '.[0].handle' | xargs corpus get --what content
     """
     engine, _, store = _build(ctx.obj["verbose"])
@@ -228,6 +224,7 @@ def search(
         source=source, min_duration=min_duration, max_duration=max_duration,
         video_type=video_type, since=since, until=until,
         min_size=min_size, max_size=max_size,
+        privacy_status=privacy,
     )
     if mode == "keyword":
         results = store.keyword_search(query, limit, filters)
@@ -243,6 +240,7 @@ def search(
             "title": r.title,
             "score": round(r.score, 4),
             "duration_seconds": r.duration_seconds,
+            "privacy_status": r.privacy_status,
             "excerpt": r.excerpt,
         } for r in results], fmt)
     else:
@@ -251,7 +249,8 @@ def search(
             return
         for r in results:
             dur = f"  duration={_fmt_duration(r.duration_seconds)}" if r.duration_seconds else ""
-            click.echo(f"[{r.handle}] {r.title}{dur}")
+            privacy_tag = f"  privacy={r.privacy_status}" if r.privacy_status else ""
+            click.echo(f"[{r.handle}] {r.title}{dur}{privacy_tag}")
             click.echo(f"  score={round(r.score, 4)}  source={r.source_plugin}")
             click.echo(f"  {r.excerpt[:120]}")
 

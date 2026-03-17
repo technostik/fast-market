@@ -12,6 +12,11 @@ from plugins.base import ItemMeta, SourcePlugin
 
 logger = structlog.get_logger(__name__)
 
+# How many files to scan before applying `since` and truncating to `limit`.
+# Prevents `limit` being consumed entirely by already-indexed files.
+_OBSIDIAN_OVERFETCH_FACTOR = 4
+_OBSIDIAN_MAX_SCAN = 2000
+
 
 class ObsidianPlugin(SourcePlugin):
     name = "obsidian"
@@ -25,13 +30,17 @@ class ObsidianPlugin(SourcePlugin):
         if not self.vault.exists():
             raise FileNotFoundError(f"Obsidian vault not found: {self.vault}")
 
-    def list_items(self, limit: int, since: datetime | None = None) -> list[ItemMeta]:
-        metas: list[ItemMeta] = []
+    def list_items(self, limit: int, since: datetime | None = None, known_ids: set[str] | None = None) -> list[ItemMeta]:
+        # Scan more files than requested so `since` filtering doesn't starve `limit`.
+        scan_cap = min(limit * _OBSIDIAN_OVERFETCH_FACTOR, _OBSIDIAN_MAX_SCAN)
         files = sorted(self.vault.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for file in files:
+
+        metas: list[ItemMeta] = []
+        for file in files[:scan_cap]:
             updated = datetime.fromtimestamp(file.stat().st_mtime)
             if since and updated <= since:
-                continue
+                # Files are newest-first; once we pass `since` all remaining are older.
+                break
             size_chars = file.stat().st_size
             metas.append(ItemMeta(source_id=file.name, updated_at=updated, metadata={"size_bytes": size_chars}))
             if len(metas) >= limit:
@@ -58,7 +67,7 @@ class ObsidianPlugin(SourcePlugin):
         size_bytes = (item_meta.metadata or {}).get("size_bytes", 0)
         logger.info("indexed_note", title=path.stem, size_bytes=size_bytes, tags=len(tags))
 
-        # vault_path stored in metadata so the frontend can build obsidian:// URLs
+        # vault_path stored so the frontend can build obsidian:// URLs
         metadata["vault_path"] = str(self.vault)
         metadata["size_bytes"] = size_bytes
 

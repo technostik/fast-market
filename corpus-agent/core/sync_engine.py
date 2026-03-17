@@ -47,8 +47,25 @@ class SyncEngine:
         return chunks
 
     def sync(self, plugin: SourcePlugin, mode: str, limit: int) -> SyncResult:
-        since = self.store.get_last_sync(plugin.name) if mode == "new" else None
-        items = plugin.list_items(limit=limit, since=since)
+        # Two cursor strategies depending on plugin:
+        #
+        # ID-based (YouTube): pass known_ids so the plugin skips already-indexed
+        # videos while walking the playlist newest-first. A date cursor fails here
+        # because published_at of every past video is older than the newest indexed
+        # one — so after the first sync, all remaining videos are silently skipped.
+        #
+        # Date-based (Obsidian): pass since = MAX(updated_at) so the plugin skips
+        # files whose mtime hasn't advanced past the last indexed timestamp.
+        #
+        # Plugins may use either or both; unused kwargs are ignored.
+        if mode == "new":
+            known_ids = self.store.get_indexed_ids(plugin.name)
+            since = self.store.get_latest_content_date(plugin.name)
+        else:  # backfill — ignore all cursors
+            known_ids = set()
+            since = None
+
+        items = plugin.list_items(limit=limit, since=since, known_ids=known_ids)
         processed = indexed = skipped = 0
         failures: list[SyncFailure] = []
 
@@ -56,7 +73,6 @@ class SyncEngine:
             processed += 1
             try:
                 document = plugin.fetch(item)
-                # Assign stable handle before storing
                 document.handle = make_handle(document.source_plugin, document.source_id, document.title)
                 content_hash = self.embedder.hash_text(document.raw_text)
                 changed = self.store.upsert_document(document, content_hash)
@@ -97,10 +113,13 @@ class SyncEngine:
 
 def _log_item(source: str, document: Document, status: str, **extra) -> None:
     fields: dict = {"source": source, "handle": document.handle, "title": document.title, "status": status}
-    if source == "youtube" and document.duration_seconds:
-        h, rem = divmod(document.duration_seconds, 3600)
-        m, s = divmod(rem, 60)
-        fields["duration"] = f"{h}h{m:02d}m{s:02d}s" if h else f"{m}m{s:02d}s"
+    if source == "youtube":
+        if document.duration_seconds:
+            h, rem = divmod(document.duration_seconds, 3600)
+            m, s = divmod(rem, 60)
+            fields["duration"] = f"{h}h{m:02d}m{s:02d}s" if h else f"{m}m{s:02d}s"
+        if document.privacy_status:
+            fields["privacy"] = document.privacy_status
     if source == "obsidian":
         fields["chars"] = len(document.raw_text)
     fields.update(extra)

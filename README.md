@@ -49,8 +49,45 @@ obsidian:
 youtube:
   channel_id: UCxxxxxxxxxxxxxxxxxxxxxxxx
   client_secret_path: /path/to/client_secret.json
+  # Optional: include non-public videos. Default: only public videos are indexed.
+  # include_privacy: [public, unlisted]   # add "private" to also index private videos
 whisper:
   model: base   # tiny | base | small — only used if no transcript available
+```
+
+---
+
+### How incremental sync works
+
+`corpus sync --mode new` (the default) only fetches content published **after the last successful sync run**. The sync timestamp is stored in the `sync_log` table and is updated at the end of every run — it is the wall-clock time of the sync, not the publish date of any video.
+
+- **First run**: no prior timestamp → fetches the N most recent items (controlled by `--limit`).
+- **Subsequent runs**: only fetches items published after the previous run timestamp.
+- **Backfill**: `--mode backfill` ignores the timestamp and reprocesses all items up to `--limit`.
+- **Full reset**: `--clean` wipes the entire index and sync log before syncing.
+
+---
+
+### YouTube privacy filtering
+
+The YouTube plugin fetches `privacyStatus` for every video (`public`, `private`, or `unlisted`) and stores it in the index. By default, **only public videos are indexed** — private and unlisted videos are skipped at sync time with a log entry.
+
+**To include non-public videos**, set `youtube.include_privacy` in `config.yaml`:
+
+```yaml
+youtube:
+  channel_id: UCxxxxxxxxxxxxxxxxxxxxxxxx
+  client_secret_path: /path/to/client_secret.json
+  include_privacy: [public, unlisted]    # include unlisted but not private
+  # include_privacy: [public, private, unlisted]  # include everything
+```
+
+The `privacy_status` field is stored on every indexed document and exposed in search results and API responses. You can filter by it at search time:
+
+```bash
+corpus search "topic" --privacy public      # public only
+corpus search "topic" --privacy unlisted    # unlisted only
+corpus search "topic" --format json | jq '.[] | select(.privacy_status == "public")'
 ```
 
 ---
@@ -125,9 +162,9 @@ Fetch and index new content.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--source obsidian\|youtube\|all` | `all` | Which source to sync |
-| `--mode new\|backfill` | `new` | `new`: only items newer than last sync. `backfill`: ignore last-sync timestamp |
+| `--mode new\|backfill` | `new` | `new`: only items newer than last sync run. `backfill`: ignore last-sync timestamp |
 | `--limit N` | 10 obsidian / 5 youtube | Max items to fetch |
-| `--clean` | off | Wipe entire index before syncing |
+| `--clean` | off | Wipe entire index and sync log before syncing |
 | `--format json\|text` | `text` | Output format |
 
 ```bash
@@ -146,7 +183,7 @@ corpus sync --format json                        # machine-readable result
 corpus search QUERY [OPTIONS]
 ```
 
-Search the index. Returns handles, titles, excerpts, and scores.
+Search the index. Returns handles, titles, excerpts, scores, and privacy status.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -160,6 +197,7 @@ Search the index. Returns handles, titles, excerpts, and scores.
 | `--until YYYY-MM-DD` | — | Updated before date |
 | `--min-size N` | — | Min content length in chars (useful for Obsidian) |
 | `--max-size N` | — | Max content length in chars |
+| `--privacy public\|private\|unlisted` | — | Filter by YouTube privacy status |
 | `--format json\|text` | `text` | Output format |
 
 ```bash
@@ -167,6 +205,7 @@ corpus search "landing page"
 corpus search "IA" --source youtube --type long
 corpus search "startup" --since 2024-01-01 --limit 10
 corpus search "notes" --source obsidian --min-size 1000
+corpus search "topic" --privacy public
 corpus search "topic" --format json | jq '.[0].handle'
 ```
 
@@ -268,13 +307,13 @@ Start the server and open `http://localhost:8000` (redirects to `/ui`).
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/sources` | List source plugins |
-| GET | `/items` | List documents (supports `source`, `limit`, `video_type`, `min_duration`, `max_duration`, `since`, `until`, `min_size`, `max_size`) |
+| GET | `/items` | List documents (supports `source`, `limit`, `video_type`, `min_duration`, `max_duration`, `since`, `until`, `min_size`, `max_size`, `privacy_status`) |
 | GET | `/document/{plugin}/{id}` | Get full document including raw text |
 | GET | `/handle/{handle}` | Get document by handle |
 | DELETE | `/document/{plugin}/{id}` | Delete document from index |
 | POST | `/sync` | `{"source": "obsidian", "mode": "new", "limit": 10}` |
 | POST | `/reindex` | `{"source": "youtube"}` |
-| GET | `/search` | `?q=…&mode=semantic&limit=5` (same filters as CLI) |
+| GET | `/search` | `?q=…&mode=semantic&limit=5&privacy_status=public` (same filters as CLI) |
 
 ---
 

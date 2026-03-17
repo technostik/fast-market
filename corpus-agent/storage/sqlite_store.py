@@ -4,7 +4,6 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
@@ -22,6 +21,7 @@ class SQLiteStore:
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._init_db()
+        self._migrate()
 
     def _init_db(self) -> None:
         self.conn.executescript(
@@ -36,6 +36,7 @@ class SQLiteStore:
                 url TEXT,
                 updated_at TEXT,
                 duration_seconds INTEGER,
+                privacy_status TEXT,
                 content_hash TEXT NOT NULL,
                 metadata_json TEXT NOT NULL,
                 UNIQUE(source_plugin, source_id),
@@ -59,6 +60,17 @@ class SQLiteStore:
         )
         self.conn.commit()
 
+    def _migrate(self) -> None:
+        """Add columns introduced after the initial schema — safe to run on every start."""
+        existing = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(documents)").fetchall()
+        }
+        if "privacy_status" not in existing:
+            self.conn.execute("ALTER TABLE documents ADD COLUMN privacy_status TEXT")
+            self.conn.commit()
+            logger.info("db_migrated", added_column="privacy_status")
+
     def upsert_document(self, document: Document, content_hash: str) -> bool:
         row = self.conn.execute(
             "SELECT content_hash FROM documents WHERE source_plugin=? AND source_id=?",
@@ -68,8 +80,11 @@ class SQLiteStore:
             return False
         self.conn.execute(
             """
-            INSERT INTO documents(handle, source_plugin, source_id, title, raw_text, url, updated_at, duration_seconds, content_hash, metadata_json)
-            VALUES(?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO documents(
+                handle, source_plugin, source_id, title, raw_text, url, updated_at,
+                duration_seconds, privacy_status, content_hash, metadata_json
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(source_plugin, source_id) DO UPDATE SET
                 handle=excluded.handle,
                 title=excluded.title,
@@ -77,6 +92,7 @@ class SQLiteStore:
                 url=excluded.url,
                 updated_at=excluded.updated_at,
                 duration_seconds=excluded.duration_seconds,
+                privacy_status=excluded.privacy_status,
                 content_hash=excluded.content_hash,
                 metadata_json=excluded.metadata_json
             """,
@@ -89,6 +105,7 @@ class SQLiteStore:
                 document.url,
                 document.updated_at.isoformat() if document.updated_at else None,
                 document.duration_seconds,
+                document.privacy_status,
                 content_hash,
                 json.dumps(document.metadata),
             ),
@@ -129,7 +146,8 @@ class SQLiteStore:
 
     def get_document(self, source_plugin: str, source_id: str) -> dict | None:
         row = self.conn.execute(
-            "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, duration_seconds, metadata_json "
+            "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, "
+            "duration_seconds, privacy_status, metadata_json "
             "FROM documents WHERE source_plugin=? AND source_id=?",
             (source_plugin, source_id),
         ).fetchone()
@@ -138,7 +156,8 @@ class SQLiteStore:
     def get_document_by_handle(self, handle: str) -> dict | None:
         """Resolve by handle OR source_id (fallback for convenience)."""
         row = self.conn.execute(
-            "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, duration_seconds, metadata_json "
+            "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, "
+            "duration_seconds, privacy_status, metadata_json "
             "FROM documents WHERE handle=? OR source_id=?",
             (handle, handle),
         ).fetchone()
@@ -175,7 +194,8 @@ class SQLiteStore:
     ) -> list[SearchResult]:
         rows = self.conn.execute(
             """
-            SELECT d.handle, d.source_plugin, d.source_id, d.title, d.duration_seconds, c.content
+            SELECT d.handle, d.source_plugin, d.source_id, d.title, d.duration_seconds,
+                   d.privacy_status, c.content
             FROM chunks_fts c
             JOIN documents d ON d.source_plugin=c.source_plugin AND d.source_id=c.source_id
             WHERE chunks_fts MATCH ?
@@ -192,6 +212,7 @@ class SQLiteStore:
                 excerpt=r["content"][:220],
                 score=1.0,
                 duration_seconds=r["duration_seconds"],
+                privacy_status=r["privacy_status"],
             )
             for r in rows
         ]
@@ -206,7 +227,7 @@ class SQLiteStore:
         rows = self.conn.execute(
             """
             SELECT c.source_plugin, c.source_id, c.content, c.embedding_json,
-                   d.handle, d.title, d.duration_seconds
+                   d.handle, d.title, d.duration_seconds, d.privacy_status
             FROM chunks c
             JOIN documents d ON d.source_plugin=c.source_plugin AND d.source_id=c.source_id
             """
@@ -228,6 +249,7 @@ class SQLiteStore:
                 excerpt=row["content"][:220],
                 score=score,
                 duration_seconds=row["duration_seconds"],
+                privacy_status=row["privacy_status"],
             )
             for score, row in scored
         ]
@@ -241,13 +263,15 @@ class SQLiteStore:
     ) -> list[dict]:
         if source:
             rows = self.conn.execute(
-                "SELECT handle, source_plugin, source_id, title, url, updated_at, duration_seconds, metadata_json "
+                "SELECT handle, source_plugin, source_id, title, url, updated_at, "
+                "duration_seconds, privacy_status, metadata_json "
                 "FROM documents WHERE source_plugin=? ORDER BY updated_at DESC LIMIT ?",
                 (source, limit * 5),
             ).fetchall()
         else:
             rows = self.conn.execute(
-                "SELECT handle, source_plugin, source_id, title, url, updated_at, duration_seconds, metadata_json "
+                "SELECT handle, source_plugin, source_id, title, url, updated_at, "
+                "duration_seconds, privacy_status, metadata_json "
                 "FROM documents ORDER BY updated_at DESC LIMIT ?",
                 (limit * 5,),
             ).fetchall()
@@ -262,7 +286,23 @@ class SQLiteStore:
         self.conn.commit()
         logger.info("store_cleared")
 
-    def get_last_sync(self, source: str) -> datetime | None:
+    def get_indexed_ids(self, source: str) -> set[str]:
+        """Return the set of source_ids already indexed for this source.
+
+        Used by plugins that cannot rely on a date cursor (e.g. YouTube, where the
+        playlist API always returns newest-first and date filtering would skip the
+        entire backlog after the first sync).
+        """
+        rows = self.conn.execute(
+            "SELECT source_id FROM documents WHERE source_plugin=?", (source,)
+        ).fetchall()
+        return {row["source_id"] for row in rows}
+
+    def get_latest_content_date(self, source: str) -> datetime | None:
+        """Return MAX(updated_at) for this source — the publish date of the newest
+        indexed document.  Used by file-based plugins (Obsidian) where mtime is a
+        reliable incremental cursor.
+        """
         row = self.conn.execute(
             "SELECT MAX(updated_at) AS ts FROM documents WHERE source_plugin=?", (source,)
         ).fetchone()
@@ -297,11 +337,12 @@ class SearchFilters:
         source: str | None = None,
         min_duration: int | None = None,
         max_duration: int | None = None,
-        video_type: str | None = None,   # "short" | "long"
-        since: str | None = None,        # ISO date string YYYY-MM-DD
-        until: str | None = None,        # ISO date string YYYY-MM-DD
-        min_size: int | None = None,     # min raw_text chars (for obsidian)
+        video_type: str | None = None,       # "short" | "long"
+        since: str | None = None,            # ISO date string YYYY-MM-DD
+        until: str | None = None,            # ISO date string YYYY-MM-DD
+        min_size: int | None = None,         # min raw_text chars (obsidian)
         max_size: int | None = None,
+        privacy_status: str | None = None,   # "public" | "unlisted" | "private" | "unknown"
     ) -> None:
         self.source = source
         self.min_duration = min_duration
@@ -311,6 +352,7 @@ class SearchFilters:
         self.until = until
         self.min_size = min_size
         self.max_size = max_size
+        self.privacy_status = privacy_status
 
         # Resolve video_type into duration bounds
         if video_type == "short":
@@ -330,6 +372,8 @@ def _apply_filters(results: list[SearchResult], filters: "SearchFilters | None")
         if filters.min_duration is not None and dur < filters.min_duration:
             continue
         if filters.max_duration is not None and dur > filters.max_duration:
+            continue
+        if filters.privacy_status is not None and r.privacy_status != filters.privacy_status:
             continue
         out.append(r)
     return out
@@ -356,6 +400,8 @@ def _apply_filters_dicts(items: list[dict], filters: "SearchFilters | None") -> 
         if filters.min_size is not None and raw_len < filters.min_size:
             continue
         if filters.max_size is not None and raw_len > filters.max_size:
+            continue
+        if filters.privacy_status is not None and item.get("privacy_status") != filters.privacy_status:
             continue
         out.append(item)
     return out

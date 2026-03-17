@@ -5,6 +5,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
 
 import structlog
 
@@ -12,6 +13,9 @@ from core.models import Document
 from plugins.base import ItemMeta, SourcePlugin
 
 logger = structlog.get_logger(__name__)
+
+# Privacy statuses considered publicly accessible.
+_PUBLIC_STATUSES = {"public"}
 
 
 def _parse_iso8601_duration(duration: str) -> int:
@@ -28,8 +32,21 @@ def _format_duration(seconds: int) -> str:
     return f"{h}h{m:02d}m{s:02d}s" if h else f"{m}m{s:02d}s"
 
 
+# ---------------------------------------------------------------------------
+# Transport abstraction (injectable for tests)
+# ---------------------------------------------------------------------------
+
 class Transport:
-    def list_videos(self, channel_id: str, limit: int) -> list[dict]:
+    def get_uploads_playlist(self, channel_id: str) -> str:
+        """Return the uploads playlist ID for the channel. Raises on failure."""
+        raise NotImplementedError
+
+    def iter_playlist_pages(self, playlist_id: str) -> Iterator[list[dict]]:
+        """Yield raw playlist pages, each a list of playlistItem snippet dicts."""
+        raise NotImplementedError
+
+    def get_video_details(self, video_ids: list[str]) -> dict[str, dict]:
+        """Return video_id -> full video resource (contentDetails+snippet+status)."""
         raise NotImplementedError
 
     def get_transcript(self, video_id: str, cookies: str | None) -> str | None:
@@ -43,7 +60,7 @@ class Transport:
 class YouTubeTransport(Transport):
     client_secret_path: str
 
-    def _get_youtube_client(self):
+    def _get_client(self):
         try:
             from google_auth_oauthlib.flow import InstalledAppFlow
             from googleapiclient.discovery import build
@@ -71,59 +88,43 @@ class YouTubeTransport(Transport):
             logger.info("oauth_token_saved", path=str(token_path))
         return build("youtube", "v3", credentials=creds)
 
-    def list_videos(self, channel_id: str, limit: int) -> list[dict]:
-        youtube = self._get_youtube_client()
-
-        channel_resp = youtube.channels().list(part="contentDetails", id=channel_id).execute()
-        items = channel_resp.get("items", [])
+    def get_uploads_playlist(self, channel_id: str) -> str:
+        youtube = self._get_client()
+        resp = youtube.channels().list(part="contentDetails", id=channel_id).execute()
+        items = resp.get("items", [])
         if not items:
             raise RuntimeError(f"Channel not found or no content: {channel_id}")
+        playlist_id = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        logger.info("channel_resolved", channel_id=channel_id, playlist=playlist_id)
+        return playlist_id
 
-        uploads_playlist = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
-        logger.info("channel_resolved", channel_id=channel_id, playlist=uploads_playlist)
-
-        playlist_items: list[dict] = []
+    def iter_playlist_pages(self, playlist_id: str) -> Iterator[list[dict]]:
+        youtube = self._get_client()
         page_token = None
-        while len(playlist_items) < limit:
-            batch = min(50, limit - len(playlist_items))
+        while True:
             resp = youtube.playlistItems().list(
-                part="snippet", playlistId=uploads_playlist,
-                maxResults=batch, pageToken=page_token,
+                part="snippet", playlistId=playlist_id,
+                maxResults=50, pageToken=page_token,
             ).execute()
-            playlist_items.extend(resp.get("items", []))
+            page = resp.get("items", [])
+            if not page:
+                return
+            yield page
             page_token = resp.get("nextPageToken")
             if not page_token:
-                break
+                return
 
-        video_ids = [i["snippet"]["resourceId"]["videoId"] for i in playlist_items]
-        durations: dict[str, int] = {}
-        descriptions: dict[str, str] = {}
+    def get_video_details(self, video_ids: list[str]) -> dict[str, dict]:
+        youtube = self._get_client()
+        out: dict[str, dict] = {}
         for i in range(0, len(video_ids), 50):
-            detail_resp = youtube.videos().list(
-                part="contentDetails,snippet", id=",".join(video_ids[i:i + 50])
+            resp = youtube.videos().list(
+                part="contentDetails,snippet,status",
+                id=",".join(video_ids[i:i + 50]),
             ).execute()
-            for v in detail_resp.get("items", []):
-                vid = v["id"]
-                durations[vid] = _parse_iso8601_duration(v.get("contentDetails", {}).get("duration", ""))
-                descriptions[vid] = v.get("snippet", {}).get("description", "")
-
-        videos: list[dict] = []
-        for item in playlist_items:
-            snippet = item["snippet"]
-            video_id = snippet["resourceId"]["videoId"]
-            duration = durations.get(video_id, 0)
-            logger.info("video_listed", video_id=video_id, title=snippet.get("title", ""), duration=_format_duration(duration))
-            videos.append({
-                "id": video_id,
-                "title": snippet.get("title", video_id),
-                "description": descriptions.get(video_id, ""),
-                "published_at": snippet.get("publishedAt", "1970-01-01T00:00:00Z"),
-                "url": f"https://www.youtube.com/watch?v={video_id}",
-                "duration_seconds": duration,
-            })
-
-        logger.info("videos_listed", channel_id=channel_id, count=len(videos))
-        return videos
+            for v in resp.get("items", []):
+                out[v["id"]] = v
+        return out
 
     def get_transcript(self, video_id: str, cookies: str | None) -> str | None:
         try:
@@ -132,7 +133,6 @@ class YouTubeTransport(Transport):
             raise RuntimeError("pip install youtube-transcript-api") from exc
 
         try:
-            # API >= 0.6: instantiate, call .list(), then .find_transcript(), then .fetch()
             api = YouTubeTranscriptApi()
             transcript_list = api.list(video_id)
             transcript = transcript_list.find_transcript(["en", "fr"])
@@ -140,7 +140,6 @@ class YouTubeTransport(Transport):
             text = " ".join(entry["text"] for entry in fetched.to_raw_data())
             logger.info("transcript_fetched", video_id=video_id, chars=len(text))
             return text
-
         except (NoTranscriptFound, TranscriptsDisabled) as exc:
             logger.info("no_transcript", video_id=video_id, reason=str(exc))
             return None
@@ -180,6 +179,10 @@ class YouTubeTransport(Transport):
         return mp3_files[0]
 
 
+# ---------------------------------------------------------------------------
+# Whisper fallback
+# ---------------------------------------------------------------------------
+
 def transcribe_audio(audio_path: Path, model_size: str = "base") -> str:
     try:
         import whisper
@@ -199,6 +202,10 @@ def transcribe_audio(audio_path: Path, model_size: str = "base") -> str:
     return text
 
 
+# ---------------------------------------------------------------------------
+# Plugin
+# ---------------------------------------------------------------------------
+
 class YouTubePlugin(SourcePlugin):
     name = "youtube"
 
@@ -209,19 +216,93 @@ class YouTubePlugin(SourcePlugin):
             self.cookies: str | None = yt_cfg.get("cookies")  # type: ignore[union-attr]
             self.whisper_model: str = str((config.get("whisper") or {}).get("model", "base"))  # type: ignore[union-attr]
             client_secret_path = str(yt_cfg.get("client_secret_path", ""))  # type: ignore[union-attr]
+            # When False (default), non-public videos are skipped during sync.
+            # Set youtube.index_non_public: true in config.yaml to override.
+            # privacy_status is always stored on the document regardless.
+            self.index_non_public: bool = bool(yt_cfg.get("index_non_public", False))  # type: ignore[union-attr]
         except Exception as exc:
             raise ValueError("Missing youtube.channel_id in config") from exc
 
         self.transport = transport or YouTubeTransport(client_secret_path=client_secret_path)
 
-    def list_items(self, limit: int, since: datetime | None = None) -> list[ItemMeta]:
-        videos = self.transport.list_videos(self.channel_id, limit)
+    def list_items(
+        self,
+        limit: int,
+        since: datetime | None = None,
+        known_ids: set[str] | None = None,
+    ) -> list[ItemMeta]:
+        """Walk the uploads playlist newest-first, returning up to `limit` unindexed videos.
+
+        Uses ID-based dedup (known_ids) — not date cursors. Date cursors break after
+        the first sync because every backlog video has published_at older than the
+        newest indexed one, causing the entire backlog to be silently skipped.
+
+        Pages through the YouTube API until `limit` new eligible videos are found or
+        the channel is exhausted. `since` is accepted for interface compatibility but
+        intentionally ignored.
+        """
+        known = known_ids or set()
         out: list[ItemMeta] = []
-        for video in videos:
-            updated = datetime.fromisoformat(video["published_at"].replace("Z", "+00:00")).replace(tzinfo=None)
-            if since and updated <= since:
-                continue
-            out.append(ItemMeta(source_id=video["id"], updated_at=updated, metadata=video))
+        skipped_privacy = 0
+
+        playlist_id = self.transport.get_uploads_playlist(self.channel_id)
+
+        for page in self.transport.iter_playlist_pages(playlist_id):
+            if len(out) >= limit:
+                break
+
+            # Enrich the whole page in one API call
+            video_ids = [item["snippet"]["resourceId"]["videoId"] for item in page]
+            details = self.transport.get_video_details(video_ids)
+
+            for item in page:
+                if len(out) >= limit:
+                    break
+
+                snippet = item["snippet"]
+                video_id = snippet["resourceId"]["videoId"]
+
+                if video_id in known:
+                    continue  # already indexed — keep paging for older unindexed ones
+
+                detail = details.get(video_id, {})
+                privacy = detail.get("status", {}).get("privacyStatus", "unknown")
+
+                if not self.index_non_public and privacy not in _PUBLIC_STATUSES:
+                    logger.info("video_skipped_privacy", video_id=video_id, privacy_status=privacy)
+                    skipped_privacy += 1
+                    continue
+
+                duration = _parse_iso8601_duration(
+                    detail.get("contentDetails", {}).get("duration", "")
+                )
+                description = detail.get("snippet", {}).get("description", "")
+                published_at = snippet.get("publishedAt", "1970-01-01T00:00:00Z")
+                updated = datetime.fromisoformat(published_at.replace("Z", "+00:00")).replace(tzinfo=None)
+
+                logger.info(
+                    "video_listed",
+                    video_id=video_id,
+                    title=snippet.get("title", ""),
+                    duration=_format_duration(duration),
+                    privacy_status=privacy,
+                )
+                out.append(ItemMeta(
+                    source_id=video_id,
+                    updated_at=updated,
+                    metadata={
+                        "id": video_id,
+                        "title": snippet.get("title", video_id),
+                        "description": description,
+                        "published_at": published_at,
+                        "url": f"https://www.youtube.com/watch?v={video_id}",
+                        "duration_seconds": duration,
+                        "privacy_status": privacy,
+                    },
+                ))
+
+        if skipped_privacy:
+            logger.info("videos_skipped_non_public", count=skipped_privacy)
         logger.info("items_listed", source=self.name, count=len(out))
         return out
 
@@ -231,8 +312,15 @@ class YouTubePlugin(SourcePlugin):
         title = str(meta.get("title", video_id))
         duration = int(meta.get("duration_seconds", 0))
         description = str(meta.get("description", ""))
+        privacy_status = str(meta.get("privacy_status", "unknown"))
 
-        logger.info("fetching_video", video_id=video_id, title=title, duration=_format_duration(duration))
+        logger.info(
+            "fetching_video",
+            video_id=video_id,
+            title=title,
+            duration=_format_duration(duration),
+            privacy_status=privacy_status,
+        )
 
         transcript = self.transport.get_transcript(video_id, self.cookies)
         if transcript is None:
@@ -252,5 +340,6 @@ class YouTubePlugin(SourcePlugin):
             updated_at=item_meta.updated_at,
             url=str(meta.get("url")) if meta.get("url") else None,
             duration_seconds=duration or None,
+            privacy_status=privacy_status,
             metadata=meta,
         )
