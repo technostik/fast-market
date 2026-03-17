@@ -116,3 +116,54 @@ def test_failure_tracking_methods(store):
     remaining = store.list_failures("youtube")
     assert len(remaining) == 1
     assert remaining[0]["source_id"] == "v2"
+
+
+def test_auto_migration_adds_sync_failures_for_existing_0001_db(tmp_path):
+    db_path = tmp_path / "legacy-0001.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE documents (
+            id INTEGER PRIMARY KEY,
+            handle TEXT NOT NULL,
+            source_plugin TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            raw_text TEXT NOT NULL,
+            url TEXT,
+            updated_at TEXT,
+            duration_seconds INTEGER,
+            privacy_status TEXT,
+            content_hash TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            UNIQUE(source_plugin, source_id),
+            UNIQUE(handle)
+        );
+        CREATE TABLE chunks (
+            id INTEGER PRIMARY KEY,
+            source_plugin TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            embedding_json TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            UNIQUE(source_plugin, source_id, chunk_index)
+        );
+        CREATE VIRTUAL TABLE chunks_fts USING fts5(source_plugin, source_id, content);
+        CREATE TABLE alembic_version(version_num VARCHAR(32) NOT NULL PRIMARY KEY);
+        INSERT INTO alembic_version(version_num) VALUES ('0001_initial_schema');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    SQLiteStore(str(db_path))
+
+    check = sqlite3.connect(db_path)
+    tables = {row[0] for row in check.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    version = check.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    check.close()
+
+    assert "sync_failures" in tables
+    assert version == "0002_add_sync_failures_table"

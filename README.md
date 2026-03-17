@@ -77,6 +77,12 @@ rm -rf ~/.cache/fast-market/corpus
 
 If you still use legacy `config.yaml` in your current directory, it is supported with a deprecation warning. Move it to `~/.local/share/fast-market/config/corpus.yaml`.
 
+If you upgrade corpus-agent and need to force schema updates manually, run:
+
+```bash
+corpus db-migrate
+```
+
 ---
 
 ### How incremental sync works
@@ -214,6 +220,16 @@ corpus sync --source obsidian --mode backfill    # reprocess all Obsidian notes
 corpus sync --clean                              # wipe index and start fresh
 corpus sync --format json                        # machine-readable result
 ```
+
+---
+
+### db-migrate
+
+```bash
+corpus db-migrate [--format json|text]
+```
+
+Run Alembic migrations to `head` for the configured corpus database.
 
 ---
 

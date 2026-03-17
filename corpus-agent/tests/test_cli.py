@@ -214,3 +214,11 @@ def test_retry_failures_command_clears_and_resyncs(runner, mock_env, config_dict
     assert data[0]["source"] == "youtube"
     assert data[0]["indexed"] >= 1
     assert store.list_failures("youtube") == []
+
+
+def test_db_migrate_command(runner, mock_env):
+    main = _main_with_reload()
+    result = runner.invoke(main, ["db-migrate", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["status"] == "ok"
