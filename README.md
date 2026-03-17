@@ -114,6 +114,24 @@ corpus search "topic" --format json | jq '.[] | select(.privacy_status == "publi
 
 ---
 
+### Sync failure handling
+
+Sync now records per-item failures in `sync_failures`:
+
+- **Permanent failures** (for example missing transcript) are marked and skipped on later sync runs.
+- **Transient failures** (rate limit/network/unknown runtime errors) are recorded and retried on subsequent runs.
+- A successful sync of an item clears any previous failure record.
+
+Use `corpus retry-failures` to clear failures and retry:
+
+```bash
+corpus retry-failures
+corpus retry-failures --source youtube
+corpus retry-failures --clear-permanent
+```
+
+---
+
 ### Finding your YouTube channel ID
 
 Go to [commentpicker.com/youtube-channel-id.php](https://commentpicker.com/youtube-channel-id.php), enter your channel URL, and copy the ID (starts with `UC...`).
@@ -362,3 +380,21 @@ pytest
 Tests use an in-memory SQLite store and a `DummyEmbedder` — no ML model download needed.
 The Obsidian plugin test creates a temporary vault via `tmp_path` (pytest built-in).
 No external fixtures or data files are required.
+
+---
+
+### Troubleshooting sync failures
+
+- Check currently tracked failures in the database table `sync_failures`.
+- If a video/note is permanently failing but should be retried, run:
+
+```bash
+corpus retry-failures --clear-permanent
+```
+
+- If only transient failures should be retried, run:
+
+```bash
+corpus retry-failures
+```
+

@@ -100,3 +100,19 @@ def test_migration_works_when_cwd_changes(tmp_path, monkeypatch):
     version = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     conn.close()
     assert version == "0001_initial_schema"
+
+
+def test_failure_tracking_methods(store):
+    store.record_failure("youtube", "v1", "boom", "transient")
+    store.record_failure("youtube", "v1", "boom again", "transient")
+    rows = store.list_failures("youtube")
+    assert len(rows) == 1
+    assert rows[0]["retry_count"] == 1
+
+    store.record_failure("youtube", "v2", "missing transcript", "permanent")
+    assert store.get_permanent_failures("youtube") == {"v2"}
+
+    store.clear_failure("youtube", "v1")
+    remaining = store.list_failures("youtube")
+    assert len(remaining) == 1
+    assert remaining[0]["source_id"] == "v2"

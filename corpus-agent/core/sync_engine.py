@@ -8,6 +8,7 @@ import structlog
 from core.embedder import Embedder
 from core.handle import make_handle
 from core.models import Chunk, Document, ReindexResult, SyncFailure, SyncResult
+from core.sync_errors import SyncError
 from plugins.base import SourcePlugin
 from storage.sqlite_store import SQLiteStore
 
@@ -55,11 +56,17 @@ class SyncEngine:
         # backfill mode passes an empty dict so all items are reconsidered.
         known_id_dates = self.store.get_indexed_id_dates(plugin.name) if mode == "new" else {}
 
+        permanent_failures = self.store.get_permanent_failures(plugin.name)
         items = plugin.list_items(limit=limit, known_id_dates=known_id_dates)
         processed = indexed = skipped = 0
         failures: list[SyncFailure] = []
 
         for item in items:
+            if item.source_id in permanent_failures:
+                logger.info("skipping_permanent_failure", source=plugin.name, source_id=item.source_id)
+                skipped += 1
+                continue
+
             processed += 1
             try:
                 document = plugin.fetch(item)
@@ -74,11 +81,30 @@ class SyncEngine:
 
                 chunks = self._build_chunks(document)
                 self.store.replace_chunks(document.source_plugin, document.source_id, chunks)
+                self.store.clear_failure(plugin.name, item.source_id)
                 indexed += 1
                 _log_item(plugin.name, document, "indexed", chunks=len(chunks))
 
+            except SyncError as exc:
+                error_type = "permanent" if exc.permanent else "transient"
+                self.store.record_failure(plugin.name, item.source_id, str(exc), error_type)
+                logger.error(
+                    "sync_item_failed",
+                    source=plugin.name,
+                    source_id=item.source_id,
+                    error_type=error_type,
+                    error=str(exc),
+                )
+                failures.append(SyncFailure(source_id=item.source_id, error=str(exc)))
             except Exception as exc:
-                logger.error("sync_item_failed", source=plugin.name, source_id=item.source_id, error=str(exc))
+                self.store.record_failure(plugin.name, item.source_id, str(exc), "transient")
+                logger.error(
+                    "sync_item_failed",
+                    source=plugin.name,
+                    source_id=item.source_id,
+                    error_type="transient",
+                    error=str(exc),
+                )
                 failures.append(SyncFailure(source_id=item.source_id, error=str(exc)))
 
         return SyncResult(plugin.name, processed, indexed, skipped, failures)

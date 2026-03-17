@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.sync_errors import TranscriptUnavailableError
 from plugins.youtube.plugin import Transport, YouTubePlugin
 
 
@@ -31,3 +32,18 @@ def test_youtube_fetch():
     item = plugin.list_items(1)[0]
     doc = plugin.fetch(item)
     assert "hello" in doc.raw_text
+
+
+class NoTranscriptTransport(MockTransport):
+    def get_transcript(self, video_id: str, cookies: str | None):
+        return None
+
+
+def test_youtube_fetch_raises_permanent_when_transcript_missing():
+    plugin = YouTubePlugin({"youtube": {"channel_id": "c"}}, transport=NoTranscriptTransport())
+    item = plugin.list_items(1)[0]
+    try:
+        plugin.fetch(item)
+    except TranscriptUnavailableError:
+        return
+    raise AssertionError("Expected TranscriptUnavailableError")
