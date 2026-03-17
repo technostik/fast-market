@@ -107,19 +107,25 @@ def register(plugin_manifests: dict) -> CommandManifest:
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            close_fds=True,
             start_new_session=True,
         )
         _write_state(process.pid, resolved_port, resolved_model)
 
-        for _ in range(30):
-            time.sleep(1)
-            if _health(resolved_port):
-                click.echo(f"Embedding server started successfully (PID {process.pid})")
-                return
+        time.sleep(0.5)
+        try:
+            os.kill(process.pid, 0)
+        except ProcessLookupError as exc:
+            _pid_file().unlink(missing_ok=True)
+            raise click.ClickException("Server process exited immediately") from exc
 
-        _pid_file().unlink(missing_ok=True)
-        click.echo("Embedding server failed to become healthy within 30 seconds", err=True)
-        raise click.ClickException("Server startup failed")
+        click.echo(f"Embedding server started in background (PID {process.pid})")
+        health = _health(resolved_port, timeout=0.5)
+        if health is not None:
+            click.echo("Server health: OK")
+        else:
+            click.echo("Server health: initializing")
 
     @embed_server_group.command("stop")
     def stop_cmd() -> None:

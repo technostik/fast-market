@@ -54,7 +54,7 @@ def test_embed_server_start_status_stop(runner, mock_env, monkeypatch):
 
     result = local_runner.invoke(main, ["embed-server", "start", "--port", "28765"])
     assert result.exit_code == 0, result.output
-    assert "started successfully" in result.output.lower()
+    assert "started in background" in result.output.lower()
 
     result = local_runner.invoke(main, ["embed-server", "status"])
     assert result.exit_code == 0
