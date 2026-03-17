@@ -83,6 +83,22 @@ def _configure_logging(verbose: bool) -> None:
     logging.root.setLevel(level)
     for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(level)
+
+    # Ensure structlog respects the same verbosity as stdlib logging.
+    # In environments with the real structlog package installed, this routes
+    # bound loggers through stdlib and applies filtering at creation time.
+    try:
+        import structlog as _structlog
+
+        _structlog.configure(
+            wrapper_class=_structlog.make_filtering_bound_logger(level),
+            logger_factory=_structlog.stdlib.LoggerFactory(),
+            cache_logger_on_first_use=True,
+        )
+    except Exception:
+        # Local shim or missing APIs: best-effort only.
+        pass
+
     if not verbose:
         try:
             from tqdm import tqdm
