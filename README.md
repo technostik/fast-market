@@ -31,18 +31,25 @@ pip install -e ".[whisper]"
 
 ### First-time setup
 
-Run the interactive wizard to generate `config.yaml`:
+Run the interactive wizard to generate `corpus.yaml`:
 
 ```bash
 corpus setup
 ```
 
-This writes `config.yaml` and a stub `.env` at the project root. Neither is committed to git.
+This writes config/data under XDG-style paths:
 
-**Manual config** — you can also write `config.yaml` directly:
+- `~/.local/share/fast-market/config/corpus.yaml`
+- `~/.local/share/fast-market/config/.env` (stub, optional shared secrets)
+- `~/.local/share/fast-market/data/corpus/corpus.db`
+- `~/.cache/fast-market/corpus/`
+
+You can override config location for testing with `FASTMARKET_CONFIG_DIR`.
+
+**Manual config** — you can also write `~/.local/share/fast-market/config/corpus.yaml` directly:
 
 ```yaml
-db_path: data/corpus.db
+db_path: ~/.local/share/fast-market/data/corpus/corpus.db
 embed_batch_size: 32
 obsidian:
   vault_path: /absolute/path/to/vault
@@ -54,6 +61,19 @@ youtube:
 whisper:
   model: base   # tiny | base | small — only used if no transcript available
 ```
+
+
+### Reset corpus-agent completely
+
+To remove only corpus-agent data/config without affecting other fast-market tools:
+
+```bash
+rm -rf ~/.local/share/fast-market/data/corpus
+rm -f ~/.local/share/fast-market/config/corpus.yaml
+rm -rf ~/.cache/fast-market/corpus
+```
+
+If you still use legacy `config.yaml` in your current directory, it is supported with a deprecation warning. Move it to `~/.local/share/fast-market/config/corpus.yaml`.
 
 ---
 

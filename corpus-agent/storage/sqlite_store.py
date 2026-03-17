@@ -8,6 +8,7 @@ from pathlib import Path
 import structlog
 
 from core.models import Chunk, Document, SearchResult
+from core.paths import get_tool_data_dir
 
 logger = structlog.get_logger(__name__)
 
@@ -15,7 +16,9 @@ YOUTUBE_SHORT_MAX_SECONDS = 60
 
 
 class SQLiteStore:
-    def __init__(self, path: str = ":memory:") -> None:
+    def __init__(self, path: str | None = None) -> None:
+        if path is None:
+            path = str(get_tool_data_dir("corpus") / "corpus.db")
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path, check_same_thread=False)

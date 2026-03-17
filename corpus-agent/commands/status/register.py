@@ -49,7 +49,7 @@ def _build_router(plugin_manifests: dict) -> APIRouter:
         from storage.sqlite_store import SQLiteStore, SearchFilters
 
         config = load_config()
-        store = SQLiteStore(config.get("db_path", ":memory:"))
+        store = SQLiteStore(config.get("db_path"))
         filters = SearchFilters(
             source=source,
             video_type=video_type,
