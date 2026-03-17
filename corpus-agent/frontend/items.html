@@ -286,5 +286,15 @@
     .then(items => { allItems = items; filterSource('all'); })
     .catch(err => { document.getElementById('list').innerHTML = `<div class="empty">Error: ${err}</div>`; });
 </script>
+<script>
+  fetch('/api/frontend-fragments')
+    .then(r => r.json())
+    .then(frags => frags.forEach(f => {
+      const s = document.createElement('script');
+      s.textContent = f.js;
+      document.head.appendChild(s);
+    }))
+    .catch(() => {});
+</script>
 </body>
 </html>

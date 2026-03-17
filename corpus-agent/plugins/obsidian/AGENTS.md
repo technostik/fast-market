@@ -24,3 +24,15 @@ Directories in `obsidian.exclude_dirs` (config.yaml) are excluded at scan time v
 ID + staleness: skip a file only when `source_id in known_id_dates` AND
 `mtime <= indexed_updated_at`. A modified file is re-indexed even if already known.
 Mtime comparison truncates to second precision to absorb filesystem float rounding.
+
+## register.py
+
+`register(config) -> PluginManifest` declares what this plugin contributes
+to the CLI, API, and frontend. Current contributions:
+
+- `cli_options["search"]`: --since, --until, --min-size, --max-size
+- No plugin-specific API routes (generic /items?source=obsidian is sufficient)
+- No frontend JS fragment
+
+To add a new CLI option to a command, add a click.Option to the relevant
+cli_options list. The registry injects it automatically. Do not touch main.py.
