@@ -21,6 +21,7 @@ youtube = [
   "google-api-python-client>=2.0",
   "google-auth-oauthlib>=1.0",
   "youtube-transcript-api>=0.6",
+  "yt-dlp-ejs>=0.4.0",
 ]
 whisper = [
   "yt-dlp>=2024.1",

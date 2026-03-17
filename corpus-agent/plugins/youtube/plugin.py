@@ -159,6 +159,7 @@ class YouTubeTransport(Transport):
             "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
             "quiet": True,
             "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
+            "remote_components": ["ejs:github"],
         }
         if cookies:
             ydl_opts["cookiefile"] = cookies
