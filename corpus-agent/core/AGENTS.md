@@ -1,2 +1,1 @@
-- Keep code minimal and explicit.
-- Use structlog, raise explicit exceptions.
+Core logic used by the agent.
