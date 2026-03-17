@@ -22,7 +22,7 @@ class ObsidianPlugin(SourcePlugin):
             vault_path = ob_cfg["vault_path"]  # type: ignore[index]
         except Exception as exc:
             raise ValueError("Missing obsidian.vault_path in config") from exc
-        self.vault = Path(str(vault_path))
+        self.vault = Path(str(vault_path)).expanduser()
         if not self.vault.exists():
             raise FileNotFoundError(f"Obsidian vault not found: {self.vault}")
 

@@ -25,7 +25,7 @@ def build_engine(verbose: bool):
 
     _configure_logging(verbose)
     config = load_config()
-    store = SQLiteStore(config.get("db_path", ":memory:"))
+    store = SQLiteStore(config.get("db_path"))
     embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
     engine = SyncEngine(store, embedder)
     plugins = build_plugins(config)
