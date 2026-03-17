@@ -53,7 +53,7 @@ def _build_router() -> APIRouter:
         from storage.sqlite_store import SQLiteStore
 
         config = load_config()
-        store = SQLiteStore(config.get("db_path", ":memory:"))
+        store = SQLiteStore(config.get("db_path"))
         doc = store.get_document(source_plugin, source_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -65,7 +65,7 @@ def _build_router() -> APIRouter:
         from storage.sqlite_store import SQLiteStore
 
         config = load_config()
-        store = SQLiteStore(config.get("db_path", ":memory:"))
+        store = SQLiteStore(config.get("db_path"))
         doc = store.get_document_by_handle(handle)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")

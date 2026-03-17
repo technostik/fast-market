@@ -79,7 +79,7 @@ def _build_router() -> APIRouter:
         from storage.sqlite_store import SQLiteStore, SearchFilters
 
         config = load_config()
-        store = SQLiteStore(config.get("db_path", ":memory:"))
+        store = SQLiteStore(config.get("db_path"))
         embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
         filters = SearchFilters(
             source=source,
