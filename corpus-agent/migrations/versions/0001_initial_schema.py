@@ -59,15 +59,15 @@ def upgrade() -> None:
         """
     )
 
-    op.execute("CREATE INDEX IF NOT EXISTS ix_documents_source_plugin ON documents(source_plugin)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_documents_updated_at ON documents(updated_at)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_documents_privacy_status ON documents(privacy_status)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_chunks_source_plugin_source_id ON chunks(source_plugin, source_id)")
-
     bind = op.get_bind()
     cols = [row[1] for row in bind.exec_driver_sql("PRAGMA table_info(documents)").fetchall()]
     if "privacy_status" not in cols:
         op.execute("ALTER TABLE documents ADD COLUMN privacy_status TEXT")
+
+    op.execute("CREATE INDEX IF NOT EXISTS ix_documents_source_plugin ON documents(source_plugin)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_documents_updated_at ON documents(updated_at)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_documents_privacy_status ON documents(privacy_status)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_chunks_source_plugin_source_id ON chunks(source_plugin, source_id)")
 
 
 def downgrade() -> None:

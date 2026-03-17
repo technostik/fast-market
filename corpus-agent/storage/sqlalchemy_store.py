@@ -52,6 +52,40 @@ class SearchFilters:
             self.min_duration = max(self.min_duration or 0, YOUTUBE_SHORT_MAX_SECONDS + 1)
 
 
+class _CompatCursor:
+    def __init__(self, rows: list[object]) -> None:
+        self._rows = rows
+        self._index = 0
+
+    def fetchone(self):
+        if self._index >= len(self._rows):
+            return None
+        row = self._rows[self._index]
+        self._index += 1
+        return row
+
+    def fetchall(self):
+        if self._index >= len(self._rows):
+            return []
+        rows = self._rows[self._index :]
+        self._index = len(self._rows)
+        return rows
+
+
+class _CompatConnection:
+    """Compatibility wrapper for legacy `store.conn.execute(...)` usage."""
+
+    def __init__(self, store: "SQLAlchemyStore") -> None:
+        self._store = store
+
+    def execute(self, sql: str, parameters: tuple | None = None) -> _CompatCursor:
+        params = parameters or ()
+        with self._store.engine.connect() as conn:
+            result = conn.exec_driver_sql(sql, params)
+            rows = result.fetchall()
+        return _CompatCursor(rows)
+
+
 class SQLAlchemyStore:
     def __init__(self, path: str | None = None) -> None:
         if path is None:
@@ -61,6 +95,7 @@ class SQLAlchemyStore:
         self.engine = self._build_engine(path, db_url)
         self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, future=True)
         self._run_migrations()
+        self.conn = _CompatConnection(self)
 
     @staticmethod
     def _build_db_url(path: str) -> str:
