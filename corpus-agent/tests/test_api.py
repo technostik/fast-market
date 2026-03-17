@@ -106,3 +106,47 @@ def test_ui_items_page(api_client):
 
 def test_ui_status_page(api_client):
     assert api_client.get("/ui/status").status_code == 200
+
+
+def test_api_list_basic(api_client):
+    api_client.post("/sync", json={"source": "obsidian", "limit": 5})
+
+    resp = api_client.get("/list?limit=3")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) <= 3
+    assert "X-Total-Count" in resp.headers
+
+
+def test_api_list_pagination(api_client):
+    api_client.post("/sync", json={"source": "obsidian"})
+
+    resp = api_client.get("/list?limit=1")
+    total = int(resp.headers["X-Total-Count"])
+
+    all_handles = set()
+    for offset in range(0, total, 2):
+        resp = api_client.get(f"/list?limit=2&offset={offset}")
+        data = resp.json()
+        all_handles.update(d["handle"] for d in data)
+
+    assert len(all_handles) == total
+
+
+def test_api_list_filtering(api_client):
+    api_client.post("/sync", json={"source": "youtube", "limit": 3})
+
+    resp = api_client.get("/list?source=youtube&privacy_status=public")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert all(d["source_plugin"] == "youtube" for d in data)
+    assert all(d["privacy_status"] == "public" for d in data)
+
+
+def test_api_list_sorting(api_client):
+    api_client.post("/sync", json={"source": "obsidian"})
+
+    resp = api_client.get("/list?source=obsidian&order_by=size&reverse=true")
+    data = resp.json()
+    sizes = [len(d.get("raw_text") or "") for d in data]
+    assert sizes == sorted(sizes)
