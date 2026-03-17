@@ -167,3 +167,15 @@ def test_auto_migration_adds_sync_failures_for_existing_0001_db(tmp_path):
 
     assert "sync_failures" in tables
     assert version == "0002_add_sync_failures_table"
+
+
+def test_status_includes_sync_error_stats(store):
+    store.record_failure("youtube", "v1", "boom", "transient")
+    store.record_failure("youtube", "v2", "missing transcript", "permanent")
+
+    rows = store.status()
+    youtube = next(row for row in rows if row["source_plugin"] == "youtube")
+    assert youtube["docs"] == 0
+    assert youtube["sync_failures_total"] == 2
+    assert youtube["sync_failures_transient"] == 1
+    assert youtube["sync_failures_permanent"] == 1

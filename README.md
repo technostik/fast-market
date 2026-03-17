@@ -330,7 +330,9 @@ Rebuild embeddings for all indexed documents without re-fetching from source. Us
 corpus status [--format json|text]
 ```
 
-Print document counts per source.
+Print document counts and sync failure stats per source.
+
+Status JSON includes `docs`, `sync_failures_total`, `sync_failures_transient`, and `sync_failures_permanent`.
 
 ---
 

@@ -222,3 +222,16 @@ def test_db_migrate_command(runner, mock_env):
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["status"] == "ok"
+
+
+def test_status_includes_sync_failure_stats(runner, mock_env, config_dict):
+    store = SQLiteStore(config_dict["db_path"])
+    store.record_failure("youtube", "vid1", "tmp", "transient")
+
+    main = _main_with_reload()
+    result = runner.invoke(main, ["status", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    youtube_row = next(row for row in data if row["source_plugin"] == "youtube")
+    assert youtube_row["sync_failures_total"] >= 1
+    assert youtube_row["sync_failures_transient"] >= 1

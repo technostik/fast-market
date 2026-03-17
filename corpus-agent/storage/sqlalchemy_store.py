@@ -514,10 +514,44 @@ class SQLAlchemyStore:
 
     def status(self) -> list[dict]:
         with self._session() as session:
-            rows = session.execute(
+            doc_rows = session.execute(
                 text("SELECT source_plugin, COUNT(*) as docs FROM documents GROUP BY source_plugin")
             ).mappings().all()
-        return [dict(row) for row in rows]
+            failure_rows = session.execute(
+                text(
+                    "SELECT source_plugin, "
+                    "COUNT(*) as sync_failures_total, "
+                    "SUM(CASE WHEN error_type='transient' THEN 1 ELSE 0 END) as sync_failures_transient, "
+                    "SUM(CASE WHEN error_type='permanent' THEN 1 ELSE 0 END) as sync_failures_permanent "
+                    "FROM sync_failures GROUP BY source_plugin"
+                )
+            ).mappings().all()
+
+        merged: dict[str, dict] = {}
+        for row in doc_rows:
+            merged[row["source_plugin"]] = {
+                "source_plugin": row["source_plugin"],
+                "docs": int(row["docs"]),
+                "sync_failures_total": 0,
+                "sync_failures_transient": 0,
+                "sync_failures_permanent": 0,
+            }
+        for row in failure_rows:
+            item = merged.setdefault(
+                row["source_plugin"],
+                {
+                    "source_plugin": row["source_plugin"],
+                    "docs": 0,
+                    "sync_failures_total": 0,
+                    "sync_failures_transient": 0,
+                    "sync_failures_permanent": 0,
+                },
+            )
+            item["sync_failures_total"] = int(row["sync_failures_total"] or 0)
+            item["sync_failures_transient"] = int(row["sync_failures_transient"] or 0)
+            item["sync_failures_permanent"] = int(row["sync_failures_permanent"] or 0)
+
+        return [merged[name] for name in sorted(merged)]
 
 
 def _apply_filters(results: list[SearchResult], filters: SearchFilters | None) -> list[SearchResult]:
