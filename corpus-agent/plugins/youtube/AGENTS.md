@@ -29,3 +29,20 @@ Tests inject a fake `Transport` to avoid real API calls.
 Default: non-public videos (private, unlisted) are skipped at list_items time.
 Override with `youtube.index_non_public: true` in config.yaml.
 `privacy_status` is stored on every Document and exposed in search results.
+
+## register.py
+
+`register(config) -> PluginManifest` declares what this plugin contributes
+to the CLI, API, and frontend. Current contributions:
+
+- `cli_options["search"]`: --type, --min-duration, --max-duration, --privacy-status
+- No plugin-specific API routes
+- No frontend JS fragment
+
+To add a new CLI option to a command, add a click.Option to the relevant
+cli_options list. The registry injects it automatically. Do not touch main.py.
+
+## Note on --source option
+
+The --source CLI option (choosing which plugin to target) is built by COMMANDS
+from plugin_manifests.keys(). This plugin must NOT declare --source.

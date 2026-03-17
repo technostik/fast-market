@@ -10,7 +10,7 @@ from core.models import Document
 class P(SourcePlugin):
     name = "obsidian"
 
-    def list_items(self, limit: int, since=None):
+    def list_items(self, limit: int, known_id_dates=None):
         return [ItemMeta("a", datetime.utcnow())]
 
     def fetch(self, item_meta: ItemMeta):
