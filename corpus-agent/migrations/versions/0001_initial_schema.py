@@ -58,6 +58,21 @@ def upgrade() -> None:
         )
         """
     )
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sync_failures (
+            id INTEGER PRIMARY KEY,
+            source_plugin TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            error_message TEXT NOT NULL,
+            error_type TEXT NOT NULL,
+            failed_at TEXT NOT NULL,
+            retry_count INTEGER DEFAULT 0,
+            last_retry_at TEXT,
+            UNIQUE(source_plugin, source_id)
+        )
+        """
+    )
 
     bind = op.get_bind()
     cols = [row[1] for row in bind.exec_driver_sql("PRAGMA table_info(documents)").fetchall()]
@@ -68,10 +83,15 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_documents_updated_at ON documents(updated_at)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_documents_privacy_status ON documents(privacy_status)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_chunks_source_plugin_source_id ON chunks(source_plugin, source_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_sync_failures_source_plugin ON sync_failures(source_plugin)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_sync_failures_error_type ON sync_failures(error_type)")
 
 
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS chunks_fts")
+    op.execute("DROP INDEX IF EXISTS ix_sync_failures_error_type")
+    op.execute("DROP INDEX IF EXISTS ix_sync_failures_source_plugin")
+    op.execute("DROP TABLE IF EXISTS sync_failures")
     op.execute("DROP INDEX IF EXISTS ix_chunks_source_plugin_source_id")
     op.execute("DROP TABLE IF EXISTS chunks")
     op.execute("DROP INDEX IF EXISTS ix_documents_privacy_status")

@@ -16,7 +16,7 @@ from sqlalchemy.pool import QueuePool, StaticPool
 
 from core.models import Chunk, Document, SearchResult
 from core.paths import get_tool_data_dir
-from storage.models import ChunkModel, DocumentModel
+from storage.models import ChunkModel, DocumentModel, SyncFailureModel
 
 logger = structlog.get_logger(__name__)
 
@@ -421,12 +421,137 @@ class SQLAlchemyStore:
             session.execute(text("DELETE FROM chunks WHERE source_plugin=:source"), {"source": source})
             session.execute(text("DELETE FROM chunks_fts WHERE source_plugin=:source"), {"source": source})
 
-    def status(self) -> list[dict]:
+    def record_failure(self, source_plugin: str, source_id: str, error: str, error_type: str) -> None:
+        now = datetime.utcnow().isoformat()
+        with self._session() as session:
+            existing = session.execute(
+                select(SyncFailureModel).where(
+                    SyncFailureModel.source_plugin == source_plugin,
+                    SyncFailureModel.source_id == source_id,
+                )
+            ).scalar_one_or_none()
+            if existing:
+                existing.error_message = error
+                existing.error_type = error_type
+                existing.failed_at = now
+                existing.retry_count = int(existing.retry_count or 0) + 1
+                existing.last_retry_at = now
+                return
+            session.add(
+                SyncFailureModel(
+                    source_plugin=source_plugin,
+                    source_id=source_id,
+                    error_message=error,
+                    error_type=error_type,
+                    failed_at=now,
+                    retry_count=0,
+                    last_retry_at=None,
+                )
+            )
+
+    def get_permanent_failures(self, source_plugin: str) -> set[str]:
         with self._session() as session:
             rows = session.execute(
+                text(
+                    "SELECT source_id FROM sync_failures "
+                    "WHERE source_plugin=:source_plugin AND error_type='permanent'"
+                ),
+                {"source_plugin": source_plugin},
+            ).mappings().all()
+        return {row["source_id"] for row in rows}
+
+    def clear_failure(self, source_plugin: str, source_id: str) -> None:
+        with self._session() as session:
+            session.execute(
+                delete(SyncFailureModel).where(
+                    SyncFailureModel.source_plugin == source_plugin,
+                    SyncFailureModel.source_id == source_id,
+                )
+            )
+
+    def list_failures(self, source_plugin: str | None = None) -> list[dict]:
+        with self._session() as session:
+            if source_plugin:
+                rows = session.execute(
+                    text(
+                        "SELECT source_plugin, source_id, error_message, error_type, "
+                        "failed_at, retry_count, last_retry_at "
+                        "FROM sync_failures WHERE source_plugin=:source_plugin "
+                        "ORDER BY failed_at DESC"
+                    ),
+                    {"source_plugin": source_plugin},
+                ).mappings().all()
+            else:
+                rows = session.execute(
+                    text(
+                        "SELECT source_plugin, source_id, error_message, error_type, "
+                        "failed_at, retry_count, last_retry_at "
+                        "FROM sync_failures ORDER BY failed_at DESC"
+                    )
+                ).mappings().all()
+        return [dict(row) for row in rows]
+
+    def clear_failures(self, source_plugin: str | None = None, include_permanent: bool = False) -> int:
+        with self._session() as session:
+            if source_plugin and include_permanent:
+                res = session.execute(
+                    text("DELETE FROM sync_failures WHERE source_plugin=:source_plugin"),
+                    {"source_plugin": source_plugin},
+                )
+            elif source_plugin:
+                res = session.execute(
+                    text(
+                        "DELETE FROM sync_failures WHERE source_plugin=:source_plugin "
+                        "AND error_type='transient'"
+                    ),
+                    {"source_plugin": source_plugin},
+                )
+            elif include_permanent:
+                res = session.execute(text("DELETE FROM sync_failures"))
+            else:
+                res = session.execute(text("DELETE FROM sync_failures WHERE error_type='transient'"))
+        return int(res.rowcount or 0)
+
+    def status(self) -> list[dict]:
+        with self._session() as session:
+            doc_rows = session.execute(
                 text("SELECT source_plugin, COUNT(*) as docs FROM documents GROUP BY source_plugin")
             ).mappings().all()
-        return [dict(row) for row in rows]
+            failure_rows = session.execute(
+                text(
+                    "SELECT source_plugin, "
+                    "COUNT(*) as sync_failures_total, "
+                    "SUM(CASE WHEN error_type='transient' THEN 1 ELSE 0 END) as sync_failures_transient, "
+                    "SUM(CASE WHEN error_type='permanent' THEN 1 ELSE 0 END) as sync_failures_permanent "
+                    "FROM sync_failures GROUP BY source_plugin"
+                )
+            ).mappings().all()
+
+        merged: dict[str, dict] = {}
+        for row in doc_rows:
+            merged[row["source_plugin"]] = {
+                "source_plugin": row["source_plugin"],
+                "docs": int(row["docs"]),
+                "sync_failures_total": 0,
+                "sync_failures_transient": 0,
+                "sync_failures_permanent": 0,
+            }
+        for row in failure_rows:
+            item = merged.setdefault(
+                row["source_plugin"],
+                {
+                    "source_plugin": row["source_plugin"],
+                    "docs": 0,
+                    "sync_failures_total": 0,
+                    "sync_failures_transient": 0,
+                    "sync_failures_permanent": 0,
+                },
+            )
+            item["sync_failures_total"] = int(row["sync_failures_total"] or 0)
+            item["sync_failures_transient"] = int(row["sync_failures_transient"] or 0)
+            item["sync_failures_permanent"] = int(row["sync_failures_permanent"] or 0)
+
+        return [merged[name] for name in sorted(merged)]
 
 
 def _apply_filters(results: list[SearchResult], filters: SearchFilters | None) -> list[SearchResult]:

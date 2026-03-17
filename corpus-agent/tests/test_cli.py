@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import json
 
+from storage.sqlite_store import SQLiteStore
+
 
 def _main_with_reload():
     import cli.main as cli_mod
@@ -199,3 +201,37 @@ def test_plugin_removal_simulation(runner, mock_env, monkeypatch):
 
     result = runner.invoke(reloaded_main, ["sync", "--source", "youtube"])
     assert result.exit_code != 0
+
+
+def test_retry_failures_command_clears_and_resyncs(runner, mock_env, config_dict):
+    store = SQLiteStore(config_dict["db_path"])
+    store.record_failure("youtube", "vid1", "tmp", "transient")
+
+    main = _main_with_reload()
+    result = runner.invoke(main, ["retry-failures", "--source", "youtube", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data[0]["source"] == "youtube"
+    assert data[0]["indexed"] >= 1
+    assert store.list_failures("youtube") == []
+
+
+def test_db_migrate_command(runner, mock_env):
+    main = _main_with_reload()
+    result = runner.invoke(main, ["db-migrate", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["status"] == "ok"
+
+
+def test_status_includes_sync_failure_stats(runner, mock_env, config_dict):
+    store = SQLiteStore(config_dict["db_path"])
+    store.record_failure("youtube", "vid1", "tmp", "transient")
+
+    main = _main_with_reload()
+    result = runner.invoke(main, ["status", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    youtube_row = next(row for row in data if row["source_plugin"] == "youtube")
+    assert youtube_row["sync_failures_total"] >= 1
+    assert youtube_row["sync_failures_transient"] >= 1

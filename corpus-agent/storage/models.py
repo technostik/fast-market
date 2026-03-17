@@ -47,3 +47,21 @@ class ChunkModel(Base):
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     embedding_json: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+
+class SyncFailureModel(Base):
+    __tablename__ = "sync_failures"
+    __table_args__ = (
+        UniqueConstraint("source_plugin", "source_id", name="uq_sync_failures_source"),
+        Index("ix_sync_failures_source_plugin", "source_plugin"),
+        Index("ix_sync_failures_error_type", "error_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_plugin: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(String, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, nullable=False)
+    error_type: Mapped[str] = mapped_column(String, nullable=False)
+    failed_at: Mapped[str] = mapped_column(String, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_retry_at: Mapped[str | None] = mapped_column(String, nullable=True)

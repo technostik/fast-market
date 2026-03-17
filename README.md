@@ -77,6 +77,12 @@ rm -rf ~/.cache/fast-market/corpus
 
 If you still use legacy `config.yaml` in your current directory, it is supported with a deprecation warning. Move it to `~/.local/share/fast-market/config/corpus.yaml`.
 
+If you upgrade corpus-agent and need to force schema updates manually, run:
+
+```bash
+corpus db-migrate
+```
+
 ---
 
 ### How incremental sync works
@@ -110,6 +116,24 @@ The `privacy_status` field is stored on every indexed document and exposed in se
 corpus search "topic" --privacy public      # public only
 corpus search "topic" --privacy unlisted    # unlisted only
 corpus search "topic" --format json | jq '.[] | select(.privacy_status == "public")'
+```
+
+---
+
+### Sync failure handling
+
+Sync now records per-item failures in `sync_failures`:
+
+- **Permanent failures** (for example missing transcript) are marked and skipped on later sync runs.
+- **Transient failures** (rate limit/network/unknown runtime errors) are recorded and retried on subsequent runs.
+- A successful sync of an item clears any previous failure record.
+
+Use `corpus retry-failures` to clear failures and retry:
+
+```bash
+corpus retry-failures
+corpus retry-failures --source youtube
+corpus retry-failures --clear-permanent
 ```
 
 ---
@@ -196,6 +220,16 @@ corpus sync --source obsidian --mode backfill    # reprocess all Obsidian notes
 corpus sync --clean                              # wipe index and start fresh
 corpus sync --format json                        # machine-readable result
 ```
+
+---
+
+### db-migrate
+
+```bash
+corpus db-migrate [--format json|text]
+```
+
+Run Alembic migrations to `head` for the configured corpus database.
 
 ---
 
@@ -296,7 +330,9 @@ Rebuild embeddings for all indexed documents without re-fetching from source. Us
 corpus status [--format json|text]
 ```
 
-Print document counts per source.
+Print document counts and sync failure stats per source.
+
+Status JSON includes `docs`, `sync_failures_total`, `sync_failures_transient`, and `sync_failures_permanent`.
 
 ---
 
@@ -362,3 +398,21 @@ pytest
 Tests use an in-memory SQLite store and a `DummyEmbedder` — no ML model download needed.
 The Obsidian plugin test creates a temporary vault via `tmp_path` (pytest built-in).
 No external fixtures or data files are required.
+
+---
+
+### Troubleshooting sync failures
+
+- Check currently tracked failures in the database table `sync_failures`.
+- If a video/note is permanently failing but should be retried, run:
+
+```bash
+corpus retry-failures --clear-permanent
+```
+
+- If only transient failures should be retried, run:
+
+```bash
+corpus retry-failures
+```
+

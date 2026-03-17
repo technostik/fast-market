@@ -46,3 +46,15 @@ Stored on the `documents` table. Values: "public" | "private" | "unlisted" | "un
 Populated by the YouTube plugin. NULL for Obsidian documents.
 Exposed in SearchResult, list_documents, and get_document* results.
 Filterable via SearchFilters.privacy_status.
+
+## sync_failures table
+
+Tracks per-item sync failures across runs.
+
+Columns:
+- `source_plugin`, `source_id` (unique pair)
+- `error_message`
+- `error_type` (`transient` or `permanent`)
+- `failed_at`, `retry_count`, `last_retry_at`
+
+Use this table to skip permanent failures in SyncEngine and to support explicit retry commands.

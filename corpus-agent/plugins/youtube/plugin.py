@@ -10,6 +10,7 @@ from typing import Iterator
 import structlog
 
 from core.models import Document
+from core.sync_errors import APIRateLimitError, NetworkError, TranscriptUnavailableError
 from plugins.base import ItemMeta, SourcePlugin
 
 logger = structlog.get_logger(__name__)
@@ -128,7 +129,11 @@ class YouTubeTransport(Transport):
 
     def get_transcript(self, video_id: str, cookies: str | None) -> str | None:
         try:
-            from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
+            from youtube_transcript_api import (
+                YouTubeTranscriptApi,
+                NoTranscriptFound,
+                TranscriptsDisabled,
+            )
         except ImportError as exc:
             raise RuntimeError("pip install youtube-transcript-api") from exc
 
@@ -143,9 +148,12 @@ class YouTubeTransport(Transport):
         except (NoTranscriptFound, TranscriptsDisabled) as exc:
             logger.info("no_transcript", video_id=video_id, reason=str(exc))
             return None
+        except OSError as exc:
+            raise NetworkError(f"Network error while fetching transcript for {video_id}") from exc
         except Exception as exc:
-            logger.error("transcript_error", video_id=video_id, error=str(exc))
-            return None
+            if "rate" in str(exc).lower() or "429" in str(exc):
+                raise APIRateLimitError(f"YouTube transcript rate limit for {video_id}") from exc
+            raise
 
     def download_audio(self, video_id: str, cookies: str | None) -> Path | None:
         try:
@@ -325,8 +333,11 @@ class YouTubePlugin(SourcePlugin):
             logger.info("transcript_unavailable_trying_audio", video_id=video_id)
             audio = self.transport.download_audio(video_id, self.cookies)
             if audio is None:
-                raise RuntimeError(f"No transcript and audio download failed for video {video_id}")
-            transcript = transcribe_audio(audio, self.whisper_model)
+                raise TranscriptUnavailableError(f"No transcript for {video_id}")
+            try:
+                transcript = transcribe_audio(audio, self.whisper_model)
+            except OSError as exc:
+                raise NetworkError(f"Network error while transcribing {video_id}") from exc
 
         raw_text = f"{description}\n\n{transcript}".strip() if description else transcript
 
