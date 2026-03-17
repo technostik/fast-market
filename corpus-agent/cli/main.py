@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import click
 
 from core.config import load_config
@@ -15,6 +17,7 @@ def main(ctx: click.Context, verbose: bool) -> None:
 
 
 def _load() -> None:
+    logging.basicConfig(level=logging.CRITICAL, force=True)
     config = load_config()
     plugin_manifests = discover_plugins(config)
     command_manifests = discover_commands(plugin_manifests)

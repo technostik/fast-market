@@ -31,7 +31,6 @@ def discover_plugins(config: dict) -> dict[str, "PluginManifest"]:
         except ModuleNotFoundError:
             # No register.py yet — skip silently during transition.
             # Once all plugins have register.py this should become a hard error.
-            logger.info("plugin_no_register", plugin=entry.name)
             continue
         if not hasattr(mod, "register"):
             raise RuntimeError(
@@ -44,7 +43,6 @@ def discover_plugins(config: dict) -> dict[str, "PluginManifest"]:
                 f"got {type(manifest)}"
             )
         manifests[manifest.name] = manifest
-        logger.info("plugin_registered", name=manifest.name)
 
     return manifests
 
@@ -74,7 +72,6 @@ def discover_commands(
         try:
             mod = importlib.import_module(mod_path)
         except ModuleNotFoundError:
-            logger.info("command_no_register", command=entry.name)
             continue
         if not hasattr(mod, "register"):
             raise RuntimeError(
@@ -87,7 +84,6 @@ def discover_commands(
                 f"got {type(manifest)}"
             )
         manifests[manifest.name] = manifest
-        logger.info("command_registered", name=manifest.name)
 
     return manifests
 

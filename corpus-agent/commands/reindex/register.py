@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import click
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, HTTPException
 
 from commands.base import CommandManifest
 from commands.helpers import build_engine, out
@@ -34,25 +33,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
 def _build_router(source_choices: list[str]) -> APIRouter:
     router = APIRouter()
 
-    class ReindexRequest(BaseModel):
-        source: str
-
     @router.post("/reindex")
-    def reindex(req: ReindexRequest):
+    def reindex(req: dict = Body(...)):
+        source = req.get("source")
         from core.config import load_config
         from core.embedder import Embedder
         from core.registry import build_plugins
         from core.sync_engine import SyncEngine
         from storage.sqlite_store import SQLiteStore
 
-        if req.source not in source_choices:
+        if source not in source_choices:
             raise HTTPException(status_code=400, detail="Unknown source")
         config = load_config()
         store = SQLiteStore(config.get("db_path", ":memory:"))
         embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
         engine = SyncEngine(store, embedder)
         plugins = build_plugins(config)
-        result = engine.reindex(plugins[req.source])
+        result = engine.reindex(plugins[source])
         return {"source": result.source, "documents": result.documents, "chunks": result.chunks}
 
     return router

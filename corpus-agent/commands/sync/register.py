@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import click
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, HTTPException
 
 from commands.base import CommandManifest
 from commands.helpers import build_engine, out
@@ -49,27 +48,25 @@ def register(plugin_manifests: dict) -> CommandManifest:
 def _build_router(source_choices: list[str]) -> APIRouter:
     router = APIRouter()
 
-    class SyncRequest(BaseModel):
-        source: str
-        mode: str = "new"
-        limit: int = 10
-
     @router.post("/sync")
-    def sync(req: SyncRequest):
+    def sync(req: dict = Body(...)):
+        source = req.get("source")
+        mode = req.get("mode", "new")
+        limit = req.get("limit", 10)
         from core.config import load_config
         from core.embedder import Embedder
         from core.registry import build_plugins
         from core.sync_engine import SyncEngine
         from storage.sqlite_store import SQLiteStore
 
-        if req.source not in source_choices:
+        if source not in source_choices:
             raise HTTPException(status_code=400, detail="Unknown source")
         config = load_config()
         store = SQLiteStore(config.get("db_path", ":memory:"))
         embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
         engine = SyncEngine(store, embedder)
         plugins = build_plugins(config)
-        result = engine.sync(plugins[req.source], mode=req.mode, limit=req.limit)
+        result = engine.sync(plugins[source], mode=mode, limit=int(limit))
         return {
             "source": result.source,
             "indexed": result.indexed,
