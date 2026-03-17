@@ -272,6 +272,56 @@ corpus search "bureaucratie" --source youtube --format json \
   | xargs corpus get --what content
 ```
 
+
+---
+
+### list
+
+```bash
+corpus list [OPTIONS]
+```
+
+List indexed documents with filtering, sorting, and pagination.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--limit N` | `10` | Number of items to return |
+| `--offset N` | `0` | Skip first N items (pagination) |
+| `--source obsidian\|youtube` | — | Filter by source |
+| `--order-by date\|size\|duration\|title` | `date` | Sort field |
+| `--reverse` | off | Reverse sort order |
+| `--format json\|text\|table` | `text` | Output format |
+
+**YouTube filters:**
+| Option | Description |
+|--------|-------------|
+| `--type short\|long` | Videos ≤60s or >60s |
+| `--min-duration N` | Min duration in seconds |
+| `--max-duration N` | Max duration in seconds |
+| `--privacy public\|private\|unlisted\|unknown` | Privacy status |
+
+**Obsidian filters:**
+| Option | Description |
+|--------|-------------|
+| `--min-size N` | Min content size in chars |
+| `--max-size N` | Max content size in chars |
+
+**Date filters (all sources):**
+| Option | Description |
+|--------|-------------|
+| `--since YYYY-MM-DD` | Updated on or after date |
+| `--until YYYY-MM-DD` | Updated on or before date |
+
+```bash
+corpus list
+corpus list --limit 1
+corpus list --source youtube --type short --since 2024-01-01
+corpus list --source obsidian --order-by size --limit 20
+corpus list --limit 20 --offset 20
+corpus list --format table
+corpus list --limit 5 --format json | jq '.[0].handle'
+```
+
 ---
 
 ### get
@@ -366,6 +416,7 @@ Start the server and open `http://localhost:8000` (redirects to `/ui`).
 |--------|----------|-------------|
 | GET | `/sources` | List source plugins |
 | GET | `/items` | List documents (supports `source`, `limit`, `video_type`, `min_duration`, `max_duration`, `since`, `until`, `min_size`, `max_size`, `privacy_status`) |
+| GET | `/list` | List documents with filters (`limit`, `offset`, `source`, `order_by`, `reverse`, `video_type`, `min_duration`, `max_duration`, `privacy_status`, `since`, `until`, `min_size`, `max_size`) |
 | GET | `/document/{plugin}/{id}` | Get full document including raw text |
 | GET | `/handle/{handle}` | Get document by handle |
 | DELETE | `/document/{plugin}/{id}` | Delete document from index |

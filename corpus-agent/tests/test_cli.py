@@ -235,3 +235,92 @@ def test_status_includes_sync_failure_stats(runner, mock_env, config_dict):
     youtube_row = next(row for row in data if row["source_plugin"] == "youtube")
     assert youtube_row["sync_failures_total"] >= 1
     assert youtube_row["sync_failures_transient"] >= 1
+
+
+def test_list_command_basic(mock_env, runner):
+    main = _main_with_reload()
+    runner.invoke(main, ["sync", "--source", "obsidian", "--limit", "3"])
+
+    result = runner.invoke(main, ["list", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert len(data) <= 10
+    assert all("title" in d for d in data)
+
+
+def test_list_command_pagination(mock_env, runner):
+    main = _main_with_reload()
+    runner.invoke(main, ["sync", "--source", "obsidian"])
+
+    result = runner.invoke(main, ["list", "--limit", "2", "--format", "json"])
+    page1 = json.loads(result.output)
+    assert len(page1) == 2
+
+    result = runner.invoke(main, ["list", "--limit", "2", "--offset", "2", "--format", "json"])
+    page2 = json.loads(result.output)
+    assert len(page2) >= 1
+
+    handles1 = {d["handle"] for d in page1}
+    handles2 = {d["handle"] for d in page2}
+    assert handles1.isdisjoint(handles2)
+
+
+def test_list_command_get_last_behavior(mock_env, runner):
+    main = _main_with_reload()
+    runner.invoke(main, ["sync", "--source", "obsidian", "--limit", "3"])
+
+    result = runner.invoke(main, ["list", "--limit", "1", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert len(data) == 1
+
+
+def test_list_command_filtering(mock_env, runner):
+    main = _main_with_reload()
+    runner.invoke(main, ["sync", "--source", "youtube", "--limit", "5"])
+
+    result = runner.invoke(main, ["list", "--source", "youtube", "--format", "json"])
+    data = json.loads(result.output)
+    assert all(d["source_plugin"] == "youtube" for d in data)
+
+
+def test_list_command_sorting(mock_env, runner):
+    main = _main_with_reload()
+    runner.invoke(main, ["sync", "--source", "obsidian"])
+
+    result = runner.invoke(main, ["list", "--order-by", "title", "--format", "json"])
+    data = json.loads(result.output)
+    titles = [d["title"] for d in data]
+    assert titles == sorted(titles, reverse=True)
+
+    result = runner.invoke(main, ["list", "--order-by", "title", "--reverse", "--format", "json"])
+    data_rev = json.loads(result.output)
+    titles_rev = [d["title"] for d in data_rev]
+    assert titles_rev == sorted(titles)
+
+
+def test_list_command_date_filtering(mock_env, runner):
+    main = _main_with_reload()
+    runner.invoke(main, ["sync", "--source", "obsidian"])
+
+    result = runner.invoke(main, [
+        "list",
+        "--since", "2024-01-01",
+        "--until", "2024-12-31",
+        "--format", "json",
+    ])
+    data = json.loads(result.output)
+    for doc in data:
+        date = doc["updated_at"][:10]
+        assert "2024-01-01" <= date <= "2024-12-31"
+
+
+def test_list_command_table_format(mock_env, runner):
+    main = _main_with_reload()
+    runner.invoke(main, ["sync", "--source", "obsidian", "--limit", "3"])
+
+    result = runner.invoke(main, ["list", "--format", "table"])
+    assert result.exit_code == 0, result.output
+    assert "HANDLE" in result.output
+    assert "TITLE" in result.output
+    assert "---" in result.output

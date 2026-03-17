@@ -389,6 +389,69 @@ class SQLAlchemyStore:
             items = _apply_filters_dicts(items, filters)
         return items[:limit]
 
+    def list_documents_extended(
+        self,
+        source: str | None = None,
+        filters: SearchFilters | None = None,
+        order_by: str = "date",
+        reverse: bool = False,
+        limit: int = 1000,
+    ) -> list[dict]:
+        query = (
+            "SELECT handle, source_plugin, source_id, title, raw_text, url, "
+            "updated_at, duration_seconds, privacy_status, metadata_json "
+            "FROM documents WHERE 1=1"
+        )
+        params: dict[str, object] = {"limit": limit}
+
+        if source:
+            query += " AND source_plugin=:source"
+            params["source"] = source
+
+        if filters:
+            if filters.since:
+                query += " AND updated_at >= :since"
+                params["since"] = f"{filters.since}T00:00:00"
+            if filters.until:
+                query += " AND updated_at <= :until"
+                params["until"] = f"{filters.until}T23:59:59"
+            if filters.min_duration is not None:
+                query += " AND duration_seconds >= :min_duration"
+                params["min_duration"] = filters.min_duration
+            if filters.max_duration is not None:
+                query += " AND duration_seconds <= :max_duration"
+                params["max_duration"] = filters.max_duration
+            if filters.privacy_status:
+                query += " AND privacy_status = :privacy_status"
+                params["privacy_status"] = filters.privacy_status
+
+        order_field_map = {
+            "date": "updated_at",
+            "size": "LENGTH(raw_text)",
+            "duration": "COALESCE(duration_seconds, 0)",
+            "title": "title COLLATE NOCASE",
+        }
+        order_field = order_field_map.get(order_by, "updated_at")
+        order_dir = "ASC" if reverse else "DESC"
+        query += f" ORDER BY {order_field} {order_dir} LIMIT :limit"
+
+        with self._session() as session:
+            rows = session.execute(text(query), params).mappings().all()
+        docs = [self._row_to_doc_dict(row) for row in rows]
+
+        if filters and (filters.min_size is not None or filters.max_size is not None):
+            filtered = []
+            for doc in docs:
+                size = len(doc.get("raw_text", "") or "")
+                if filters.min_size is not None and size < filters.min_size:
+                    continue
+                if filters.max_size is not None and size > filters.max_size:
+                    continue
+                filtered.append(doc)
+            docs = filtered
+
+        return docs
+
     def delete_all(self) -> None:
         with self._session() as session:
             session.execute(text("DELETE FROM documents"))

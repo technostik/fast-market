@@ -32,7 +32,33 @@ def register(config: dict) -> PluginManifest:
                     help="Maximum video duration in seconds.",
                 ),
                 click.Option(
-                    ["--privacy-status"],
+                    ["--privacy", "privacy_status"],
+                    type=click.Choice(["public", "unlisted", "private", "unknown"]),
+                    default=None,
+                    help="Filter by YouTube privacy status.",
+                ),
+            ],
+            "list": [
+                click.Option(
+                    ["--type", "video_type"],
+                    type=click.Choice(["short", "long"]),
+                    default=None,
+                    help="Filter by video type (short ≤60s, long >60s).",
+                ),
+                click.Option(
+                    ["--min-duration"],
+                    type=int,
+                    default=None,
+                    help="Minimum video duration in seconds.",
+                ),
+                click.Option(
+                    ["--max-duration"],
+                    type=int,
+                    default=None,
+                    help="Maximum video duration in seconds.",
+                ),
+                click.Option(
+                    ["--privacy", "privacy_status"],
                     type=click.Choice(["public", "unlisted", "private", "unknown"]),
                     default=None,
                     help="Filter by YouTube privacy status.",
