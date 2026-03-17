@@ -12,6 +12,8 @@ A local indexing and search agent that ingests content from pluggable sources, c
 
 - Python 3.11+
 - (Optional, for semantic search) `sentence-transformers` — requires PyTorch
+- Deno : `curl -fsSL https://deno.land/install.sh | sh` for yt-dlp transcript retrieval
+
 
 ### Installation
 
