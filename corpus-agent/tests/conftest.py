@@ -96,6 +96,7 @@ def config_path(tmp_path: Path, vault: Path) -> Path:
     cfg = {
         "db_path": str(tmp_path / "test.db"),
         "embed_batch_size": 2,
+        "embeddings": {"model": "paraphrase-multilingual-mpnet-base-v2", "server_port": 8765, "batch_size": 2},
         "obsidian": {"vault_path": str(vault)},
         "youtube": {"channel_id": "UC_fake", "client_secret_path": ""},
     }
@@ -111,6 +112,7 @@ def config_dict(tmp_path: Path, vault: Path) -> dict:
     return {
         "db_path": str(tmp_path / "test.db"),
         "embed_batch_size": 2,
+        "embeddings": {"model": "paraphrase-multilingual-mpnet-base-v2", "server_port": 8765, "batch_size": 2},
         "obsidian": {"vault_path": str(vault)},
         "youtube": {"channel_id": "UC_fake", "client_secret_path": ""},
     }
