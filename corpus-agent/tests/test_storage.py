@@ -69,7 +69,7 @@ def test_auto_migration_adds_privacy_status(tmp_path):
     check.close()
 
     assert "privacy_status" in cols
-    assert version == "0001_initial_schema"
+    assert version == "0002_add_sync_failures_table"
 
 
 def test_replace_chunks_rolls_back_on_error(store):
@@ -99,7 +99,7 @@ def test_migration_works_when_cwd_changes(tmp_path, monkeypatch):
     conn = sqlite3.connect(db_path)
     version = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     conn.close()
-    assert version == "0001_initial_schema"
+    assert version == "0002_add_sync_failures_table"
 
 
 def test_failure_tracking_methods(store):
