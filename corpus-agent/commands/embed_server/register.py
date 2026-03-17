@@ -21,6 +21,10 @@ def _pid_file() -> Path:
     return get_tool_cache_dir("corpus") / "embedding-server.pid"
 
 
+def _log_file() -> Path:
+    return get_tool_cache_dir("corpus") / "embedding-server.log"
+
+
 def _read_state() -> tuple[int, int | None, str | None] | None:
     path = _pid_file()
     if not path.exists():
@@ -103,29 +107,35 @@ def register(plugin_manifests: dict) -> CommandManifest:
         ]
         logger.info("starting_embedding_server", port=resolved_port, model=resolved_model)
 
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            close_fds=True,
-            start_new_session=True,
-        )
+        log_file = _log_file()
+        with log_file.open("ab") as log_handle:
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_handle,
+                stderr=log_handle,
+                stdin=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=True,
+            )
+
         _write_state(process.pid, resolved_port, resolved_model)
 
-        time.sleep(0.5)
-        try:
-            os.kill(process.pid, 0)
-        except ProcessLookupError as exc:
-            _pid_file().unlink(missing_ok=True)
-            raise click.ClickException("Server process exited immediately") from exc
+        for _ in range(10):
+            time.sleep(0.2)
+            if _health(resolved_port, timeout=0.2) is not None:
+                click.echo(f"Embedding server started in background (PID {process.pid})")
+                click.echo("Server health: OK")
+                click.echo(f"Server logs: {log_file}")
+                return
+            if process.poll() is not None:
+                _pid_file().unlink(missing_ok=True)
+                raise click.ClickException(
+                    f"Server process exited early with code {process.returncode}. See logs: {log_file}"
+                )
 
         click.echo(f"Embedding server started in background (PID {process.pid})")
-        health = _health(resolved_port, timeout=0.5)
-        if health is not None:
-            click.echo("Server health: OK")
-        else:
-            click.echo("Server health: initializing")
+        click.echo("Server health: initializing")
+        click.echo(f"Server logs: {log_file}")
 
     @embed_server_group.command("stop")
     def stop_cmd() -> None:
