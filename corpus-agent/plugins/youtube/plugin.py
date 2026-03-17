@@ -71,7 +71,7 @@ class YouTubeTransport(Transport):
                 "pip install google-api-python-client google-auth-oauthlib"
             ) from exc
 
-        token_path = Path(self.client_secret_path).parent / "token.json"
+        token_path = Path(self.client_secret_path).expanduser().parent / "token.json"
         creds = None
         if token_path.exists():
             creds = Credentials.from_authorized_user_file(str(token_path))
@@ -80,7 +80,7 @@ class YouTubeTransport(Transport):
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    self.client_secret_path,
+                    str(Path(self.client_secret_path).expanduser()),
                     scopes=["https://www.googleapis.com/auth/youtube.readonly"],
                 )
                 creds = flow.run_local_server(port=0)

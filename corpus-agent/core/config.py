@@ -11,17 +11,17 @@ from core.paths import get_tool_config
 
 def _resolve_config_path(path: str | None) -> Path:
     if path is not None:
-        return Path(path)
+        return Path(path).expanduser()
 
     override_dir = os.environ.get("FASTMARKET_CONFIG_DIR")
     if override_dir:
-        return Path(override_dir) / "corpus.yaml"
+        return Path(override_dir).expanduser() / "corpus.yaml"
 
     deprecated_path = Path("config.yaml")
     if deprecated_path.exists():
         warnings.warn(
-            f"config.yaml in current directory is deprecated. "
-            f"Move to {get_tool_config('corpus')}",
+            "config.yaml in current directory is deprecated. "
+            "Move to ~/.local/share/fast-market/config/corpus.yaml",
             DeprecationWarning,
             stacklevel=2,
         )

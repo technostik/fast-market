@@ -20,6 +20,7 @@ class SQLiteStore:
         if path is None:
             path = str(get_tool_data_dir("corpus") / "corpus.db")
         if path != ":memory:":
+            path = str(Path(path).expanduser())
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
