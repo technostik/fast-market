@@ -228,20 +228,17 @@ class YouTubePlugin(SourcePlugin):
     def list_items(
         self,
         limit: int,
-        since: datetime | None = None,
-        known_ids: set[str] | None = None,
+        known_id_dates: dict[str, datetime | None] | None = None,
     ) -> list[ItemMeta]:
         """Walk the uploads playlist newest-first, returning up to `limit` unindexed videos.
 
-        Uses ID-based dedup (known_ids) — not date cursors. Date cursors break after
-        the first sync because every backlog video has published_at older than the
-        newest indexed one, causing the entire backlog to be silently skipped.
-
-        Pages through the YouTube API until `limit` new eligible videos are found or
-        the channel is exhausted. `since` is accepted for interface compatibility but
-        intentionally ignored.
+        Uses ID-based dedup via known_id_dates — date values are ignored for YouTube.
+        Date cursors break after the first sync because every backlog video has
+        published_at older than the newest indexed one, causing the entire backlog to
+        be silently skipped. Pages through the API until `limit` new eligible videos
+        are found or the channel is exhausted.
         """
-        known = known_ids or set()
+        known = set(known_id_dates or {})
         out: list[ItemMeta] = []
         skipped_privacy = 0
 

@@ -286,29 +286,22 @@ class SQLiteStore:
         self.conn.commit()
         logger.info("store_cleared")
 
-    def get_indexed_ids(self, source: str) -> set[str]:
-        """Return the set of source_ids already indexed for this source.
+    def get_indexed_id_dates(self, source: str) -> dict[str, datetime | None]:
+        """Return {source_id: updated_at} for every indexed document of this source.
 
-        Used by plugins that cannot rely on a date cursor (e.g. YouTube, where the
-        playlist API always returns newest-first and date filtering would skip the
-        entire backlog after the first sync).
+        Plugins use this as their incremental cursor:
+        - YouTube: checks source_id presence to skip already-indexed videos.
+        - Obsidian: checks both presence (new file?) and updated_at vs current mtime
+          (modified file?), skipping only when known AND mtime unchanged.
         """
         rows = self.conn.execute(
-            "SELECT source_id FROM documents WHERE source_plugin=?", (source,)
+            "SELECT source_id, updated_at FROM documents WHERE source_plugin=?", (source,)
         ).fetchall()
-        return {row["source_id"] for row in rows}
-
-    def get_latest_content_date(self, source: str) -> datetime | None:
-        """Return MAX(updated_at) for this source — the publish date of the newest
-        indexed document.  Used by file-based plugins (Obsidian) where mtime is a
-        reliable incremental cursor.
-        """
-        row = self.conn.execute(
-            "SELECT MAX(updated_at) AS ts FROM documents WHERE source_plugin=?", (source,)
-        ).fetchone()
-        if not row or not row["ts"]:
-            return None
-        return datetime.fromisoformat(row["ts"])
+        out: dict[str, datetime | None] = {}
+        for row in rows:
+            ts = row["updated_at"]
+            out[row["source_id"]] = datetime.fromisoformat(ts) if ts else None
+        return out
 
     def get_documents_raw(self, source: str) -> list[sqlite3.Row]:
         return self.conn.execute(

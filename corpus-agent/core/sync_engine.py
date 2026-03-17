@@ -47,25 +47,15 @@ class SyncEngine:
         return chunks
 
     def sync(self, plugin: SourcePlugin, mode: str, limit: int) -> SyncResult:
-        # Two cursor strategies depending on plugin:
-        #
-        # ID-based (YouTube): pass known_ids so the plugin skips already-indexed
-        # videos while walking the playlist newest-first. A date cursor fails here
-        # because published_at of every past video is older than the newest indexed
-        # one — so after the first sync, all remaining videos are silently skipped.
-        #
-        # Date-based (Obsidian): pass since = MAX(updated_at) so the plugin skips
-        # files whose mtime hasn't advanced past the last indexed timestamp.
-        #
-        # Plugins may use either or both; unused kwargs are ignored.
-        if mode == "new":
-            known_ids = self.store.get_indexed_ids(plugin.name)
-            since = self.store.get_latest_content_date(plugin.name)
-        else:  # backfill — ignore all cursors
-            known_ids = set()
-            since = None
+        # Unified cursor: {source_id: indexed_updated_at} for all already-indexed docs.
+        # Each plugin decides how to use it:
+        # - YouTube: skip if source_id is present (ID-based dedup, date ignored).
+        # - Obsidian: skip if source_id is present AND mtime <= indexed_updated_at
+        #   (re-indexes modified files even when already known).
+        # backfill mode passes an empty dict so all items are reconsidered.
+        known_id_dates = self.store.get_indexed_id_dates(plugin.name) if mode == "new" else {}
 
-        items = plugin.list_items(limit=limit, since=since, known_ids=known_ids)
+        items = plugin.list_items(limit=limit, known_id_dates=known_id_dates)
         processed = indexed = skipped = 0
         failures: list[SyncFailure] = []
 

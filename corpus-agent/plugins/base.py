@@ -21,18 +21,18 @@ class SourcePlugin(ABC):
     def list_items(
         self,
         limit: int,
-        since: datetime | None = None,
-        known_ids: set[str] | None = None,
+        known_id_dates: dict[str, datetime | None] | None = None,
     ) -> list[ItemMeta]:
-        """Return up to `limit` items to index.
+        """Return up to `limit` items that need indexing (new or modified).
 
         Args:
-            limit:     Maximum number of items to return.
-            since:     Date-based cursor (used by file plugins like Obsidian).
-                       Skip items whose content date is <= this value.
-            known_ids: ID-based cursor (used by API plugins like YouTube).
-                       Skip items whose source_id is already in this set.
-                       Both cursors are passed; plugins use whichever is appropriate.
+            limit:          Maximum number of items to return.
+            known_id_dates: {source_id: indexed_updated_at} for all already-indexed
+                            documents of this source. Empty dict on backfill.
+                            Plugins use this to decide what to skip:
+                            - YouTube: skip if source_id is a key (ID-based dedup).
+                            - Obsidian: skip if source_id is a key AND mtime has not
+                              advanced past indexed_updated_at (re-index on change).
         """
         raise NotImplementedError
 
