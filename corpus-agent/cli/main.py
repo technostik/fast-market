@@ -17,22 +17,76 @@ from storage.sqlite_store import SQLiteStore, SearchFilters
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Verbose flag: when off, suppress all logs so only explicit output is printed
+# Logging configuration
 # ---------------------------------------------------------------------------
+
+_NOISY_LOGGERS = [
+    "core",                    # all our core.* modules (embedder, sync_engine, etc.)
+    "storage",                 # storage.*
+    "plugins",                 # plugins.*
+    "sentence_transformers",
+    "transformers",
+    "huggingface_hub",
+    "torch",
+    "filelock",
+    "urllib3",
+    "httpx",
+]
+
 
 def _configure_logging(verbose: bool) -> None:
+    """
+    Non-verbose (default): silence everything so stdout is clean JSON.
+    Verbose (-v): INFO on stderr, stdout stays clean.
+
+    Uses stdlib logging directly — works regardless of whether the real
+    structlog package or the local shim is active.
+    """
     level = logging.INFO if verbose else logging.CRITICAL
-    logging.basicConfig(level=level)
-    # Silence the structlog shim
-    logging.getLogger().setLevel(level)
+
+    # Root logger to stderr
+    logging.basicConfig(level=level, stream=sys.stderr,
+                        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+                        force=True)  # force=True reconfigures even if basicConfig was called before
+    logging.root.setLevel(level)
+
+    # Explicitly silence each known noisy logger
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(level)
+
+    if not verbose:
+        # Silence tqdm progress bars
+        try:
+            from tqdm import tqdm
+            tqdm.__init__ = _make_silent_tqdm(tqdm.__init__)
+        except ImportError:
+            pass
+
+        # Silence transformers/sentence-transformers verbosity APIs
+        try:
+            import transformers
+            transformers.logging.set_verbosity_error()
+        except (ImportError, AttributeError):
+            pass
+        try:
+            import sentence_transformers.logging as st_log
+            st_log.set_verbosity_error()
+        except (ImportError, AttributeError):
+            pass
+
+
+def _make_silent_tqdm(original_init):
+    def patched(self, *args, **kwargs):
+        kwargs["disable"] = True
+        original_init(self, *args, **kwargs)
+    return patched
 
 
 # ---------------------------------------------------------------------------
-# Output helpers
+# Output helpers — stdout only, stderr for logs
 # ---------------------------------------------------------------------------
 
 def _out(data: object, fmt: str) -> None:
-    """Print data as JSON (fmt=json) or human-readable text (fmt=text)."""
     if fmt == "json":
         click.echo(json.dumps(data, ensure_ascii=False, default=str))
     else:
@@ -47,7 +101,7 @@ def _print_text(data: object) -> None:
     elif isinstance(data, dict):
         for k, v in data.items():
             if k == "raw_text":
-                continue  # skip large field in default text view
+                continue
             click.echo(f"  {k}: {v}")
     else:
         click.echo(str(data))
@@ -76,20 +130,17 @@ def _build(verbose: bool) -> tuple[SyncEngine, dict, SQLiteStore]:
 
 
 # ---------------------------------------------------------------------------
-# CLI group
+# CLI
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.option("--verbose", "-v", is_flag=True, default=False, help="Show logs. When off, only result output is printed.")
+@click.option("--verbose", "-v", is_flag=True, default=False,
+              help="Show logs on stderr. When off, only result output is printed on stdout.")
 @click.pass_context
 def main(ctx: click.Context, verbose: bool) -> None:
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
 
-
-# ---------------------------------------------------------------------------
-# setup
-# ---------------------------------------------------------------------------
 
 @main.command()
 @click.pass_context
@@ -100,15 +151,11 @@ def setup(ctx: click.Context) -> None:
     run_wizard()
 
 
-# ---------------------------------------------------------------------------
-# sync
-# ---------------------------------------------------------------------------
-
 @main.command()
 @click.option("--source", type=click.Choice(["obsidian", "youtube", "all"]), default="all")
 @click.option("--mode", type=click.Choice(["new", "backfill"]), default="new")
-@click.option("--limit", type=int, default=None, help="Max items to sync (default: 10 obsidian, 5 youtube)")
-@click.option("--clean", is_flag=True, default=False, help="Wipe all indexed data before syncing")
+@click.option("--limit", type=int, default=None)
+@click.option("--clean", is_flag=True, default=False)
 @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
 @click.pass_context
 def sync(ctx: click.Context, source: str, mode: str, limit: int | None, clean: bool, fmt: str) -> None:
@@ -116,10 +163,8 @@ def sync(ctx: click.Context, source: str, mode: str, limit: int | None, clean: b
     engine, plugins, store = _build(ctx.obj["verbose"])
     if clean:
         store.delete_all()
-
     targets = list(plugins.keys()) if source == "all" else [source]
     results = []
-
     for name in targets:
         effective_limit = limit if limit is not None else (5 if name == "youtube" else 10)
         result = engine.sync(plugins[name], mode=mode, limit=effective_limit)
@@ -130,13 +175,8 @@ def sync(ctx: click.Context, source: str, mode: str, limit: int | None, clean: b
             "failures": len(result.failures),
             "errors": [{"source_id": f.source_id, "error": f.error} for f in result.failures],
         })
+    _out(results, fmt)
 
-    _out(results if fmt == "json" else results, fmt)
-
-
-# ---------------------------------------------------------------------------
-# reindex
-# ---------------------------------------------------------------------------
 
 @main.command()
 @click.option("--source", type=click.Choice(["obsidian", "youtube", "all"]), default="all")
@@ -153,61 +193,42 @@ def reindex(ctx: click.Context, source: str, fmt: str) -> None:
     _out(results, fmt)
 
 
-# ---------------------------------------------------------------------------
-# search
-# ---------------------------------------------------------------------------
-
 @main.command()
 @click.argument("query")
 @click.option("--mode", type=click.Choice(["semantic", "keyword"]), default="semantic")
 @click.option("--limit", type=int, default=5)
-@click.option("--source", type=click.Choice(["obsidian", "youtube"]), default=None, help="Filter by source plugin")
-@click.option("--type", "video_type", type=click.Choice(["short", "long"]), default=None, help="YouTube only: short (≤60s) or long (>60s)")
-@click.option("--min-duration", type=int, default=None, help="Min duration in seconds (YouTube)")
-@click.option("--max-duration", type=int, default=None, help="Max duration in seconds (YouTube)")
-@click.option("--since", default=None, help="Only results updated after this date (YYYY-MM-DD)")
-@click.option("--until", default=None, help="Only results updated before this date (YYYY-MM-DD)")
-@click.option("--min-size", type=int, default=None, help="Min content length in chars (Obsidian)")
-@click.option("--max-size", type=int, default=None, help="Max content length in chars (Obsidian)")
+@click.option("--source", type=click.Choice(["obsidian", "youtube"]), default=None)
+@click.option("--type", "video_type", type=click.Choice(["short", "long"]), default=None)
+@click.option("--min-duration", type=int, default=None)
+@click.option("--max-duration", type=int, default=None)
+@click.option("--since", default=None, help="YYYY-MM-DD")
+@click.option("--until", default=None, help="YYYY-MM-DD")
+@click.option("--min-size", type=int, default=None)
+@click.option("--max-size", type=int, default=None)
 @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
 @click.pass_context
 def search(
     ctx: click.Context,
-    query: str,
-    mode: str,
-    limit: int,
-    source: str | None,
-    video_type: str | None,
-    min_duration: int | None,
-    max_duration: int | None,
-    since: str | None,
-    until: str | None,
-    min_size: int | None,
-    max_size: int | None,
+    query: str, mode: str, limit: int,
+    source: str | None, video_type: str | None,
+    min_duration: int | None, max_duration: int | None,
+    since: str | None, until: str | None,
+    min_size: int | None, max_size: int | None,
     fmt: str,
 ) -> None:
-    """Search the index. Returns handles, titles, and excerpts.
+    """Search the index.
 
     \b
     Examples:
-      corpus search "landing page tips" --source youtube --type long
-      corpus search "obsidian setup" --source obsidian --min-size 500
-      corpus search "API design" --mode keyword --format json
-      corpus search "startup" --since 2024-01-01 --limit 10
+      corpus search "landing page" --source youtube --type long --format json
+      corpus search "topic" --format json | jq -r '.[0].handle' | xargs corpus get --what content
     """
     engine, _, store = _build(ctx.obj["verbose"])
-
     filters = SearchFilters(
-        source=source,
-        min_duration=min_duration,
-        max_duration=max_duration,
-        video_type=video_type,
-        since=since,
-        until=until,
-        min_size=min_size,
-        max_size=max_size,
+        source=source, min_duration=min_duration, max_duration=max_duration,
+        video_type=video_type, since=since, until=until,
+        min_size=min_size, max_size=max_size,
     )
-
     if mode == "keyword":
         results = store.keyword_search(query, limit, filters)
     else:
@@ -235,14 +256,9 @@ def search(
             click.echo(f"  {r.excerpt[:120]}")
 
 
-# ---------------------------------------------------------------------------
-# get
-# ---------------------------------------------------------------------------
-
 @main.command(name="get")
 @click.argument("handle")
-@click.option("--what", type=click.Choice(["meta", "content", "all"]), default="meta",
-              help="meta: fields only. content: raw_text only. all: everything.")
+@click.option("--what", type=click.Choice(["meta", "content", "all"]), default="meta")
 @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
 @click.pass_context
 def get_doc(ctx: click.Context, handle: str, what: str, fmt: str) -> None:
@@ -250,27 +266,20 @@ def get_doc(ctx: click.Context, handle: str, what: str, fmt: str) -> None:
 
     \b
     Examples:
-      corpus get yt-my-video-a3f2
       corpus get yt-my-video-a3f2 --what content
       corpus get yt-my-video-a3f2 --what all --format json
-      corpus get "Note.md" --what meta
     """
     _, _, store = _build(ctx.obj["verbose"])
     doc = store.get_document_by_handle(handle)
     if not doc:
         click.echo(f"not found: {handle}", err=True)
         sys.exit(1)
-
     if what == "content":
         click.echo(doc["raw_text"])
         return
-
     if what == "meta":
-        meta_fields = {k: v for k, v in doc.items() if k != "raw_text"}
-        _out(meta_fields, fmt)
+        _out({k: v for k, v in doc.items() if k != "raw_text"}, fmt)
         return
-
-    # all
     if fmt == "json":
         _out(doc, fmt)
     else:
@@ -282,35 +291,20 @@ def get_doc(ctx: click.Context, handle: str, what: str, fmt: str) -> None:
                 click.echo(f"  {k}: {v}")
 
 
-# ---------------------------------------------------------------------------
-# delete
-# ---------------------------------------------------------------------------
-
 @main.command(name="delete")
 @click.argument("handle")
 @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
 @click.pass_context
 def delete_doc(ctx: click.Context, handle: str, fmt: str) -> None:
-    """Delete a document from the index by handle or source_id.
-
-    \b
-    Examples:
-      corpus delete yt-my-video-a3f2
-      corpus delete "Note.md"
-    """
+    """Delete a document by handle or source_id."""
     _, _, store = _build(ctx.obj["verbose"])
     deleted = store.delete_document_by_handle(handle)
     if deleted:
-        result = {"deleted": True, "handle": handle}
-        _out(result, fmt)
+        _out({"deleted": True, "handle": handle}, fmt)
     else:
         click.echo(f"not found: {handle}", err=True)
         sys.exit(1)
 
-
-# ---------------------------------------------------------------------------
-# status
-# ---------------------------------------------------------------------------
 
 @main.command()
 @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
@@ -318,13 +312,8 @@ def delete_doc(ctx: click.Context, handle: str, fmt: str) -> None:
 def status(ctx: click.Context, fmt: str) -> None:
     """Show document counts per source."""
     _, _, store = _build(ctx.obj["verbose"])
-    rows = store.status()
-    _out(rows, fmt)
+    _out(store.status(), fmt)
 
-
-# ---------------------------------------------------------------------------
-# serve
-# ---------------------------------------------------------------------------
 
 @main.command()
 @click.option("--port", type=int, default=8000)

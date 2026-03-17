@@ -94,91 +94,203 @@ The first time you run `corpus sync --source youtube`, a browser window will ope
 
 ---
 
-### CLI usage
+## CLI reference
 
-All commands are under the `corpus` entry point.
-
-#### Sync new content
+### Global flag
 
 ```bash
-# Sync new items from all sources (default: last 10 items)
-corpus sync
-
-# Sync only Obsidian, backfill mode (re-process everything), up to 50 items
-corpus sync --source obsidian --mode backfill --limit 50
-
-# Sync only YouTube, new items only
-corpus sync --source youtube --mode new --limit 5
+corpus --verbose COMMAND   # or: corpus -v COMMAND
 ```
 
-`--mode new` only fetches items newer than the last sync.
-`--mode backfill` ignores the last-sync timestamp and re-processes from scratch.
-
-#### Search
+`--verbose` / `-v` prints all internal logs (embedding model loading, sync progress, errors) to **stderr**. Without it, **only result output goes to stdout** — this keeps the CLI pipeable with `jq`, `xargs`, etc.
 
 ```bash
-# Semantic search (requires sentence-transformers)
-corpus search "how to structure a landing page"
+# Silent — stdout is clean JSON
+corpus search "landing page" --format json | jq '.[0].handle'
 
-# Keyword (FTS) search — no ML deps required
-corpus search "landing page" --mode keyword
-
-# Return more results
-corpus search "landing page" --limit 10
+# Verbose — logs on stderr, JSON on stdout, both usable
+corpus -v search "landing page" --format json | jq '.[0].handle'
 ```
-
-#### Reindex (rebuild embeddings without re-fetching)
-
-```bash
-corpus reindex
-corpus reindex --source obsidian
-```
-
-Use this after changing the embedding model or chunking logic.
-
-#### Status
-
-```bash
-corpus status
-```
-
-Prints document counts per source plugin.
 
 ---
 
-### HTTP API
-
-Start the server:
+### sync
 
 ```bash
-corpus serve           # default port 8000
-corpus serve --port 9000
+corpus sync [OPTIONS]
 ```
 
-Endpoints:
+Fetch and index new content.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/sources` | List available source plugins |
-| GET | `/items?source=obsidian&limit=20` | List indexed documents |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--source obsidian\|youtube\|all` | `all` | Which source to sync |
+| `--mode new\|backfill` | `new` | `new`: only items newer than last sync. `backfill`: ignore last-sync timestamp |
+| `--limit N` | 10 obsidian / 5 youtube | Max items to fetch |
+| `--clean` | off | Wipe entire index before syncing |
+| `--format json\|text` | `text` | Output format |
+
+```bash
+corpus sync                                      # sync all sources, new items only
+corpus sync --source youtube --limit 20          # last 20 YouTube videos
+corpus sync --source obsidian --mode backfill    # reprocess all Obsidian notes
+corpus sync --clean                              # wipe index and start fresh
+corpus sync --format json                        # machine-readable result
+```
+
+---
+
+### search
+
+```bash
+corpus search QUERY [OPTIONS]
+```
+
+Search the index. Returns handles, titles, excerpts, and scores.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--mode semantic\|keyword` | `semantic` | Semantic uses embeddings; keyword uses SQLite FTS |
+| `--limit N` | `5` | Max results |
+| `--source obsidian\|youtube` | — | Filter by source |
+| `--type short\|long` | — | YouTube only: short ≤ 60s, long > 60s |
+| `--min-duration N` | — | Min duration in seconds |
+| `--max-duration N` | — | Max duration in seconds |
+| `--since YYYY-MM-DD` | — | Updated after date |
+| `--until YYYY-MM-DD` | — | Updated before date |
+| `--min-size N` | — | Min content length in chars (useful for Obsidian) |
+| `--max-size N` | — | Max content length in chars |
+| `--format json\|text` | `text` | Output format |
+
+```bash
+corpus search "landing page"
+corpus search "IA" --source youtube --type long
+corpus search "startup" --since 2024-01-01 --limit 10
+corpus search "notes" --source obsidian --min-size 1000
+corpus search "topic" --format json | jq '.[0].handle'
+```
+
+**Chaining example — get full transcript of top result:**
+```bash
+corpus search "bureaucratie" --source youtube --format json \
+  | jq -r '.[0].handle' \
+  | xargs corpus get --what content
+```
+
+---
+
+### get
+
+```bash
+corpus get HANDLE [OPTIONS]
+```
+
+Retrieve a document by its **handle** (e.g. `yt-my-video-a3f2`) or by `source_id` (e.g. `Note.md`).
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--what meta\|content\|all` | `meta` | `meta`: all fields except raw text. `content`: raw text only. `all`: everything |
+| `--format json\|text` | `text` | Output format |
+
+```bash
+corpus get yt-my-video-a3f2                        # metadata only
+corpus get yt-my-video-a3f2 --what content         # transcript/text only
+corpus get yt-my-video-a3f2 --what all --format json
+corpus get "Note.md" --what meta
+```
+
+**Handles** are stable slugs assigned at index time: `yt-{title-slug}-{4char-hash}` for YouTube, `ob-{title-slug}-{4char-hash}` for Obsidian. They are shell-safe (no spaces, no special characters) and survive reindexing.
+
+---
+
+### delete
+
+```bash
+corpus delete HANDLE [OPTIONS]
+```
+
+Remove a document and all its chunks from the index.
+
+```bash
+corpus delete yt-my-video-a3f2
+corpus delete "Note.md"
+corpus delete yt-my-video-a3f2 --format json
+```
+
+---
+
+### reindex
+
+```bash
+corpus reindex [--source obsidian|youtube|all] [--format json|text]
+```
+
+Rebuild embeddings for all indexed documents without re-fetching from source. Use after changing the embedding model or chunking logic.
+
+---
+
+### status
+
+```bash
+corpus status [--format json|text]
+```
+
+Print document counts per source.
+
+---
+
+### serve
+
+```bash
+corpus serve [--port PORT]   # default: 8000
+```
+
+Start the HTTP API and web frontend.
+
+---
+
+## Web frontend
+
+Start the server and open `http://localhost:8000` (redirects to `/ui`).
+
+| URL | Description |
+|-----|-------------|
+| `/ui` | Homepage with links to all sections |
+| `/ui/items` | Browse all indexed documents, filter by source, expand content, delete |
+| `/ui/search` | Semantic or keyword search with content expansion and delete |
+| `/ui/status` | Document counts and total video duration |
+| `/docs` | OpenAPI interactive docs |
+
+---
+
+## HTTP API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/sources` | List source plugins |
+| GET | `/items` | List documents (supports `source`, `limit`, `video_type`, `min_duration`, `max_duration`, `since`, `until`, `min_size`, `max_size`) |
+| GET | `/document/{plugin}/{id}` | Get full document including raw text |
+| GET | `/handle/{handle}` | Get document by handle |
+| DELETE | `/document/{plugin}/{id}` | Delete document from index |
 | POST | `/sync` | `{"source": "obsidian", "mode": "new", "limit": 10}` |
 | POST | `/reindex` | `{"source": "youtube"}` |
-| GET | `/search?q=hello&mode=semantic&limit=5` | Search (`keyword` or `semantic`) |
-
-Interactive docs at `http://localhost:8000/docs`.
+| GET | `/search` | `?q=…&mode=semantic&limit=5` (same filters as CLI) |
 
 ---
 
-### Adding a new source plugin
+## Adding a new source plugin
 
 1. Create `plugins/yourplugin/` with `__init__.py` and `plugin.py`
-2. Implement the `SourcePlugin` ABC from `plugins/base.py` — requires `name`, `list_items()`, and `fetch()`
+2. Implement the `SourcePlugin` ABC from `plugins/base.py`:
+   - `name: str` — plugin identifier
+   - `list_items(limit, since) -> list[ItemMeta]`
+   - `fetch(item_meta) -> Document`
 3. Register it in `core/registry.py` → `build_plugins()`
 4. Add it to the `--source` choices in `cli/main.py`
 
 ---
 
-### Running tests
+## Running tests
 
 ```bash
 cd corpus-agent
