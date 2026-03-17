@@ -20,8 +20,8 @@ def _resolve_config_path(path: str | None) -> Path:
     deprecated_path = Path("config.yaml")
     if deprecated_path.exists():
         warnings.warn(
-            "config.yaml in current directory is deprecated. "
-            "Move to ~/.local/share/fast-market/config/corpus.yaml",
+            f"config.yaml in current directory is deprecated. "
+            f"Move to {get_tool_config('corpus')}",
             DeprecationWarning,
             stacklevel=2,
         )
