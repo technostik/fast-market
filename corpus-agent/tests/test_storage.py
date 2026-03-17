@@ -90,3 +90,13 @@ def test_replace_chunks_rolls_back_on_error(store):
     results = store.semantic_search([1.0, 0.0], 5)
     assert len(results) == 1
     assert results[0].excerpt == "base"
+
+
+def test_migration_works_when_cwd_changes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "cwd-change.db"
+    SQLiteStore(str(db_path))
+    conn = sqlite3.connect(db_path)
+    version = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    conn.close()
+    assert version == "0001_initial_schema"
