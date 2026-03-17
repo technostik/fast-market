@@ -10,9 +10,11 @@ class Document:
     source_id: str
     title: str
     raw_text: str
+    handle: str = ""                    # stable slug handle, e.g. yt-my-video-a3f2
     url: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    duration_seconds: int | None = None # YouTube: video duration; Obsidian: None
     metadata: dict[str, object] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
     links: list[str] = field(default_factory=list)
@@ -55,6 +57,8 @@ class ReindexResult:
 class SearchResult:
     source_plugin: str
     source_id: str
+    handle: str
     title: str
     excerpt: str
     score: float
+    duration_seconds: int | None = None

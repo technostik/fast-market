@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corpus Agent</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0e0e0f;
+    --surface: #18181a;
+    --border: #2a2a2e;
+    --accent: #c8f04a;
+    --accent2: #4af0c8;
+    --text: #e8e8e6;
+    --muted: #6b6b70;
+    --obsidian: #a78bfa;
+    --youtube: #f87171;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    padding: 2rem 3rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 1.5rem;
+  }
+
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+
+  header span {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  main {
+    flex: 1;
+    padding: 4rem 3rem;
+    max-width: 900px;
+  }
+
+  .tagline {
+    font-family: 'Syne', sans-serif;
+    font-size: 2.8rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 1rem;
+    letter-spacing: -0.03em;
+  }
+
+  .tagline em {
+    font-style: normal;
+    color: var(--accent);
+  }
+
+  .sub {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 3.5rem;
+    line-height: 1.7;
+  }
+
+  .nav-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1px;
+    border: 1px solid var(--border);
+    background: var(--border);
+    margin-bottom: 3rem;
+  }
+
+  .nav-card {
+    background: var(--surface);
+    padding: 2rem;
+    text-decoration: none;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    transition: background 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .nav-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--card-accent, var(--accent));
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.2s ease;
+  }
+
+  .nav-card:hover {
+    background: #1e1e20;
+  }
+
+  .nav-card:hover::before {
+    transform: scaleX(1);
+  }
+
+  .nav-card .icon {
+    font-size: 1.4rem;
+  }
+
+  .nav-card .label {
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
+  .nav-card .desc {
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }
+
+  .nav-card .arrow {
+    margin-top: auto;
+    color: var(--card-accent, var(--accent));
+    font-size: 1.1rem;
+  }
+
+  .status-bar {
+    display: flex;
+    gap: 2rem;
+    padding: 1rem 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
+  .status-bar .pill {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .status-bar .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>corpus-agent</h1>
+  <span>local knowledge index</span>
+</header>
+
+<main>
+  <h2 class="tagline">Your content,<br><em>indexed.</em></h2>
+  <p class="sub">Search across Obsidian notes and YouTube transcripts.<br>Semantic + keyword. All local.</p>
+
+  <nav class="nav-grid">
+    <a href="/ui/items" class="nav-card" style="--card-accent: var(--accent)">
+      <span class="icon">📚</span>
+      <span class="label">Browse</span>
+      <span class="desc">List all indexed documents across sources.</span>
+      <span class="arrow">→</span>
+    </a>
+    <a href="/ui/search" class="nav-card" style="--card-accent: var(--accent2)">
+      <span class="icon">🔍</span>
+      <span class="label">Search</span>
+      <span class="desc">Semantic or keyword search across your corpus.</span>
+      <span class="arrow">→</span>
+    </a>
+    <a href="/ui/status" class="nav-card" style="--card-accent: var(--obsidian)">
+      <span class="icon">📊</span>
+      <span class="label">Status</span>
+      <span class="desc">Index stats and source breakdown.</span>
+      <span class="arrow">→</span>
+    </a>
+    <a href="/docs" class="nav-card" style="--card-accent: var(--muted)">
+      <span class="icon">⚡</span>
+      <span class="label">API</span>
+      <span class="desc">OpenAPI docs. Sync, search, reindex endpoints.</span>
+      <span class="arrow">→</span>
+    </a>
+  </nav>
+
+  <div class="status-bar" id="status-bar">
+    <span class="pill"><span class="dot"></span> loading…</span>
+  </div>
+</main>
+
+<script>
+  fetch('/items?limit=1000')
+    .then(r => r.json())
+    .then(items => {
+      const counts = {};
+      items.forEach(i => { counts[i.source_plugin] = (counts[i.source_plugin] || 0) + 1; });
+      const bar = document.getElementById('status-bar');
+      const parts = Object.entries(counts).map(([src, n]) =>
+        `<span class="pill"><span class="dot" style="background:var(--${src === 'youtube' ? 'youtube' : 'obsidian'})"></span>${src}: ${n} docs</span>`
+      );
+      if (parts.length === 0) parts.push('<span class="pill"><span class="dot"></span>no documents indexed yet — run corpus sync</span>');
+      bar.innerHTML = parts.join('');
+    })
+    .catch(() => {
+      document.getElementById('status-bar').innerHTML = '<span class="pill">API offline</span>';
+    });
+</script>
+</body>
+</html>

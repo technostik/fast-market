@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import math
 from typing import Sequence
 
-import math
-import structlog
-
-logger = structlog.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class Embedder:
@@ -22,7 +21,7 @@ class Embedder:
                 from sentence_transformers import SentenceTransformer
             except ImportError as exc:
                 raise RuntimeError("sentence-transformers is required for embeddings") from exc
-            logger.info("loading_embedding_model", model=self.model_name)
+            logger.info("loading_embedding_model model=%s", self.model_name)
             self._model = SentenceTransformer(self.model_name)
         return self._model
 

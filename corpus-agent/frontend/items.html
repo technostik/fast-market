@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Browse — Corpus Agent</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e0f; --surface: #18181a; --border: #2a2a2e;
+    --accent: #c8f04a; --accent2: #4af0c8; --danger: #f87171;
+    --text: #e8e8e6; --muted: #6b6b70;
+    --obsidian: #a78bfa; --youtube: #f87171;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Mono', monospace; min-height: 100vh; }
+
+  header { padding: 1.5rem 3rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; }
+  header a { color: var(--muted); text-decoration: none; font-size: 0.8rem; }
+  header a:hover { color: var(--accent); }
+  header h1 { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 800; color: var(--accent); }
+  .sep { color: var(--border); }
+
+  .toolbar { padding: 1.5rem 3rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  select, button { background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.8rem; padding: 0.5rem 1rem; cursor: pointer; }
+  button.active { border-color: var(--accent); color: var(--accent); }
+  .count { color: var(--muted); font-size: 0.75rem; margin-left: auto; }
+
+  .list { padding: 0 3rem 3rem; }
+
+  .item { border-bottom: 1px solid var(--border); padding: 1.25rem 0; display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: start; }
+
+  .source-badge { font-size: 0.65rem; padding: 0.2rem 0.5rem; border-radius: 2px; font-weight: 500; white-space: nowrap; margin-top: 3px; }
+  .badge-obsidian { background: rgba(167,139,250,0.15); color: var(--obsidian); }
+  .badge-youtube  { background: rgba(248,113,113,0.15); color: var(--youtube); }
+
+  .item-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; margin-bottom: 0.35rem; }
+  .item-title a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
+  .item-title a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .item-meta { color: var(--muted); font-size: 0.72rem; display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .duration { color: var(--accent2); }
+
+  .item-excerpt {
+    color: var(--muted); font-size: 0.75rem; line-height: 1.5; max-width: 70ch;
+    cursor: pointer; border-left: 2px solid var(--border); padding-left: 0.75rem;
+    transition: border-color 0.15s, color 0.15s;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .item-excerpt:hover { border-left-color: var(--accent2); color: var(--text); }
+  .item-excerpt::after { content: ' · click to expand'; color: var(--muted); font-size: 0.65rem; }
+
+  .item-actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end; }
+  .btn-delete { background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 0.7rem; padding: 0.3rem 0.6rem; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+  .btn-delete:hover { border-color: var(--danger); color: var(--danger); }
+
+  .empty, .loading { padding: 3rem; color: var(--muted); font-size: 0.85rem; }
+
+  /* Modal */
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    z-index: 100; align-items: center; justify-content: center; padding: 2rem;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    max-width: 800px; width: 100%; max-height: 85vh;
+    display: flex; flex-direction: column; position: relative;
+  }
+  .modal-header {
+    padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 1rem;
+  }
+  .modal-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1rem; flex: 1; }
+  .modal-close {
+    background: transparent; border: none; color: var(--muted);
+    font-size: 1.2rem; cursor: pointer; padding: 0 0.25rem; line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); }
+  .modal-body { padding: 1.5rem; overflow-y: auto; flex: 1; }
+  .modal-body pre {
+    white-space: pre-wrap; word-break: break-word;
+    font-family: 'DM Mono', monospace; font-size: 0.78rem;
+    line-height: 1.7; color: var(--text);
+  }
+  /* Basic markdown rendering */
+  .modal-body .md h1 { font-family: 'Syne', sans-serif; font-size: 1.3rem; font-weight: 800; margin: 1rem 0 0.5rem; color: var(--accent); }
+  .modal-body .md h2 { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; margin: 0.9rem 0 0.4rem; color: var(--accent2); }
+  .modal-body .md h3 { font-size: 0.9rem; font-weight: 500; margin: 0.75rem 0 0.3rem; color: var(--text); }
+  .modal-body .md p  { font-size: 0.82rem; line-height: 1.7; margin-bottom: 0.6rem; color: var(--text); }
+  .modal-body .md code { background: #222; padding: 0.1em 0.3em; font-size: 0.75rem; }
+  .modal-body .md ul, .modal-body .md ol { padding-left: 1.5rem; margin-bottom: 0.6rem; font-size: 0.82rem; line-height: 1.7; }
+  .modal-body .md blockquote { border-left: 3px solid var(--border); padding-left: 0.75rem; color: var(--muted); }
+  .modal-footer { padding: 1rem 1.5rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.75rem; }
+  .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--muted); font-family: 'DM Mono', monospace; font-size: 0.78rem; padding: 0.4rem 1rem; cursor: pointer; }
+  .btn-secondary:hover { border-color: var(--text); color: var(--text); }
+  .btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); font-family: 'DM Mono', monospace; font-size: 0.78rem; padding: 0.4rem 1rem; cursor: pointer; }
+  .btn-danger:hover { background: var(--danger); color: #000; }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/ui">corpus-agent</a>
+  <span class="sep">/</span>
+  <h1>Browse</h1>
+</header>
+
+<div class="toolbar">
+  <button id="btn-all" class="active" onclick="filterSource('all')">All</button>
+  <button id="btn-obsidian" onclick="filterSource('obsidian')">📓 Obsidian</button>
+  <button id="btn-youtube" onclick="filterSource('youtube')">▶ YouTube</button>
+  <span class="count" id="count"></span>
+</div>
+
+<div class="list" id="list"><div class="loading">Loading…</div></div>
+
+<!-- Content modal -->
+<div class="modal-backdrop" id="modal" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title"></span>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn-danger" id="modal-delete-btn" onclick="deleteFromModal()">Delete from index</button>
+      <button class="btn-secondary" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let allItems = [];
+  let currentSource = 'all';
+  let modalItem = null;
+
+  // --- obsidian URL helper ---
+  function obsidianUrl(item) {
+    const meta = item.metadata || {};
+    const vaultPath = meta.vault_path || '';
+    const vaultName = vaultPath.split('/').filter(Boolean).pop() || 'vault';
+    const file = item.source_id.replace(/\.md$/, '');
+    return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(file)}`;
+  }
+
+  function sourceUrl(item) {
+    if (item.source_plugin === 'youtube') return item.url || '#';
+    return obsidianUrl(item);
+  }
+
+  function formatDuration(s) {
+    if (!s) return null;
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m ${String(sec).padStart(2,'0')}s`;
+  }
+
+  function formatDate(iso) { return iso ? iso.slice(0,10) : ''; }
+
+  // --- minimal markdown renderer ---
+  function renderMarkdown(text) {
+    const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return escaped
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm,  '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm,   '<h1>$1</h1>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^\* (.+)$/gm, '<li>$1</li>')
+      .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/^(?!<[hpulbc])(.+)$/gm, (m, line) => line ? `<p>${line}</p>` : '');
+  }
+
+  // --- modal ---
+  function openModal(item) {
+    modalItem = item;
+    document.getElementById('modal-title').textContent = item.title;
+    document.getElementById('modal-body').innerHTML = '<p style="color:var(--muted);font-size:.8rem">Loading…</p>';
+    document.getElementById('modal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    fetch(`/document/${item.source_plugin}/${encodeURIComponent(item.source_id)}`)
+      .then(r => r.json())
+      .then(doc => {
+        const body = document.getElementById('modal-body');
+        if (item.source_plugin === 'obsidian') {
+          body.innerHTML = `<div class="md">${renderMarkdown(doc.raw_text)}</div>`;
+        } else {
+          body.innerHTML = `<pre>${doc.raw_text.replace(/</g,'&lt;')}</pre>`;
+        }
+      })
+      .catch(err => {
+        document.getElementById('modal-body').innerHTML = `<p style="color:var(--danger)">Error: ${err}</p>`;
+      });
+  }
+
+  function closeModal(event) {
+    if (event && event.target !== document.getElementById('modal')) return;
+    document.getElementById('modal').classList.remove('open');
+    document.body.style.overflow = '';
+    modalItem = null;
+  }
+
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  function closeModal(event) {
+    if (event && event.target !== document.getElementById('modal')) return;
+    document.getElementById('modal').classList.remove('open');
+    document.body.style.overflow = '';
+    modalItem = null;
+  }
+  // override with unconditional close for button/escape
+  function closeModal() {
+    document.getElementById('modal').classList.remove('open');
+    document.body.style.overflow = '';
+    modalItem = null;
+  }
+
+  function deleteItem(sourcePlugin, sourceId, onSuccess) {
+    if (!confirm(`Delete "${sourceId}" from index?`)) return;
+    fetch(`/document/${sourcePlugin}/${encodeURIComponent(sourceId)}`, { method: 'DELETE' })
+      .then(r => {
+        if (!r.ok) throw new Error('Delete failed');
+        onSuccess();
+      })
+      .catch(err => alert('Error: ' + err));
+  }
+
+  function deleteFromModal() {
+    if (!modalItem) return;
+    deleteItem(modalItem.source_plugin, modalItem.source_id, () => {
+      allItems = allItems.filter(i => !(i.source_plugin === modalItem.source_plugin && i.source_id === modalItem.source_id));
+      closeModal();
+      filterSource(currentSource);
+    });
+  }
+
+  function renderItems(items) {
+    const list = document.getElementById('list');
+    document.getElementById('count').textContent = `${items.length} document${items.length !== 1 ? 's' : ''}`;
+    if (!items.length) { list.innerHTML = '<div class="empty">No documents found.</div>'; return; }
+
+    list.innerHTML = items.map((item, idx) => {
+      const isYT = item.source_plugin === 'youtube';
+      const badgeClass = isYT ? 'badge-youtube' : 'badge-obsidian';
+      const badgeLabel = isYT ? 'YouTube' : 'Obsidian';
+      const href = sourceUrl(item);
+      const target = isYT ? 'target="_blank" rel="noopener"' : '';
+      const dur = formatDuration(item.duration_seconds);
+      const desc = item.metadata?.description || '';
+
+      return `
+        <div class="item" id="item-${idx}">
+          <span class="source-badge ${badgeClass}">${badgeLabel}</span>
+          <div class="item-body">
+            <div class="item-title">
+              <a href="${href}" ${target}>${item.title.replace(/</g,'&lt;')}</a>
+            </div>
+            <div class="item-meta">
+              <span>${formatDate(item.updated_at)}</span>
+              ${dur ? `<span class="duration">⏱ ${dur}</span>` : ''}
+            </div>
+            ${desc
+              ? `<div class="item-excerpt" onclick="openModal(allItems[${idx}])">${desc.replace(/</g,'&lt;').slice(0,180)}</div>`
+              : `<div class="item-excerpt" onclick="openModal(allItems[${idx}])">Click to view content</div>`
+            }
+          </div>
+          <div class="item-actions">
+            <button class="btn-delete" onclick="deleteItem('${item.source_plugin}', '${item.source_id.replace(/'/g,"\\'")}', () => { allItems.splice(${idx},1); filterSource(currentSource); })">✕ remove</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function filterSource(source) {
+    currentSource = source;
+    ['all','obsidian','youtube'].forEach(s => {
+      document.getElementById('btn-' + s).classList.toggle('active', s === source);
+    });
+    const filtered = source === 'all' ? allItems : allItems.filter(i => i.source_plugin === source);
+    renderItems(filtered);
+  }
+
+  fetch('/items?limit=500')
+    .then(r => r.json())
+    .then(items => { allItems = items; filterSource('all'); })
+    .catch(err => { document.getElementById('list').innerHTML = `<div class="empty">Error: ${err}</div>`; });
+</script>
+</body>
+</html>

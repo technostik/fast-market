@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
+import sys
+
 import click
 import structlog
 import uvicorn
@@ -8,12 +12,115 @@ from core.config import load_config
 from core.embedder import Embedder
 from core.registry import build_plugins
 from core.sync_engine import SyncEngine
-from storage.sqlite_store import SQLiteStore
+from storage.sqlite_store import SQLiteStore, SearchFilters
 
 logger = structlog.get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Logging configuration
+# ---------------------------------------------------------------------------
 
-def build_engine() -> tuple[SyncEngine, dict[str, object], SQLiteStore]:
+_NOISY_LOGGERS = [
+    "core",                    # all our core.* modules (embedder, sync_engine, etc.)
+    "storage",                 # storage.*
+    "plugins",                 # plugins.*
+    "sentence_transformers",
+    "transformers",
+    "huggingface_hub",
+    "torch",
+    "filelock",
+    "urllib3",
+    "httpx",
+]
+
+
+def _configure_logging(verbose: bool) -> None:
+    """
+    Non-verbose (default): silence everything so stdout is clean JSON.
+    Verbose (-v): INFO on stderr, stdout stays clean.
+
+    Uses stdlib logging directly — works regardless of whether the real
+    structlog package or the local shim is active.
+    """
+    level = logging.INFO if verbose else logging.CRITICAL
+
+    # Root logger to stderr
+    logging.basicConfig(level=level, stream=sys.stderr,
+                        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+                        force=True)  # force=True reconfigures even if basicConfig was called before
+    logging.root.setLevel(level)
+
+    # Explicitly silence each known noisy logger
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(level)
+
+    if not verbose:
+        # Silence tqdm progress bars
+        try:
+            from tqdm import tqdm
+            tqdm.__init__ = _make_silent_tqdm(tqdm.__init__)
+        except ImportError:
+            pass
+
+        # Silence transformers/sentence-transformers verbosity APIs
+        try:
+            import transformers
+            transformers.logging.set_verbosity_error()
+        except (ImportError, AttributeError):
+            pass
+        try:
+            import sentence_transformers.logging as st_log
+            st_log.set_verbosity_error()
+        except (ImportError, AttributeError):
+            pass
+
+
+def _make_silent_tqdm(original_init):
+    def patched(self, *args, **kwargs):
+        kwargs["disable"] = True
+        original_init(self, *args, **kwargs)
+    return patched
+
+
+# ---------------------------------------------------------------------------
+# Output helpers — stdout only, stderr for logs
+# ---------------------------------------------------------------------------
+
+def _out(data: object, fmt: str) -> None:
+    if fmt == "json":
+        click.echo(json.dumps(data, ensure_ascii=False, default=str))
+    else:
+        _print_text(data)
+
+
+def _print_text(data: object) -> None:
+    if isinstance(data, list):
+        for item in data:
+            _print_text(item)
+            click.echo("")
+    elif isinstance(data, dict):
+        for k, v in data.items():
+            if k == "raw_text":
+                continue
+            click.echo(f"  {k}: {v}")
+    else:
+        click.echo(str(data))
+
+
+def _fmt_duration(seconds: int | None) -> str:
+    if not seconds:
+        return ""
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}h{m:02d}m{s:02d}s" if h else f"{m}m{s:02d}s"
+
+
+# ---------------------------------------------------------------------------
+# Engine builder
+# ---------------------------------------------------------------------------
+
+def _build(verbose: bool) -> tuple[SyncEngine, dict, SQLiteStore]:
+    _configure_logging(verbose)
     config = load_config()
     store = SQLiteStore(config.get("db_path", ":memory:"))
     embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
@@ -22,66 +129,198 @@ def build_engine() -> tuple[SyncEngine, dict[str, object], SQLiteStore]:
     return engine, plugins, store
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 @click.group()
-def main() -> None:
-    pass
+@click.option("--verbose", "-v", is_flag=True, default=False,
+              help="Show logs on stderr. When off, only result output is printed on stdout.")
+@click.pass_context
+def main(ctx: click.Context, verbose: bool) -> None:
+    ctx.ensure_object(dict)
+    ctx.obj["verbose"] = verbose
 
 
 @main.command()
-def setup() -> None:
+@click.pass_context
+def setup(ctx: click.Context) -> None:
+    """Interactive setup wizard."""
+    _configure_logging(ctx.obj["verbose"])
     from setup_wizard import run_wizard
-
     run_wizard()
 
 
 @main.command()
 @click.option("--source", type=click.Choice(["obsidian", "youtube", "all"]), default="all")
 @click.option("--mode", type=click.Choice(["new", "backfill"]), default="new")
-@click.option("--limit", type=int, default=10)
-def sync(source: str, mode: str, limit: int) -> None:
-    engine, plugins, _ = build_engine()
-    targets = plugins.keys() if source == "all" else [source]
+@click.option("--limit", type=int, default=None)
+@click.option("--clean", is_flag=True, default=False)
+@click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.pass_context
+def sync(ctx: click.Context, source: str, mode: str, limit: int | None, clean: bool, fmt: str) -> None:
+    """Sync content from sources into the index."""
+    engine, plugins, store = _build(ctx.obj["verbose"])
+    if clean:
+        store.delete_all()
+    targets = list(plugins.keys()) if source == "all" else [source]
+    results = []
     for name in targets:
-        result = engine.sync(plugins[name], mode=mode, limit=limit)
-        logger.info("sync_done", source=name, indexed=result.indexed, skipped=result.skipped, failures=len(result.failures))
+        effective_limit = limit if limit is not None else (5 if name == "youtube" else 10)
+        result = engine.sync(plugins[name], mode=mode, limit=effective_limit)
+        results.append({
+            "source": result.source,
+            "indexed": result.indexed,
+            "skipped": result.skipped,
+            "failures": len(result.failures),
+            "errors": [{"source_id": f.source_id, "error": f.error} for f in result.failures],
+        })
+    _out(results, fmt)
 
 
 @main.command()
 @click.option("--source", type=click.Choice(["obsidian", "youtube", "all"]), default="all")
-def reindex(source: str) -> None:
-    engine, plugins, _ = build_engine()
-    targets = plugins.keys() if source == "all" else [source]
+@click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.pass_context
+def reindex(ctx: click.Context, source: str, fmt: str) -> None:
+    """Rebuild embeddings for already-indexed documents."""
+    engine, plugins, _ = _build(ctx.obj["verbose"])
+    targets = list(plugins.keys()) if source == "all" else [source]
+    results = []
     for name in targets:
-        result = engine.reindex(plugins[name])
-        logger.info("reindex_done", source=name, documents=result.documents, chunks=result.chunks)
+        r = engine.reindex(plugins[name])
+        results.append({"source": r.source, "documents": r.documents, "chunks": r.chunks})
+    _out(results, fmt)
 
 
 @main.command()
 @click.argument("query")
 @click.option("--mode", type=click.Choice(["semantic", "keyword"]), default="semantic")
 @click.option("--limit", type=int, default=5)
-def search(query: str, mode: str, limit: int) -> None:
-    engine, _, store = build_engine()
+@click.option("--source", type=click.Choice(["obsidian", "youtube"]), default=None)
+@click.option("--type", "video_type", type=click.Choice(["short", "long"]), default=None)
+@click.option("--min-duration", type=int, default=None)
+@click.option("--max-duration", type=int, default=None)
+@click.option("--since", default=None, help="YYYY-MM-DD")
+@click.option("--until", default=None, help="YYYY-MM-DD")
+@click.option("--min-size", type=int, default=None)
+@click.option("--max-size", type=int, default=None)
+@click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.pass_context
+def search(
+    ctx: click.Context,
+    query: str, mode: str, limit: int,
+    source: str | None, video_type: str | None,
+    min_duration: int | None, max_duration: int | None,
+    since: str | None, until: str | None,
+    min_size: int | None, max_size: int | None,
+    fmt: str,
+) -> None:
+    """Search the index.
+
+    \b
+    Examples:
+      corpus search "landing page" --source youtube --type long --format json
+      corpus search "topic" --format json | jq -r '.[0].handle' | xargs corpus get --what content
+    """
+    engine, _, store = _build(ctx.obj["verbose"])
+    filters = SearchFilters(
+        source=source, min_duration=min_duration, max_duration=max_duration,
+        video_type=video_type, since=since, until=until,
+        min_size=min_size, max_size=max_size,
+    )
     if mode == "keyword":
-        results = store.keyword_search(query, limit)
+        results = store.keyword_search(query, limit, filters)
     else:
-        # Re-use embedder from engine
         vector = engine.embedder.embed_texts([query])[0][1]
-        results = store.semantic_search(vector, limit)
-    for res in results:
-        logger.info("search_result", source=res.source_plugin, source_id=res.source_id, title=res.title, score=res.score)
+        results = store.semantic_search(vector, limit, filters)
+
+    if fmt == "json":
+        _out([{
+            "handle": r.handle,
+            "source_plugin": r.source_plugin,
+            "source_id": r.source_id,
+            "title": r.title,
+            "score": round(r.score, 4),
+            "duration_seconds": r.duration_seconds,
+            "excerpt": r.excerpt,
+        } for r in results], fmt)
+    else:
+        if not results:
+            click.echo("no results")
+            return
+        for r in results:
+            dur = f"  duration={_fmt_duration(r.duration_seconds)}" if r.duration_seconds else ""
+            click.echo(f"[{r.handle}] {r.title}{dur}")
+            click.echo(f"  score={round(r.score, 4)}  source={r.source_plugin}")
+            click.echo(f"  {r.excerpt[:120]}")
+
+
+@main.command(name="get")
+@click.argument("handle")
+@click.option("--what", type=click.Choice(["meta", "content", "all"]), default="meta")
+@click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.pass_context
+def get_doc(ctx: click.Context, handle: str, what: str, fmt: str) -> None:
+    """Retrieve a document by handle or source_id.
+
+    \b
+    Examples:
+      corpus get yt-my-video-a3f2 --what content
+      corpus get yt-my-video-a3f2 --what all --format json
+    """
+    _, _, store = _build(ctx.obj["verbose"])
+    doc = store.get_document_by_handle(handle)
+    if not doc:
+        click.echo(f"not found: {handle}", err=True)
+        sys.exit(1)
+    if what == "content":
+        click.echo(doc["raw_text"])
+        return
+    if what == "meta":
+        _out({k: v for k, v in doc.items() if k != "raw_text"}, fmt)
+        return
+    if fmt == "json":
+        _out(doc, fmt)
+    else:
+        for k, v in doc.items():
+            if k == "raw_text":
+                click.echo(f"\n--- content ({len(v)} chars) ---\n")
+                click.echo(v)
+            else:
+                click.echo(f"  {k}: {v}")
+
+
+@main.command(name="delete")
+@click.argument("handle")
+@click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.pass_context
+def delete_doc(ctx: click.Context, handle: str, fmt: str) -> None:
+    """Delete a document by handle or source_id."""
+    _, _, store = _build(ctx.obj["verbose"])
+    deleted = store.delete_document_by_handle(handle)
+    if deleted:
+        _out({"deleted": True, "handle": handle}, fmt)
+    else:
+        click.echo(f"not found: {handle}", err=True)
+        sys.exit(1)
 
 
 @main.command()
-def status() -> None:
-    _, _, store = build_engine()
-    for row in store.status():
-        logger.info("status", **row)
+@click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.pass_context
+def status(ctx: click.Context, fmt: str) -> None:
+    """Show document counts per source."""
+    _, _, store = _build(ctx.obj["verbose"])
+    _out(store.status(), fmt)
 
 
 @main.command()
 @click.option("--port", type=int, default=8000)
-def serve(port: int) -> None:
+@click.pass_context
+def serve(ctx: click.Context, port: int) -> None:
+    """Start the HTTP API and frontend."""
+    _configure_logging(ctx.obj["verbose"])
     uvicorn.run("api.server:app", host="0.0.0.0", port=port, reload=False)
 
 
