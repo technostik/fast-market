@@ -32,8 +32,8 @@ whisper = [
 dev = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.scripts]
-corpus = "cli.main:main"
+corpus = "corpus_entry:main"
 
 [tool.setuptools]
-packages = ["common", "common.core", "common.auth", "common.cli", "common.storage", "cli", "core", "storage", "plugins", "plugins.obsidian", "plugins.youtube", "api", "commands", "commands.sync", "commands.search", "commands.list", "commands.get", "commands.delete", "commands.status", "commands.reindex", "commands.serve", "commands.setup", "commands.setconfig", "commands.retry_failures", "commands.db_migrate", "commands.embed_server"]
+packages = ["common", "common.core", "common.auth", "common.cli", "common.storage", "corpus_entry", "cli", "core", "storage", "plugins", "plugins.obsidian", "plugins.youtube", "api", "commands", "commands.sync", "commands.search", "commands.list", "commands.get", "commands.delete", "commands.status", "commands.reindex", "commands.serve", "commands.setup", "commands.setconfig", "commands.retry_failures", "commands.db_migrate", "commands.embed_server"]
 py-modules = ["setup_wizard", "yaml"]
