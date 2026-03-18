@@ -1,60 +1,64 @@
-# storage
+# corpus-agent/storage
 
-- Keep code minimal and explicit.
-- Use structlog, raise explicit exceptions.
+## 🎯 Purpose
+Provides the persistence layer for document storage, chunk management, and sync tracking using SQLite with SQLAlchemy ORM and Alembic migrations.
 
-## SQLAlchemy storage layout
+## 🏗️ Essential Components
+- `models.py` — SQLAlchemy ORM models for documents, chunks, and sync failures (1:1 mapping to SQLite tables)
+- `sqlalchemy_store.py` — Main store implementation with session management, CRUD operations, and search methods
+- `sqlite_store.py` — Legacy compatibility wrapper (deprecated, raises warning)
+- `env.py` — Alembic environment configuration for migrations
+- `script.py.mako` — Template for generating new migration scripts
 
-- ORM models are in `storage/models.py`.
-- `DocumentModel` and `ChunkModel` map 1:1 to SQLite tables.
-- JSON payloads (`embedding_json`, `metadata_json`) are stored as JSON strings for deterministic serialization.
-- `chunks_fts` remains an SQLite FTS5 virtual table managed through raw SQL.
+## 📋 Core Responsibilities
+- Persist documents with their metadata and content hashes for change detection
+- Manage chunk storage including embeddings for semantic search (embedding_json stored as JSON string)
+- Maintain FTS5 virtual tables for keyword search through raw SQL
+- Track sync failures with retry counts and error types (transient/permanent)
+- Handle database migrations through Alembic (auto-run on startup)
+- Provide cursor strategies for incremental sync:
+  - ID-based (`get_indexed_ids()`) — for YouTube to walk playlist newest-first
+  - Date-based (`get_latest_content_date()`) — for file-based plugins using mtime
+- Store and filter by privacy status ("public" | "private" | "unlisted" | "unknown") for YouTube content
 
-## Migrations workflow (Alembic)
+## 🔗 Dependencies & Integration
+- Imports from: `core.models`, `core.paths`, `alembic`, `sqlalchemy`, `structlog`
+- Used by: SyncEngine, CLI commands, plugin system (YouTube, Obsidian, etc.)
+- External deps: SQLAlchemy, Alembic, sqlite3 (via Python stdlib)
 
-- Alembic config lives in `corpus-agent/alembic.ini`.
-- Migration scripts live in `corpus-agent/migrations/versions`.
-- Store startup runs `alembic upgrade head` automatically for file-backed DBs.
-- If migration fails, code must fail loudly and raise.
+## ✅ Do's
+- Keep code minimal and explicit
+- Use structlog for all logging
+- Use context managers for sessions to ensure proper cleanup
+- Store JSON payloads as deterministic JSON strings (`json.dumps()` with default args)
+- Include explicit error handling and fail loudly on migration failures
+- Use content hashes to detect changes before updating
+- Keep migration scripts explicit and minimal
+- Use `op.execute()` for SQLite-specific DDL (FTS5 virtual tables)
+- Apply filters at the database level when possible (defer to Python only when necessary)
+- Return `bool` from upsert operations to indicate whether changes occurred
+- Use ID-based cursors for YouTube, date-based for file plugins
+- Make privacy_status nullable (NULL for Obsidian, populated for YouTube)
 
-Create a new migration:
+## ❌ Don'ts
+- Don't use raw SQLite store directly (SQLiteStore is deprecated)
+- Don't ignore migration failures — raise RuntimeError with explicit context
+- Don't use date cursors for YouTube sync (will silently skip backlog)
+- Don't store Python objects directly — serialize to JSON first
+- Don't forget to update FTS tables when chunks change (delete + insert)
+- Don't assume all documents have privacy_status (check for NULL)
+- Don't use `autocommit=True` — manage transactions explicitly with session.commit()/rollback()
+- Don't swallow exceptions in store methods — let them bubble up
 
-1. Add model changes in `storage/models.py`.
-2. Add a new migration file in `migrations/versions/`.
-3. Include SQLite-specific DDL for FTS5 updates using `op.execute(...)` when needed.
-4. Keep upgrade/downgrade explicit and minimal.
+## 🛠️ Extension Points
+- To add a new model: Define in `models.py`, create migration, add store methods
+- To modify search behavior: Extend `SearchFilters` and update `keyword_search`/`semantic_search`
+- To add new cursor strategy: Add method to store (e.g., `get_indexed_timestamps()`)
+- To add document metadata: Update `DocumentModel`, create migration, update `_row_to_doc_dict()`
+- To support new filter types: Add to `SearchFilters` and implement in relevant methods
 
-## Sync cursor strategy
-
-Two methods provide cursors for incremental sync:
-
-`get_indexed_ids(source)` → set[str]
-  ID-based cursor. Returns all source_ids already in the index for this source.
-  Used by YouTube: the plugin walks the playlist newest-first and skips known IDs,
-  so each sync fetches the next N unindexed videos regardless of their age.
-  DO NOT use date-based cursors for YouTube — published_at of every backlog video
-  is older than the newest indexed one, so a date filter silently skips everything
-  after the first sync.
-
-`get_latest_content_date(source)` → datetime | None
-  Date-based cursor. Returns MAX(updated_at) for the source.
-  Used by file-based plugins (Obsidian) where mtime is a reliable incremental cursor.
-
-## privacy_status column
-
-Stored on the `documents` table. Values: "public" | "private" | "unlisted" | "unknown".
-Populated by the YouTube plugin. NULL for Obsidian documents.
-Exposed in SearchResult, list_documents, and get_document* results.
-Filterable via SearchFilters.privacy_status.
-
-## sync_failures table
-
-Tracks per-item sync failures across runs.
-
-Columns:
-- `source_plugin`, `source_id` (unique pair)
-- `error_message`
-- `error_type` (`transient` or `permanent`)
-- `failed_at`, `retry_count`, `last_retry_at`
-
-Use this table to skip permanent failures in SyncEngine and to support explicit retry commands.
+## 📚 Related Documentation
+- See `AGENTS.md` (root) for sync cursor strategy and privacy_status semantics
+- See `MIGRATIONS.md` for more details
+- Refer to `GOLDEN_RULES.md` for principles: DRY, KISS, CODE IS LAW, FAIL LOUDLY, modularity, granularity, observability
+- See plugin-specific AGENTS.md files for how storage is used by each plugin type
