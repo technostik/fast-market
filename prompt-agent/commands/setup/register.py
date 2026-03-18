@@ -22,8 +22,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--remove-provider", help="Remove a provider")
     @click.option("--set-default", help="Set default provider")
     @click.option("--show-config", is_flag=True, help="Show current configuration")
+    @click.option(
+        "--config-path", "show_config_path", is_flag=True, help="Show config file path"
+    )
     @click.pass_context
-    def setup_cmd(ctx, list_providers, add_provider, remove_provider, set_default, show_config):
+    def setup_cmd(
+        ctx,
+        list_providers,
+        add_provider,
+        remove_provider,
+        set_default,
+        show_config,
+        show_config_path,
+    ):
         """Setup wizard for managing LLM providers."""
         config_path = get_tool_config("prompt")
         config = _load_config(config_path)
@@ -32,7 +43,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
             _list_providers(config)
             return
         if show_config:
-            click.echo(yaml.safe_dump(config, default_flow_style=False, sort_keys=False))
+            click.echo(
+                yaml.safe_dump(config, default_flow_style=False, sort_keys=False)
+            )
+            return
+        if show_config_path:
+            click.echo(config_path)
             return
         if add_provider:
             _add_provider(config_path, config, add_provider)
@@ -158,7 +174,9 @@ def _set_default(config_path: Path, config: dict, provider_name: str) -> None:
     normalized = provider_name.lower()
     if normalized not in config.get("providers", {}):
         click.echo(f"Provider not configured: {normalized}", err=True)
-        click.echo(f"Add it first with: prompt setup --add-provider {normalized}", err=True)
+        click.echo(
+            f"Add it first with: prompt setup --add-provider {normalized}", err=True
+        )
         sys.exit(1)
     config["default_provider"] = normalized
     _save_config(config_path, config)
@@ -182,7 +200,12 @@ def _run_interactive_wizard(config_path: Path, config: dict) -> None:
     click.echo("  3. OpenAI-compatible")
     click.echo("  4. Ollama")
     choice = click.prompt("Enter choice", type=click.Choice(["1", "2", "3", "4"]))
-    provider_map = {"1": "anthropic", "2": "openai", "3": "openai-compatible", "4": "ollama"}
+    provider_map = {
+        "1": "anthropic",
+        "2": "openai",
+        "3": "openai-compatible",
+        "4": "ollama",
+    }
     provider_name = provider_map[choice]
     click.echo(f"\n--- {provider_name} configuration ---")
     settings, env_var = _build_provider_settings(provider_name)
