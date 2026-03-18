@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
+from pathlib import Path
 
 import click
 import yaml
 
 from commands.base import CommandManifest
 from common.cli.helpers import out
+from common.youtube.models import Video
 from core.config import load_config
 from core.engine import build_youtube_client
 
@@ -30,12 +34,46 @@ def _read_stdin() -> list:
 
 def _read_file(path: str) -> list:
     """Read JSON or YAML from file."""
-    from pathlib import Path
-
     content = Path(path).read_text()
     if path.endswith(".yaml") or path.endswith(".yml"):
         return yaml.safe_load(content) or []
     return json.loads(content)
+
+
+def _search_with_ytdlp(query: str, max_results: int) -> list[dict]:
+    """Search using yt-dlp and return Video dicts."""
+    if not shutil.which("yt-dlp"):
+        raise click.ClickException(
+            "yt-dlp not found. Install it with: pip install yt-dlp"
+        )
+
+    search_query = f"ytsearch{max_results}:{query}"
+    result = subprocess.run(
+        ["yt-dlp", "--flat-playlist", "--dump-single-json", search_query],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    data = json.loads(result.stdout)
+
+    videos = []
+    for entry in data.get("entries", []):
+        if not entry:
+            continue
+        videos.append(
+            Video.from_video_list(
+                {
+                    "id": entry.get("id", ""),
+                    "title": entry.get("title", ""),
+                    "description": entry.get("description", ""),
+                    "channel_id": entry.get("channel_id", ""),
+                    "channel_title": entry.get("channel") or entry.get("uploader", ""),
+                    "view_count": entry.get("view_count", 0),
+                    "url": entry.get("url", ""),
+                }
+            ).to_dict()
+        )
+    return videos
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -61,6 +99,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--stdin", is_flag=True, help="Read video IDs from stdin for filtering"
     )
+    @click.option(
+        "--use-yt-dlp",
+        is_flag=True,
+        help="Use yt-dlp instead of YouTube API for search",
+    )
     @click.pass_context
     def search_cmd(
         ctx,
@@ -72,6 +115,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         fmt,
         output,
         stdin,
+        use_yt_dlp,
         **kwargs,
     ):
         try:
@@ -96,16 +140,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     click.echo("Keywords required when not using --stdin", err=True)
                     return
                 query = " ".join(keywords)
-                config = load_config()
-                client = build_youtube_client(config)
-                videos = client.search_videos(
-                    query=query,
-                    max_results=max_results,
-                    order=order,
-                    language=language,
-                    combine_keywords=combine,
-                )
-                videos = [v.to_dict() for v in videos]
+                if use_yt_dlp:
+                    videos = _search_with_ytdlp(query, max_results)
+                else:
+                    config = load_config()
+                    client = build_youtube_client(config)
+                    videos = client.search_videos(
+                        query=query,
+                        max_results=max_results,
+                        order=order,
+                        language=language,
+                        combine_keywords=combine,
+                    )
+                    videos = [v.to_dict() for v in videos]
 
             if output:
                 Path(output).write_text(

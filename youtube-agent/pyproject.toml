@@ -16,6 +16,12 @@ dependencies = [
     "google-auth>=2.0",
 ]
 
+[project.optional-dependencies]
+ytdlp = ["yt-dlp"]
+
+[project.extras]
+ytdlp = ["yt-dlp"]
+
 [project.scripts]
 youtube = "youtube_entry:main"
 
