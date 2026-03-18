@@ -4,29 +4,52 @@ import json
 from urllib import error, request as urllib_request
 
 from common import structlog
-from plugins.base import LLMProvider, LLMRequest, LLMResponse
+from plugins.base import LLMProvider, LLMRequest, LLMResponse, LazyLLMProvider
 
 logger = structlog.get_logger(__name__)
 
 
-class OllamaProvider(LLMProvider):
+class OllamaProvider(LazyLLMProvider):
     name = "ollama"
 
-    def __init__(self, config: dict):
-        provider_config = (config.get("providers") or {}).get("ollama", {})
+    def _initialize(self):
+        provider_config = (self.config.get("providers") or {}).get("ollama", {})
         base_url = provider_config.get("base_url", "http://127.0.0.1:11434")
         model = provider_config.get("default_model", "")
+
         if not isinstance(base_url, str) or not base_url.strip():
-            raise ValueError("providers.ollama.base_url must be configured")
+            logger.warning(
+                "ollama_provider_not_initialized",
+                reason="providers.ollama.base_url must be configured"
+            )
+            self._provider = None
+            return
+
         if not isinstance(model, str) or not model.strip():
-            raise ValueError("providers.ollama.default_model must be configured")
-        self.base_url = base_url.rstrip("/")
-        self.default_model = model
+            logger.warning(
+                "ollama_provider_not_initialized",
+                reason="providers.ollama.default_model must be configured"
+            )
+            self._provider = None
+            return
+
+        self._provider = _RealOllamaProvider(
+            base_url=base_url.rstrip("/"),
+            default_model=model
+        )
         logger.info(
             "ollama_provider_initialized",
-            base_url=self.base_url,
-            default_model=self.default_model,
+            base_url=base_url,
+            default_model=model,
         )
+
+
+class _RealOllamaProvider(LLMProvider):
+    name = "ollama"
+
+    def __init__(self, base_url: str, default_model: str):
+        self.base_url = base_url
+        self.default_model = default_model
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model

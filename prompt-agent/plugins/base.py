@@ -40,6 +40,33 @@ class LLMProvider(ABC):
         raise NotImplementedError
 
 
+class LazyLLMProvider(LLMProvider):
+    """Base class for providers that need lazy initialization."""
+
+    def __init__(self, config: dict):
+        self.config = config
+        self._initialized = False
+        self._provider = None
+
+    def _ensure_initialized(self):
+        """Ensure the provider is initialized before use."""
+        if not self._initialized:
+            self._initialize()
+            self._initialized = True
+
+    def _initialize(self):
+        """Actual initialization logic to be implemented by subclasses."""
+        raise NotImplementedError
+
+    def complete(self, request: LLMRequest) -> LLMResponse:
+        self._ensure_initialized()
+        return self._provider.complete(request)
+
+    def list_models(self) -> list[str]:
+        self._ensure_initialized()
+        return self._provider.list_models()
+
+
 @dataclass
 class PluginManifest:
     """Everything an LLM provider plugin contributes."""

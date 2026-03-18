@@ -3,41 +3,70 @@ from __future__ import annotations
 import os
 
 from common import structlog
-from plugins.base import LLMProvider, LLMRequest, LLMResponse
+from plugins.base import LLMProvider, LLMRequest, LLMResponse, LazyLLMProvider
 
 logger = structlog.get_logger(__name__)
 
 
-class OpenAICompatibleProvider(LLMProvider):
+class OpenAICompatibleProvider(LazyLLMProvider):
     name = "openai-compatible"
 
-    def __init__(self, config: dict):
+    def _initialize(self):
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("pip install openai") from exc
 
-        provider_config = (config.get("providers") or {}).get("openai-compatible", {})
+        provider_config = (self.config.get("providers") or {}).get("openai-compatible", {})
         base_url = provider_config.get("base_url", "")
         if not isinstance(base_url, str) or not base_url.strip():
-            raise ValueError("providers.openai-compatible.base_url must be configured")
+            logger.warning(
+                "openai_compatible_provider_not_initialized",
+                reason="providers.openai-compatible.base_url must be configured"
+            )
+            self._provider = None
+            return
 
         api_key_env = provider_config.get("api_key_env", "OPENAI_COMPATIBLE_API_KEY")
         api_key = os.environ.get(api_key_env)
         if not api_key:
-            raise ValueError(f"{api_key_env} environment variable not set")
+            logger.warning(
+                "openai_compatible_provider_not_initialized",
+                reason=f"{api_key_env} environment variable not set"
+            )
+            self._provider = None
+            return
 
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.base_url = base_url
-        self.default_model = provider_config.get("default_model", "")
-        if not isinstance(self.default_model, str) or not self.default_model.strip():
-            raise ValueError("providers.openai-compatible.default_model must be configured")
+        default_model = provider_config.get("default_model", "")
+        if not isinstance(default_model, str) or not default_model.strip():
+            logger.warning(
+                "openai_compatible_provider_not_initialized",
+                reason="providers.openai-compatible.default_model must be configured"
+            )
+            self._provider = None
+            return
 
+        client = OpenAI(api_key=api_key, base_url=base_url)
+
+        self._provider = _RealOpenAICompatibleProvider(
+            client=client,
+            base_url=base_url,
+            default_model=default_model
+        )
         logger.info(
             "openai_compatible_provider_initialized",
-            base_url=self.base_url,
-            default_model=self.default_model,
+            base_url=base_url,
+            default_model=default_model,
         )
+
+
+class _RealOpenAICompatibleProvider(LLMProvider):
+    name = "openai-compatible"
+
+    def __init__(self, client, base_url: str, default_model: str):
+        self.client = client
+        self.base_url = base_url
+        self.default_model = default_model
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model

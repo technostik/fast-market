@@ -3,29 +3,47 @@ from __future__ import annotations
 import os
 
 from common import structlog
-from plugins.base import LLMProvider, LLMRequest, LLMResponse
+from plugins.base import LLMProvider, LLMRequest, LLMResponse, LazyLLMProvider
 
 logger = structlog.get_logger(__name__)
 
 
-class AnthropicProvider(LLMProvider):
+class AnthropicProvider(LazyLLMProvider):
     name = "anthropic"
 
-    def __init__(self, config: dict):
+    def _initialize(self):
         try:
             from anthropic import Anthropic
         except ImportError as exc:
             raise RuntimeError("pip install anthropic") from exc
 
-        provider_config = (config.get("providers") or {}).get("anthropic", {})
+        provider_config = (self.config.get("providers") or {}).get("anthropic", {})
         api_key_env = provider_config.get("api_key_env", "ANTHROPIC_API_KEY")
         api_key = os.environ.get(api_key_env)
         if not api_key:
-            raise ValueError(f"{api_key_env} environment variable not set")
+            logger.warning(
+                "anthropic_provider_not_initialized",
+                reason=f"{api_key_env} environment variable not set"
+            )
+            self._provider = None
+            return
 
-        self.client = Anthropic(api_key=api_key)
-        self.default_model = provider_config.get("default_model", "claude-sonnet-4-20250514")
-        logger.info("anthropic_provider_initialized", default_model=self.default_model)
+        client = Anthropic(api_key=api_key)
+        default_model = provider_config.get("default_model", "claude-sonnet-4-20250514")
+
+        self._provider = _RealAnthropicProvider(
+            client=client,
+            default_model=default_model
+        )
+        logger.info("anthropic_provider_initialized", default_model=default_model)
+
+
+class _RealAnthropicProvider(LLMProvider):
+    name = "anthropic"
+
+    def __init__(self, client, default_model: str):
+        self.client = client
+        self.default_model = default_model
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model
