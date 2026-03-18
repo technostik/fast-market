@@ -59,7 +59,7 @@ cat replies.json | youtube reply --stdin
 
 ```bash
 # Search and get comments in pipeline
-youtube search "python" -n 5 --format json | youtube comments --stdin > comments.yaml
+youtube search "python" -n 5 --format json | youtube comments -n 3 --stdin > comments.yaml
 
 # Chain multiple operations
 youtube search "tutorial" | youtube comments --stdin | youtube reply --stdin
