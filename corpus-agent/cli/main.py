@@ -1,26 +1,21 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
-import click
+from common.cli.base import create_cli_group
+from common.core.config import load_config
+from common.core.registry import discover_commands, discover_plugins
 
-from core.config import load_config
-from core.registry import discover_commands, discover_plugins
-
-
-@click.group()
-@click.option("--verbose", "-v", is_flag=True, default=False, help="Show logs on stderr.")
-@click.pass_context
-def main(ctx: click.Context, verbose: bool) -> None:
-    ctx.ensure_object(dict)
-    ctx.obj["verbose"] = verbose
+main = create_cli_group("corpus")
+_TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load() -> None:
     logging.basicConfig(level=logging.CRITICAL, force=True)
     config = load_config()
-    plugin_manifests = discover_plugins(config)
-    command_manifests = discover_commands(plugin_manifests)
+    plugin_manifests = discover_plugins(config, tool_root=_TOOL_ROOT)
+    command_manifests = discover_commands(plugin_manifests, tool_root=_TOOL_ROOT)
     for command_manifest in command_manifests.values():
         main.add_command(command_manifest.click_command)
 

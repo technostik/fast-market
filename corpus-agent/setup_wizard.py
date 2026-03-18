@@ -5,7 +5,7 @@ from pathlib import Path
 import structlog
 import yaml
 
-from core.paths import get_fastmarket_dir, get_tool_cache_dir, get_tool_config, get_tool_data_dir
+from common.core.paths import get_fastmarket_dir, get_tool_cache_dir, get_tool_config, get_tool_data_dir
 
 logger = structlog.get_logger(__name__)
 

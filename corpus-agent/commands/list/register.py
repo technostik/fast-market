@@ -167,7 +167,7 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         min_size: int | None = Query(None, ge=0, description="Min content size in chars"),
         max_size: int | None = Query(None, ge=0, description="Max content size in chars"),
     ):
-        from core.config import load_config
+        from common.core.config import load_config
         from storage.sqlite_store import SQLiteStore, SearchFilters
 
         if source and source not in source_choices:

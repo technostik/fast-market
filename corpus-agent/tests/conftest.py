@@ -133,9 +133,11 @@ def mock_env(config_path: Path, config_dict: dict, monkeypatch: pytest.MonkeyPat
 
     import core.embedder as emb_mod
     import core.config as cfg_mod
+    import common.core.config as common_cfg_mod
 
     monkeypatch.setattr(emb_mod, "Embedder", DummyEmbedder)
     monkeypatch.setattr(cfg_mod, "load_config", lambda path="config.yaml": config_dict)
+    monkeypatch.setattr(common_cfg_mod, "load_config", lambda path="config.yaml": config_dict)
 
     return tmp_path
 

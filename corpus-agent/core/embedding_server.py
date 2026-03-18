@@ -93,7 +93,7 @@ class EmbeddingServer:
 def main() -> None:
     import argparse
 
-    from core.config import load_config
+    from common.core.config import load_config
 
     parser = argparse.ArgumentParser(description="Corpus embedding server")
     parser.add_argument("--model", help="Model name override")

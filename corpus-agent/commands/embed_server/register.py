@@ -12,7 +12,7 @@ import click
 import structlog
 
 from commands.base import CommandManifest
-from core.paths import get_tool_cache_dir
+from common.core.paths import get_tool_cache_dir
 
 logger = structlog.get_logger(__name__)
 
@@ -81,7 +81,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--model", help="Model name override")
     @click.option("--port", type=int, help="Port override")
     def start_cmd(model: str | None, port: int | None) -> None:
-        from core.config import load_config
+        from common.core.config import load_config
 
         running, pid, _, _ = _is_running()
         if running:
@@ -169,7 +169,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
     @embed_server_group.command("status")
     def status_cmd() -> None:
-        from core.config import load_config
+        from common.core.config import load_config
 
         config = load_config()
         embeddings_cfg = config.get("embeddings", {})

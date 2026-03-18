@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool, StaticPool
 
 from core.models import Chunk, Document, SearchResult
-from core.paths import get_tool_data_dir
+from common.core.paths import get_tool_data_dir
 from storage.models import ChunkModel, DocumentModel, SyncFailureModel
 
 logger = structlog.get_logger(__name__)

@@ -11,7 +11,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
     @click.pass_context
     def db_migrate_cmd(ctx, fmt):
-        from core.config import load_config
+        from common.core.config import load_config
         from storage.sqlite_store import SQLiteStore
 
         config = load_config()

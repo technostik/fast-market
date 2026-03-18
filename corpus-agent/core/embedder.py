@@ -17,7 +17,7 @@ class Embedder:
         batch_size: int = 32,
         server_url: str | None = None,
     ) -> None:
-        from core.config import load_config
+        from common.core.config import load_config
 
         try:
             config = load_config()
