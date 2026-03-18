@@ -24,6 +24,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "configured": name in configured,
                     "default": config.get("default_provider") == name,
                     "default_model": settings.get("default_model", ""),
+                    "base_url": settings.get("base_url", ""),
                 }
             )
         if fmt == "json":
@@ -38,5 +39,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"{item['name']}{marker}: {state}")
             if item["default_model"]:
                 click.echo(f"  Default model: {item['default_model']}")
+            if item["base_url"]:
+                click.echo(f"  Base URL: {item['base_url']}")
 
     return CommandManifest(name="providers", click_command=providers_cmd)

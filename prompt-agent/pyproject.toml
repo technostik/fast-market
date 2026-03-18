@@ -35,6 +35,8 @@ packages = [
     "plugins",
     "plugins.anthropic",
     "plugins.openai",
+    "plugins.openai_compatible",
+    "plugins.ollama",
     "commands",
     "commands.create",
     "commands.list",

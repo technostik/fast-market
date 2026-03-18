@@ -9,14 +9,16 @@ import yaml
 from commands.base import CommandManifest
 from common.core.paths import get_tool_config
 
-
-_SUPPORTED_PROVIDERS = {"anthropic", "openai"}
+_SUPPORTED_PROVIDERS = {"anthropic", "openai", "openai-compatible", "ollama"}
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("setup")
     @click.option("--list-providers", is_flag=True, help="List configured providers")
-    @click.option("--add-provider", help="Add a provider (anthropic, openai)")
+    @click.option(
+        "--add-provider",
+        help="Add a provider (anthropic, openai, openai-compatible, ollama)",
+    )
     @click.option("--remove-provider", help="Remove a provider")
     @click.option("--set-default", help="Set default provider")
     @click.option("--show-config", is_flag=True, help="Show current configuration")
@@ -62,14 +64,21 @@ def _load_config(config_path: Path) -> dict:
 
 def _save_config(config_path: Path, config: dict) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(yaml.safe_dump(config, default_flow_style=False, sort_keys=False), encoding="utf-8")
+    config_path.write_text(
+        yaml.safe_dump(config, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
 
 
-def _provider_defaults(provider_name: str) -> tuple[str, str]:
+def _provider_defaults(provider_name: str) -> tuple[str, str, str | None]:
     if provider_name == "anthropic":
-        return "claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"
+        return "claude-sonnet-4-20250514", "ANTHROPIC_API_KEY", None
     if provider_name == "openai":
-        return "gpt-4", "OPENAI_API_KEY"
+        return "gpt-4", "OPENAI_API_KEY", None
+    if provider_name == "openai-compatible":
+        return "gpt-4o-mini", "OPENAI_COMPATIBLE_API_KEY", "https://api.openai.com/v1"
+    if provider_name == "ollama":
+        return "llama3.2", "", "http://127.0.0.1:11434"
     raise ValueError(f"Unknown provider: {provider_name}")
 
 
@@ -78,6 +87,21 @@ def _require_supported(provider_name: str) -> str:
     if normalized not in _SUPPORTED_PROVIDERS:
         raise ValueError(f"Unknown provider: {normalized}")
     return normalized
+
+
+def _build_provider_settings(provider_name: str) -> tuple[dict[str, str], str]:
+    default_model, api_key_env, base_url = _provider_defaults(provider_name)
+    click.echo(f"\n=== Adding {provider_name} provider ===")
+    settings = {
+        "default_model": click.prompt("Default model", default=default_model),
+    }
+    if base_url is not None:
+        settings["base_url"] = click.prompt("Base URL", default=base_url)
+    env_var = ""
+    if api_key_env:
+        env_var = click.prompt("API key environment variable", default=api_key_env)
+        settings["api_key_env"] = env_var
+    return settings, env_var
 
 
 def _list_providers(config: dict) -> None:
@@ -90,7 +114,10 @@ def _list_providers(config: dict) -> None:
         default_marker = " (default)" if name == config.get("default_provider") else ""
         click.echo(f"  - {name}{default_marker}")
         click.echo(f"    Model: {settings.get('default_model', 'N/A')}")
-        click.echo(f"    API Key Env: {settings.get('api_key_env', 'N/A')}")
+        if settings.get("base_url"):
+            click.echo(f"    Base URL: {settings['base_url']}")
+        if settings.get("api_key_env"):
+            click.echo(f"    API Key Env: {settings['api_key_env']}")
 
 
 def _add_provider(config_path: Path, config: dict, provider_name: str) -> None:
@@ -98,23 +125,18 @@ def _add_provider(config_path: Path, config: dict, provider_name: str) -> None:
         normalized = _require_supported(provider_name)
     except ValueError as exc:
         click.echo(str(exc), err=True)
-        click.echo("Supported: anthropic, openai", err=True)
+        click.echo("Supported: anthropic, openai, openai-compatible, ollama", err=True)
         sys.exit(1)
 
-    default_model, api_key_env = _provider_defaults(normalized)
-    click.echo(f"\n=== Adding {normalized} provider ===")
-    model = click.prompt("Default model", default=default_model)
-    env_var = click.prompt("API key environment variable", default=api_key_env)
-    config["providers"][normalized] = {
-        "default_model": model,
-        "api_key_env": env_var,
-    }
+    settings, env_var = _build_provider_settings(normalized)
+    config["providers"][normalized] = settings
     if not config.get("default_provider"):
         config["default_provider"] = normalized
         click.echo(f"\nSet {normalized} as default provider")
     _save_config(config_path, config)
     click.echo(f"\n✓ Added {normalized} provider")
-    click.echo(f"\nDon't forget to set {env_var} environment variable!")
+    if env_var:
+        click.echo(f"\nDon't forget to set {env_var} environment variable!")
 
 
 def _remove_provider(config_path: Path, config: dict, provider_name: str) -> None:
@@ -157,23 +179,23 @@ def _run_interactive_wizard(config_path: Path, config: dict) -> None:
     click.echo("\nWhich LLM provider do you want to add?")
     click.echo("  1. Anthropic (Claude)")
     click.echo("  2. OpenAI (GPT)")
-    choice = click.prompt("Enter choice", type=click.Choice(["1", "2"]))
-    provider_name = "anthropic" if choice == "1" else "openai"
-    default_model, api_key_env = _provider_defaults(provider_name)
+    click.echo("  3. OpenAI-compatible")
+    click.echo("  4. Ollama")
+    choice = click.prompt("Enter choice", type=click.Choice(["1", "2", "3", "4"]))
+    provider_map = {"1": "anthropic", "2": "openai", "3": "openai-compatible", "4": "ollama"}
+    provider_name = provider_map[choice]
     click.echo(f"\n--- {provider_name} configuration ---")
-    model = click.prompt("Default model", default=default_model)
-    env_var = click.prompt("API key environment variable", default=api_key_env)
+    settings, env_var = _build_provider_settings(provider_name)
 
-    config["providers"][provider_name] = {
-        "default_model": model,
-        "api_key_env": env_var,
-    }
+    config["providers"][provider_name] = settings
     if not config.get("default_provider"):
         config["default_provider"] = provider_name
     _save_config(config_path, config)
+
     click.echo("\n✓ Setup complete!")
     click.echo(f"\nConfiguration saved to: {config_path}")
-    click.echo("\nDon't forget to set environment variable:")
-    click.echo(f"  export {env_var}=your-api-key")
+    if env_var:
+        click.echo("\nDon't forget to set environment variable:")
+        click.echo(f"  export {env_var}=your-api-key")
     click.echo("\nYou can add more providers with:")
     click.echo("  prompt setup --add-provider <name>")

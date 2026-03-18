@@ -116,3 +116,55 @@ def test_prompt_cli_apply_from_file_json(runner: CliRunner, tmp_path: Path, monk
     payload = json.loads(result.output)
     assert payload["output"] == "RESULT::Summarize: file content"
     assert payload["model"] == "fake-model"
+
+
+def test_prompt_cli_setup_add_openai_compatible_and_ollama(runner: CliRunner, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FASTMARKET_CONFIG_DIR", str(tmp_path / "cfg"))
+    (tmp_path / "cfg").mkdir()
+
+    result = runner.invoke(
+        main,
+        ["setup", "--add-provider", "openai-compatible"],
+        input="custom-model\nhttps://llm.example/v1\nCOMPAT_KEY\n",
+    )
+    assert result.exit_code == 0, result.output
+
+    result = runner.invoke(main, ["setup", "--add-provider", "ollama"], input="llama3.1\nhttp://localhost:11434\n")
+    assert result.exit_code == 0, result.output
+
+    result = runner.invoke(main, ["setup", "--list-providers"])
+    assert result.exit_code == 0, result.output
+    assert "openai-compatible" in result.output
+    assert "https://llm.example/v1" in result.output
+    assert "COMPAT_KEY" in result.output
+    assert "ollama" in result.output
+    assert "http://localhost:11434" in result.output
+
+
+def test_prompt_cli_providers_command_lists_all_discovered(runner: CliRunner, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FASTMARKET_CONFIG_DIR", str(tmp_path / "cfg"))
+    (tmp_path / "cfg").mkdir()
+
+    result = runner.invoke(main, ["providers", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    names = {item["name"] for item in payload}
+    assert {"anthropic", "openai", "openai-compatible", "ollama"}.issubset(names)
+
+
+def test_prompt_cli_providers_command_marks_configured_entries(runner: CliRunner, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FASTMARKET_CONFIG_DIR", str(tmp_path / "cfg"))
+    (tmp_path / "cfg").mkdir()
+    (tmp_path / "cfg" / "prompt.yaml").write_text(
+        "default_provider: openai-compatible\nproviders:\n  openai-compatible:\n    default_model: custom-model\n    base_url: https://llm.example/v1\n    api_key_env: COMPAT_KEY\n  ollama:\n    default_model: llama3.1\n    base_url: http://localhost:11434\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(main, ["providers", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    payload = {item["name"]: item for item in json.loads(result.output)}
+    assert payload["openai-compatible"]["configured"] is True
+    assert payload["openai-compatible"]["default"] is True
+    assert payload["openai-compatible"]["base_url"] == "https://llm.example/v1"
+    assert payload["ollama"]["configured"] is True
+    assert payload["ollama"]["base_url"] == "http://localhost:11434"
