@@ -96,10 +96,17 @@ def build_plugins(
     try:
         manifests = discover_plugins(config, tool_root=tool_root, plugin_package=plugin_package)
         if manifests:
-            return {
-                name: manifest.source_plugin_class(config)
-                for name, manifest in manifests.items()
-            }
+            built: dict[str, object] = {}
+            for name, manifest in manifests.items():
+                if hasattr(manifest, "source_plugin_class"):
+                    built[name] = manifest.source_plugin_class(config)
+                elif hasattr(manifest, "provider_class"):
+                    built[name] = manifest.provider_class(config)
+                else:
+                    raise TypeError(
+                        f"FAIL LOUDLY: manifest for {name} must expose source_plugin_class or provider_class"
+                    )
+            return built
     except Exception as exc:
         logger.error("discover_plugins_failed", error=str(exc))
         raise
