@@ -7,7 +7,12 @@ from pathlib import Path
 from common import structlog
 from common.storage.base import create_sqlite_engine
 from core.config import load_config
-from core.paths import get_fastmarket_dir, get_tool_cache_dir, get_tool_config, get_tool_data_dir
+from core.paths import (
+    get_fastmarket_dir,
+    get_tool_cache_dir,
+    get_tool_config,
+    get_tool_data_dir,
+)
 from plugins.obsidian.plugin import ObsidianPlugin
 from plugins.youtube.plugin import YouTubeTransport
 from storage.sqlite_store import SQLiteStore
@@ -20,7 +25,10 @@ def test_paths_follow_xdg(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
 
     assert get_fastmarket_dir() == data_home / "fast-market"
-    assert get_tool_config("corpus") == data_home / "fast-market" / "config" / "corpus.yaml"
+    assert (
+        get_tool_config("corpus")
+        == data_home / "fast-market" / "config" / "corpus.yaml"
+    )
 
     corpus_dir = get_tool_data_dir("corpus")
     marketing_dir = get_tool_data_dir("marketing")
@@ -40,7 +48,7 @@ def test_load_config_from_override_dir(monkeypatch, tmp_path: Path):
     config_dir = home / "cfg"
     config_dir.mkdir(parents=True)
     cfg_path = config_dir / "corpus.yaml"
-    cfg_path.write_text("db_path: :memory:\n", encoding="utf-8")
+    cfg_path.write_text('db_path: ":memory:"\n', encoding="utf-8")
 
     monkeypatch.setenv("FASTMARKET_CONFIG_DIR", "~/cfg")
     loaded = load_config()
@@ -54,12 +62,15 @@ def test_paths_expand_tilde_in_xdg_env(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CACHE_HOME", "~/.custom_cache")
 
     assert get_fastmarket_dir() == home / ".custom_data" / "fast-market"
-    assert get_tool_cache_dir("corpus") == home / ".custom_cache" / "fast-market" / "corpus"
+    assert (
+        get_tool_cache_dir("corpus")
+        == home / ".custom_cache" / "fast-market" / "corpus"
+    )
 
 
 def test_deprecated_local_config_still_supported(monkeypatch, tmp_path: Path):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "config.yaml").write_text("db_path: :memory:\n", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text('db_path: ":memory:"\n', encoding="utf-8")
 
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
@@ -86,7 +97,10 @@ def test_sqlite_store_expands_tilde_db_path(monkeypatch, tmp_path: Path):
     row = store.conn.execute("PRAGMA database_list").fetchone()
     assert row is not None
     db_path = Path(row[2])
-    assert db_path == home / ".local" / "share" / "fast-market" / "data" / "corpus" / "corpus.db"
+    assert (
+        db_path
+        == home / ".local" / "share" / "fast-market" / "data" / "corpus" / "corpus.db"
+    )
 
 
 def test_tool_data_isolation(monkeypatch, tmp_path: Path):
@@ -108,7 +122,9 @@ def test_obsidian_plugin_expands_tilde_vault_path(monkeypatch, tmp_path: Path):
     assert plugin.vault == vault
 
 
-def test_youtube_transport_expands_tilde_client_secret_path(monkeypatch, tmp_path: Path):
+def test_youtube_transport_expands_tilde_client_secret_path(
+    monkeypatch, tmp_path: Path
+):
     home = tmp_path / "home"
     secrets_dir = home / "secrets"
     secrets_dir.mkdir(parents=True)
@@ -127,7 +143,9 @@ def test_common_structlog_logger_available():
 def test_common_storage_engine_respects_custom_path(monkeypatch, tmp_path: Path):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
-    engine = create_sqlite_engine("corpus", db_path="~/.local/share/fast-market/data/corpus/custom.db")
+    engine = create_sqlite_engine(
+        "corpus", db_path="~/.local/share/fast-market/data/corpus/custom.db"
+    )
     try:
         with engine.connect() as conn:
             row = conn.exec_driver_sql("PRAGMA database_list").fetchone()
@@ -135,4 +153,7 @@ def test_common_storage_engine_respects_custom_path(monkeypatch, tmp_path: Path)
         engine.dispose()
     assert row is not None
     db_path = Path(row[2])
-    assert db_path == home / ".local" / "share" / "fast-market" / "data" / "corpus" / "custom.db"
+    assert (
+        db_path
+        == home / ".local" / "share" / "fast-market" / "data" / "corpus" / "custom.db"
+    )

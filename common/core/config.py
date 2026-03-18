@@ -29,6 +29,27 @@ def _resolve_config_path(tool_name: str, path: str | None = None) -> Path:
 
     return get_tool_config(tool_name)
 
+    override_dir = os.environ.get("FASTMARKET_CONFIG_DIR")
+    if override_dir:
+        result = Path(override_dir).expanduser() / f"{tool_name}.yaml"
+        print(f"[DEBUG] Using FASTMARKET_CONFIG_DIR override: {result}")
+        return result
+
+    deprecated_path = Path("config.yaml")
+    if deprecated_path.exists():
+        warnings.warn(
+            "config.yaml in current directory is deprecated. "
+            f"Move to {get_tool_config(tool_name)}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        print(f"[DEBUG] Using deprecated config.yaml: {deprecated_path}")
+        return deprecated_path
+
+    result = get_tool_config(tool_name)
+    print(f"[DEBUG] Using get_tool_config: {result}")
+    return result
+
 
 def load_tool_config(tool_name: str, path: str | None = None) -> dict[str, object]:
     """Load a fast-market tool config mapping from disk."""

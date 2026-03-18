@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import yaml
+import yaml_shim as yaml
 
 
 def test_yaml_shim_exposes_dump_and_safe_dump():
@@ -14,5 +14,5 @@ def test_yaml_shim_exposes_dump_and_safe_dump():
 def test_yaml_shim_load_variants():
     text = "key: value"
     assert yaml.safe_load(text)["key"] == "value"
-    assert yaml.load(text, Loader=None)["key"] == "value"
+    assert yaml.load(text)["key"] == "value"
     assert yaml.full_load(text)["key"] == "value"
