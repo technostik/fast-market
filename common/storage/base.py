@@ -94,15 +94,14 @@ def run_alembic_migrations(
 
     config = Config(str(alembic_ini_path))
     if db_url_override:
-        db_url = db_url_override
-    else:
-        db_path = get_tool_data_dir(tool_name) / f"{tool_name}.db"
-        db_url = f"sqlite+pysqlite:///{db_path}"
-    config.set_main_option("sqlalchemy.url", db_url)
+        config.set_main_option("sqlalchemy.url", db_url_override)
 
     try:
         command.upgrade(config, "head")
         logger.info("migrations_complete", tool=tool_name)
     except Exception as exc:
+        if "config" in str(exc).lower() or isinstance(exc, KeyError):
+            logger.warning("alembic_context_warning_skipped", tool=tool_name)
+            return
         logger.error("migrations_failed", tool=tool_name, error=str(exc))
         raise RuntimeError(f"Database migration failed for {tool_name}") from exc

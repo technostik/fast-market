@@ -8,6 +8,7 @@ Provides a clean, minimal local web interface for interacting with the corpus kn
 - `items.html` — Browse interface with filtering by source, document preview modal, and delete functionality
 - `search.html` — Search interface supporting both semantic and keyword modes with result previews
 - `status.html` — Summary dashboard showing document counts and total video duration by source
+- `failures.html` — Failed items page showing sync failures with error details, URLs to original content, and resync functionality
 
 ## 📋 Core Responsibilities
 - Display real-time corpus statistics via `/items?limit=1000` endpoint
@@ -15,11 +16,12 @@ Provides a clean, minimal local web interface for interacting with the corpus kn
 - Support semantic and keyword search with unified result presentation
 - Render document previews with source-appropriate formatting (Markdown for Obsidian, plain text for YouTube)
 - Enable document deletion directly from UI with confirmation
+- Display failed sync items with error details, original content URLs, and resync capability
 - Maintain consistent visual language across all pages (DM Mono/Syne fonts, dark theme, source color-coding)
 - Load dynamic frontend fragments via `/api/frontend-fragments` for extensibility
 
 ## 🔗 Dependencies & Integration
-- Imports from: Backend API endpoints (`/items`, `/search`, `/document/{plugin}/{id}`, `/api/frontend-fragments`)
+- Imports from: Backend API endpoints (`/items`, `/search`, `/document/{plugin}/{id}`, `/api/failures`, `/api/frontend-fragments`)
 - Used by: Browser clients accessing `/ui/*` routes
 - External deps: Google Fonts (DM Mono, Syne), browser native fetch API
 

@@ -199,6 +199,12 @@
       <span class="desc">Index stats and source breakdown.</span>
       <span class="arrow">→</span>
     </a>
+    <a href="/ui/failures" class="nav-card" style="--card-accent: var(--youtube)">
+      <span class="icon">⚠️</span>
+      <span class="label">Failures</span>
+      <span class="desc">View and retry failed sync items.</span>
+      <span class="arrow">→</span>
+    </a>
     <a href="/docs" class="nav-card" style="--card-accent: var(--muted)">
       <span class="icon">⚡</span>
       <span class="label">API</span>
@@ -213,21 +219,35 @@
 </main>
 
 <script>
-  fetch('/items?limit=1000')
-    .then(r => r.json())
-    .then(items => {
+  async function updateStatusBar() {
+    const bar = document.getElementById('status-bar');
+    try {
+      const [itemsRes, failuresRes] = await Promise.all([
+        fetch('/items?limit=1'),
+        fetch('/api/failures')
+      ]);
+      
+      const items = await itemsRes.json();
+      const failures = await failuresRes.json();
+      
       const counts = {};
       items.forEach(i => { counts[i.source_plugin] = (counts[i.source_plugin] || 0) + 1; });
-      const bar = document.getElementById('status-bar');
+      
       const parts = Object.entries(counts).map(([src, n]) =>
         `<span class="pill"><span class="dot" style="background:var(--${src === 'youtube' ? 'youtube' : 'obsidian'})"></span>${src}: ${n} docs</span>`
       );
+      
+      if (failures.length > 0) {
+        parts.push(`<span class="pill"><span class="dot" style="background:var(--youtube)"></span>${failures.length} failures</span>`);
+      }
+      
       if (parts.length === 0) parts.push('<span class="pill"><span class="dot"></span>no documents indexed yet — run corpus sync</span>');
       bar.innerHTML = parts.join('');
-    })
-    .catch(() => {
-      document.getElementById('status-bar').innerHTML = '<span class="pill">API offline</span>';
-    });
+    } catch {
+      bar.innerHTML = '<span class="pill">API offline</span>';
+    }
+  }
+  updateStatusBar();
 </script>
 <script>
   fetch('/api/frontend-fragments')

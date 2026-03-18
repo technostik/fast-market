@@ -20,24 +20,42 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--mode", type=click.Choice(["new", "backfill"]), default="new")
     @click.option("--limit", type=int, default=None)
     @click.option("--clean", is_flag=True, default=False)
-    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    @click.option(
+        "--format", "fmt", type=click.Choice(["json", "text"]), default="text"
+    )
     @click.pass_context
     def sync_cmd(ctx, source, mode, limit, clean, fmt, **kwargs):
+        from common.core.config import load_config
+
         engine, plugins, store = build_engine(ctx.obj["verbose"])
+        config = load_config()
+        obsidian_vault_path = config.get("obsidian", {}).get("vault_path")
         if clean:
             store.delete_all()
         targets = list(plugins.keys()) if source == "all" else [source]
         results = []
         for name in targets:
-            effective_limit = limit if limit is not None else _DEFAULT_LIMITS.get(name, _FALLBACK_LIMIT)
-            result = engine.sync(plugins[name], mode=mode, limit=effective_limit)
-            results.append({
-                "source": result.source,
-                "indexed": result.indexed,
-                "skipped": result.skipped,
-                "failures": len(result.failures),
-                "errors": [{"source_id": f.source_id, "error": f.error} for f in result.failures],
-            })
+            effective_limit = (
+                limit
+                if limit is not None
+                else _DEFAULT_LIMITS.get(name, _FALLBACK_LIMIT)
+            )
+            vault_path = obsidian_vault_path if name == "obsidian" else None
+            result = engine.sync(
+                plugins[name], mode=mode, limit=effective_limit, vault_path=vault_path
+            )
+            results.append(
+                {
+                    "source": result.source,
+                    "indexed": result.indexed,
+                    "skipped": result.skipped,
+                    "failures": len(result.failures),
+                    "errors": [
+                        {"source_id": f.source_id, "error": f.error}
+                        for f in result.failures
+                    ],
+                }
+            )
         out(results, fmt)
 
     return CommandManifest(
@@ -68,7 +86,11 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
         engine = SyncEngine(store, embedder)
         plugins = build_plugins(config, tool_root=Path(__file__).resolve().parents[2])
-        result = engine.sync(plugins[source], mode=mode, limit=int(limit))
+        obsidian_vault_path = config.get("obsidian", {}).get("vault_path")
+        vault_path = obsidian_vault_path if source == "obsidian" else None
+        result = engine.sync(
+            plugins[source], mode=mode, limit=int(limit), vault_path=vault_path
+        )
         return {
             "source": result.source,
             "indexed": result.indexed,

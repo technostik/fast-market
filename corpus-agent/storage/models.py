@@ -35,7 +35,9 @@ class DocumentModel(Base):
 class ChunkModel(Base):
     __tablename__ = "chunks"
     __table_args__ = (
-        UniqueConstraint("source_plugin", "source_id", "chunk_index", name="uq_chunks_source_chunk"),
+        UniqueConstraint(
+            "source_plugin", "source_id", "chunk_index", name="uq_chunks_source_chunk"
+        ),
         Index("ix_chunks_source_plugin_source_id", "source_plugin", "source_id"),
     )
 
@@ -65,3 +67,4 @@ class SyncFailureModel(Base):
     failed_at: Mapped[str] = mapped_column(String, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_retry_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    vault_path: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Failed Items — Corpus Agent</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e0f; --surface: #18181a; --border: #2a2a2e;
+    --accent: #c8f04a; --accent2: #4af0c8; --danger: #f87171; --warning: #fbbf24;
+    --text: #e8e8e6; --muted: #6b6b70;
+    --obsidian: #a78bfa; --youtube: #f87171;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Mono', monospace; min-height: 100vh; }
+
+  header { padding: 1.5rem 3rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; }
+  header a { color: var(--muted); text-decoration: none; font-size: 0.8rem; }
+  header a:hover { color: var(--accent); }
+  header h1 { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 800; color: var(--danger); }
+  .sep { color: var(--border); }
+
+  .toolbar { padding: 1.5rem 3rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  select, button { background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.8rem; padding: 0.5rem 1rem; cursor: pointer; }
+  button.active { border-color: var(--accent); color: var(--accent); }
+  .count { color: var(--muted); font-size: 0.75rem; margin-left: auto; }
+
+  .list { padding: 0 3rem 3rem; }
+
+  .item { border-bottom: 1px solid var(--border); padding: 1.25rem 0; display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: start; }
+
+  .source-badge { font-size: 0.65rem; padding: 0.2rem 0.5rem; border-radius: 2px; font-weight: 500; white-space: nowrap; margin-top: 3px; }
+  .badge-obsidian { background: rgba(167,139,250,0.15); color: var(--obsidian); }
+  .badge-youtube  { background: rgba(248,113,113,0.15); color: var(--youtube); }
+
+  .item-body { display: flex; flex-direction: column; gap: 0.4rem; }
+
+  .item-url { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.9rem; }
+  .item-url a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
+  .item-url a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .item-meta { color: var(--muted); font-size: 0.72rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+
+  .error-message {
+    color: var(--danger); font-size: 0.78rem; line-height: 1.4;
+    background: rgba(248,113,113,0.08); border-left: 2px solid var(--danger);
+    padding: 0.4rem 0.75rem; margin-top: 0.25rem;
+    max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .error-message:hover { white-space: normal; }
+
+  .badge-type { font-size: 0.6rem; padding: 0.15rem 0.4rem; border-radius: 2px; font-weight: 500; text-transform: uppercase; }
+  .badge-transient { background: rgba(251,191,36,0.15); color: var(--warning); }
+  .badge-permanent { background: rgba(248,113,113,0.15); color: var(--danger); }
+
+  .item-actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end; }
+  .btn-resync { background: transparent; border: 1px solid var(--accent); color: var(--accent); font-size: 0.7rem; padding: 0.3rem 0.6rem; cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+  .btn-resync:hover { background: var(--accent); color: #000; }
+  .btn-resync:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .empty, .loading { padding: 3rem; color: var(--muted); font-size: 0.85rem; text-align: center; }
+  .empty a { color: var(--accent); }
+  .empty a:hover { text-decoration: underline; }
+
+  .toast {
+    position: fixed; bottom: 2rem; right: 2rem; padding: 1rem 1.5rem;
+    border-radius: 4px; font-size: 0.85rem; z-index: 200;
+    animation: slideIn 0.2s ease-out;
+  }
+  .toast-success { background: var(--accent); color: #000; }
+  .toast-error { background: var(--danger); color: #fff; }
+  @keyframes slideIn {
+    from { transform: translateY(1rem); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/ui">corpus-agent</a>
+  <span class="sep">/</span>
+  <h1>Failed Items</h1>
+</header>
+
+<div class="toolbar">
+  <button id="btn-all" class="active" onclick="filterSource('all')">All</button>
+  <button id="btn-obsidian" onclick="filterSource('obsidian')">📓 Obsidian</button>
+  <button id="btn-youtube" onclick="filterSource('youtube')">▶ YouTube</button>
+  <span class="count" id="count"></span>
+</div>
+
+<div class="list" id="list"><div class="loading">Loading…</div></div>
+
+<script>
+  let allFailures = [];
+  let currentSource = 'all';
+
+  function obsidianUrl(item) {
+    const vaultPath = item.vault_path || '';
+    const vaultName = vaultPath.split('/').filter(Boolean).pop() || 'vault';
+    const file = item.source_id.replace(/\.md$/, '');
+    return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(file)}`;
+  }
+
+  function sourceUrl(item) {
+    if (item.source_plugin === 'youtube') return `https://www.youtube.com/watch?v=${item.source_id}`;
+    return obsidianUrl(item);
+  }
+
+  function sourceLinkText(item) {
+    if (item.source_plugin === 'youtube') return '▶ Watch on YouTube';
+    return '📓 Open in Obsidian';
+  }
+
+  function formatDate(iso) { return iso ? iso.slice(0, 10) : ''; }
+
+  function showToast(message, type) {
+    const existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  }
+
+  function resyncItem(sourcePlugin, sourceId, btn, idx) {
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+
+    fetch(`/api/failures/${sourcePlugin}/${encodeURIComponent(sourceId)}/resync`, { method: 'POST' })
+      .then(r => r.json())
+      .then(result => {
+        if (result.success) {
+          showToast('Resynced successfully', 'success');
+          allFailures.splice(idx, 1);
+          filterSource(currentSource);
+        } else {
+          showToast('Resync failed: ' + result.error, 'error');
+          btn.disabled = false;
+          btn.textContent = 'Resync';
+        }
+      })
+      .catch(err => {
+        showToast('Error: ' + err, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Resync';
+      });
+  }
+
+  function renderFailures(failures) {
+    const list = document.getElementById('list');
+    document.getElementById('count').textContent = `${failures.length} failed item${failures.length !== 1 ? 's' : ''}`;
+
+    if (!failures.length) {
+      list.innerHTML = '<div class="empty">No failed items.<br><a href="/ui/items">Browse indexed items</a></div>';
+      return;
+    }
+
+    let globalIdx = 0;
+    list.innerHTML = failures.map(item => {
+      const isYT = item.source_plugin === 'youtube';
+      const badgeClass = isYT ? 'badge-youtube' : 'badge-obsidian';
+      const badgeLabel = isYT ? 'YouTube' : 'Obsidian';
+      const url = sourceUrl(item);
+      const linkText = sourceLinkText(item);
+      const target = isYT ? ' target="_blank" rel="noopener"' : '';
+      const typeClass = item.error_type === 'permanent' ? 'badge-permanent' : 'badge-transient';
+      const typeLabel = item.error_type || 'unknown';
+
+      const currentIdx = allFailures.indexOf(item);
+
+      return `
+        <div class="item">
+          <span class="source-badge ${badgeClass}">${badgeLabel}</span>
+          <div class="item-body">
+            <div class="item-url">
+              <a href="${url}" ${target}>${linkText}</a>
+            </div>
+            <div class="item-meta">
+              <span>Failed: ${formatDate(item.failed_at)}</span>
+              <span>Retries: ${item.retry_count || 0}</span>
+              <span class="badge-type ${typeClass}">${typeLabel}</span>
+            </div>
+            <div class="error-message" title="${(item.error_message || '').replace(/"/g, '&quot;')}">
+              ${(item.error_message || 'Unknown error').replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+            </div>
+          </div>
+          <div class="item-actions">
+            <button class="btn-resync" onclick="resyncItem('${item.source_plugin}', '${item.source_id.replace(/'/g, "\\'")}', this, ${currentIdx})">Resync</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function filterSource(source) {
+    currentSource = source;
+    ['all', 'obsidian', 'youtube'].forEach(s => {
+      document.getElementById('btn-' + s).classList.toggle('active', s === source);
+    });
+    const filtered = source === 'all' ? allFailures : allFailures.filter(i => i.source_plugin === source);
+    renderFailures(filtered);
+  }
+
+  fetch('/api/failures')
+    .then(r => r.json())
+    .then(failures => { allFailures = failures; filterSource('all'); })
+    .catch(err => { document.getElementById('list').innerHTML = `<div class="empty">Error loading failures: ${err}</div>`; });
+</script>
+<script>
+  fetch('/api/frontend-fragments')
+    .then(r => r.json())
+    .then(frags => frags.forEach(f => {
+      const s = document.createElement('script');
+      s.textContent = f.js;
+      document.head.appendChild(s);
+    }))
+    .catch(() => {});
+</script>
+</body>
+</html>

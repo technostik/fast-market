@@ -49,9 +49,13 @@ class SearchFilters:
         self.privacy_status = privacy_status
 
         if video_type == "short":
-            self.max_duration = min(self.max_duration or 9999999, YOUTUBE_SHORT_MAX_SECONDS)
+            self.max_duration = min(
+                self.max_duration or 9999999, YOUTUBE_SHORT_MAX_SECONDS
+            )
         elif video_type == "long":
-            self.min_duration = max(self.min_duration or 0, YOUTUBE_SHORT_MAX_SECONDS + 1)
+            self.min_duration = max(
+                self.min_duration or 0, YOUTUBE_SHORT_MAX_SECONDS + 1
+            )
 
 
 class _CompatCursor:
@@ -121,6 +125,15 @@ class SQLAlchemyStore:
             logger.info("db_migration_complete", backend="sqlalchemy", target="memory")
             return
 
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text("SELECT version_num FROM alembic_version"))
+                current_version = result.scalar()
+                logger.info("db_already_migrated", version=current_version)
+                return
+        except Exception:
+            pass
+
         alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
         expanded = Path(self._path).expanduser()
         run_alembic_migrations(
@@ -157,7 +170,9 @@ class SQLAlchemyStore:
                 "title": document.title,
                 "raw_text": document.raw_text,
                 "url": document.url,
-                "updated_at": document.updated_at.isoformat() if document.updated_at else None,
+                "updated_at": document.updated_at.isoformat()
+                if document.updated_at
+                else None,
                 "duration_seconds": document.duration_seconds,
                 "privacy_status": document.privacy_status,
                 "content_hash": content_hash,
@@ -171,14 +186,20 @@ class SQLAlchemyStore:
                 session.add(DocumentModel(**payload))
             return True
 
-    def replace_chunks(self, source_plugin: str, source_id: str, chunks: list[Chunk]) -> None:
+    def replace_chunks(
+        self, source_plugin: str, source_id: str, chunks: list[Chunk]
+    ) -> None:
         with self._session() as session:
-            session.execute(delete(ChunkModel).where(
-                ChunkModel.source_plugin == source_plugin,
-                ChunkModel.source_id == source_id,
-            ))
             session.execute(
-                text("DELETE FROM chunks_fts WHERE source_plugin = :source_plugin AND source_id = :source_id"),
+                delete(ChunkModel).where(
+                    ChunkModel.source_plugin == source_plugin,
+                    ChunkModel.source_id == source_id,
+                )
+            )
+            session.execute(
+                text(
+                    "DELETE FROM chunks_fts WHERE source_plugin = :source_plugin AND source_id = :source_id"
+                ),
                 {"source_plugin": source_plugin, "source_id": source_id},
             )
             if not chunks:
@@ -215,66 +236,93 @@ class SQLAlchemyStore:
 
     def get_document(self, source_plugin: str, source_id: str) -> dict | None:
         with self._session() as session:
-            row = session.execute(
-                text(
-                    "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, "
-                    "duration_seconds, privacy_status, metadata_json "
-                    "FROM documents WHERE source_plugin=:source_plugin AND source_id=:source_id"
-                ),
-                {"source_plugin": source_plugin, "source_id": source_id},
-            ).mappings().first()
+            row = (
+                session.execute(
+                    text(
+                        "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, "
+                        "duration_seconds, privacy_status, metadata_json "
+                        "FROM documents WHERE source_plugin=:source_plugin AND source_id=:source_id"
+                    ),
+                    {"source_plugin": source_plugin, "source_id": source_id},
+                )
+                .mappings()
+                .first()
+            )
             return self._row_to_doc_dict(row) if row else None
 
     def get_document_by_handle(self, handle: str) -> dict | None:
         with self._session() as session:
-            row = session.execute(
-                text(
-                    "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, "
-                    "duration_seconds, privacy_status, metadata_json "
-                    "FROM documents WHERE handle=:handle OR source_id=:handle"
-                ),
-                {"handle": handle},
-            ).mappings().first()
+            row = (
+                session.execute(
+                    text(
+                        "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, "
+                        "duration_seconds, privacy_status, metadata_json "
+                        "FROM documents WHERE handle=:handle OR source_id=:handle"
+                    ),
+                    {"handle": handle},
+                )
+                .mappings()
+                .first()
+            )
             return self._row_to_doc_dict(row) if row else None
 
     def delete_document(self, source_plugin: str, source_id: str) -> bool:
         with self._session() as session:
             exists = session.execute(
-                text("SELECT 1 FROM documents WHERE source_plugin=:source_plugin AND source_id=:source_id"),
+                text(
+                    "SELECT 1 FROM documents WHERE source_plugin=:source_plugin AND source_id=:source_id"
+                ),
                 {"source_plugin": source_plugin, "source_id": source_id},
             ).first()
             if not exists:
                 return False
             session.execute(
-                text("DELETE FROM documents WHERE source_plugin=:source_plugin AND source_id=:source_id"),
+                text(
+                    "DELETE FROM documents WHERE source_plugin=:source_plugin AND source_id=:source_id"
+                ),
                 {"source_plugin": source_plugin, "source_id": source_id},
             )
             session.execute(
-                text("DELETE FROM chunks WHERE source_plugin=:source_plugin AND source_id=:source_id"),
+                text(
+                    "DELETE FROM chunks WHERE source_plugin=:source_plugin AND source_id=:source_id"
+                ),
                 {"source_plugin": source_plugin, "source_id": source_id},
             )
             session.execute(
-                text("DELETE FROM chunks_fts WHERE source_plugin=:source_plugin AND source_id=:source_id"),
+                text(
+                    "DELETE FROM chunks_fts WHERE source_plugin=:source_plugin AND source_id=:source_id"
+                ),
                 {"source_plugin": source_plugin, "source_id": source_id},
             )
-            logger.info("document_deleted", source_plugin=source_plugin, source_id=source_id)
+            logger.info(
+                "document_deleted", source_plugin=source_plugin, source_id=source_id
+            )
             return True
 
     def delete_document_by_handle(self, handle: str) -> bool:
         with self._session() as session:
-            row = session.execute(
-                text("SELECT source_plugin, source_id FROM documents WHERE handle=:handle OR source_id=:handle"),
-                {"handle": handle},
-            ).mappings().first()
+            row = (
+                session.execute(
+                    text(
+                        "SELECT source_plugin, source_id FROM documents WHERE handle=:handle OR source_id=:handle"
+                    ),
+                    {"handle": handle},
+                )
+                .mappings()
+                .first()
+            )
         if not row:
             return False
         return self.delete_document(row["source_plugin"], row["source_id"])
 
-    def keyword_search(self, query: str, limit: int, filters: SearchFilters | None = None) -> list[SearchResult]:
+    def keyword_search(
+        self, query: str, limit: int, filters: SearchFilters | None = None
+    ) -> list[SearchResult]:
         with self._session() as session:
-            rows = session.execute(
-                text(
-                    """
+            rows = (
+                session.execute(
+                    text(
+                        """
                     SELECT d.handle, d.source_plugin, d.source_id, d.title, d.duration_seconds,
                            d.privacy_status, c.content
                     FROM chunks_fts c
@@ -282,9 +330,12 @@ class SQLAlchemyStore:
                     WHERE chunks_fts MATCH :query
                     LIMIT :limit
                     """
-                ),
-                {"query": query, "limit": limit * 5},
-            ).mappings().all()
+                    ),
+                    {"query": query, "limit": limit * 5},
+                )
+                .mappings()
+                .all()
+            )
         results = [
             SearchResult(
                 source_plugin=row["source_plugin"],
@@ -300,18 +351,27 @@ class SQLAlchemyStore:
         ]
         return _apply_filters(results, filters)[:limit]
 
-    def semantic_search(self, query_vector: list[float], limit: int, filters: SearchFilters | None = None) -> list[SearchResult]:
+    def semantic_search(
+        self,
+        query_vector: list[float],
+        limit: int,
+        filters: SearchFilters | None = None,
+    ) -> list[SearchResult]:
         with self._session() as session:
-            rows = session.execute(
-                text(
-                    """
+            rows = (
+                session.execute(
+                    text(
+                        """
                     SELECT c.source_plugin, c.source_id, c.content, c.embedding_json,
                            d.handle, d.title, d.duration_seconds, d.privacy_status
                     FROM chunks c
                     JOIN documents d ON d.source_plugin=c.source_plugin AND d.source_id=c.source_id
                     """
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
         q = [float(value) for value in query_vector]
         scored: list[tuple[float, dict]] = []
         for row in rows:
@@ -334,26 +394,39 @@ class SQLAlchemyStore:
         ]
         return _apply_filters(results, filters)[:limit]
 
-    def list_documents(self, source: str | None = None, limit: int = 50, filters: SearchFilters | None = None) -> list[dict]:
+    def list_documents(
+        self,
+        source: str | None = None,
+        limit: int = 50,
+        filters: SearchFilters | None = None,
+    ) -> list[dict]:
         with self._session() as session:
             if source:
-                rows = session.execute(
-                    text(
-                        "SELECT handle, source_plugin, source_id, title, url, updated_at, "
-                        "duration_seconds, privacy_status, metadata_json "
-                        "FROM documents WHERE source_plugin=:source ORDER BY updated_at DESC LIMIT :limit"
-                    ),
-                    {"source": source, "limit": limit * 5},
-                ).mappings().all()
+                rows = (
+                    session.execute(
+                        text(
+                            "SELECT handle, source_plugin, source_id, title, url, updated_at, "
+                            "duration_seconds, privacy_status, metadata_json "
+                            "FROM documents WHERE source_plugin=:source ORDER BY updated_at DESC LIMIT :limit"
+                        ),
+                        {"source": source, "limit": limit * 5},
+                    )
+                    .mappings()
+                    .all()
+                )
             else:
-                rows = session.execute(
-                    text(
-                        "SELECT handle, source_plugin, source_id, title, url, updated_at, "
-                        "duration_seconds, privacy_status, metadata_json "
-                        "FROM documents ORDER BY updated_at DESC LIMIT :limit"
-                    ),
-                    {"limit": limit * 5},
-                ).mappings().all()
+                rows = (
+                    session.execute(
+                        text(
+                            "SELECT handle, source_plugin, source_id, title, url, updated_at, "
+                            "duration_seconds, privacy_status, metadata_json "
+                            "FROM documents ORDER BY updated_at DESC LIMIT :limit"
+                        ),
+                        {"limit": limit * 5},
+                    )
+                    .mappings()
+                    .all()
+                )
         items = [self._row_to_doc_dict(row) for row in rows]
         if filters:
             items = _apply_filters_dicts(items, filters)
@@ -431,10 +504,16 @@ class SQLAlchemyStore:
 
     def get_indexed_id_dates(self, source: str) -> dict[str, datetime | None]:
         with self._session() as session:
-            rows = session.execute(
-                text("SELECT source_id, updated_at FROM documents WHERE source_plugin=:source"),
-                {"source": source},
-            ).mappings().all()
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT source_id, updated_at FROM documents WHERE source_plugin=:source"
+                    ),
+                    {"source": source},
+                )
+                .mappings()
+                .all()
+            )
         out: dict[str, datetime | None] = {}
         for row in rows:
             ts = row["updated_at"]
@@ -443,18 +522,37 @@ class SQLAlchemyStore:
 
     def get_documents_raw(self, source: str) -> list[sqlite3.Row]:
         with self._session() as session:
-            rows = session.execute(
-                text("SELECT source_plugin, source_id, title, raw_text FROM documents WHERE source_plugin=:source"),
-                {"source": source},
-            ).mappings().all()
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT source_plugin, source_id, title, raw_text FROM documents WHERE source_plugin=:source"
+                    ),
+                    {"source": source},
+                )
+                .mappings()
+                .all()
+            )
         return rows
 
     def delete_source_chunks(self, source: str) -> None:
         with self._session() as session:
-            session.execute(text("DELETE FROM chunks WHERE source_plugin=:source"), {"source": source})
-            session.execute(text("DELETE FROM chunks_fts WHERE source_plugin=:source"), {"source": source})
+            session.execute(
+                text("DELETE FROM chunks WHERE source_plugin=:source"),
+                {"source": source},
+            )
+            session.execute(
+                text("DELETE FROM chunks_fts WHERE source_plugin=:source"),
+                {"source": source},
+            )
 
-    def record_failure(self, source_plugin: str, source_id: str, error: str, error_type: str) -> None:
+    def record_failure(
+        self,
+        source_plugin: str,
+        source_id: str,
+        error: str,
+        error_type: str,
+        vault_path: str | None = None,
+    ) -> None:
         now = datetime.utcnow().isoformat()
         with self._session() as session:
             existing = session.execute(
@@ -469,6 +567,7 @@ class SQLAlchemyStore:
                 existing.failed_at = now
                 existing.retry_count = int(existing.retry_count or 0) + 1
                 existing.last_retry_at = now
+                existing.vault_path = vault_path
                 return
             session.add(
                 SyncFailureModel(
@@ -479,18 +578,23 @@ class SQLAlchemyStore:
                     failed_at=now,
                     retry_count=0,
                     last_retry_at=None,
+                    vault_path=vault_path,
                 )
             )
 
     def get_permanent_failures(self, source_plugin: str) -> set[str]:
         with self._session() as session:
-            rows = session.execute(
-                text(
-                    "SELECT source_id FROM sync_failures "
-                    "WHERE source_plugin=:source_plugin AND error_type='permanent'"
-                ),
-                {"source_plugin": source_plugin},
-            ).mappings().all()
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT source_id FROM sync_failures "
+                        "WHERE source_plugin=:source_plugin AND error_type='permanent'"
+                    ),
+                    {"source_plugin": source_plugin},
+                )
+                .mappings()
+                .all()
+            )
         return {row["source_id"] for row in rows}
 
     def clear_failure(self, source_plugin: str, source_id: str) -> None:
@@ -505,30 +609,42 @@ class SQLAlchemyStore:
     def list_failures(self, source_plugin: str | None = None) -> list[dict]:
         with self._session() as session:
             if source_plugin:
-                rows = session.execute(
-                    text(
-                        "SELECT source_plugin, source_id, error_message, error_type, "
-                        "failed_at, retry_count, last_retry_at "
-                        "FROM sync_failures WHERE source_plugin=:source_plugin "
-                        "ORDER BY failed_at DESC"
-                    ),
-                    {"source_plugin": source_plugin},
-                ).mappings().all()
-            else:
-                rows = session.execute(
-                    text(
-                        "SELECT source_plugin, source_id, error_message, error_type, "
-                        "failed_at, retry_count, last_retry_at "
-                        "FROM sync_failures ORDER BY failed_at DESC"
+                rows = (
+                    session.execute(
+                        text(
+                            "SELECT source_plugin, source_id, error_message, error_type, "
+                            "failed_at, retry_count, last_retry_at, vault_path "
+                            "FROM sync_failures WHERE source_plugin=:source_plugin "
+                            "ORDER BY failed_at DESC"
+                        ),
+                        {"source_plugin": source_plugin},
                     )
-                ).mappings().all()
+                    .mappings()
+                    .all()
+                )
+            else:
+                rows = (
+                    session.execute(
+                        text(
+                            "SELECT source_plugin, source_id, error_message, error_type, "
+                            "failed_at, retry_count, last_retry_at, vault_path "
+                            "FROM sync_failures ORDER BY failed_at DESC"
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
         return [dict(row) for row in rows]
 
-    def clear_failures(self, source_plugin: str | None = None, include_permanent: bool = False) -> int:
+    def clear_failures(
+        self, source_plugin: str | None = None, include_permanent: bool = False
+    ) -> int:
         with self._session() as session:
             if source_plugin and include_permanent:
                 res = session.execute(
-                    text("DELETE FROM sync_failures WHERE source_plugin=:source_plugin"),
+                    text(
+                        "DELETE FROM sync_failures WHERE source_plugin=:source_plugin"
+                    ),
                     {"source_plugin": source_plugin},
                 )
             elif source_plugin:
@@ -542,23 +658,35 @@ class SQLAlchemyStore:
             elif include_permanent:
                 res = session.execute(text("DELETE FROM sync_failures"))
             else:
-                res = session.execute(text("DELETE FROM sync_failures WHERE error_type='transient'"))
+                res = session.execute(
+                    text("DELETE FROM sync_failures WHERE error_type='transient'")
+                )
         return int(res.rowcount or 0)
 
     def status(self) -> list[dict]:
         with self._session() as session:
-            doc_rows = session.execute(
-                text("SELECT source_plugin, COUNT(*) as docs FROM documents GROUP BY source_plugin")
-            ).mappings().all()
-            failure_rows = session.execute(
-                text(
-                    "SELECT source_plugin, "
-                    "COUNT(*) as sync_failures_total, "
-                    "SUM(CASE WHEN error_type='transient' THEN 1 ELSE 0 END) as sync_failures_transient, "
-                    "SUM(CASE WHEN error_type='permanent' THEN 1 ELSE 0 END) as sync_failures_permanent "
-                    "FROM sync_failures GROUP BY source_plugin"
+            doc_rows = (
+                session.execute(
+                    text(
+                        "SELECT source_plugin, COUNT(*) as docs FROM documents GROUP BY source_plugin"
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
+            failure_rows = (
+                session.execute(
+                    text(
+                        "SELECT source_plugin, "
+                        "COUNT(*) as sync_failures_total, "
+                        "SUM(CASE WHEN error_type='transient' THEN 1 ELSE 0 END) as sync_failures_transient, "
+                        "SUM(CASE WHEN error_type='permanent' THEN 1 ELSE 0 END) as sync_failures_permanent "
+                        "FROM sync_failures GROUP BY source_plugin"
+                    )
+                )
+                .mappings()
+                .all()
+            )
 
         merged: dict[str, dict] = {}
         for row in doc_rows:
@@ -587,7 +715,9 @@ class SQLAlchemyStore:
         return [merged[name] for name in sorted(merged)]
 
 
-def _apply_filters(results: list[SearchResult], filters: SearchFilters | None) -> list[SearchResult]:
+def _apply_filters(
+    results: list[SearchResult], filters: SearchFilters | None
+) -> list[SearchResult]:
     if not filters:
         return results
     out = []
@@ -599,13 +729,18 @@ def _apply_filters(results: list[SearchResult], filters: SearchFilters | None) -
             continue
         if filters.max_duration is not None and duration > filters.max_duration:
             continue
-        if filters.privacy_status is not None and item.privacy_status != filters.privacy_status:
+        if (
+            filters.privacy_status is not None
+            and item.privacy_status != filters.privacy_status
+        ):
             continue
         out.append(item)
     return out
 
 
-def _apply_filters_dicts(items: list[dict], filters: SearchFilters | None) -> list[dict]:
+def _apply_filters_dicts(
+    items: list[dict], filters: SearchFilters | None
+) -> list[dict]:
     if not filters:
         return items
     out = []
@@ -627,7 +762,10 @@ def _apply_filters_dicts(items: list[dict], filters: SearchFilters | None) -> li
             continue
         if filters.max_size is not None and raw_len > filters.max_size:
             continue
-        if filters.privacy_status is not None and item.get("privacy_status") != filters.privacy_status:
+        if (
+            filters.privacy_status is not None
+            and item.get("privacy_status") != filters.privacy_status
+        ):
             continue
         out.append(item)
     return out

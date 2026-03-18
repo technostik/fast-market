@@ -47,14 +47,12 @@ class SyncEngine:
             )
         return chunks
 
-    def sync(self, plugin: SourcePlugin, mode: str, limit: int) -> SyncResult:
-        # Unified cursor: {source_id: indexed_updated_at} for all already-indexed docs.
-        # Each plugin decides how to use it:
-        # - YouTube: skip if source_id is present (ID-based dedup, date ignored).
-        # - Obsidian: skip if source_id is present AND mtime <= indexed_updated_at
-        #   (re-indexes modified files even when already known).
-        # backfill mode passes an empty dict so all items are reconsidered.
-        known_id_dates = self.store.get_indexed_id_dates(plugin.name) if mode == "new" else {}
+    def sync(
+        self, plugin: SourcePlugin, mode: str, limit: int, vault_path: str | None = None
+    ) -> SyncResult:
+        known_id_dates = (
+            self.store.get_indexed_id_dates(plugin.name) if mode == "new" else {}
+        )
 
         permanent_failures = self.store.get_permanent_failures(plugin.name)
         items = plugin.list_items(limit=limit, known_id_dates=known_id_dates)
@@ -63,14 +61,20 @@ class SyncEngine:
 
         for item in items:
             if item.source_id in permanent_failures:
-                logger.info("skipping_permanent_failure", source=plugin.name, source_id=item.source_id)
+                logger.info(
+                    "skipping_permanent_failure",
+                    source=plugin.name,
+                    source_id=item.source_id,
+                )
                 skipped += 1
                 continue
 
             processed += 1
             try:
                 document = plugin.fetch(item)
-                document.handle = make_handle(document.source_plugin, document.source_id, document.title)
+                document.handle = make_handle(
+                    document.source_plugin, document.source_id, document.title
+                )
                 content_hash = self.embedder.hash_text(document.raw_text)
                 changed = self.store.upsert_document(document, content_hash)
 
@@ -80,14 +84,18 @@ class SyncEngine:
                     continue
 
                 chunks = self._build_chunks(document)
-                self.store.replace_chunks(document.source_plugin, document.source_id, chunks)
+                self.store.replace_chunks(
+                    document.source_plugin, document.source_id, chunks
+                )
                 self.store.clear_failure(plugin.name, item.source_id)
                 indexed += 1
                 _log_item(plugin.name, document, "indexed", chunks=len(chunks))
 
             except SyncError as exc:
                 error_type = "permanent" if exc.permanent else "transient"
-                self.store.record_failure(plugin.name, item.source_id, str(exc), error_type)
+                self.store.record_failure(
+                    plugin.name, item.source_id, str(exc), error_type, vault_path
+                )
                 logger.error(
                     "sync_item_failed",
                     source=plugin.name,
@@ -97,7 +105,9 @@ class SyncEngine:
                 )
                 failures.append(SyncFailure(source_id=item.source_id, error=str(exc)))
             except Exception as exc:
-                self.store.record_failure(plugin.name, item.source_id, str(exc), "transient")
+                self.store.record_failure(
+                    plugin.name, item.source_id, str(exc), "transient", vault_path
+                )
                 logger.error(
                     "sync_item_failed",
                     source=plugin.name,
@@ -128,7 +138,12 @@ class SyncEngine:
 
 
 def _log_item(source: str, document: Document, status: str, **extra) -> None:
-    fields: dict = {"source": source, "handle": document.handle, "title": document.title, "status": status}
+    fields: dict = {
+        "source": source,
+        "handle": document.handle,
+        "title": document.title,
+        "status": status,
+    }
     if source == "youtube":
         if document.duration_seconds:
             h, rem = divmod(document.duration_seconds, 3600)
