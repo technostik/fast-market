@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-import structlog
+from common import structlog
 
 from core.models import Document
 from core.sync_errors import APIRateLimitError, NetworkError, TranscriptUnavailableError

@@ -7,7 +7,7 @@ import os
 import signal
 import sys
 
-import structlog
+from common import structlog
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 

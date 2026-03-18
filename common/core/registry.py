@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
-import structlog
+from common import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -29,11 +29,10 @@ def discover_plugins(
     for entry in sorted(plugins_dir.iterdir()):
         if not entry.is_dir() or entry.name.startswith("_"):
             continue
-        mod_path = f"{plugin_package}.{entry.name}.register"
-        try:
-            mod = importlib.import_module(mod_path)
-        except ModuleNotFoundError:
+        if not (entry / "register.py").exists():
             continue
+        mod_path = f"{plugin_package}.{entry.name}.register"
+        mod = importlib.import_module(mod_path)
         if not hasattr(mod, "register"):
             raise RuntimeError(
                 f"FAIL LOUDLY: {mod_path} exists but has no register() function"
@@ -68,11 +67,10 @@ def discover_commands(
     for entry in sorted(commands_dir.iterdir()):
         if not entry.is_dir() or entry.name.startswith("_"):
             continue
-        mod_path = f"{command_package}.{entry.name}.register"
-        try:
-            mod = importlib.import_module(mod_path)
-        except ModuleNotFoundError:
+        if not (entry / "register.py").exists():
             continue
+        mod_path = f"{command_package}.{entry.name}.register"
+        mod = importlib.import_module(mod_path)
         if not hasattr(mod, "register"):
             raise RuntimeError(
                 f"FAIL LOUDLY: {mod_path} exists but has no register() function"

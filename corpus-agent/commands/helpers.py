@@ -4,7 +4,7 @@ import inspect
 import sys
 from pathlib import Path
 
-import structlog
+from common import structlog
 
 from common.cli.helpers import out
 from storage.sqlite_store import SearchFilters
@@ -65,7 +65,7 @@ def _configure_logging(verbose: bool) -> None:
         logging.getLogger(name).setLevel(level)
 
     try:
-        import structlog as _structlog
+        from common import structlog as _structlog
 
         _structlog.configure(
             wrapper_class=_structlog.make_filtering_bound_logger(level),

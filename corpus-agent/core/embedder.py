@@ -5,7 +5,7 @@ import logging
 import math
 from typing import Sequence
 
-import structlog
+from common import structlog
 
 logger = structlog.get_logger(__name__)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-import structlog
+from common import structlog
 
 from core.embedder import Embedder
 from core.handle import make_handle

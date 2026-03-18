@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import structlog
+from common import structlog
 
 from common.auth.base import AuthProvider
 

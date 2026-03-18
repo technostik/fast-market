@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import click
-import structlog
+from common import structlog
 
 from commands.base import CommandManifest
 from common.core.paths import get_tool_cache_dir

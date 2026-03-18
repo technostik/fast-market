@@ -4,6 +4,8 @@ import warnings
 from pathlib import Path
 
 
+from common import structlog
+from common.storage.base import create_sqlite_engine
 from core.config import load_config
 from core.paths import get_fastmarket_dir, get_tool_cache_dir, get_tool_config, get_tool_data_dir
 from plugins.obsidian.plugin import ObsidianPlugin
@@ -115,3 +117,22 @@ def test_youtube_transport_expands_tilde_client_secret_path(monkeypatch, tmp_pat
     transport = YouTubeTransport(client_secret_path="~/secrets/client_secret.json")
     token_path = Path(transport.client_secret_path).expanduser().parent / "token.json"
     assert token_path == secrets_dir / "token.json"
+
+
+def test_common_structlog_logger_available():
+    logger = structlog.get_logger("test")
+    assert logger is not None
+
+
+def test_common_storage_engine_respects_custom_path(monkeypatch, tmp_path: Path):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    engine = create_sqlite_engine("corpus", db_path="~/.local/share/fast-market/data/corpus/custom.db")
+    try:
+        with engine.connect() as conn:
+            row = conn.exec_driver_sql("PRAGMA database_list").fetchone()
+    finally:
+        engine.dispose()
+    assert row is not None
+    db_path = Path(row[2])
+    assert db_path == home / ".local" / "share" / "fast-market" / "data" / "corpus" / "custom.db"
