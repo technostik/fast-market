@@ -5,19 +5,14 @@ This document explains how to build a new CLI application with the same modular 
 ## Architecture Overview
 
 ```
-fast-market/                  # Workspace root
-├── common/                   # Shared utilities for ALL tools
-│   ├── cli/                  # CLI helpers (create_cli_group, out)
-│   ├── core/                 # Config, paths, registry
-│   └── storage/              # SQLAlchemy engine/session helpers
-├── your-agent/              # Tool-specific code
-│   ├── cli/                 # Entry point (main.py)
-│   ├── core/                # Tool-specific (models, embedder, sync)
-│   ├── plugins/             # Source plugins
-│   ├── commands/            # CLI commands
-│   ├── storage/             # Tool-specific DB models
-│   ├── api/                 # HTTP API (optional)
-│   └── ui/                  # Web UI (optional)
+your-agent/
+├── your_entry/           # CLI entry point (NOT cli/!)
+│   └── __init__.py        # Imports main from cli.main
+├── core/                  # Core logic (models, engine, config)
+├── plugins/               # your engine plugins (flux2)
+├── commands/              # CLI commands (generate, setup, serve)
+├── api/                   # FastAPI server
+└── common/                # Symlink to shared utilities
 ```
 
 ### Common Code (`common/`)
@@ -48,9 +43,8 @@ Create your project with this minimal structure:
 
 ```
 your-agent/
-├── cli/
-│   ├── __init__.py
-│   └── main.py              # CLI entry point
+├── your_entry/          # CLI entry point (NOT cli/!)
+│   └── __init__.py      # Imports and re-exports main from cli.main
 ├── core/
 │   ├── __init__.py
 │   ├── config.py            # Re-export from common (optional)
@@ -68,7 +62,26 @@ your-agent/
 
 ## Step 2: Core Components
 
-### 2.1 CLI Entry Point (cli/main.py)
+### 2.1 Entry Point (your_entry/__init__.py)
+
+This is the **required** entry point for your CLI. The `cli/main.py` is imported by this file, but the `[project.scripts]` in pyproject.toml **must** point here to avoid conflicts with other agents.
+
+```python
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from cli.main import main
+
+__all__ = ["main"]
+```
+
+### 2.2 CLI Main (cli/main.py)
 
 ```python
 from __future__ import annotations
@@ -99,7 +112,7 @@ if __name__ == "__main__":
     main()
 ```
 
-### 2.2 Configuration (core/config.py)
+### 2.3 Configuration (core/config.py)
 
 Import from `common.core.config`:
 
@@ -113,7 +126,7 @@ XDG-compliant config path: `~/.local/share/fast-market/config/your-agent.yaml`
 
 Use `load_tool_config("your-tool-name")` for tool-specific config loading.
 
-### 2.3 Registry (core/registry.py)
+### 2.4 Registry (core/registry.py)
 
 Import from `common.core.registry`:
 
@@ -131,7 +144,7 @@ Functions from `common.core.registry`:
 | `discover_commands(plugin_manifests, tool_root=...)` | Scan `commands/*/register.py` |
 | `build_plugins(config, tool_root=...)` | Instantiate plugin classes from manifests |
 
-### 2.4 Helper Utilities (commands/helpers.py)
+### 2.5 Helper Utilities (commands/helpers.py)
 
 ```python
 from __future__ import annotations
@@ -145,7 +158,7 @@ def build_engine(config: dict, tool_root: Path):
     return build_plugins(config, tool_root=tool_root)
 ```
 
-### 2.5 Storage (common/storage/base.py)
+### 2.6 Storage (common/storage/base.py)
 
 ```python
 from common.storage.base import create_sqlite_engine, session_scope
@@ -361,7 +374,7 @@ api = [
 ]
 
 [project.scripts]
-your-agent = "cli.main:main"
+your-agent = "your_entry:main"
 
 [tool.setuptools]
 packages = [
@@ -371,6 +384,7 @@ packages = [
     "plugins.example",
     "commands",
     "commands.hello",
+    "your_entry",
 ]
 ```
 
@@ -488,7 +502,7 @@ your-agent --help
 
 ## Step 9: How Discovery Works
 
-1. **Startup**: `cli/main.py` calls `_load()` on import
+1. **Startup**: `your_entry/__init__.py` imports `cli.main` which calls `_load()` on import
 2. **Discover Plugins**: `discover_plugins()` scans `plugins/*/register.py`
 3. **Discover Commands**: `discover_commands()` scans `commands/*/register.py`
 4. **Inject Options**: Each command receives plugin-specific CLI options
@@ -554,13 +568,15 @@ for cmd in discover_commands().values():
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Entry Point | `cli/main.py` | Click group + discovery |
+| Entry Point | `your_entry/__init__.py` | CLI script entry (imports cli.main) |
+| CLI Main | `cli/main.py` | Click group + plugin/command discovery |
 | Plugin Base | `plugins/base.py` | `SourcePlugin` ABC + `PluginManifest` |
 | Command Base | `commands/base.py` | `CommandManifest` |
 | Plugin | `plugins/*/register.py` | Returns `PluginManifest` |
 | Command | `commands/*/register.py` | Returns `CommandManifest` |
 
 **Key Rules**:
+- `[project.scripts]` **must** point to `your_entry:main` — NOT `cli.main:main`
 - Never hardcode plugin names — use manifests
 - Never modify cli/main.py when adding plugins/commands
 - Use `**kwargs` to absorb plugin-injected options

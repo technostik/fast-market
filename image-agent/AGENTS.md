@@ -7,12 +7,13 @@ AI image generation CLI tool with FLUX.2 support. Provides a modular plugin syst
 
 ```
 image-agent/
-├── cli/                  # Entry point (main.py)
-├── core/                 # Core logic (models, engine, config)
-├── plugins/              # Image engine plugins (flux2)
-├── commands/             # CLI commands (generate, setup, serve)
-├── api/                  # FastAPI server
-└── common/               # Symlink to shared utilities
+├── image_entry/           # CLI entry point (NOT cli/!)
+│   └── __init__.py        # Imports main from cli.main
+├── core/                  # Core logic (models, engine, config)
+├── plugins/               # Image engine plugins (flux2)
+├── commands/              # CLI commands (generate, setup, serve)
+├── api/                   # FastAPI server
+└── common/                # Symlink to shared utilities
 ```
 
 ## Essential Components
