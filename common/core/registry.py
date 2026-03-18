@@ -10,7 +10,9 @@ logger = structlog.get_logger(__name__)
 
 def _resolve_tool_root(tool_root: str | Path | None) -> Path:
     if tool_root is None:
-        raise RuntimeError("FAIL LOUDLY: tool_root is required for common registry discovery")
+        raise RuntimeError(
+            "FAIL LOUDLY: tool_root is required for common registry discovery"
+        )
     return Path(tool_root).expanduser().resolve()
 
 
@@ -94,7 +96,9 @@ def build_plugins(
 ) -> dict[str, object]:
     """Build source plugin instances from discovered manifests."""
     try:
-        manifests = discover_plugins(config, tool_root=tool_root, plugin_package=plugin_package)
+        manifests = discover_plugins(
+            config, tool_root=tool_root, plugin_package=plugin_package
+        )
         if manifests:
             built: dict[str, object] = {}
             for name, manifest in manifests.items():
@@ -102,9 +106,11 @@ def build_plugins(
                     built[name] = manifest.source_plugin_class(config)
                 elif hasattr(manifest, "provider_class"):
                     built[name] = manifest.provider_class(config)
+                elif hasattr(manifest, "engine_class"):
+                    built[name] = manifest.engine_class(config)
                 else:
                     raise TypeError(
-                        f"FAIL LOUDLY: manifest for {name} must expose source_plugin_class or provider_class"
+                        f"FAIL LOUDLY: manifest for {name} must expose source_plugin_class, provider_class, or engine_class"
                     )
             return built
     except Exception as exc:

@@ -81,6 +81,7 @@ class EngineConfig:
     model_path: str = "./flux2-klein-4b"
     torch_dtype: str = "bfloat16"
     local_files_only: bool = True
+    force_device: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EngineConfig:
@@ -90,6 +91,7 @@ class EngineConfig:
             model_path=data.get("model_path", cls().model_path),
             torch_dtype=data.get("torch_dtype", cls().torch_dtype),
             local_files_only=data.get("local_files_only", cls().local_files_only),
+            force_device=data.get("force_device", cls().force_device),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -97,6 +99,7 @@ class EngineConfig:
             "model_path": self.model_path,
             "torch_dtype": self.torch_dtype,
             "local_files_only": self.local_files_only,
+            "force_device": self.force_device,
         }
 
 

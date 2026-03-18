@@ -6,7 +6,7 @@ from pathlib import Path
 
 from common import structlog
 from common.cli.helpers import out
-from common.core.registry import build_plugins
+from common.core.registry import discover_plugins
 
 from core.config import load_image_config
 from core.engine import ImageGenEngine
@@ -55,7 +55,7 @@ def build_engine(
             }
         )
 
-    plugin_manifests = build_plugins(config, tool_root=_TOOL_ROOT)
+    plugin_manifests = discover_plugins(config, tool_root=_TOOL_ROOT)
     plugins = {}
     for name, manifest in plugin_manifests.items():
         engine_config = config.get_engine_config(name)
