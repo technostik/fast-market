@@ -3,12 +3,19 @@ from __future__ import annotations
 import json
 
 import click
+import yaml
 
 
 def out(data: object, fmt: str) -> None:
     """Standard output formatting for fast-market tools."""
     if fmt == "json":
         click.echo(json.dumps(data, ensure_ascii=False, default=str))
+    elif fmt == "yaml":
+        click.echo(
+            yaml.dump(
+                data, allow_unicode=True, default_flow_style=False, sort_keys=False
+            )
+        )
     else:
         _print_text(data)
 

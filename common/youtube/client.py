@@ -1,0 +1,429 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Optional
+
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+from common import structlog
+from common.youtube.models import ChannelInfo, Comment, ReplyResult, Video
+from common.youtube.quota import QuotaTracker
+from common.youtube.utils import format_count, is_short_video, iso_duration_to_seconds
+
+if TYPE_CHECKING:
+    from googleapiclient.discovery import Resource
+
+logger = structlog.get_logger(__name__)
+
+
+class YouTubeClient:
+    """YouTube API client with quota tracking and error handling."""
+
+    def __init__(
+        self,
+        api_client: Resource,
+        channel_id: Optional[str] = None,
+        quota_limit: int = 10000,
+    ):
+        self.youtube = api_client
+        self.channel_id = channel_id
+        self.quota = QuotaTracker(limit=quota_limit)
+        self._analytics: Optional[Resource] = None
+
+    def _track_quota(self, units: int) -> None:
+        """Track quota usage."""
+        self.quota.track(units)
+
+    def get_quota_usage(self) -> dict[str, Any]:
+        """Get current quota usage information."""
+        state = self.quota.get_state()
+        return {
+            "usage": state.usage,
+            "limit": state.limit,
+            "usage_percentage": state.usage_percentage,
+            "remaining_percentage": state.remaining_percentage,
+        }
+
+    def reset_quota(self) -> None:
+        """Reset quota counter."""
+        self.quota.reset()
+
+    def get_channel_info(self, channel_id: str) -> Optional[ChannelInfo]:
+        """Get channel information."""
+        try:
+            request = self.youtube.channels().list(
+                part="snippet,statistics",
+                id=channel_id,
+            )
+            response = request.execute()
+            self._track_quota(1)
+
+            if not response.get("items"):
+                logger.warning("channel_not_found", channel_id=channel_id)
+                return None
+
+            item = response["items"][0]
+            return ChannelInfo.from_api_response(item, channel_id)
+        except HttpError as e:
+            logger.error("api_error", operation="get_channel_info", error=str(e))
+            raise
+        except Exception as e:
+            logger.error("unexpected_error", operation="get_channel_info", error=str(e))
+            raise
+
+    def get_video_details(self, video_id: str) -> Optional[dict[str, Any]]:
+        """Get video statistics and details."""
+        try:
+            request = self.youtube.videos().list(
+                part="statistics,snippet,contentDetails",
+                id=video_id,
+            )
+            response = request.execute()
+            self._track_quota(1)
+
+            if not response.get("items"):
+                logger.warning("video_not_found", video_id=video_id)
+                return None
+
+            item = response["items"][0]
+            stats = item.get("statistics", {})
+            snippet = item.get("snippet", {})
+            content = item.get("contentDetails", {})
+            return {
+                "view_count": int(stats.get("viewCount", 0)),
+                "like_count": int(stats.get("likeCount", 0)),
+                "comment_count": int(stats.get("commentCount", 0)),
+                "description": snippet.get("description", ""),
+                "duration": content.get("duration", ""),
+                "title": snippet.get("title", ""),
+                "published_at": snippet.get("publishedAt", ""),
+            }
+        except HttpError as e:
+            logger.error("api_error", operation="get_video_details", error=str(e))
+            raise
+        except Exception as e:
+            logger.error(
+                "unexpected_error", operation="get_video_details", error=str(e)
+            )
+            raise
+
+    def get_comments(
+        self,
+        video_id: str,
+        max_results: int = 20,
+        order: str = "relevance",
+    ) -> list[Comment]:
+        """Get comments for a video."""
+        try:
+            request = self.youtube.commentThreads().list(
+                part="snippet",
+                videoId=video_id,
+                maxResults=min(max_results, 100),
+                textFormat="plainText",
+                order=order,
+            )
+            response = request.execute()
+            self._track_quota(1)
+
+            comments = []
+            for item in response.get("items", []):
+                comments.append(Comment.from_api_response(item, video_id))
+
+            logger.info(
+                "comments_retrieved",
+                video_id=video_id,
+                count=len(comments),
+            )
+            return comments
+        except HttpError as e:
+            if e.resp.status == 403 and "commentsDisabled" in str(e):
+                logger.warning("comments_disabled", video_id=video_id)
+                return []
+            logger.error("api_error", operation="get_comments", error=str(e))
+            raise
+        except Exception as e:
+            logger.error("unexpected_error", operation="get_comments", error=str(e))
+            raise
+
+    def post_comment_reply(self, comment_id: str, text: str) -> Optional[ReplyResult]:
+        """Post a reply to a comment."""
+        if not self.channel_id:
+            raise ValueError("channel_id required for posting replies")
+
+        try:
+            request = self.youtube.comments().insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "parentId": comment_id,
+                        "textOriginal": text,
+                    }
+                },
+            )
+            response = request.execute()
+            self._track_quota(50)
+
+            result = ReplyResult.from_api_response(response)
+            logger.info(
+                "reply_posted",
+                comment_id=comment_id,
+                moderation_status=result.moderation_status,
+            )
+            return result
+        except HttpError as e:
+            logger.error("api_error", operation="post_comment_reply", error=str(e))
+            raise
+        except Exception as e:
+            logger.error(
+                "unexpected_error", operation="post_comment_reply", error=str(e)
+            )
+            raise
+
+    def search_videos(
+        self,
+        query: str,
+        max_results: int = 10,
+        order: str = "relevance",
+        language: str = "en",
+        combine_keywords: bool = False,
+    ) -> list[Video]:
+        """Search for videos on YouTube."""
+        try:
+            if combine_keywords:
+                modified_query = query.replace(" ", " | ")
+            else:
+                modified_query = query
+
+            api_max_results = min(max_results * 5, 50)
+
+            if language == "fr" and order != "relevance":
+                request = self.youtube.search().list(
+                    part="snippet",
+                    q=modified_query,
+                    maxResults=api_max_results,
+                    type="video",
+                    order=order,
+                    location="46.2276,2.2137",
+                    locationRadius="1000km",
+                )
+            else:
+                request = self.youtube.search().list(
+                    part="snippet",
+                    q=modified_query,
+                    maxResults=api_max_results,
+                    type="video",
+                    relevanceLanguage=language,
+                    order=order,
+                )
+
+            response = request.execute()
+            self._track_quota(100)
+
+            videos = []
+            video_ids = []
+
+            for item in response.get("items", []):
+                if "videoId" in item.get("id", {}):
+                    video_ids.append(item["id"]["videoId"])
+                else:
+                    logger.debug("item_filtered_no_video_id", item=item)
+
+            if video_ids:
+                video_details_request = self.youtube.videos().list(
+                    part="snippet,statistics",
+                    id=",".join(video_ids[:50]),
+                )
+                video_details_response = video_details_request.execute()
+                self._track_quota(1)
+
+                video_details_map = {
+                    item["id"]: item for item in video_details_response.get("items", [])
+                }
+
+                for item in response.get("items", []):
+                    if "videoId" not in item.get("id", {}):
+                        continue
+                    video_id = item["id"]["videoId"]
+                    details = video_details_map.get(video_id)
+                    video = Video.from_search_result(item, details)
+                    videos.append(video)
+
+            logger.info(
+                "search_completed",
+                query=query,
+                results=len(videos),
+                requested=max_results,
+            )
+            return videos[:max_results]
+        except HttpError as e:
+            logger.error("api_error", operation="search_videos", error=str(e))
+            raise
+        except Exception as e:
+            logger.error("unexpected_error", operation="search_videos", error=str(e))
+            raise
+
+    def get_trending_videos(
+        self,
+        language: str = "US",
+        category_id: int = 0,
+        max_results: int = 50,
+    ) -> list[Video]:
+        """Get trending videos."""
+        try:
+            request = self.youtube.videos().list(
+                part="snippet,statistics",
+                chart="mostPopular",
+                regionCode=language.upper(),
+                videoCategoryId=str(category_id) if category_id else None,
+                maxResults=min(max_results, 50),
+            )
+            response = request.execute()
+            self._track_quota(1)
+
+            videos = []
+            for item in response.get("items", []):
+                snippet = item.get("snippet", {})
+                stats = item.get("statistics", {})
+                video = Video(
+                    video_id=item["id"],
+                    title=snippet.get("title", "N/A"),
+                    description=snippet.get("description", ""),
+                    channel_id=snippet.get("channelId", ""),
+                    channel_title=snippet.get("channelTitle", ""),
+                    view_count=int(stats.get("viewCount", 0)),
+                    like_count=int(stats.get("likeCount", 0)),
+                    comment_count=int(stats.get("commentCount", 0)),
+                    published_at=snippet.get("publishedAt", ""),
+                    url=f"https://www.youtube.com/watch?v={item['id']}",
+                )
+                videos.append(video)
+
+            logger.info("trending_retrieved", count=len(videos))
+            return videos
+        except HttpError as e:
+            logger.error("api_error", operation="get_trending_videos", error=str(e))
+            raise
+        except Exception as e:
+            logger.error(
+                "unexpected_error", operation="get_trending_videos", error=str(e)
+            )
+            raise
+
+    def get_channel_videos(
+        self,
+        channel_id: str,
+        max_results: int = 50,
+    ) -> list[Video]:
+        """Get all videos from a channel."""
+        try:
+            channel_response = (
+                self.youtube.channels()
+                .list(
+                    part="contentDetails",
+                    id=channel_id,
+                )
+                .execute()
+            )
+            self._track_quota(1)
+
+            if not channel_response.get("items"):
+                logger.warning("channel_not_found", channel_id=channel_id)
+                return []
+
+            uploads_playlist_id = channel_response["items"][0]["contentDetails"][
+                "relatedPlaylists"
+            ]["uploads"]
+
+            videos = []
+            next_page_token = None
+
+            while len(videos) < max_results:
+                playlist_response = (
+                    self.youtube.playlistItems()
+                    .list(
+                        part="snippet,status",
+                        playlistId=uploads_playlist_id,
+                        maxResults=min(50, max_results - len(videos)),
+                        pageToken=next_page_token,
+                    )
+                    .execute()
+                )
+                self._track_quota(1)
+
+                video_ids = [
+                    item["snippet"]["resourceId"]["videoId"]
+                    for item in playlist_response.get("items", [])
+                    if "resourceId" in item["snippet"]
+                ]
+
+                if video_ids:
+                    video_details = (
+                        self.youtube.videos()
+                        .list(
+                            part="contentDetails,snippet",
+                            id=",".join(video_ids),
+                        )
+                        .execute()
+                    )
+                    self._track_quota(1)
+
+                    duration_map = {
+                        item["id"]: item["contentDetails"]["duration"]
+                        for item in video_details.get("items", [])
+                    }
+
+                    for item in playlist_response.get("items", []):
+                        if "resourceId" not in item["snippet"]:
+                            continue
+                        video_id = item["snippet"]["resourceId"]["videoId"]
+                        duration = duration_map.get(video_id, "N/A")
+                        is_short = (
+                            is_short_video(duration) if duration != "N/A" else False
+                        )
+
+                        video = Video(
+                            video_id=video_id,
+                            title=item["snippet"].get("title", "N/A"),
+                            description=item["snippet"].get("description", ""),
+                            channel_id=channel_id,
+                            channel_title=item["snippet"].get("channelTitle", ""),
+                            published_at=item["snippet"].get("publishedAt", ""),
+                            url=f"https://www.youtube.com/watch?v={video_id}",
+                        )
+                        videos.append(video)
+
+                next_page_token = playlist_response.get("nextPageToken")
+                if not next_page_token:
+                    break
+
+            logger.info(
+                "channel_videos_retrieved", channel_id=channel_id, count=len(videos)
+            )
+            return videos[:max_results]
+        except HttpError as e:
+            logger.error("api_error", operation="get_channel_videos", error=str(e))
+            raise
+        except Exception as e:
+            logger.error(
+                "unexpected_error", operation="get_channel_videos", error=str(e)
+            )
+            raise
+
+    def get_video_infos(self, video_id: str) -> Optional[Video]:
+        """Get complete video information."""
+        details = self.get_video_details(video_id)
+        if not details:
+            return None
+
+        return Video(
+            video_id=video_id,
+            title=details.get("title", "N/A"),
+            description=details.get("description", ""),
+            channel_id="",
+            channel_title="",
+            view_count=details.get("view_count", 0),
+            like_count=details.get("like_count", 0),
+            comment_count=details.get("comment_count", 0),
+            published_at=details.get("published_at", ""),
+            url=f"https://www.youtube.com/watch?v={video_id}",
+        )

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "youtube-agent"
+version = "0.1.0"
+description = "YouTube CLI tool for search, comments, and replies"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "google-api-python-client>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "google-auth>=2.0",
+]
+
+[project.scripts]
+youtube = "youtube_entry:main"
+
+[tool.setuptools]
+packages = [
+    "cli",
+    "core",
+    "commands",
+    "commands.search",
+    "commands.comments",
+    "commands.reply",
+    "youtube_entry",
+]
+
+[tool.setuptools.package-data]
+common = ["py.typed"]

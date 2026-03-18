@@ -36,6 +36,9 @@ class _Logger:
     def warning(self, event: str, **kwargs) -> None:
         self._emit(logging.WARNING, event, **kwargs)
 
+    def debug(self, event: str, **kwargs) -> None:
+        self._emit(logging.DEBUG, event, **kwargs)
+
 
 def get_logger(name: str) -> _Logger:
     return _Logger(name)
