@@ -74,7 +74,7 @@ def _build_router() -> APIRouter:
         max_size: int | None = None,
         privacy_status: str | None = None,
     ):
-        from core.config import load_config
+        from common.core.config import load_config
         from core.embedder import Embedder
         from storage.sqlite_store import SQLiteStore, SearchFilters
 

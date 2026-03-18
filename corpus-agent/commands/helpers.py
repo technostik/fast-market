@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 import inspect
-import json
 import sys
+from pathlib import Path
 
-import click
-import structlog
+from common import structlog
 
+from common.cli.helpers import out
 from storage.sqlite_store import SearchFilters
 
 logger = structlog.get_logger(__name__)
+_TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 
 _SF_PARAMS = set(inspect.signature(SearchFilters.__init__).parameters) - {"self"}
 
 
 def build_engine(verbose: bool):
-    """Construct the SyncEngine, plugins, and store from config. Mirrors _build() in cli/main.py."""
-    from core.config import load_config
+    """Construct the SyncEngine, plugins, and store from config."""
+    from common.core.config import load_config
+    from common.core.registry import build_plugins
     from core.embedder import Embedder
-    from core.registry import build_plugins
     from core.sync_engine import SyncEngine
     from storage.sqlite_store import SQLiteStore
 
@@ -28,29 +29,8 @@ def build_engine(verbose: bool):
     store = SQLiteStore(config.get("db_path"))
     embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
     engine = SyncEngine(store, embedder)
-    plugins = build_plugins(config)
+    plugins = build_plugins(config, tool_root=_TOOL_ROOT)
     return engine, plugins, store
-
-
-def out(data: object, fmt: str) -> None:
-    if fmt == "json":
-        click.echo(json.dumps(data, ensure_ascii=False, default=str))
-    else:
-        _print_text(data)
-
-
-def _print_text(data: object) -> None:
-    if isinstance(data, list):
-        for item in data:
-            _print_text(item)
-            click.echo("")
-    elif isinstance(data, dict):
-        for key, value in data.items():
-            if key == "raw_text":
-                continue
-            click.echo(f"  {key}: {value}")
-    else:
-        click.echo(str(data))
 
 
 def fmt_duration(seconds: int | None) -> str:
@@ -84,11 +64,8 @@ def _configure_logging(verbose: bool) -> None:
     for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(level)
 
-    # Ensure structlog respects the same verbosity as stdlib logging.
-    # In environments with the real structlog package installed, this routes
-    # bound loggers through stdlib and applies filtering at creation time.
     try:
-        import structlog as _structlog
+        from common import structlog as _structlog
 
         _structlog.configure(
             wrapper_class=_structlog.make_filtering_bound_logger(level),
@@ -96,7 +73,6 @@ def _configure_logging(verbose: bool) -> None:
             cache_logger_on_first_use=True,
         )
     except Exception:
-        # Local shim or missing APIs: best-effort only.
         pass
 
     if not verbose:

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prompt-agent"
+version = "0.1.0"
+description = "CLI tool for managing and applying LLM prompts"
+requires-python = ">=3.11"
+dependencies = [
+  "click>=8.1",
+  "pyyaml>=6.0",
+  "sqlalchemy>=2.0",
+  "alembic>=1.13",
+  "anthropic>=0.18",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+prompt = "prompt_entry:main"
+
+[tool.setuptools]
+packages = [
+    "common",
+    "common.core",
+    "common.auth",
+    "common.cli",
+    "common.storage",
+    "cli",
+    "core",
+    "storage",
+    "plugins",
+    "plugins.anthropic",
+    "plugins.openai",
+    "plugins.openai_compatible",
+    "plugins.ollama",
+    "commands",
+    "commands.create",
+    "commands.list",
+    "commands.get",
+    "commands.update",
+    "commands.delete",
+    "commands.apply",
+    "commands.setup",
+    "commands.providers",
+    "prompt_entry",
+]

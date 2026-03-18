@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-import structlog
-from alembic import command
-from alembic.config import Config
-from sqlalchemy import create_engine, text, select, delete
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import QueuePool, StaticPool
+from common import structlog
+from sqlalchemy import text, select, delete
+from sqlalchemy.orm import Session
 
 from core.models import Chunk, Document, SearchResult
-from core.paths import get_tool_data_dir
+from common.core.paths import get_tool_data_dir
+from common.storage.base import (
+    create_memory_engine,
+    create_session_factory,
+    create_sqlite_engine,
+    run_alembic_migrations,
+    session_scope,
+)
 from storage.models import ChunkModel, DocumentModel, SyncFailureModel
 
 logger = structlog.get_logger(__name__)
@@ -90,39 +92,16 @@ class SQLAlchemyStore:
     def __init__(self, path: str | None = None) -> None:
         if path is None:
             path = str(get_tool_data_dir("corpus") / "corpus.db")
+
         self._path = path
-        db_url = self._build_db_url(path)
-        self.engine = self._build_engine(path, db_url)
-        self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, future=True)
+        if path == ":memory:":
+            self.engine = create_memory_engine()
+        else:
+            self.engine = create_sqlite_engine("corpus", "corpus.db", db_path=path)
+
+        self.SessionLocal = create_session_factory(self.engine)
         self._run_migrations()
         self.conn = _CompatConnection(self)
-
-    @staticmethod
-    def _build_db_url(path: str) -> str:
-        if path == ":memory:":
-            return "sqlite+pysqlite:///:memory:"
-        expanded = Path(path).expanduser()
-        expanded.parent.mkdir(parents=True, exist_ok=True)
-        return f"sqlite+pysqlite:///{expanded}"
-
-    @staticmethod
-    def _build_engine(path: str, db_url: str) -> Engine:
-        connect_args = {"check_same_thread": False}
-        if path == ":memory:":
-            return create_engine(
-                db_url,
-                future=True,
-                connect_args=connect_args,
-                poolclass=StaticPool,
-                pool_pre_ping=True,
-            )
-        return create_engine(
-            db_url,
-            future=True,
-            connect_args=connect_args,
-            poolclass=QueuePool,
-            pool_pre_ping=True,
-        )
 
     def _run_migrations(self) -> None:
         if self._path == ":memory:":
@@ -142,26 +121,17 @@ class SQLAlchemyStore:
             logger.info("db_migration_complete", backend="sqlalchemy", target="memory")
             return
 
-        config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
-        config.set_main_option("sqlalchemy.url", self._build_db_url(self._path))
-        try:
-            command.upgrade(config, "head")
-        except Exception as exc:  # fail loudly
-            logger.error("db_migration_failed", error=str(exc), path=self._path)
-            raise RuntimeError(f"Database migration failed for {self._path}") from exc
-        logger.info("db_migration_complete", backend="sqlalchemy", path=self._path)
+        alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+        expanded = Path(self._path).expanduser()
+        run_alembic_migrations(
+            "corpus",
+            alembic_ini,
+            db_url_override=f"sqlite+pysqlite:///{expanded}",
+        )
+        logger.info("db_migration_complete", backend="sqlalchemy", path=str(expanded))
 
-    @contextmanager
     def _session(self):
-        session: Session = self.SessionLocal()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        return session_scope(self.SessionLocal)
 
     @staticmethod
     def _row_to_doc_dict(row: dict) -> dict:

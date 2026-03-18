@@ -181,14 +181,16 @@ def test_source_choices_are_dynamic(runner, mock_env):
 
 def test_plugin_removal_simulation(runner, mock_env, monkeypatch):
     from core import registry as reg
+    from common.core import registry as common_reg
 
-    original = reg.discover_plugins
+    original = common_reg.discover_plugins
 
-    def obsidian_only(config):
-        all_plugins = original(config)
+    def obsidian_only(config, **kwargs):
+        all_plugins = original(config, **kwargs)
         return {k: v for k, v in all_plugins.items() if k == "obsidian"}
 
     monkeypatch.setattr(reg, "discover_plugins", obsidian_only)
+    monkeypatch.setattr(common_reg, "discover_plugins", obsidian_only)
 
     import cli.main as cli_mod
 

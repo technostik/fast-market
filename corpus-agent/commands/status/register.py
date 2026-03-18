@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 from fastapi import APIRouter
 
@@ -27,11 +29,11 @@ def _build_router(plugin_manifests: dict) -> APIRouter:
 
     @router.get("/sources")
     def sources():
-        from core.config import load_config
-        from core.registry import build_plugins
+        from common.core.config import load_config
+        from common.core.registry import build_plugins
 
         config = load_config()
-        return list(build_plugins(config).keys())
+        return list(build_plugins(config, tool_root=Path(__file__).resolve().parents[2]).keys())
 
     @router.get("/items")
     def items(
@@ -45,7 +47,7 @@ def _build_router(plugin_manifests: dict) -> APIRouter:
         min_size: int | None = None,
         max_size: int | None = None,
     ):
-        from core.config import load_config
+        from common.core.config import load_config
         from storage.sqlite_store import SQLiteStore, SearchFilters
 
         config = load_config()

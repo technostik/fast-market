@@ -35,7 +35,7 @@ def _build_router() -> APIRouter:
 
     @router.delete("/document/{source_plugin}/{source_id:path}")
     def delete_document(source_plugin: str, source_id: str):
-        from core.config import load_config
+        from common.core.config import load_config
         from storage.sqlite_store import SQLiteStore
 
         config = load_config()

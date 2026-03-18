@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-import structlog
+from common import structlog
 
 from core.models import Document
 from core.sync_errors import APIRateLimitError, NetworkError, TranscriptUnavailableError
@@ -62,32 +62,10 @@ class YouTubeTransport(Transport):
     client_secret_path: str
 
     def _get_client(self):
-        try:
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            from googleapiclient.discovery import build
-            from google.oauth2.credentials import Credentials
-            from google.auth.transport.requests import Request
-        except ImportError as exc:
-            raise RuntimeError(
-                "pip install google-api-python-client google-auth-oauthlib"
-            ) from exc
+        from common.auth.youtube import YouTubeOAuth
 
-        token_path = Path(self.client_secret_path).expanduser().parent / "token.json"
-        creds = None
-        if token_path.exists():
-            creds = Credentials.from_authorized_user_file(str(token_path))
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    str(Path(self.client_secret_path).expanduser()),
-                    scopes=["https://www.googleapis.com/auth/youtube.readonly"],
-                )
-                creds = flow.run_local_server(port=0)
-            token_path.write_text(creds.to_json(), encoding="utf-8")
-            logger.info("oauth_token_saved", path=str(token_path))
-        return build("youtube", "v3", credentials=creds)
+        oauth = YouTubeOAuth(self.client_secret_path)
+        return oauth.get_client()
 
     def get_uploads_playlist(self, channel_id: str) -> str:
         youtube = self._get_client()

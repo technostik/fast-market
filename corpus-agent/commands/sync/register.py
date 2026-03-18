@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 from fastapi import APIRouter, Body, HTTPException
 
@@ -53,9 +55,9 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         source = req.get("source")
         mode = req.get("mode", "new")
         limit = req.get("limit", 10)
-        from core.config import load_config
+        from common.core.config import load_config
         from core.embedder import Embedder
-        from core.registry import build_plugins
+        from common.core.registry import build_plugins
         from core.sync_engine import SyncEngine
         from storage.sqlite_store import SQLiteStore
 
@@ -65,7 +67,7 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         store = SQLiteStore(config.get("db_path"))
         embedder = Embedder(batch_size=int(config.get("embed_batch_size", 32)))
         engine = SyncEngine(store, embedder)
-        plugins = build_plugins(config)
+        plugins = build_plugins(config, tool_root=Path(__file__).resolve().parents[2])
         result = engine.sync(plugins[source], mode=mode, limit=int(limit))
         return {
             "source": result.source,

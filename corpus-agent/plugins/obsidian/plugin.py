@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-import structlog
+from common import structlog
 import yaml
 
 from core.models import Document

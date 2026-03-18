@@ -7,7 +7,7 @@ import os
 import signal
 import sys
 
-import structlog
+from common import structlog
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -93,7 +93,7 @@ class EmbeddingServer:
 def main() -> None:
     import argparse
 
-    from core.config import load_config
+    from common.core.config import load_config
 
     parser = argparse.ArgumentParser(description="Corpus embedding server")
     parser.add_argument("--model", help="Model name override")
