@@ -1,19 +1,37 @@
 # How to Build a New Agent CLI (corpus-agent Architecture)
 
-This document explains how to build a new CLI application with the same modular plugin/command architecture as corpus-agent.
+This document explains how to build a new CLI application with the same modular plugin/command architecture as corpus-agent, using shared `common/` utilities.
 
 ## Architecture Overview
 
 ```
-your-agent/
-├── cli/              # Entry point (main.py)
-├── core/             # Shared infrastructure (config, registry, models)
-├── plugins/         # Data source plugins (what to ingest)
-├── commands/        # CLI commands (what to do)
-├── storage/         # Data persistence
-├── api/             # HTTP API (optional)
-└── frontend/        # Web UI (optional)
+fast-market/                  # Workspace root
+├── common/                   # Shared utilities for ALL tools
+│   ├── cli/                  # CLI helpers (create_cli_group, out)
+│   ├── core/                 # Config, paths, registry
+│   └── storage/              # SQLAlchemy engine/session helpers
+├── your-agent/              # Tool-specific code
+│   ├── cli/                 # Entry point (main.py)
+│   ├── core/                # Tool-specific (models, embedder, sync)
+│   ├── plugins/             # Source plugins
+│   ├── commands/            # CLI commands
+│   ├── storage/             # Tool-specific DB models
+│   ├── api/                 # HTTP API (optional)
+│   └── ui/                  # Web UI (optional)
 ```
+
+### Common Code (`common/`)
+
+Shared utilities live at the workspace root and are imported by all tools:
+
+| Path | Purpose |
+|------|---------|
+| `common/cli/base.py` | `create_cli_group()` — standard Click group factory |
+| `common/cli/helpers.py` | `out()` — standard output formatting (JSON/text) |
+| `common/core/config.py` | `load_tool_config()` — YAML config loading |
+| `common/core/paths.py` | XDG-compliant paths (config, data, cache) |
+| `common/core/registry.py` | Plugin/command discovery engine |
+| `common/storage/base.py` | SQLAlchemy engine/session helpers |
 
 ### Core Concepts
 
@@ -35,8 +53,8 @@ your-agent/
 │   └── main.py              # CLI entry point
 ├── core/
 │   ├── __init__.py
-│   ├── config.py            # Configuration loading
-│   ├── registry.py          # Plugin/command discovery
+│   ├── config.py            # Re-export from common (optional)
+│   ├── registry.py          # Re-export from common (optional)
 │   └── models.py            # Core data classes
 ├── plugins/
 │   └── __init__.py
@@ -56,25 +74,21 @@ your-agent/
 from __future__ import annotations
 
 import logging
-import click
+from pathlib import Path
 
-from core.config import load_config
-from core.registry import discover_plugins, discover_commands
+from common.cli.base import create_cli_group
+from common.core.config import load_config
+from common.core.registry import discover_commands, discover_plugins
 
-
-@click.group()
-@click.option("--verbose", "-v", is_flag=True, default=False)
-@click.pass_context
-def main(ctx: click.Context, verbose: bool) -> None:
-    ctx.ensure_object(dict)
-    ctx.obj["verbose"] = verbose
+main = create_cli_group("your-agent")
+_TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load() -> None:
     logging.basicConfig(level=logging.CRITICAL, force=True)
     config = load_config()
-    plugin_manifests = discover_plugins(config)
-    command_manifests = discover_commands(plugin_manifests)
+    plugin_manifests = discover_plugins(config, tool_root=_TOOL_ROOT)
+    command_manifests = discover_commands(plugin_manifests, tool_root=_TOOL_ROOT)
     for cmd in command_manifests.values():
         main.add_command(cmd.click_command)
 
@@ -87,143 +101,63 @@ if __name__ == "__main__":
 
 ### 2.2 Configuration (core/config.py)
 
+Import from `common.core.config`:
+
 ```python
 from __future__ import annotations
 
-from pathlib import Path
-import yaml
-
-
-def load_config() -> dict:
-    """Load configuration from XDG-compliant paths."""
-    config_paths = [
-        Path.home() / ".config" / "your-agent" / "config.yaml",
-        Path.home() / ".your-agent" / "config.yaml",
-    ]
-    
-    for path in config_paths:
-        if path.exists():
-            return yaml.safe_load(path.read_text()) or {}
-    
-    return {}
-
-
-def get_config_path() -> Path:
-    """Get the config file path, creating directory if needed."""
-    config_dir = Path.home() / ".config" / "your-agent"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "config.yaml"
+from common.core.config import load_config
 ```
+
+XDG-compliant config path: `~/.local/share/fast-market/config/your-agent.yaml`
+
+Use `load_tool_config("your-tool-name")` for tool-specific config loading.
 
 ### 2.3 Registry (core/registry.py)
 
-```python
-from __future__ import annotations
-
-import importlib
-from pathlib import Path
-
-_ROOT = Path(__file__).resolve().parent.parent
-
-
-def discover_plugins(config: dict) -> dict[str, "PluginManifest"]:
-    """Scan plugins/ for subdirectories with register.py."""
-    from plugins.base import PluginManifest
-    
-    plugins_dir = _ROOT / "plugins"
-    manifests = {}
-    
-    for entry in sorted(plugins_dir.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("_"):
-            continue
-        mod_path = f"plugins.{entry.name}.register"
-        try:
-            mod = importlib.import_module(mod_path)
-        except ModuleNotFoundError:
-            continue
-            
-        if not hasattr(mod, "register"):
-            raise RuntimeError(f"{mod_path} has no register() function")
-            
-        manifest = mod.register(config)
-        if not isinstance(manifest, PluginManifest):
-            raise TypeError(f"{mod_path}.register() must return PluginManifest")
-            
-        manifests[manifest.name] = manifest
-    
-    return manifests
-
-
-def discover_commands(plugin_manifests: dict | None = None) -> dict[str, "CommandManifest"]:
-    """Scan commands/ for subdirectories with register.py."""
-    from commands.base import CommandManifest
-    
-    commands_dir = _ROOT / "commands"
-    if not commands_dir.exists():
-        return {}
-    
-    manifests = {}
-    pm = plugin_manifests or {}
-    
-    for entry in sorted(commands_dir.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("_"):
-            continue
-        mod_path = f"commands.{entry.name}.register"
-        try:
-            mod = importlib.import_module(mod_path)
-        except ModuleNotFoundError:
-            continue
-            
-        if not hasattr(mod, "register"):
-            raise RuntimeError(f"{mod_path} has no register() function")
-            
-        manifest = mod.register(pm)
-        if not isinstance(manifest, CommandManifest):
-            raise TypeError(f"{mod_path}.register() must return CommandManifest")
-            
-        manifests[manifest.name] = manifest
-    
-    return manifests
-
-
-def build_plugins(config: dict) -> dict[str, object]:
-    """Build plugin instances from manifests."""
-    manifests = discover_plugins(config)
-    return {name: m.source_plugin_class(config) for name, m in manifests.items()}
-```
-
-### 2.4 Data Models (core/models.py)
+Import from `common.core.registry`:
 
 ```python
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
-
-
-@dataclass
-class Document:
-    """A document to be indexed."""
-    source_plugin: str
-    source_id: str
-    handle: str
-    title: str
-    raw_text: str
-    metadata: dict = field(default_factory=dict)
-    updated_at: datetime | None = None
-
-
-@dataclass
-class SearchResult:
-    """A search result."""
-    handle: str
-    source_plugin: str
-    source_id: str
-    title: str
-    excerpt: str
-    score: float
-    metadata: dict = field(default_factory=dict)
+from common.core.registry import discover_commands, discover_plugins, build_plugins
 ```
+
+Functions from `common.core.registry`:
+
+| Function | Purpose |
+|----------|---------|
+| `discover_plugins(config, tool_root=...)` | Scan `plugins/*/register.py` |
+| `discover_commands(plugin_manifests, tool_root=...)` | Scan `commands/*/register.py` |
+| `build_plugins(config, tool_root=...)` | Instantiate plugin classes from manifests |
+
+### 2.4 Helper Utilities (commands/helpers.py)
+
+```python
+from __future__ import annotations
+
+from common.cli.helpers import out
+from common.core.registry import build_plugins
+
+
+def build_engine(config: dict, tool_root: Path):
+    """Construct the engine and plugins."""
+    return build_plugins(config, tool_root=tool_root)
+```
+
+### 2.5 Storage (common/storage/base.py)
+
+```python
+from common.storage.base import create_sqlite_engine, session_scope
+```
+
+Functions from `common.storage.base`:
+
+| Function | Purpose |
+|----------|---------|
+| `create_sqlite_engine(tool_name)` | Create persistent SQLite engine |
+| `create_memory_engine()` | Create in-memory engine for testing |
+| `session_scope(factory)` | Context manager for transactions |
 
 ---
 
@@ -239,11 +173,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass
+@dataclass(slots=True)
 class ItemMeta:
     """Metadata about an item to be fetched."""
     source_id: str
-    updated_at: datetime | None = None
+    updated_at: str | None = None
     metadata: dict | None = None
 
 
@@ -257,7 +191,7 @@ class SourcePlugin(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def fetch(self, item_meta: ItemMeta) -> Document:
+    def fetch(self, item_meta: ItemMeta) -> "Document":
         """Fetch full document content."""
         raise NotImplementedError
 
@@ -286,14 +220,10 @@ class ExamplePlugin(SourcePlugin):
         self.config = config
 
     def list_items(self, limit: int, known_id_dates: dict | None = None) -> list[ItemMeta]:
-        # Return list of items to index
-        # known_id_dates: {source_id: indexed_updated_at} for existing docs
         items = []
-        # ... your logic here ...
         return items
 
     def fetch(self, item_meta: ItemMeta) -> Document:
-        # Return full Document with raw_text, title, etc.
         return Document(
             source_plugin=self.name,
             source_id=item_meta.source_id,
@@ -301,7 +231,6 @@ class ExamplePlugin(SourcePlugin):
             title="Document Title",
             raw_text="Full document content...",
             metadata=item_meta.metadata or {},
-            updated_at=item_meta.updated_at,
         )
 ```
 
@@ -356,42 +285,12 @@ from typing import Any
 class CommandManifest:
     """Everything a command contributes to the system."""
     name: str
-    click_command: Any  # click.Command
+    click_command: Any
     api_router: Any | None = None
     frontend_js: str | None = None
 ```
 
-### 4.2 Helper Utilities (commands/helpers.py)
-
-```python
-from __future__ import annotations
-
-import json
-import click
-import structlog
-
-logger = structlog.get_logger(__name__)
-
-
-def build_engine(verbose: bool):
-    """Construct the engine, plugins, and store."""
-    from core.config import load_config
-    from core.registry import build_plugins
-    
-    config = load_config()
-    plugins = build_plugins(config)
-    return plugins
-
-
-def out(data: object, fmt: str) -> None:
-    """Output data in the specified format."""
-    if fmt == "json":
-        click.echo(json.dumps(data, ensure_ascii=False, default=str))
-    else:
-        click.echo(str(data))
-```
-
-### 4.3 Example Command (commands/hello/register.py)
+### 4.2 Example Command (commands/hello/register.py)
 
 ```python
 import click
@@ -400,7 +299,6 @@ from commands.helpers import build_engine, out
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    # Build dynamic source choices from plugins
     source_choices = list(plugin_manifests.keys()) + ["all"]
 
     @click.command("hello")
@@ -409,8 +307,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
     @click.pass_context
     def hello_cmd(ctx, name, source, fmt, **kwargs):
-        plugins = build_engine(ctx.obj["verbose"])
-        
+        plugins = build_engine(config, tool_root=_TOOL_ROOT)
+
         result = {
             "message": f"Hello, {name}!",
             "target": source,
@@ -418,7 +316,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         }
         out(result, fmt)
 
-    # Inject plugin-specific options for this command
     for pm in plugin_manifests.values():
         hello_cmd.params.extend(pm.cli_options.get("hello", []))
 
@@ -428,7 +325,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
 ```
 
-### 4.4 Required Files
+### 4.3 Required Files
 
 ```
 commands/hello/
@@ -454,6 +351,7 @@ dependencies = [
     "click>=8.1",
     "pyyaml>=6.0",
     "structlog>=24.2",
+    "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -478,11 +376,102 @@ packages = [
 
 ---
 
-## Step 6: Run Your Agent
+## Step 6: Documentation
+
+After creating new components, update the relevant `AGENTS.md` files following the pattern in `.doc/PROMPT_UPDATE_AGENTS_DOC.md`.
+
+---
+
+## Step 7: Testing
+
+### Test Structure
+
+```
+your-agent/
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py           # Shared fixtures
+│   ├── test_plugin_*.py     # Plugin tests
+│   ├── test_command_*.py    # Command tests
+│   ├── test_storage.py      # Storage tests
+│   └── data/                # Test fixtures
+```
+
+### conftest.py Pattern
+
+```python
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+@pytest.fixture
+def runner() -> CliRunner:
+    return CliRunner()
+
+
+@pytest.fixture
+def store() -> SQLiteStore:
+    return SQLiteStore(":memory:")
+
+
+@pytest.fixture
+def mock_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Patch config and plugins for testing."""
+    monkeypatch.chdir(tmp_path)
+    # Add plugin mocks as needed
+    return tmp_path
+```
+
+### Command Test Pattern
+
+```python
+import json
+import importlib
+
+from click.testing import CliRunner
+
+
+def _main_with_reload():
+    import cli.main as cli_mod
+    importlib.reload(cli_mod)
+    return cli_mod.main
+
+
+def test_command_basic(runner, mock_env):
+    main = _main_with_reload()
+    result = runner.invoke(main, ["command", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+```
+
+### Run Tests
+
+```bash
+# Run all tests
+pytest your-agent/tests/
+
+# Run with coverage
+pytest --cov=your-agent tests/
+
+# Run specific test file
+pytest tests/test_command_name.py -v
+```
+
+---
+
+## Step 8: Run Your Agent
 
 ```bash
 # Install in development mode
-pip install -e .
+pip install -e ".."
 
 # Run CLI
 your-agent --verbose hello --name "Your Name"
@@ -497,7 +486,7 @@ your-agent --help
 
 ---
 
-## How Discovery Works
+## Step 9: How Discovery Works
 
 1. **Startup**: `cli/main.py` calls `_load()` on import
 2. **Discover Plugins**: `discover_plugins()` scans `plugins/*/register.py`
@@ -507,7 +496,7 @@ your-agent --help
 
 ---
 
-## Adding API Support (Optional)
+## Step 10: Adding API Support (Optional)
 
 Commands can contribute FastAPI routers:
 
@@ -517,17 +506,15 @@ from commands.base import CommandManifest
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    # ... CLI command definition ...
-    
     def _build_router():
         router = APIRouter()
-        
+
         @router.get("/hello")
         def hello_api(name: str = "World"):
             return {"message": f"Hello, {name}!"}
-        
+
         return router
-    
+
     return CommandManifest(
         name="hello",
         click_command=hello_cmd,
@@ -539,11 +526,10 @@ Then in `api/server.py`:
 
 ```python
 from fastapi import FastAPI
-from core.registry import discover_commands
+from common.core.registry import discover_commands
 
 app = FastAPI()
 
-# Include all command routers
 for cmd in discover_commands().values():
     if cmd.api_router:
         app.include_router(cmd.api_router, prefix="/api")
@@ -551,13 +537,24 @@ for cmd in discover_commands().values():
 
 ---
 
-## Summary
+## Step 11: Summary
+
+### Shared Code (common/)
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| CLI Group | `common/cli/base.py` | `create_cli_group()` — Click group factory |
+| Output | `common/cli/helpers.py` | `out()` — JSON/text formatting |
+| Config | `common/core/config.py` | `load_tool_config()` — YAML loading |
+| Paths | `common/core/paths.py` | XDG-compliant paths |
+| Discovery | `common/core/registry.py` | `discover_plugins/commands()` |
+| Storage | `common/storage/base.py` | SQLAlchemy engine/session helpers |
+
+### Tool-Specific Code (your-agent/)
 
 | Component | File | Purpose |
 |-----------|------|---------|
 | Entry Point | `cli/main.py` | Click group + discovery |
-| Config | `core/config.py` | Load YAML config |
-| Discovery | `core/registry.py` | Find plugins/commands |
 | Plugin Base | `plugins/base.py` | `SourcePlugin` ABC + `PluginManifest` |
 | Command Base | `commands/base.py` | `CommandManifest` |
 | Plugin | `plugins/*/register.py` | Returns `PluginManifest` |
@@ -568,3 +565,4 @@ for cmd in discover_commands().values():
 - Never modify cli/main.py when adding plugins/commands
 - Use `**kwargs` to absorb plugin-injected options
 - Build `--source` choices dynamically from manifests
+- Import shared utilities from `common/`, not local copies
