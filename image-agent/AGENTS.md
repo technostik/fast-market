@@ -188,4 +188,3 @@ available_formats:
 
 - See `.doc/GOLDEN_RULES.md` for architectural principles
 - See `common/core/registry.py` for plugin discovery
-- See `corpus-agent/AGENTS.md` for similar patterns

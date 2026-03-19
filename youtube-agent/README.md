@@ -1,128 +1,317 @@
 # youtube-agent
 
-YouTube CLI tool for search, comments, and replies.
+YouTube CLI tool for searching videos, fetching comments, and posting replies via the YouTube Data API v3.
 
 ## Installation
 
 ```bash
+# Clone and install
 cd youtube-agent
 pip install -e .
+
+# Install with yt-dlp support for advanced searching
+pip install -e ".[ytdlp]"
 ```
+
+### Prerequisites
+- Python 3.11+
+- Google Cloud Project with YouTube Data API v3 enabled
+- OAuth 2.0 credentials (client_secret.json)
 
 ## Configuration
 
-Create `~/.local/share/fast-market/config/youtube-agent.yaml`:
+The tool follows XDG specifications for configuration:
+- Config: `~/.local/share/fast-market/config/youtube-agent.yaml`
+- Cache: `~/.cache/fast-market/youtube/` (for quota tracking)
+- OAuth token: `~/.local/share/fast-market/config/token.json`
+
+### First-time Setup
+
+Run the interactive setup wizard:
+```bash
+youtube setup --create
+```
+
+This creates a default configuration at `~/.local/share/fast-market/config/youtube-agent.yaml`:
 
 ```yaml
+# YouTube agent configuration
 youtube:
-  client_secret_path: "~/.local/share/fast-market/config/client_secret.json"
-  channel_id: "YOUR_CHANNEL_ID"  # Required for reply command
+  # Get your channel ID from YouTube Studio > Settings > Channel
+  # Or use any channel ID you want to interact with
+  channel_id: ""
+
+  # Quota limit (default: 10000 units/day)
   quota_limit: 10000
+
+  # Optional: explicit path to client_secret.json
+  # If not specified, looks for client_secret.json in config directory
+  # client_secret_path: "~/.config/fast-market/config/client_secret.json"
 ```
 
 ### Getting Google OAuth Credentials
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a project or select existing one
-3. Enable YouTube Data API v3
-4. Go to Credentials → Create Credentials → OAuth client ID
-5. Download the JSON file and save as `client_secret.json`
+3. Enable **YouTube Data API v3**
+4. Go to **Credentials** → **Create Credentials** → **OAuth client ID**
+   - Application type: Desktop application
+   - Name: youtube-agent
+5. Download the JSON file and save as `client_secret.json` in the config directory:
+   ```bash
+   mv ~/Downloads/client_secret.json ~/.local/share/fast-market/config/
+   ```
 
-## Usage
-
-### Search Videos
-
-```bash
-youtube search "python tutorial" --max-results 5
-youtube search "python tutorial" --order date --language fr
-youtube search "python" --combine  # OR search
-youtube search "python" --format json -o results.json
-```
-
-### Get Comments
+### Verify Setup
 
 ```bash
-youtube comments dQw4w9WgXcQ --max-results 10
-youtube comments dQw4w9WgXcQ --order time
-youtube search "tutorial" | youtube comments --stdin --format yaml
+# Check configuration
+youtube setup --locate
+youtube setup --show
+
+# Test authentication (will open browser for OAuth)
+youtube search "test"
 ```
 
-### Reply to Comments
+## CLI Reference
+
+### setup
+
+Manage configuration and authentication.
 
 ```bash
-youtube reply COMMENT_ID "Your reply text"
-youtube reply --from-file replies.json
-cat replies.json | youtube reply --stdin
+youtube setup [OPTIONS]
 ```
 
-### Piping Examples
+| Option | Description |
+|--------|-------------|
+| `--locate` | Show config file locations and status |
+| `--show` | Display current configuration |
+| `--create` | Create default configuration file |
 
+**Examples:**
 ```bash
-# Search and get comments in pipeline
-youtube search "python" -n 5 --format json | youtube comments -n 3 --stdin > comments.yaml
+# Create initial config
+youtube setup --create
 
-# Chain multiple operations
-youtube search "tutorial" | youtube comments --stdin | youtube reply --stdin
+# Check setup status
+youtube setup --locate
+
+# View current config
+youtube setup --show
 ```
-
-## Commands
 
 ### search
+
 Search for YouTube videos by keywords.
 
-Options:
-- `KEYWORDS...` - Search terms
-- `--max-results, -n` - Number of results (default: 10)
-- `--order` - Sort by: date, relevance, rating, title, viewCount
-- `--language` - Language code (default: en)
-- `--combine` - Use OR instead of AND for keywords
-- `--format` - Output: json, yaml, text (default: text)
-- `--output, -o` - Save to file
-- `--stdin` - Read video IDs from stdin for filtering
+```bash
+youtube search KEYWORDS... [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-n, --max-results` | Number of results | 10 |
+| `--order` | Sort order: date, relevance, rating, title, viewCount | relevance |
+| `--language` | Language code (e.g., en, fr, es) | en |
+| `--combine` | Use OR instead of AND for keywords | False |
+| `--format` | Output: json, yaml, text | text |
+| `-o, --output` | Save results to file | None |
+| `--stdin` | Read video IDs from stdin for filtering | False |
+| `--use-yt-dlp` | Use yt-dlp instead of YouTube API (requires yt-dlp) | False |
+
+**Examples:**
+```bash
+# Basic search
+youtube search "python tutorial" -n 5
+
+# Sort by date, French language
+youtube search "tutoriel python" --order date --language fr -n 3
+
+# OR search
+youtube search "python java" --combine
+
+# Output as JSON to file
+youtube search "machine learning" --format json -o results.json
+
+# Use yt-dlp for more flexible searching
+youtube search "site:youtube.com tutorial" --use-yt-dlp
+
+# Filter search results by video IDs from stdin
+echo '{"video_id": "dQw4w9WgXcQ"}' | youtube search --stdin
+```
 
 ### comments
-Get comments for a video.
 
-Options:
-- `VIDEO_ID` - Video ID (optional with --stdin)
-- `--max-results, -n` - Number of comments (default: 20)
-- `--order` - Sort by: relevance, time
-- `--format` - Output: json, yaml, text (default: text)
-- `--output, -o` - Save to file
-- `--stdin` - Read video IDs from stdin
-- `--field` - Field name to extract from stdin data (default: video_id)
+Fetch comments for YouTube videos.
+
+```bash
+youtube comments [VIDEO_ID] [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-n, --max-results` | Maximum comments per video | 20 |
+| `--order` | Sort order: relevance, time | relevance |
+| `--format` | Output: json, yaml, text | text |
+| `-o, --output` | Save results to file | None |
+| `--stdin` | Read video IDs from stdin | False |
+| `--field` | JSON field to extract IDs from stdin | video_id |
+
+**Examples:**
+```bash
+# Get comments for a video
+youtube comments dQw4w9WgXcQ -n 10
+
+# Sort by newest first
+youtube comments dQw4w9WgXcQ --order time
+
+# Chain with search using jq
+youtube search "tutorial" -n 3 --format json \
+  | jq '.[].id' -r \
+  | xargs -I {} youtube comments {} -n 5
+
+# Using stdin with custom field
+echo '[{"video": "dQw4w9WgXcQ"}]' | youtube comments --stdin --field video
+```
 
 ### reply
-Post replies to comments.
 
-Options:
-- `COMMENT_ID` - Comment ID (optional with --from-file or --stdin)
-- `TEXT` - Reply text (optional with --from-file or --stdin)
-- `--from-file` - JSON/YAML file with {comment_id, text} pairs
-- `--format` - Output: json, yaml, text (default: text)
-- `--output, -o` - Save results to file
-- `--stdin` - Read from stdin (JSON array)
+Post replies to YouTube comments.
 
-## Quota Tracking
+```bash
+youtube reply [COMMENT_ID] [TEXT] [OPTIONS]
+```
 
-The tool tracks YouTube API quota usage. The default limit is 10,000 units per day.
+| Option | Description |
+|--------|-------------|
+| `--from-file` | JSON/YAML file with array of {comment_id, text} |
+| `--format` | Output: json, yaml, text |
+| `-o, --output` | Save results to file |
+| `--stdin` | Read from stdin (JSON array) |
+
+**Examples:**
+```bash
+# Single reply
+youtube reply COMMENT_ID "Thanks for watching!"
+
+# Batch replies from file
+youtube reply --from-file replies.json
+
+# replies.json format:
+# [
+#   {"comment_id": "abc123", "text": "Great point!"},
+#   {"comment_id": "def456", "text": "Agreed!"}
+# ]
+
+# Pipe from comments command
+youtube comments VIDEO_ID -n 5 --format json \
+  | jq '.[] | {comment_id: .id, text: "Thanks!"}' \
+  | youtube reply --stdin
+```
+
+## Features
+
+### Quota Tracking
+- Automatically tracks YouTube API quota usage
+- Default limit: 10,000 units/day (YouTube Data API standard)
+- Quota persists across sessions in `~/.cache/fast-market/youtube/quota.json`
+- Prevents accidental quota exhaustion
+
+### Piping Support
+All commands support JSON/YAML streaming for pipeline composition:
+
+```bash
+# Multi-stage pipeline
+youtube search "tutorial" -n 5 --format json \
+  | youtube comments --stdin -n 3 \
+  | youtube reply --stdin
+
+# Extract and transform with jq
+youtube search "python" --format json \
+  | jq '.[] | {id, title, channel_title}' \
+  > summary.json
+```
+
+### Multiple Input Formats
+- JSON files
+- YAML files
+- stdin (auto-detects JSON/YAML)
+- Direct arguments
+
+### Error Handling
+- Clear error messages for configuration issues
+- OAuth flow failure recovery
+- API quota exceeded warnings
 
 ## Architecture
 
 ```
 youtube-agent/
 ├── youtube_entry/       # CLI entry point
-├── cli/                 # Click main group
-├── core/                # Config and engine
-├── commands/            # CLI commands
+│   └── __init__.py      # Exports main()
+├── cli/
+│   └── main.py          # Click CLI group
+├── core/
+│   ├── config.py        # Config loading
+│   └── engine.py        # YouTube client factory
+├── commands/            # Plugin-style commands
+│   ├── base.py          # CommandManifest
 │   ├── search/
+│   │   └── register.py  # Search implementation
 │   ├── comments/
-│   └── reply/
-└── common -> ../common   # Shared utilities symlink
+│   │   └── register.py  # Comments implementation
+│   ├── reply/
+│   │   └── register.py  # Reply implementation
+│   └── setup/
+│       └── register.py  # Setup command
+└── common/              # Shared utilities (symlink)
+    ├── youtube/
+    │   ├── client.py    # YouTube API wrapper
+    │   ├── models.py    # Pydantic models
+    │   └── quota.py     # Quota tracking
+    └── auth/
+        └── youtube.py   # OAuth handling
 ```
 
-Shared code lives in `common/youtube/`:
-- `client.py` - YouTube API wrapper
-- `models.py` - Pydantic models
-- `quota.py` - Quota tracking
-- `utils.py` - Helper functions
+## Development
+
+### Adding New Commands
+
+1. Create a new directory in `commands/your_command/`
+2. Create `register.py` with:
+   ```python
+   from commands.base import CommandManifest
+   import click
+   
+   def register(plugin_manifests: dict) -> CommandManifest:
+       @click.command("your-command")
+       def cmd():
+           """Your command description."""
+           pass
+       
+       return CommandManifest(
+           name="your-command",
+           click_command=cmd,
+       )
+   ```
+
+3. Command automatically discovered on next run
+
+### Testing
+
+```bash
+# Run tests (if available)
+pytest tests/
+
+# Test with debug logging
+YOUTUBE_DEBUG=1 youtube search test
+```
+
+### Dependencies
+- `click>=8.1` - CLI framework
+- `pyyaml>=6.0` - YAML support
+- `pydantic>=2.0` - Data validation
+- `google-api-python-client>=2.0` - YouTube API
+- `google-auth-oauthlib>=1.0` - OAuth flow
+- `yt-dlp` (optional) - Advanced searching
