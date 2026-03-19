@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.task_prompt import TaskPromptConfig, DEFAULT_PROMPT_TEMPLATE
+from common.core.paths import get_skills_dir
+from core.skill import discover_skills
 
 
 SYSTEM_COMMAND_DOCS = {
@@ -223,7 +225,7 @@ SYSTEM_COMMAND_DOCS = {
 }
 
 DEFAULT_TOOLS_DOC_TEMPLATE = (
-    """{aliases}{fastmarket_tools}{system_commands}{other_commands}"""
+    """{aliases}{fastmarket_tools}{system_commands}{other_commands}{skills}"""
 )
 
 
@@ -361,6 +363,38 @@ def _build_other_commands_section(allowed_commands: list[str]) -> str:
     return "\n".join(docs)
 
 
+def _build_skills_section() -> str:
+    """Build the skills section of command documentation."""
+    skills_dir = get_skills_dir()
+    skills = discover_skills(skills_dir)
+    if not skills:
+        return ""
+
+    docs = ["\n## Skills\n"]
+    docs.append(
+        "Skills provide specialized capabilities for specific tasks. Use `skill:name/script [args]` to execute.\n"
+    )
+
+    for skill in skills:
+        docs.append(f"### {skill.name}")
+        if skill.description:
+            docs.append(f"{skill.description}")
+        if skill.has_scripts:
+            scripts_dir = skill.path / "scripts"
+            scripts = [
+                f.name
+                for f in scripts_dir.iterdir()
+                if f.is_file() and not f.name.startswith(".")
+            ]
+            if scripts:
+                docs.append(
+                    f"**Scripts**: {', '.join(f'`{s}`' for s in sorted(scripts))}"
+                )
+        docs.append("")
+
+    return "\n".join(docs)
+
+
 def get_active_tools_doc_prompt_config() -> TaskPromptConfig:
     """Get the active tools doc prompt configuration."""
     from common.core.config import load_tool_config
@@ -396,6 +430,7 @@ def build_command_documentation(allowed_commands: list[str]) -> str:
     fastmarket_tools_section = _build_fastmarket_tools_section(allowed_commands)
     system_commands_section = _build_system_commands_section(allowed_commands)
     other_commands_section = _build_other_commands_section(allowed_commands)
+    skills_section = _build_skills_section()
 
     if not any(
         [
@@ -403,6 +438,7 @@ def build_command_documentation(allowed_commands: list[str]) -> str:
             fastmarket_tools_section,
             system_commands_section,
             other_commands_section,
+            skills_section,
         ]
     ):
         return ""
@@ -414,6 +450,7 @@ def build_command_documentation(allowed_commands: list[str]) -> str:
         fastmarket_tools=fastmarket_tools_section,
         system_commands=system_commands_section,
         other_commands=other_commands_section,
+        skills=skills_section,
     )
 
 

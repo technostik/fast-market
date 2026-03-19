@@ -51,3 +51,16 @@ def get_prompt_aliases_path() -> Path:
     path = config_home / "prompt-agent" / "aliases.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_skills_dir() -> Path:
+    """Return XDG-compliant skills directory for prompt-agent."""
+    raw_config_home = os.environ.get("XDG_CONFIG_HOME")
+    config_home = (
+        Path(raw_config_home).expanduser()
+        if raw_config_home
+        else (Path.home() / ".config")
+    )
+    path = config_home / "prompt-agent" / "skills"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

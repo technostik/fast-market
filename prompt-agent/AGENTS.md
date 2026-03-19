@@ -9,12 +9,15 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - `commands/apply/register.py` — Core execution engine with three input modes (saved/direct/stdin)
 - `commands/task/register.py` — Agentic task execution with LLM-driven CLI loop
 - `commands/alias/register.py` — Command alias management with description support
+- `commands/skill/register.py` — Skill management for agentic task execution
 - `commands/setup/register.py` — Configuration wizard for provider, task prompts, and task management
 - `core/substitution.py` — Placeholder resolution with file/stdin injection
 - `core/models.py` — Domain models (Prompt, PromptExecution)
 - `core/session.py` — Task session tracking and serialization
+- `core/skill.py` — Skill model and discovery (Anthropic skill format)
 - `core/task_prompt.py` — Task prompt configuration (TaskPromptConfig)
 - `common/core/aliases.py` — Alias resolution with caching and nested alias support
+- `common/core/paths.py` — XDG-compliant paths including skills directory
 - `plugins/base.py` — Provider interfaces (LLMProvider, LazyLLMProvider)
 - `storage/store.py` — SQLite persistence with PromptStore
 - `plugins/anthropic/plugin.py` — Anthropic provider implementation
@@ -102,7 +105,17 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 4. Use `prompt setup --edit-tools-doc-prompt <name>` to customize a prompt
 5. Use `prompt setup --import-tools-doc-prompt <file>` to import from YAML
 6. Tools doc prompts are stored in `~/.local/share/fast-market/tools_doc_prompts/`
-7. Default template uses placeholders: `{aliases}`, `{fastmarket_tools}`, `{system_commands}`, `{other_commands}`
+7. Default template uses placeholders: `{aliases}`, `{fastmarket_tools}`, `{system_commands}`, `{other_commands}`, `{skills}`
+
+**To manage skills:**
+1. Skills are stored in `~/.config/prompt-agent/skills/`
+2. Each skill is a directory containing `SKILL.md` (with YAML frontmatter)
+3. Optional `scripts/` subdirectory for executable scripts
+4. Use `prompt skill list` to see available skills
+5. Use `prompt skill create <name>` to scaffold a new skill
+6. Use `prompt skill show <name>` to view skill details
+7. Use `prompt skill delete <name>` to remove a skill
+8. Execute skill scripts with `skill:name/script [args]` in task execution
 
 ## 📚 Related Documentation
 

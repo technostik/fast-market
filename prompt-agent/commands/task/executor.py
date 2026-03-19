@@ -158,6 +158,40 @@ def execute_command(
 
 def execute_dry_run(cmd_str: str, workdir: Path, allowed: set[str]) -> dict:
     """Simulate execution for dry-run mode."""
+    if cmd_str.startswith("skill:"):
+        from common.core.paths import get_skills_dir
+
+        skill_ref = cmd_str[6:]
+        skill_path_part, _, args_part = skill_ref.partition(" ")
+        if not skill_path_part or "/" not in skill_path_part:
+            return {
+                "command": cmd_str,
+                "resolved_command": cmd_str,
+                "alias_used": None,
+                "allowed": False,
+                "would_execute": False,
+                "reason": "Invalid skill format. Use: skill:name/script [args]",
+            }
+        skill_name, script_name = skill_path_part.split("/", 1)
+        script_path = get_skills_dir() / skill_name / "scripts" / script_name
+        if not script_path.exists():
+            return {
+                "command": cmd_str,
+                "resolved_command": cmd_str,
+                "alias_used": None,
+                "allowed": False,
+                "would_execute": False,
+                "reason": f"Skill script not found: {skill_name}/{script_name}",
+            }
+        return {
+            "command": cmd_str,
+            "resolved_command": f"{script_path} {args_part}".strip(),
+            "alias_used": None,
+            "allowed": True,
+            "would_execute": True,
+            "workdir": str(workdir),
+        }
+
     resolved_cmd, alias_used = _resolve_alias(cmd_str)
 
     if not is_command_allowed(resolved_cmd, allowed):
@@ -201,17 +235,94 @@ def _resolve_alias(cmd_str: str) -> tuple[str, str | None]:
         return cmd_str, None
 
 
+def execute_skill_command(
+    skill_ref: str,
+    workdir: Path,
+    timeout: int,
+) -> CommandResult:
+    """Execute a skill script.
+
+    Format: skill_name/script_name [args]
+    """
+    from common.core.paths import get_skills_dir
+
+    skill_path_part, _, args_part = skill_ref.partition(" ")
+    if not skill_path_part or "/" not in skill_path_part:
+        return CommandResult(
+            command=f"skill:{skill_ref}",
+            stdout="",
+            stderr="Invalid skill format. Use: skill:name/script [args]",
+            exit_code=1,
+        )
+
+    skill_name, script_name = skill_path_part.split("/", 1)
+    script_path = get_skills_dir() / skill_name / "scripts" / script_name
+
+    if not script_path.exists():
+        return CommandResult(
+            command=f"skill:{skill_ref}",
+            stdout="",
+            stderr=f"Skill script not found: {skill_name}/{script_name}",
+            exit_code=1,
+        )
+
+    if not script_path.is_file():
+        return CommandResult(
+            command=f"skill:{skill_ref}",
+            stdout="",
+            stderr=f"Not a file: {skill_name}/{script_name}",
+            exit_code=1,
+        )
+
+    try:
+        cmd_parts = [str(script_path)]
+        if args_part:
+            cmd_parts.extend(shlex.split(args_part))
+        result = subprocess.run(
+            cmd_parts,
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return CommandResult(
+            command=f"skill:{skill_ref}",
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.returncode,
+        )
+    except subprocess.TimeoutExpired:
+        return CommandResult(
+            command=f"skill:{skill_ref}",
+            stdout="",
+            stderr=f"Skill script timed out after {timeout} seconds",
+            exit_code=124,
+            timed_out=True,
+        )
+    except Exception as exc:
+        return CommandResult(
+            command=f"skill:{skill_ref}",
+            stdout="",
+            stderr=str(exc),
+            exit_code=1,
+        )
+
+
 def resolve_and_execute_command(
     cmd_str: str,
     workdir: Path,
     allowed: set[str],
     timeout: int = 60,
 ) -> CommandResult:
-    """Execute a command with alias resolution.
+    """Execute a command with alias resolution and skill script support.
 
     Resolves any aliases in the command before execution.
+    Supports skill: prefix for executing skill scripts.
     Tracks original command and alias for debugging.
     """
+    if cmd_str.startswith("skill:"):
+        return execute_skill_command(cmd_str[6:], workdir, timeout)
+
     resolved_cmd, alias_used = _resolve_alias(cmd_str)
 
     if resolved_cmd != cmd_str:
