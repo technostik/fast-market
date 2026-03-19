@@ -20,6 +20,9 @@ Ignore last_item_id, process all available items (for testing).
 ### --limit
 Max items to process per source (default: 50).
 
+### --silent
+Suppress replay of command output. Action results are still logged. `--cron` mode already implies silent.
+
 ### --format
 Output format: `json` or `text`.
 
@@ -37,8 +40,9 @@ Output format: `json` or `text`.
    d. Update last_item_id (unless --force)
 4. For each trigger:
    a. Execute each action
-   b. Log trigger to storage
-5. Output results (unless --cron)
+   b. Replay output to stdout (unless --silent or --cron)
+   c. Log trigger to storage
+5. Output summary results (unless --cron)
 ```
 
 ## Normal vs Force Mode

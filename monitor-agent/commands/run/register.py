@@ -29,9 +29,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--limit", type=int, default=50, help="Max items to process per source (default: 50)"
     )
+    @click.option(
+        "--silent",
+        is_flag=True,
+        help="Suppress replay of command output (action results will still be logged)",
+    )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
     @click.pass_context
-    def run_cmd(ctx, cron, source_id, dry_run, force, limit, fmt):
+    def run_cmd(ctx, cron, source_id, dry_run, force, limit, silent, fmt):
         """Check sources and execute matching rules.
 
         Use --force to re-process already seen items for testing.
@@ -124,6 +129,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     if action and action.enabled:
                         try:
                             code, output = execute_action(action, item, source, rule.name)
+
+                            if not silent and not cron:
+                                click.echo(f"[{action.name}] exit={code}")
+                                if output:
+                                    click.echo(output)
 
                             storage.log_trigger(
                                 TriggerLog(
