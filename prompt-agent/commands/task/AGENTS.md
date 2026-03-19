@@ -87,6 +87,8 @@ task:
   max_iterations: 20
   default_timeout: 60
   active_prompt: default  # Custom prompt name
+
+tools_doc_prompt: default  # Tools doc prompt name
 ```
 
 Manage with:
@@ -96,15 +98,25 @@ prompt setup --add-task-command python3
 prompt setup --set-task-max-iterations 50
 
 # Task prompt management
-prompt setup --list-prompts      # List available prompts
-prompt setup --set-prompt my-prompt  # Activate a prompt
-prompt setup --edit-prompt my-prompt # Edit in editor
-prompt setup --show-prompt my-prompt # View prompt content
-prompt setup --import-prompt file.yaml # Import from file
+prompt setup --list-task-prompts
+prompt setup --set-task-prompt my-prompt
+prompt setup --edit-task-prompt my-prompt
+prompt setup --show-task-prompt my-prompt
+prompt setup --import-task-prompt file.yaml
+
+# Tools doc prompt management
+prompt setup --list-tools-doc-prompts
+prompt setup --set-tools-doc-prompt my-tools-doc
+prompt setup --edit-tools-doc-prompt my-tools-doc
+prompt setup --show-tools-doc-prompt my-tools-doc
+prompt setup --import-tools-doc-prompt file.yaml
+
+# Preview
 prompt setup --show-task-tools   # Preview inner tool documentation
 ```
 
-Prompts are stored in `~/.local/share/fast-market/task_prompts/`.
+- Task prompts stored in `~/.local/share/fast-market/task_prompts/`
+- Tools doc prompts stored in `~/.local/share/fast-market/tools_doc_prompts/`
 
 ## Usage
 

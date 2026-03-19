@@ -222,6 +222,10 @@ SYSTEM_COMMAND_DOCS = {
     },
 }
 
+DEFAULT_TOOLS_DOC_TEMPLATE = (
+    """{aliases}{fastmarket_tools}{system_commands}{other_commands}"""
+)
+
 
 def format_standard_command_doc(cmd_name: str) -> str:
     """Format documentation for a standard system command."""
@@ -252,84 +256,165 @@ def format_standard_command_doc(cmd_name: str) -> str:
     return "\n".join(lines)
 
 
-def build_command_documentation(allowed_commands: list[str]) -> str:
-    """Build formatted documentation for all allowed commands."""
+def _build_aliases_section() -> str:
+    """Build the aliases section of command documentation."""
+    from common.core.aliases import get_all_aliases
+
+    aliases = get_all_aliases()
+    if not aliases:
+        return ""
+
+    docs = ["## Aliases\n", "You can use these shortcuts instead of full commands:\n"]
+    for alias_name, alias_data in sorted(aliases.items()):
+        if isinstance(alias_data, dict):
+            actual_cmd = alias_data.get("command", "")
+            desc = alias_data.get("description", "")
+        else:
+            actual_cmd = alias_data
+            desc = ""
+        if desc:
+            docs.append(f"- `{alias_name}` → `{actual_cmd}` - {desc}")
+        else:
+            docs.append(f"- `{alias_name}` → `{actual_cmd}`")
+    docs.append("\nYou can use either the alias or the actual command.\n")
+    docs.append("---\n")
+    return "\n".join(docs)
+
+
+def _build_fastmarket_tools_section(allowed_commands: list[str]) -> str:
+    """Build the Fast-Market tools section of command documentation."""
     from commands.task.command_registry import get_fastmarket_command_help
-    from common.core.aliases import get_all_aliases, get_reverse_aliases
+    from common.core.aliases import get_reverse_aliases
+
+    fastmarket_cmds = {"corpus", "youtube", "image", "message", "prompt"}
+    fm_allowed = [c for c in allowed_commands if c in fastmarket_cmds]
+    if not fm_allowed:
+        return ""
+
+    reverse_aliases = get_reverse_aliases()
+    docs = ["## Fast-Market Tools\n"]
+
+    for cmd in sorted(fm_allowed):
+        info = get_fastmarket_command_help(cmd)
+        if info is None:
+            docs.append(f"### {cmd}")
+            docs.append(f"{cmd} command-line tool")
+            docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
+        else:
+            docs.append(f"### {info.name}")
+            docs.append(info.description)
+            docs.append(f"**Usage**: `{info.usage}`")
+        cmd_aliases = reverse_aliases.get(cmd, [])
+        if cmd_aliases:
+            docs.append(
+                f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
+            )
+        if info and info.examples:
+            docs.append("\n**Quick Examples**:")
+            for ex in info.examples:
+                docs.append(f"- `{ex}`")
+        docs.append("")
+
+    return "\n".join(docs)
+
+
+def _build_system_commands_section(allowed_commands: list[str]) -> str:
+    """Build the system commands section of command documentation."""
+    system_cmds = set(SYSTEM_COMMAND_DOCS.keys())
+    sys_allowed = [c for c in allowed_commands if c in system_cmds]
+    if not sys_allowed:
+        return ""
+
+    docs = ["\n## System Commands\n"]
+    for cmd in sorted(sys_allowed):
+        docs.append(format_standard_command_doc(cmd))
+        docs.append("")
+
+    return "\n".join(docs)
+
+
+def _build_other_commands_section(allowed_commands: list[str]) -> str:
+    """Build the other commands section of command documentation."""
+    from common.core.aliases import get_reverse_aliases
 
     fastmarket_cmds = {"corpus", "youtube", "image", "message", "prompt"}
     system_cmds = set(SYSTEM_COMMAND_DOCS.keys())
-
-    docs = ["# Available Commands\n"]
-
-    aliases = get_all_aliases()
-    reverse_aliases = get_reverse_aliases()
-
-    fm_allowed = [c for c in allowed_commands if c in fastmarket_cmds]
-    sys_allowed = [c for c in allowed_commands if c in system_cmds]
     other_allowed = [
         c for c in allowed_commands if c not in fastmarket_cmds and c not in system_cmds
     ]
+    if not other_allowed:
+        return ""
 
-    if aliases:
-        docs.append("## Aliases\n")
-        docs.append("You can use these shortcuts instead of full commands:\n")
-        for alias_name, alias_data in sorted(aliases.items()):
-            if isinstance(alias_data, dict):
-                actual_cmd = alias_data.get("command", "")
-                desc = alias_data.get("description", "")
-            else:
-                actual_cmd = alias_data
-                desc = ""
-            if desc:
-                docs.append(f"- `{alias_name}` → `{actual_cmd}` - {desc}")
-            else:
-                docs.append(f"- `{alias_name}` → `{actual_cmd}`")
-        docs.append("\nYou can use either the alias or the actual command.\n")
-        docs.append("---\n")
+    reverse_aliases = get_reverse_aliases()
+    docs = ["\n## Other Commands\n"]
 
-    if fm_allowed:
-        docs.append("## Fast-Market Tools\n")
-        for cmd in sorted(fm_allowed):
-            info = get_fastmarket_command_help(cmd)
-            if info is None:
-                docs.append(f"### {cmd}")
-                docs.append(f"{cmd} command-line tool")
-                docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
-            else:
-                docs.append(f"### {info.name}")
-                docs.append(info.description)
-                docs.append(f"**Usage**: `{info.usage}`")
-            cmd_aliases = reverse_aliases.get(cmd, [])
-            if cmd_aliases:
-                docs.append(
-                    f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
-                )
-            if info and info.examples:
-                docs.append("\n**Quick Examples**:")
-                for ex in info.examples:
-                    docs.append(f"- `{ex}`")
-            docs.append("")
-
-    if sys_allowed:
-        docs.append("\n## System Commands\n")
-        for cmd in sorted(sys_allowed):
-            docs.append(format_standard_command_doc(cmd))
-            docs.append("")
-
-    if other_allowed:
-        docs.append("\n## Other Commands\n")
-        for cmd in sorted(other_allowed):
-            docs.append(f"### {cmd}")
-            docs.append(f"Command: `{cmd}` (run `{cmd} --help` for details)")
-            cmd_aliases = reverse_aliases.get(cmd, [])
-            if cmd_aliases:
-                docs.append(
-                    f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
-                )
-            docs.append("")
+    for cmd in sorted(other_allowed):
+        docs.append(f"### {cmd}")
+        docs.append(f"Command: `{cmd}` (run `{cmd} --help` for details)")
+        cmd_aliases = reverse_aliases.get(cmd, [])
+        if cmd_aliases:
+            docs.append(
+                f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
+            )
+        docs.append("")
 
     return "\n".join(docs)
+
+
+def get_active_tools_doc_prompt_config() -> TaskPromptConfig:
+    """Get the active tools doc prompt configuration."""
+    from common.core.config import load_tool_config
+    from common.core.paths import get_fastmarket_dir
+
+    config = load_tool_config("prompt")
+    active_tools_doc = config.get("tools_doc_prompt", "default")
+
+    if active_tools_doc == "default":
+        return TaskPromptConfig(
+            name="default",
+            description="Default tools documentation",
+            template=DEFAULT_TOOLS_DOC_TEMPLATE,
+        )
+
+    tools_doc_path = (
+        get_fastmarket_dir() / "tools_doc_prompts" / f"{active_tools_doc}.yaml"
+    )
+    prompt_config = TaskPromptConfig.from_yaml(tools_doc_path)
+    if not prompt_config:
+        return TaskPromptConfig(
+            name="default",
+            description="Default tools documentation",
+            template=DEFAULT_TOOLS_DOC_TEMPLATE,
+        )
+
+    return prompt_config
+
+
+def build_command_documentation(allowed_commands: list[str]) -> str:
+    """Build formatted documentation for all allowed commands using template."""
+    aliases_section = _build_aliases_section()
+    fastmarket_tools_section = _build_fastmarket_tools_section(allowed_commands)
+    system_commands_section = _build_system_commands_section(allowed_commands)
+    other_commands_section = _build_other_commands_section(allowed_commands)
+
+    if not any(
+        [
+            aliases_section,
+            fastmarket_tools_section,
+            system_commands_section,
+            other_commands_section,
+        ]
+    ):
+        return ""
+
+    prompt_config = get_active_tools_doc_prompt_config()
+
+    return prompt_config.render(
+        aliases=aliases_section,
+        fastmarket_tools=fastmarket_tools_section,
+        system_commands=system_commands_section,
+        other_commands=other_commands_section,
+    )
 
 
 def build_system_prompt(
