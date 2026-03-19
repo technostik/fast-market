@@ -232,6 +232,30 @@ prompt task "count lines" --timeout 10 --workdir ./count
 prompt task "index all files" --timeout 300 --workdir ./index
 ```
 
+### Example 13: Session Management
+
+Control how task sessions are displayed and saved:
+
+```bash
+# Normal mode shows session header
+prompt task "analyze data" --workdir ./research
+# Output includes session header:
+# ============================================================
+# TASK SESSION: analyze data
+# Provider: anthropic, Model: claude-sonnet-4-20250514
+# Workdir: /path/to/research
+# ============================================================
+
+# Suppress session output
+prompt task "quick task" --silent --workdir ./test
+
+# Save session to YAML for later review
+prompt task "complex analysis" --save-session session.yaml --workdir ./output
+
+# Debug mode shows full session in YAML format
+prompt task "debug task" --debug full --workdir ./test
+```
+
 ## Configuration
 
 Edit `~/.local/share/fast-market/config/prompt.yaml`:
@@ -247,6 +271,7 @@ task:
     # ... add more as needed
   max_iterations: 20      # Max tool calls per task
   default_timeout: 60     # Seconds per command
+  active_prompt: default  # Active task prompt name
 ```
 
 Or use the setup command:
@@ -265,6 +290,29 @@ prompt setup --remove-task-command rm
 prompt setup --set-task-max-iterations 50
 prompt setup --set-task-timeout 120
 ```
+
+### Custom Task Prompts
+
+You can customize the system prompt used by `prompt task`:
+
+```bash
+# List available prompts
+prompt setup --list-prompts
+
+# Set active prompt
+prompt setup --set-prompt my-custom-prompt
+
+# Reset to built-in default
+prompt setup --set-prompt default
+
+# Edit a custom prompt
+prompt setup --edit-prompt my-custom-prompt
+
+# Import from YAML file
+prompt setup --import-prompt ./custom-prompt.yaml
+```
+
+Prompts are stored in `~/.local/share/fast-market/task_prompts/` as YAML files.
 
 ## Security
 
@@ -335,6 +383,7 @@ prompt task "for each .txt file: count words, create {name}.stats" \
 
 ## See Also
 
-- [prompt setup --help](./setup.md) — Configure providers and task settings
+- `prompt setup --help` — Configure providers and task settings
+- `prompt setup --list-prompts --help` — Prompt management options
 - [corpus search](../corpus-agent/) — Knowledge search
 - [image generate](../image-agent/) — Image generation

@@ -86,6 +86,7 @@ task:
     - ...
   max_iterations: 20
   default_timeout: 60
+  active_prompt: default  # Custom prompt name
 ```
 
 Manage with:
@@ -93,7 +94,16 @@ Manage with:
 prompt setup --list-task-commands
 prompt setup --add-task-command python3
 prompt setup --set-task-max-iterations 50
+
+# Task prompt management
+prompt setup --list-prompts      # List available prompts
+prompt setup --set-prompt my-prompt  # Activate a prompt
+prompt setup --edit-prompt my-prompt # Edit in editor
+prompt setup --show-prompt my-prompt # View prompt content
+prompt setup --import-prompt file.yaml # Import from file
 ```
+
+Prompts are stored in `~/.local/share/fast-market/task_prompts/`.
 
 ## Usage
 
@@ -112,4 +122,34 @@ prompt task "create hello.txt" --workdir ./test --dry-run
 
 # Load task from file with attached parameters
 prompt task --from-file task.md --param config=@config.yaml
+
+# Save session to file
+prompt task "complex task" --workdir ./output --save-session session.yaml
+
+# Suppress session output
+prompt task "quick task" --silent --workdir ./test
+
+# Debug mode shows full session
+prompt task "debug task" --debug full --workdir ./test
 ```
+
+## Session Display
+
+Each task run displays a session header with task details:
+
+```
+============================================================
+TASK SESSION: analyze data.csv
+Provider: anthropic, Model: claude-sonnet-4-20250514
+Workdir: /path/to/research
+Parameters:
+  file: data.csv
+============================================================
+```
+
+The session tracks:
+- Task description
+- Provider and model
+- Working directory
+- Parameters
+- All turns, tool calls, and results

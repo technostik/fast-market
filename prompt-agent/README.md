@@ -296,6 +296,58 @@ prompt setup --show-config
 prompt setup --config-path
 ```
 
+#### Task Prompt Management
+
+Manage custom task prompts that control the LLM's behavior in `prompt task`:
+
+```bash
+# List available task prompts
+prompt setup --list-prompts
+
+# Set active task prompt
+prompt setup --set-prompt my-custom-prompt
+
+# Reset to built-in default prompt
+prompt setup --set-prompt default
+
+# Show a specific prompt's content
+prompt setup --show-prompt my-custom-prompt
+
+# Edit a prompt in your default editor
+prompt setup --edit-prompt my-custom-prompt
+
+# Import a prompt from YAML file
+prompt setup --import-prompt ./my-prompt.yaml
+```
+
+**Prompt YAML format:**
+```yaml
+name: my-custom-prompt
+description: Custom task prompt for specific use case
+template: |
+  Your custom system prompt template here.
+  Supports multi-line content.
+```
+
+#### Task Configuration
+
+```bash
+# List task configuration
+prompt setup --list-task-commands
+
+# Add a command to task whitelist
+prompt setup --add-task-command python3
+
+# Remove a command from task whitelist
+prompt setup --remove-task-command rm
+
+# Set max iterations for task
+prompt setup --set-task-max-iterations 50
+
+# Set default timeout (seconds)
+prompt setup --set-task-timeout 120
+```
+
 ---
 
 ### `prompt alias`
@@ -315,6 +367,9 @@ prompt alias alert-me
 # Create/update alias
 prompt alias alert-me "message alert"
 prompt alias ls-files "ls -la"
+
+# Create alias with description (shown in task prompts)
+prompt alias alert-me "message alert" -d "Send an alert message"
 
 # Remove alias
 prompt alias alert-me --remove
@@ -339,10 +394,12 @@ prompt alias --list --format yaml
 - Nested aliases (alias → alias → command) are supported (max depth 5)
 - Alias resolution is logged in debug mode
 
-**Example aliases file:**
+**Example aliases file (with descriptions):**
 ```yaml
 aliases:
-  alert-me: message alert
+  alert-me:
+    command: message alert
+    description: Send an alert message
   search-youtube: youtube search
   img-gen: image generate
   summarize-prompt: prompt apply summarize
@@ -351,8 +408,8 @@ aliases:
 
 **Example usage:**
 ```bash
-# Create alias
-prompt alias alert-me "message alert"
+# Create alias with description
+prompt alias alert-me "message alert" -d "Send an alert message"
 
 # Use in task - LLM sees the alias and can use it directly
 prompt task "alert-me 'server is down'" --workdir ./server
@@ -372,6 +429,41 @@ prompt alias alert-me "message alert"
 prompt alias img-gen "image generate"
 ```
 Aliases are automatically documented in task system prompts, so the LLM knows available shortcuts.
+
+Aliases can include descriptions for better documentation:
+```bash
+prompt alias alert-me "message alert" -d "Send an alert message"
+```
+
+### Task Sessions
+The `prompt task` command tracks and displays session information:
+```bash
+# Normal output shows session header with task details
+prompt task "analyze data"
+
+# Output:
+# ============================================================
+# TASK SESSION: analyze data
+# Provider: anthropic, Model: claude-sonnet-4-20250514
+# Workdir: /path/to/current/dir
+# ============================================================
+
+# Suppress session output
+prompt task "quick task" --silent
+
+# Save session to YAML file for later review
+prompt task "complex task" --save-session session.yaml
+
+# Debug mode shows full session YAML
+prompt task "debug task" --debug full
+```
+
+Session information includes:
+- Task description
+- Provider and model used
+- Working directory
+- Parameters (if any)
+- All turns, tool calls, and results
 
 ### Three Input Modes
 1. **Saved prompts** — Reusable templates with stored settings

@@ -8,10 +8,12 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - `cli/main.py` — CLI entry point that discovers and registers all commands
 - `commands/apply/register.py` — Core execution engine with three input modes (saved/direct/stdin)
 - `commands/task/register.py` — Agentic task execution with LLM-driven CLI loop
-- `commands/alias/register.py` — Command alias management for task execution
-- `commands/setup/register.py` — Configuration wizard for provider and task management
+- `commands/alias/register.py` — Command alias management with description support
+- `commands/setup/register.py` — Configuration wizard for provider, task prompts, and task management
 - `core/substitution.py` — Placeholder resolution with file/stdin injection
 - `core/models.py` — Domain models (Prompt, PromptExecution)
+- `core/session.py` — Task session tracking and serialization
+- `core/task_prompt.py` — Task prompt configuration (TaskPromptConfig)
 - `common/core/aliases.py` — Alias resolution with caching and nested alias support
 - `plugins/base.py` — Provider interfaces (LLMProvider, LazyLLMProvider)
 - `storage/store.py` — SQLite persistence with PromptStore
@@ -82,7 +84,15 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 1. Create/edit `~/.config/prompt-agent/aliases.yaml`
 2. Add entries under `aliases:` key
 3. Or use `prompt alias <name> "<command>"` CLI
-4. Aliases are automatically documented in task system prompts
+4. Include optional `description` field for better documentation
+5. Aliases are automatically documented in task system prompts
+
+**To manage task prompts:**
+1. Use `prompt setup --list-prompts` to see available prompts
+2. Use `prompt setup --set-prompt <name>` to activate a prompt
+3. Use `prompt setup --edit-prompt <name>` to customize a prompt
+4. Use `prompt setup --import-prompt <file>` to import from YAML
+5. Task prompts are stored in `~/.local/share/fast-market/task_prompts/`
 
 ## 📚 Related Documentation
 
