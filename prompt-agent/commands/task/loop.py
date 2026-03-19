@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from common import structlog
@@ -33,6 +34,54 @@ def is_termination_message(content: str) -> bool:
     return any(p in content_lower for p in _TERMINATION_PATTERNS)
 
 
+def build_execute_command_tool(allowed_commands: list[str]) -> dict:
+    """Build the OpenAI-style tool definition for execute_command."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "execute_command",
+            "description": "Execute a whitelisted CLI command in the working directory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to execute",
+                    },
+                    "explanation": {
+                        "type": "string",
+                        "description": "Brief explanation of why you're running this command",
+                    },
+                },
+                "required": ["command"],
+            },
+        },
+    }
+
+
+def format_message_history(messages: list[dict]) -> str:
+    """Format message history for the prompt."""
+    formatted = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg.get("content", "")
+        if role == "tool":
+            tc_id = msg.get("tool_call_id", "")
+            formatted.append(f"[TOOL RESULT for {tc_id}]\n{content}")
+        elif msg.get("tool_calls"):
+            tc_list = []
+            for tc in msg["tool_calls"]:
+                tc_list.append(
+                    f"- {tc['function']['name']}: {tc['function']['arguments']}"
+                )
+            formatted.append(
+                f"[ASSISTANT]\n{content}\n[TOOL CALLS]\n" + "\n".join(tc_list)
+            )
+        else:
+            formatted.append(f"[{role.upper()}]\n{content}")
+    return "\n\n".join(formatted)
+
+
 @dataclass
 class TaskLoop:
     config: TaskConfig
@@ -40,6 +89,7 @@ class TaskLoop:
     provider: str
     model: str | None
     verbose: bool = False
+    debug: bool = False
 
     def run(
         self,
@@ -62,6 +112,9 @@ class TaskLoop:
             )
 
         llm_provider = providers[self.provider]
+        if hasattr(llm_provider, "set_debug"):
+            llm_provider.set_debug(self.debug)
+
         system_prompt = build_system_prompt(
             task_description=task_description,
             allowed_commands=list(self.config.allowed_commands),
@@ -78,6 +131,7 @@ class TaskLoop:
 
         iteration = 0
         max_iter = self.config.max_iterations
+        tools = [build_execute_command_tool(list(self.config.allowed_commands))]
 
         self._log(f"Starting task with {max_iter} max iterations...")
         if task_params:
@@ -85,116 +139,101 @@ class TaskLoop:
 
         while iteration < max_iter:
             iteration += 1
-            self._log(f"\n--- Iteration {iteration}/{max_iter} ---")
+            self._debug(f"\n{'=' * 50}")
+            self._debug(f"ITERATION {iteration}/{max_iter}")
+            self._debug(f"{'=' * 50}")
 
-            request = self._build_request(system_prompt, messages)
+            from plugins.base import LLMRequest
+
+            request = LLMRequest(
+                prompt=format_message_history(messages),
+                model=self.model,
+                system=system_prompt,
+                max_tokens=4096,
+                tools=tools,
+            )
+
             response = llm_provider.complete(request)
 
-            response_text = response.content
-            self._log(f"LLM response: {response_text[:200]}...")
-
-            if self._has_tool_use(response_text):
-                should_continue = self._handle_tool_use(
-                    response_text,
+            if response.tool_calls:
+                self._debug(f"\n>>> {len(response.tool_calls)} tool_call(s) detected")
+                should_continue = self._handle_tool_calls(
+                    response,
                     execute_fn,
                     messages,
+                    tools,
                 )
                 if not should_continue:
                     break
-            elif is_termination_message(response_text):
+            elif is_termination_message(response.content):
                 self._log("\n=== TASK COMPLETE ===")
-                print(response_text)
+                print(response.content)
                 break
             else:
-                messages.append({"role": "assistant", "content": response_text})
-                print(response_text)
+                self._debug(f"\n>>> No tool_calls, final response")
+                messages.append({"role": "assistant", "content": response.content})
+                print(response.content)
                 break
         else:
             print(f"\nMax iterations ({max_iter}) reached. Task may not be complete.")
 
-    def _build_request(self, system_prompt: str, messages: list[dict]):
-        from plugins.base import LLMRequest
-
-        return LLMRequest(
-            prompt=self._format_messages(messages),
-            model=self.model,
-            system=system_prompt,
-            max_tokens=4096,
-        )
-
-    def _format_messages(self, messages: list[dict]) -> str:
-        """Format messages for non-tool-use providers."""
-        formatted = []
-        for msg in messages:
-            role = msg["role"]
-            content = msg["content"]
-            if msg.get("tool_results"):
-                for tr in msg["tool_results"]:
-                    formatted.append(
-                        f"[TOOL RESULT: {tr['command']}]\n"
-                        f"Exit code: {tr['exit_code']}\n"
-                        f"Stdout:\n{tr['stdout']}\n"
-                        f"Stderr:\n{tr['stderr']}"
-                    )
-            else:
-                formatted.append(f"[{role.upper()}]\n{content}")
-        return "\n\n".join(formatted)
-
-    def _has_tool_use(self, text: str) -> bool:
-        """Check if response contains tool use."""
-        import re
-
-        return bool(re.search(r"<tool_call>", text, re.IGNORECASE))
-
-    def _handle_tool_use(
+    def _handle_tool_calls(
         self,
-        response_text: str,
+        response,
         execute_fn,
         messages: list[dict],
+        tools: list[dict],
     ) -> bool:
-        """Handle tool use response. Returns False if task should terminate."""
-        import re
-
-        tool_calls = re.findall(
-            r"<tool_call>\s*<name>(\w+)</name>\s*<input>\s*<command>([^<]+)</command>\s*<explanation>([^<]*)</explanation>\s*</input>\s*</tool_call>",
-            response_text,
-            re.DOTALL,
-        )
-
-        if not tool_calls:
-            if is_termination_message(response_text):
-                return False
-            messages.append({"role": "assistant", "content": response_text})
+        """Handle tool calls from the response."""
+        if not response.tool_calls:
             return True
 
-        messages.append({"role": "assistant", "content": response_text})
+        messages.append(
+            {
+                "role": "assistant",
+                "content": response.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments)
+                            if isinstance(tc.arguments, dict)
+                            else str(tc.arguments),
+                        },
+                    }
+                    for tc in response.tool_calls
+                ],
+            }
+        )
 
-        for tool_name, command, explanation in tool_calls:
-            self._log(f"Executing: {command}")
-            if explanation:
-                self._log(f"  Reason: {explanation}")
+        for tool_call in response.tool_calls:
+            self._debug(f"\n>>> TOOL: {tool_call.name}")
+            self._debug(f"    Args: {tool_call.arguments}")
 
-            command = command.strip()
-            result = execute_fn(command)
-            self._log(f"  Exit code: {result.exit_code}")
+            command = tool_call.arguments.get("command", "")
+            result = execute_fn(command.strip())
+
+            self._debug(f"    Exit: {result.exit_code}")
+            if result.stdout:
+                self._debug(f"    Stdout: {result.stdout[:100]}...")
+            if result.stderr:
+                self._debug(f"    Stderr: {result.stderr[:100]}...")
+
+            tool_result = self._format_tool_result(command, result)
 
             messages.append(
                 {
-                    "role": "user",
-                    "content": self._format_tool_result(command, explanation, result),
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": tool_result,
                 }
             )
 
         return True
 
-    def _format_tool_result(
-        self,
-        command: str,
-        explanation: str,
-        result,
-    ) -> str:
-        return f"""[TOOL RESULT]
-Command: {command}
+    def _format_tool_result(self, command: str, result) -> str:
+        return f"""Command: {command}
 Exit code: {result.exit_code}
 Stdout:
 {result.stdout[:5000] if result.stdout else "(empty)"}
@@ -205,6 +244,10 @@ Timed out: {result.timed_out}"""
     def _log(self, msg: str) -> None:
         if self.verbose:
             print(f"[VERBOSE] {msg}", file=sys.stderr)
+
+    def _debug(self, msg: str) -> None:
+        if self.debug:
+            print(f"[DEBUG] {msg}", file=sys.stderr)
 
 
 def run_dry_run(

@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import json
+import sys
 from urllib import error, request as urllib_request
 
 from common import structlog
-from plugins.base import LLMProvider, LLMRequest, LLMResponse, LazyLLMProvider
+from plugins.base import (
+    LLMProvider,
+    LLMRequest,
+    LLMResponse,
+    LazyLLMProvider,
+    ToolCall,
+    _format_debug_request,
+    _format_debug_response,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -20,7 +29,7 @@ class OllamaProvider(LazyLLMProvider):
         if not isinstance(base_url, str) or not base_url.strip():
             logger.warning(
                 "ollama_provider_not_initialized",
-                reason="providers.ollama.base_url must be configured"
+                reason="providers.ollama.base_url must be configured",
             )
             self._provider = None
             return
@@ -28,14 +37,13 @@ class OllamaProvider(LazyLLMProvider):
         if not isinstance(model, str) or not model.strip():
             logger.warning(
                 "ollama_provider_not_initialized",
-                reason="providers.ollama.default_model must be configured"
+                reason="providers.ollama.default_model must be configured",
             )
             self._provider = None
             return
 
         self._provider = _RealOllamaProvider(
-            base_url=base_url.rstrip("/"),
-            default_model=model
+            base_url=base_url.rstrip("/"), default_model=model
         )
         logger.info(
             "ollama_provider_initialized",
@@ -50,37 +58,41 @@ class _RealOllamaProvider(LLMProvider):
     def __init__(self, base_url: str, default_model: str):
         self.base_url = base_url
         self.default_model = default_model
+        self._debug = False
+
+    def set_debug(self, debug: bool) -> None:
+        self._debug = debug
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model
-        logger.info(
-            "ollama_request",
-            model=model,
-            base_url=self.base_url,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            prompt_chars=len(request.prompt),
-        )
+
+        if self._debug:
+            print("\n" + _format_debug_request(request), file=sys.stderr)
+
+        messages = [{"role": "user", "content": request.prompt}]
+        if request.system:
+            messages.insert(0, {"role": "system", "content": request.system})
 
         payload = {
             "model": model,
-            "prompt": request.prompt,
+            "messages": messages,
             "stream": False,
             "options": {
                 "temperature": request.temperature,
                 "num_predict": request.max_tokens,
             },
         }
-        if request.system:
-            payload["system"] = request.system
+        if request.tools:
+            payload["tools"] = request.tools
 
         body = json.dumps(payload).encode("utf-8")
         req = urllib_request.Request(
-            f"{self.base_url}/api/generate",
+            f"{self.base_url}/api/chat",
             data=body,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+
         try:
             with urllib_request.urlopen(req) as resp:
                 raw = resp.read().decode("utf-8")
@@ -88,16 +100,52 @@ class _RealOllamaProvider(LLMProvider):
             raise RuntimeError(f"Ollama request failed with HTTP {exc.code}") from exc
         except error.URLError as exc:
             raise RuntimeError(f"Ollama request failed: {exc.reason}") from exc
+        except TimeoutError:
+            raise RuntimeError(
+                f"Ollama request timed out after 120s. Model may be loading. Check 'ollama list'."
+            ) from None
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Invalid JSON response from Ollama: {raw[:500]}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"Unexpected response type from Ollama: {type(data)}. Response: {raw[:500]}"
+            )
+
+        message = data.get("message", {})
+        if not isinstance(message, dict):
+            raise RuntimeError(
+                f"Unexpected message type from Ollama: {type(message)}. Response: {raw[:500]}"
+            )
 
         data = json.loads(raw)
-        content = str(data.get("response", ""))
-        logger.info(
-            "ollama_response",
-            model=model,
-            output_chars=len(content),
-            done=bool(data.get("done", False)),
-        )
-        return LLMResponse(
+        message = data.get("message", {})
+        content = message.get("content", "")
+
+        tool_calls = None
+        if message.get("tool_calls"):
+            tool_calls = []
+            for tc in message["tool_calls"]:
+                args = tc.get("function", {}).get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        pass
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.get("id", ""),
+                        name=tc.get("function", {}).get("name", ""),
+                        arguments=args,
+                    )
+                )
+
+        response = LLMResponse(
             content=content,
             model=model,
             usage={
@@ -108,7 +156,13 @@ class _RealOllamaProvider(LLMProvider):
                 "total_duration": data.get("total_duration"),
                 "load_duration": data.get("load_duration"),
             },
+            tool_calls=tool_calls,
         )
+
+        if self._debug:
+            print("\n" + _format_debug_response(response), file=sys.stderr)
+
+        return response
 
     def list_models(self) -> list[str]:
         return [self.default_model]

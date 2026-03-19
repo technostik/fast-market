@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import json
 import os
+import sys
 
 from common import structlog
-from plugins.base import LLMProvider, LLMRequest, LLMResponse, LazyLLMProvider
+from plugins.base import (
+    LLMProvider,
+    LLMRequest,
+    LLMResponse,
+    LazyLLMProvider,
+    ToolCall,
+    _format_debug_request,
+    _format_debug_response,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -17,12 +27,14 @@ class OpenAICompatibleProvider(LazyLLMProvider):
         except ImportError as exc:
             raise RuntimeError("pip install openai") from exc
 
-        provider_config = (self.config.get("providers") or {}).get("openai-compatible", {})
+        provider_config = (self.config.get("providers") or {}).get(
+            "openai-compatible", {}
+        )
         base_url = provider_config.get("base_url", "")
         if not isinstance(base_url, str) or not base_url.strip():
             logger.warning(
                 "openai_compatible_provider_not_initialized",
-                reason="providers.openai-compatible.base_url must be configured"
+                reason="providers.openai-compatible.base_url must be configured",
             )
             self._provider = None
             return
@@ -32,7 +44,7 @@ class OpenAICompatibleProvider(LazyLLMProvider):
         if not api_key:
             logger.warning(
                 "openai_compatible_provider_not_initialized",
-                reason=f"{api_key_env} environment variable not set"
+                reason=f"{api_key_env} environment variable not set",
             )
             self._provider = None
             return
@@ -41,7 +53,7 @@ class OpenAICompatibleProvider(LazyLLMProvider):
         if not isinstance(default_model, str) or not default_model.strip():
             logger.warning(
                 "openai_compatible_provider_not_initialized",
-                reason="providers.openai-compatible.default_model must be configured"
+                reason="providers.openai-compatible.default_model must be configured",
             )
             self._provider = None
             return
@@ -49,9 +61,7 @@ class OpenAICompatibleProvider(LazyLLMProvider):
         client = OpenAI(api_key=api_key, base_url=base_url)
 
         self._provider = _RealOpenAICompatibleProvider(
-            client=client,
-            base_url=base_url,
-            default_model=default_model
+            client=client, base_url=base_url, default_model=default_model
         )
         logger.info(
             "openai_compatible_provider_initialized",
@@ -67,37 +77,55 @@ class _RealOpenAICompatibleProvider(LLMProvider):
         self.client = client
         self.base_url = base_url
         self.default_model = default_model
+        self._debug = False
+
+    def set_debug(self, debug: bool) -> None:
+        self._debug = debug
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model
-        logger.info(
-            "openai_compatible_request",
-            model=model,
-            base_url=self.base_url,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            prompt_chars=len(request.prompt),
-        )
+
+        if self._debug:
+            print("\n" + _format_debug_request(request), file=sys.stderr)
 
         messages = [{"role": "user", "content": request.prompt}]
         if request.system:
             messages.insert(0, {"role": "system", "content": request.system})
 
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-        )
-        content = response.choices[0].message.content or ""
-        logger.info(
-            "openai_compatible_response",
-            model=model,
-            prompt_tokens=response.usage.prompt_tokens,
-            completion_tokens=response.usage.completion_tokens,
-            output_chars=len(content),
-        )
-        return LLMResponse(
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+        if request.tools:
+            kwargs["tools"] = request.tools
+            kwargs["tool_choice"] = "auto"
+
+        try:
+            response = self.client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            raise RuntimeError(f"OpenAI-compatible API call failed: {exc}") from exc
+        message = response.choices[0].message
+        content = message.content or ""
+
+        tool_calls = None
+        if message.tool_calls:
+            tool_calls = []
+            for tc in message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=args,
+                    )
+                )
+
+        result_response = LLMResponse(
             content=content,
             model=model,
             usage={
@@ -105,7 +133,13 @@ class _RealOpenAICompatibleProvider(LLMProvider):
                 "completion_tokens": response.usage.completion_tokens,
             },
             metadata={"id": response.id, "base_url": self.base_url},
+            tool_calls=tool_calls,
         )
+
+        if self._debug:
+            print("\n" + _format_debug_response(result_response), file=sys.stderr)
+
+        return result_response
 
     def list_models(self) -> list[str]:
         return [self.default_model]

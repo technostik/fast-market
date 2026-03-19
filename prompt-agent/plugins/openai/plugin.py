@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import json
 import os
+import sys
 
 from common import structlog
-from plugins.base import LLMProvider, LLMRequest, LLMResponse, LazyLLMProvider
+from plugins.base import (
+    LLMProvider,
+    LLMRequest,
+    LLMResponse,
+    LazyLLMProvider,
+    ToolCall,
+    _format_debug_request,
+    _format_debug_response,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -23,7 +33,7 @@ class OpenAIProvider(LazyLLMProvider):
         if not api_key:
             logger.warning(
                 "openai_provider_not_initialized",
-                reason=f"{api_key_env} environment variable not set"
+                reason=f"{api_key_env} environment variable not set",
             )
             self._provider = None
             return
@@ -31,10 +41,7 @@ class OpenAIProvider(LazyLLMProvider):
         client = OpenAI(api_key=api_key)
         default_model = provider_config.get("default_model", "gpt-4")
 
-        self._provider = _RealOpenAIProvider(
-            client=client,
-            default_model=default_model
-        )
+        self._provider = _RealOpenAIProvider(client=client, default_model=default_model)
         logger.info("openai_provider_initialized", default_model=default_model)
 
 
@@ -44,36 +51,55 @@ class _RealOpenAIProvider(LLMProvider):
     def __init__(self, client, default_model: str):
         self.client = client
         self.default_model = default_model
+        self._debug = False
+
+    def set_debug(self, debug: bool) -> None:
+        self._debug = debug
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model
-        logger.info(
-            "openai_request",
-            model=model,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            prompt_chars=len(request.prompt),
-        )
+
+        if self._debug:
+            print("\n" + _format_debug_request(request), file=sys.stderr)
 
         messages = [{"role": "user", "content": request.prompt}]
         if request.system:
             messages.insert(0, {"role": "system", "content": request.system})
 
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-        )
-        content = response.choices[0].message.content or ""
-        logger.info(
-            "openai_response",
-            model=model,
-            prompt_tokens=response.usage.prompt_tokens,
-            completion_tokens=response.usage.completion_tokens,
-            output_chars=len(content),
-        )
-        return LLMResponse(
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+        if request.tools:
+            kwargs["tools"] = request.tools
+            kwargs["tool_choice"] = "auto"
+
+        try:
+            response = self.client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            raise RuntimeError(f"OpenAI API call failed: {exc}") from exc
+        message = response.choices[0].message
+        content = message.content or ""
+
+        tool_calls = None
+        if message.tool_calls:
+            tool_calls = []
+            for tc in message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=args,
+                    )
+                )
+
+        result_response = LLMResponse(
             content=content,
             model=model,
             usage={
@@ -81,7 +107,13 @@ class _RealOpenAIProvider(LLMProvider):
                 "completion_tokens": response.usage.completion_tokens,
             },
             metadata={"id": response.id},
+            tool_calls=tool_calls,
         )
+
+        if self._debug:
+            print("\n" + _format_debug_response(result_response), file=sys.stderr)
+
+        return result_response
 
     def list_models(self) -> list[str]:
         return ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]

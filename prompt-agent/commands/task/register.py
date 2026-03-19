@@ -66,6 +66,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Show commands without executing",
     )
     @click.option(
+        "--debug",
+        is_flag=True,
+        help="Show full LLM dialogs (requests/responses) for debugging",
+    )
+    @click.option(
         "--format",
         "fmt",
         type=click.Choice(["text", "json"]),
@@ -84,6 +89,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         max_iterations,
         timeout,
         dry_run,
+        debug,
         fmt,
     ):
         """Execute a task with LLM-driven CLI command loop.
@@ -128,6 +134,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             provider=provider_name,
             model=model,
             verbose=ctx.obj.get("verbose", False),
+            debug=debug,
         )
 
         try:
