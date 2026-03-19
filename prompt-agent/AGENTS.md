@@ -8,9 +8,11 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - `cli/main.py` — CLI entry point that discovers and registers all commands
 - `commands/apply/register.py` — Core execution engine with three input modes (saved/direct/stdin)
 - `commands/task/register.py` — Agentic task execution with LLM-driven CLI loop
+- `commands/alias/register.py` — Command alias management for task execution
 - `commands/setup/register.py` — Configuration wizard for provider and task management
 - `core/substitution.py` — Placeholder resolution with file/stdin injection
 - `core/models.py` — Domain models (Prompt, PromptExecution)
+- `common/core/aliases.py` — Alias resolution with caching and nested alias support
 - `plugins/base.py` — Provider interfaces (LLMProvider, LazyLLMProvider)
 - `storage/store.py` — SQLite persistence with PromptStore
 - `plugins/anthropic/plugin.py` — Anthropic provider implementation
@@ -75,6 +77,12 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 **To add a command to task whitelist:**
 1. Add to `_DEFAULT_ALLOWED` in `commands/task/executor.py`, or
 2. Use `prompt setup --add-task-command <name>`
+
+**To add command aliases:**
+1. Create/edit `~/.config/prompt-agent/aliases.yaml`
+2. Add entries under `aliases:` key
+3. Or use `prompt alias <name> "<command>"` CLI
+4. Aliases are automatically documented in task system prompts
 
 ## 📚 Related Documentation
 

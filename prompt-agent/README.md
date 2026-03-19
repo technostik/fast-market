@@ -296,7 +296,82 @@ prompt setup --show-config
 prompt setup --config-path
 ```
 
+---
+
+### `prompt alias`
+
+Manage command aliases for `prompt task`. Aliases are shortcuts that resolve to actual commands, making it easier to type frequently used command combinations.
+
+**Configuration file:** `~/.config/prompt-agent/aliases.yaml` (XDG compliant)
+
+```bash
+# List all aliases
+prompt alias
+prompt alias --list
+
+# Show specific alias
+prompt alias alert-me
+
+# Create/update alias
+prompt alias alert-me "message alert"
+prompt alias ls-files "ls -la"
+
+# Remove alias
+prompt alias alert-me --remove
+
+# Show config file path
+prompt alias --config-path
+
+# Export aliases to file
+prompt alias --export > backup.yaml
+
+# Import aliases from file
+prompt alias --file team_aliases.yaml
+
+# JSON/YAML output for scripting
+prompt alias --list --format json
+prompt alias --list --format yaml
+```
+
+**Alias Resolution:**
+- Aliases work with `prompt task` — the LLM sees aliases in documentation
+- Arguments are passed through to the resolved command
+- Nested aliases (alias → alias → command) are supported (max depth 5)
+- Alias resolution is logged in debug mode
+
+**Example aliases file:**
+```yaml
+aliases:
+  alert-me: message alert
+  search-youtube: youtube search
+  img-gen: image generate
+  summarize-prompt: prompt apply summarize
+  ls-files: ls -la
+```
+
+**Example usage:**
+```bash
+# Create alias
+prompt alias alert-me "message alert"
+
+# Use in task - LLM sees the alias and can use it directly
+prompt task "alert-me 'server is down'" --workdir ./server
+
+# Dry-run shows alias resolution
+prompt task "alert-me 'hello'" --dry-run
+# [DRY RUN] Available aliases:
+#   - alert-me → message alert
+```
+
 ## Features
+
+### Command Aliases
+Create shortcuts for frequently used commands in `prompt task`:
+```bash
+prompt alias alert-me "message alert"
+prompt alias img-gen "image generate"
+```
+Aliases are automatically documented in task system prompts, so the LLM knows available shortcuts.
 
 ### Three Input Modes
 1. **Saved prompts** — Reusable templates with stored settings
@@ -328,17 +403,21 @@ prompt-agent/
 ├── cli/                 # CLI entry point
 │   ├── main.py          # Command registration
 │   └── commands/        # Individual commands
-│       ├── apply.py     # Main execution logic
-│       ├── create.py    # Prompt creation
-│       ├── get.py       # Prompt retrieval
-│       ├── list.py      # Listing
-│       ├── update.py    # Updates
-│       ├── delete.py    # Deletion
-│       ├── providers.py # Provider listing
-│       └── setup.py     # Configuration wizard
+│       ├── apply/       # Main execution logic
+│       ├── create/      # Prompt creation
+│       ├── get/          # Prompt retrieval
+│       ├── list/        # Listing
+│       ├── update/      # Updates
+│       ├── delete/      # Deletion
+│       ├── alias/       # Alias management
+│       ├── providers/    # Provider listing
+│       └── setup/       # Configuration wizard
 ├── core/                # Core domain models
 │   ├── models.py        # Prompt, Execution
 │   └── substitution.py  # Placeholder resolution
+├── common/              # Shared infrastructure
+│   └── core/
+│       └── aliases.py   # Alias resolution
 ├── plugins/             # LLM providers
 │   ├── base.py          # Provider interfaces
 │   ├── anthropic/       # Anthropic provider
@@ -348,10 +427,8 @@ prompt-agent/
 ├── storage/             # Persistence
 │   ├── store.py         # PromptStore interface
 │   └── migrations/      # Alembic DB migrations
-└── common/              # Shared infrastructure
-    ├── core/            # Config, registry
-    ├── cli/             # CLI helpers
-    └── storage/         # Base storage classes
+└── tests/               # Test suite
+    └── test_aliases.py  # Alias tests
 ```
 
 ## Development
@@ -394,3 +471,32 @@ def register(config: dict) -> PluginManifest:
 1. Create `commands/newcmd/register.py` with `register()` function
 2. Return `CommandManifest` with click command
 3. Command automatically discovered via plugin registry
+
+**Example command structure:**
+```python
+from commands.base import CommandManifest
+
+def register(plugin_manifests: dict) -> CommandManifest:
+    @click.command("newcmd")
+    @click.argument("name")
+    def newcmd_cmd(name):
+        """Command description."""
+        click.echo(f"Hello {name}")
+    
+    return CommandManifest(name="newcmd", click_command=newcmd_cmd)
+```
+
+### Adding Command Aliases
+
+Aliases are defined in `~/.config/prompt-agent/aliases.yaml` or managed via CLI:
+
+```yaml
+aliases:
+  alert-me: message alert
+  img-gen: image generate
+```
+
+The alias system is implemented in `common/core/aliases.py`:
+- `load_aliases()` — Load from YAML with caching
+- `resolve_alias(cmd_str)` — Replace alias with actual command
+- `get_reverse_aliases()` — Map commands to their aliases (for docs)

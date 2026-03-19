@@ -4,8 +4,12 @@ import json
 import shlex
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from common import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -15,6 +19,8 @@ class CommandResult:
     stderr: str
     exit_code: int
     timed_out: bool = False
+    original_command: str | None = None
+    resolved_from_alias: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -23,6 +29,8 @@ class CommandResult:
             "stderr": self.stderr,
             "exit_code": self.exit_code,
             "timed_out": self.timed_out,
+            "original_command": self.original_command,
+            "resolved_from_alias": self.resolved_from_alias,
         }
 
 
@@ -150,23 +158,130 @@ def execute_command(
 
 def execute_dry_run(cmd_str: str, workdir: Path, allowed: set[str]) -> dict:
     """Simulate execution for dry-run mode."""
-    if not is_command_allowed(cmd_str, allowed):
+    resolved_cmd, alias_used = _resolve_alias(cmd_str)
+
+    if not is_command_allowed(resolved_cmd, allowed):
         return {
             "command": cmd_str,
+            "resolved_command": resolved_cmd,
+            "alias_used": alias_used,
             "allowed": False,
             "would_execute": False,
-            "reason": f"Command not allowed: {shlex.split(cmd_str)[0]}",
+            "reason": f"Command not allowed: {shlex.split(resolved_cmd)[0]}",
         }
-    if reject_absolute_paths(cmd_str):
+    if reject_absolute_paths(resolved_cmd):
         return {
             "command": cmd_str,
+            "resolved_command": resolved_cmd,
+            "alias_used": alias_used,
             "allowed": True,
             "would_execute": False,
             "reason": "Absolute paths not allowed",
         }
     return {
         "command": cmd_str,
+        "resolved_command": resolved_cmd,
+        "alias_used": alias_used,
         "allowed": True,
         "would_execute": True,
         "workdir": str(workdir),
     }
+
+
+def _resolve_alias(cmd_str: str) -> tuple[str, str | None]:
+    """Resolve an alias in the command string.
+
+    Returns (resolved_command, alias_name_or_none).
+    """
+    try:
+        from common.core.aliases import resolve_alias
+
+        return resolve_alias(cmd_str)
+    except Exception:
+        return cmd_str, None
+
+
+def resolve_and_execute_command(
+    cmd_str: str,
+    workdir: Path,
+    allowed: set[str],
+    timeout: int = 60,
+) -> CommandResult:
+    """Execute a command with alias resolution.
+
+    Resolves any aliases in the command before execution.
+    Tracks original command and alias for debugging.
+    """
+    resolved_cmd, alias_used = _resolve_alias(cmd_str)
+
+    if resolved_cmd != cmd_str:
+        logger.debug(
+            "alias resolved",
+            original=cmd_str,
+            resolved=resolved_cmd,
+            alias=alias_used,
+        )
+
+    result = _execute_whitelisted_command(resolved_cmd, workdir, allowed, timeout)
+
+    if result.exit_code != 0 and alias_used:
+        result.stderr = f"{result.stderr}\n(from alias '{alias_used}')".strip()
+
+    result.original_command = cmd_str if cmd_str != resolved_cmd else None
+    result.resolved_from_alias = alias_used
+
+    return result
+
+
+def _execute_whitelisted_command(
+    cmd_str: str,
+    workdir: Path,
+    allowed: set[str],
+    timeout: int,
+) -> CommandResult:
+    """Execute a whitelisted command (internal)."""
+    if not is_command_allowed(cmd_str, allowed):
+        return CommandResult(
+            command=cmd_str,
+            stdout="",
+            stderr=f"Command not allowed: {shlex.split(cmd_str)[0]}",
+            exit_code=126,
+        )
+
+    if reject_absolute_paths(cmd_str):
+        return CommandResult(
+            command=cmd_str,
+            stdout="",
+            stderr="Absolute paths not allowed in command arguments",
+            exit_code=126,
+        )
+
+    try:
+        result = subprocess.run(
+            shlex.split(cmd_str),
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return CommandResult(
+            command=cmd_str,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.returncode,
+        )
+    except subprocess.TimeoutExpired:
+        return CommandResult(
+            command=cmd_str,
+            stdout="",
+            stderr=f"Command timed out after {timeout} seconds",
+            exit_code=124,
+            timed_out=True,
+        )
+    except Exception as exc:
+        return CommandResult(
+            command=cmd_str,
+            stdout="",
+            stderr=str(exc),
+            exit_code=1,
+        )

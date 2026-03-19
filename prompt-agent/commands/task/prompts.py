@@ -253,11 +253,15 @@ def format_standard_command_doc(cmd_name: str) -> str:
 def build_command_documentation(allowed_commands: list[str]) -> str:
     """Build formatted documentation for all allowed commands."""
     from commands.task.command_registry import get_fastmarket_command_help
+    from common.core.aliases import get_all_aliases, get_reverse_aliases
 
     fastmarket_cmds = {"corpus", "youtube", "image", "message", "prompt"}
     system_cmds = set(SYSTEM_COMMAND_DOCS.keys())
 
     docs = ["# Available Commands\n"]
+
+    aliases = get_all_aliases()
+    reverse_aliases = get_reverse_aliases()
 
     fm_allowed = [c for c in allowed_commands if c in fastmarket_cmds]
     sys_allowed = [c for c in allowed_commands if c in system_cmds]
@@ -265,19 +269,31 @@ def build_command_documentation(allowed_commands: list[str]) -> str:
         c for c in allowed_commands if c not in fastmarket_cmds and c not in system_cmds
     ]
 
+    if aliases:
+        docs.append("## Aliases\n")
+        docs.append("You can use these shortcuts instead of full commands:\n")
+        for alias_name, actual_cmd in sorted(aliases.items()):
+            docs.append(f"- `{alias_name}` → `{actual_cmd}`")
+        docs.append("\nYou can use either the alias or the actual command.\n")
+        docs.append("---\n")
+
     if fm_allowed:
         docs.append("## Fast-Market Tools\n")
         for cmd in sorted(fm_allowed):
             info = get_fastmarket_command_help(cmd)
-            if info:
-                docs.append(f"### {info.name}")
-                docs.append(info.description)
-                docs.append(f"**Usage**: `{info.usage}`")
-                if info.examples:
-                    docs.append("\n**Quick Examples**:")
-                    for ex in info.examples:
-                        docs.append(f"- `{ex}`")
-                docs.append("")
+            docs.append(f"### {info.name}")
+            docs.append(info.description)
+            docs.append(f"**Usage**: `{info.usage}`")
+            cmd_aliases = reverse_aliases.get(cmd, [])
+            if cmd_aliases:
+                docs.append(
+                    f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
+                )
+            if info.examples:
+                docs.append("\n**Quick Examples**:")
+                for ex in info.examples:
+                    docs.append(f"- `{ex}`")
+            docs.append("")
 
     if sys_allowed:
         docs.append("\n## System Commands\n")
@@ -290,6 +306,11 @@ def build_command_documentation(allowed_commands: list[str]) -> str:
         for cmd in sorted(other_allowed):
             docs.append(f"### {cmd}")
             docs.append(f"Command: `{cmd}` (run `{cmd} --help` for details)")
+            cmd_aliases = reverse_aliases.get(cmd, [])
+            if cmd_aliases:
+                docs.append(
+                    f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
+                )
             docs.append("")
 
     return "\n".join(docs)

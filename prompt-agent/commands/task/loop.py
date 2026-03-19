@@ -221,6 +221,10 @@ class TaskLoop:
         if not response.tool_calls:
             return True
 
+        from common.core.aliases import get_all_aliases
+
+        aliases = get_all_aliases()
+
         messages.append(
             {
                 "role": "assistant",
@@ -244,7 +248,14 @@ class TaskLoop:
             command = tool_call.arguments.get("command", "")
             explanation = tool_call.arguments.get("explanation", "")
             self._debug(f">>> TOOL: {tool_call.name}")
-            self._debug(f"    Command: {command}")
+
+            if command in aliases:
+                resolved = aliases[command]
+                self._debug(f"    Command: {command}")
+                self._debug(f"    Alias resolves to: {resolved}")
+            else:
+                self._debug(f"    Command: {command}")
+
             if explanation:
                 self._debug(f"    Reason: {explanation}")
             if self._debug_full:
@@ -301,10 +312,19 @@ def run_dry_run(
     task_params: dict[str, str] | None = None,
 ) -> None:
     """Show what commands would be executed without running them."""
+    from common.core.aliases import get_all_aliases
+
     print(f"[DRY RUN] Task: {task_description}")
     print(f"[DRY RUN] Workdir: {workdir}")
     print(f"[DRY RUN] Max iterations: {config.max_iterations}")
     print(f"[DRY RUN] Allowed commands: {', '.join(sorted(config.allowed_commands))}")
+
+    aliases = get_all_aliases()
+    if aliases:
+        print(f"[DRY RUN] Available aliases:")
+        for alias_name, actual_cmd in sorted(aliases.items()):
+            print(f"  - {alias_name} → {actual_cmd}")
+
     if task_params:
         print(f"[DRY RUN] Parameters:")
         for key, value in task_params.items():

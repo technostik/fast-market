@@ -9,7 +9,7 @@ import yaml
 from commands.base import CommandManifest
 from commands.task.executor import (
     _DEFAULT_ALLOWED,
-    execute_command,
+    resolve_and_execute_command,
     validate_workdir,
 )
 from commands.task.loop import TaskConfig, TaskLoop, run_dry_run
@@ -67,10 +67,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--debug",
-        type=click.Choice(["normal", "full"]),
+        type=str,
         default="",
-        is_flag=False,
-        flag_value="normal",
         help="Debug output: 'normal' shows LLM/third calls, 'full' shows everything",
     )
     @click.option(
@@ -107,6 +105,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
           echo "search query" | prompt task "search corpus" --param query=@-
           prompt task "summarize file" --param input=@data.txt output=summary.txt
         """
+        if debug and debug not in ("normal", "full"):
+            raise click.BadParameter("--debug must be 'normal' or 'full'")
+
         config_path = get_tool_config("prompt")
         config = _load_config(config_path)
         task_config = _get_task_config(config, max_iterations, timeout)
@@ -124,7 +125,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         provider_name = provider or config.get("default_provider", "anthropic")
 
         def execute_fn(cmd_str: str):
-            return execute_command(
+            return resolve_and_execute_command(
                 cmd_str,
                 workdir_path,
                 task_config.allowed_commands,
