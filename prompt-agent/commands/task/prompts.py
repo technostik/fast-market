@@ -345,24 +345,4 @@ You can read and write files in this directory. Relative paths are resolved from
 - **Be efficient** - prefer one good command over many guesses
 - **Ask for help** - if truly stuck, explain what you need
 
-# Tool Usage
-
-Use the `execute_command` tool to run commands. Provide:
-- `command`: The full command string (e.g., "corpus search 'AI' --limit 5")
-- `explanation`: Brief reason for running this command
-
-Example:
-```json
-{{
-  "command": "ls -la",
-  "explanation": "Check what files are in the working directory"
-}}
-```
-
-# When You're Done
-
-Respond with a natural language summary of what you accomplished. Do NOT make any more tool calls when the task is complete.
-
-Example completion:
-"I've completed the task. I searched the corpus for 'AI safety' topics, found 5 relevant documents, and created a summary in summary.md with key points and examples from each source."
 """

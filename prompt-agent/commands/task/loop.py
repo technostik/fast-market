@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from common import structlog
+from plugins.base import (
+    LLMRequest,
+    _format_debug_request,
+    _format_debug_response,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -143,6 +148,11 @@ class TaskLoop:
             self._debug(f"ITERATION {iteration}/{max_iter}")
             self._debug(f"{'=' * 50}")
 
+            self._debug(f"\n>>> LLM REQUEST")
+            self._debug(f"System prompt: {len(system_prompt)} chars")
+            self._debug(f"User message: {len(format_message_history(messages))} chars")
+            self._debug(f"Tools: {len(tools)} defined")
+
             from plugins.base import LLMRequest
 
             request = LLMRequest(
@@ -153,7 +163,11 @@ class TaskLoop:
                 tools=tools,
             )
 
+            self._debug("\n" + _format_debug_request(request))
+
             response = llm_provider.complete(request)
+
+            self._debug("\n" + _format_debug_response(response))
 
             if response.tool_calls:
                 self._debug(f"\n>>> {len(response.tool_calls)} tool_call(s) detected")

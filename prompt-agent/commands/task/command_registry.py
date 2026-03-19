@@ -29,11 +29,11 @@ _COMMAND_MODULES = {
 }
 
 _COMMAND_ENTRY_POINTS = {
-    "corpus": ("corpus_agent.cli.main", "corpus-agent"),
-    "image": ("image_agent.cli.main", "image-agent"),
-    "youtube": ("youtube_agent.cli.main", "youtube-agent"),
-    "message": ("message_agent.cli.main", "message-agent"),
-    "prompt": ("prompt_agent.cli.main", "prompt-agent"),
+    "corpus": ("corpus", "corpus-agent/corpus_entry"),
+    "image": ("image", "image-agent/image_entry"),
+    "youtube": ("youtube-agent", "youtube-agent/youtube_entry"),
+    "message": ("message", "message-agent/message_entry"),
+    "prompt": ("prompt", "prompt-agent/prompt_entry"),
 }
 
 
@@ -43,19 +43,81 @@ def get_fastmarket_command_help(cmd_name: str) -> CommandInfo | None:
     if not entry:
         return None
 
-    module_path, package_name = entry
+    console_script, module_path = entry
+    project_root = Path(__file__).parents[3]
 
-    for entry_point in [
-        [sys.executable, "-m", module_path, "--help"],
-        [sys.executable, "-m", f"{package_name}.cli.main", "--help"],
-    ]:
+    entry_points_to_try = [
+        ([console_script, "--help"], None),
+        ([sys.executable, "-m", module_path, "--help"], None),
+    ]
+
+    agent_dir = project_root / module_path.split("/")[0]
+    if agent_dir.exists():
+        entry_points_to_try.append(
+            ([sys.executable, "-m", module_path, "--help"], str(agent_dir))
+        )
+
+    if cmd_name == "prompt":
+        prompt_dir = project_root / "prompt-agent"
+        if prompt_dir.exists():
+            entry_points_to_try.append(
+                (
+                    [
+                        sys.executable,
+                        "-c",
+                        f"import sys; sys.path.insert(0, '{prompt_dir}'); "
+                        f"from prompt_entry import main; "
+                        f"import sys; sys.argv = ['prompt', '--help']; main()",
+                    ],
+                    str(prompt_dir),
+                )
+            )
+
+    for entry_point, cwd in entry_points_to_try:
         try:
             result = subprocess.run(
                 entry_point,
                 capture_output=True,
                 text=True,
                 timeout=10,
-                cwd=Path(__file__).parents[3],
+                cwd=cwd,
+            )
+
+            if result.returncode == 0 and result.stdout:
+                return _parse_click_help(cmd_name, result.stdout)
+
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.debug(
+                "command_help_extraction_failed",
+                command=cmd_name,
+                entry=entry_point,
+                error=str(exc),
+            )
+            continue
+
+    return None
+
+    console_script, module_path = entry
+    project_root = Path(__file__).parents[3]
+
+    entry_points_to_try = [
+        [console_script, "--help"],
+        [sys.executable, "-m", module_path, "--help"],
+    ]
+
+    agent_dir = project_root / module_path.split("/")[0]
+    if agent_dir.exists():
+        entry_points_to_try.append([sys.executable, "-m", module_path, "--help"])
+
+    for entry_point in entry_points_to_try:
+        try:
+            result = subprocess.run(
+                entry_point,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
 
             if result.returncode == 0 and result.stdout:

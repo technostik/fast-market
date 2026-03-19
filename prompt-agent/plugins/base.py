@@ -103,15 +103,21 @@ def _format_debug_request(request: LLMRequest) -> str:
     if request.tools:
         lines.append("\n--- TOOLS ---")
         lines.append(_json.dumps(request.tools, indent=2))
-    lines.append("\n--- SYSTEM PROMPT (first 300 chars) ---")
+    lines.append(
+        f"\n--- SYSTEM PROMPT ({len(request.system) if request.system else 0} chars) ---"
+    )
     if request.system:
         lines.append(
-            request.system[:300] + ("..." if len(request.system) > 300 else "")
+            request.system[:1000]
+            + ("\n... [truncated]" if len(request.system) > 1000 else "")
         )
     else:
         lines.append("(none)")
-    lines.append("\n--- USER MESSAGE (first 500 chars) ---")
-    lines.append(request.prompt[:500] + ("..." if len(request.prompt) > 500 else ""))
+    lines.append(f"\n--- USER MESSAGE ({len(request.prompt)} chars) ---")
+    lines.append(
+        request.prompt[:800]
+        + ("\n... [truncated]" if len(request.prompt) > 800 else "")
+    )
     lines.append("=" * 60)
     return "\n".join(lines)
 
@@ -132,12 +138,16 @@ def _format_debug_response(response: LLMResponse) -> str:
         for tc in response.tool_calls:
             lines.append(f"  - ID: {tc.id}")
             lines.append(f"    Name: {tc.name}")
-            lines.append(f"    Arguments: {tc.arguments}")
+            args_str = _json.dumps(tc.arguments, indent=2)
+            lines.append(
+                f"    Arguments: {args_str[:300]}{'...' if len(args_str) > 300 else ''}"
+            )
     if response.metadata:
         lines.append(f"\nMetadata: {_json.dumps(response.metadata, indent=2)[:300]}")
     lines.append(f"\n--- CONTENT ({len(response.content)} chars) ---")
     lines.append(
-        response.content[:500] + ("..." if len(response.content) > 500 else "")
+        response.content[:800]
+        + ("\n... [truncated]" if len(response.content) > 800 else "")
     )
     lines.append("=" * 60)
     return "\n".join(lines)
