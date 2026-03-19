@@ -152,12 +152,12 @@ class TaskLoop:
 
         while iteration < max_iter:
             iteration += 1
-            self._debug(f"\n{'=' * 50}")
+            self._debug(f"{'=' * 50}")
             self._debug(f"ITERATION {iteration}/{max_iter}")
             self._debug(f"{'=' * 50}")
 
             if self._debug_full:
-                self._debug(f"\n>>> LLM REQUEST")
+                self._debug(f">>> LLM REQUEST")
                 self._debug(f"System prompt: {len(system_prompt)} chars")
                 self._debug(
                     f"User message: {len(format_message_history(messages))} chars"
@@ -182,14 +182,14 @@ class TaskLoop:
             if self._debug_full:
                 self._debug("\n" + _format_debug_response(response))
             else:
-                self._debug(f"\n>>> LLM RESPONSE ({len(response.content)} chars)")
+                self._debug(f">>> LLM RESPONSE ({len(response.content)} chars)")
                 self._debug(
                     response.content[:300]
                     + ("..." if len(response.content) > 300 else "")
                 )
 
             if response.tool_calls:
-                self._debug(f"\n>>> {len(response.tool_calls)} tool_call(s) detected")
+                self._debug(f">>> {len(response.tool_calls)} tool_call(s) detected")
                 should_continue = self._handle_tool_calls(
                     response,
                     execute_fn,
@@ -203,7 +203,7 @@ class TaskLoop:
                 print(response.content)
                 break
             else:
-                self._debug(f"\n>>> No tool_calls, final response")
+                self._debug(f">>> No tool_calls, final response")
                 messages.append({"role": "assistant", "content": response.content})
                 print(response.content)
                 break
@@ -241,11 +241,15 @@ class TaskLoop:
         )
 
         for tool_call in response.tool_calls:
-            self._debug(f"\n>>> TOOL: {tool_call.name}")
-            if self._debug_full:
-                self._debug(f"    Args: {tool_call.arguments}")
-
             command = tool_call.arguments.get("command", "")
+            explanation = tool_call.arguments.get("explanation", "")
+            self._debug(f">>> TOOL: {tool_call.name}")
+            self._debug(f"    Command: {command}")
+            if explanation:
+                self._debug(f"    Reason: {explanation}")
+            if self._debug_full:
+                self._debug(f"    Full args: {tool_call.arguments}")
+
             result = execute_fn(command.strip())
 
             if self._debug_full:
