@@ -51,11 +51,19 @@ class TestAliasResolution:
         """Test loading valid aliases."""
         from common.core.aliases import load_aliases
 
-        data = {"aliases": {"ls-files": "ls -la", "alert-me": "message alert"}}
+        data = {
+            "aliases": {
+                "ls-files": {"command": "ls -la", "description": ""},
+                "alert-me": {"command": "message alert", "description": ""},
+            }
+        }
         temp_aliases_file.write_text(yaml.dump(data), encoding="utf-8")
 
         aliases = load_aliases(force_reload=True)
-        assert aliases == {"ls-files": "ls -la", "alert-me": "message alert"}
+        assert aliases == {
+            "ls-files": {"command": "ls -la", "description": ""},
+            "alert-me": {"command": "message alert", "description": ""},
+        }
 
     def test_load_aliases_invalid_yaml(self, temp_aliases_file):
         """Test loading invalid YAML."""
@@ -145,11 +153,19 @@ class TestAliasResolution:
         """Test get_all_aliases function."""
         from common.core.aliases import get_all_aliases
 
-        data = {"aliases": {"alias1": "cmd1", "alias2": "cmd2"}}
+        data = {
+            "aliases": {
+                "alias1": {"command": "cmd1", "description": ""},
+                "alias2": {"command": "cmd2", "description": ""},
+            }
+        }
         temp_aliases_file.write_text(yaml.dump(data), encoding="utf-8")
 
         aliases = get_all_aliases()
-        assert aliases == {"alias1": "cmd1", "alias2": "cmd2"}
+        assert aliases == {
+            "alias1": {"command": "cmd1", "description": ""},
+            "alias2": {"command": "cmd2", "description": ""},
+        }
 
     def test_get_reverse_aliases(self, temp_aliases_file):
         """Test get_reverse_aliases function."""
@@ -177,7 +193,10 @@ class TestAliasResolution:
 
         is_new = create_or_update_alias("new-alias", "new command")
         assert is_new is True
-        assert get_all_aliases()["new-alias"] == "new command"
+        assert get_all_aliases()["new-alias"] == {
+            "command": "new command",
+            "description": "",
+        }
 
     def test_update_alias(self, temp_aliases_file):
         """Test updating an existing alias."""
@@ -187,7 +206,10 @@ class TestAliasResolution:
         is_new = create_or_update_alias("existing", "new command")
 
         assert is_new is False
-        assert get_all_aliases()["existing"] == "new command"
+        assert get_all_aliases()["existing"] == {
+            "command": "new command",
+            "description": "",
+        }
 
     def test_remove_alias(self, temp_aliases_file):
         """Test removing an alias."""
@@ -222,16 +244,18 @@ class TestAliasResolution:
         create_or_update_alias("existing", "old command")
 
         import_file = tmp_path / "import.yaml"
-        import_data = {"aliases": {"new1": "cmd1", "new2": "cmd2"}}
+        import_data = {
+            "aliases": {"new1": {"command": "cmd1"}, "new2": {"command": "cmd2"}}
+        }
         import_file.write_text(yaml.dump(import_data), encoding="utf-8")
 
         count = merge_aliases_from_file(import_file)
         assert count == 2
 
         aliases = get_all_aliases()
-        assert aliases["existing"] == "old command"
-        assert aliases["new1"] == "cmd1"
-        assert aliases["new2"] == "cmd2"
+        assert aliases["existing"] == {"command": "old command", "description": ""}
+        assert aliases["new1"] == {"command": "cmd1", "description": ""}
+        assert aliases["new2"] == {"command": "cmd2", "description": ""}
 
     def test_export_aliases(self, temp_aliases_file):
         """Test exporting aliases."""
@@ -242,7 +266,10 @@ class TestAliasResolution:
 
         exported = export_aliases()
         parsed = yaml.safe_load(exported)
-        assert parsed["aliases"] == {"alias1": "cmd1", "alias2": "cmd2"}
+        assert parsed["aliases"] == {
+            "alias1": {"command": "cmd1", "description": ""},
+            "alias2": {"command": "cmd2", "description": ""},
+        }
 
 
 class TestAliasCommand:
@@ -281,7 +308,10 @@ class TestAliasCommand:
 
         assert result.exit_code == 0
         assert "✓ Alias created" in result.output
-        assert get_all_aliases()["new-alias"] == "new command"
+        assert get_all_aliases()["new-alias"] == {
+            "command": "new command",
+            "description": "",
+        }
 
     def test_alias_show(self, runner, temp_aliases_file, monkeypatch):
         """Test showing a specific alias."""
@@ -355,7 +385,8 @@ class TestAliasCommand:
 
         assert result.exit_code == 0
         assert "aliases:" in result.output
-        assert "alias1: cmd1" in result.output
+        assert "alias1:" in result.output
+        assert "command: cmd1" in result.output
 
     def test_alias_export_json(self, runner, temp_aliases_file, monkeypatch):
         """Test exporting aliases as JSON."""
@@ -371,7 +402,7 @@ class TestAliasCommand:
 
         assert result.exit_code == 0
         parsed = json.loads(result.output)
-        assert parsed["aliases"] == {"alias1": "cmd1"}
+        assert parsed["aliases"] == {"alias1": {"command": "cmd1", "description": ""}}
 
     def test_alias_import(self, runner, temp_aliases_file, tmp_path, monkeypatch):
         """Test importing aliases from file."""
