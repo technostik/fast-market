@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -78,6 +79,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="text",
         help="Output format",
     )
+    @click.option("--silent", is_flag=True, help="Suppress session output")
+    @click.option("--save-session", type=click.Path(), help="Save session to YAML file")
     @click.pass_context
     def task_cmd(
         ctx,
@@ -92,6 +95,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         dry_run,
         debug,
         fmt,
+        silent,
+        save_session,
     ):
         """Execute a task with LLM-driven CLI command loop.
 
@@ -139,11 +144,30 @@ def register(plugin_manifests: dict) -> CommandManifest:
             model=model,
             verbose=ctx.obj.get("verbose", False),
             debug=debug,
+            silent=silent,
         )
 
         try:
             loop.run(task_description, execute_fn, task_params=task_params)
+
+            if save_session and loop.session:
+                session_path = Path(save_session)
+                loop.session.end_time = datetime.utcnow()
+                loop.session.save(session_path)
+                if not silent:
+                    click.echo(f"\nSession saved to: {session_path}")
+
+            if debug == "full" and not silent and loop.session:
+                click.echo("\n" + "=" * 60, file=sys.stderr)
+                click.echo("FULL SESSION YAML:", file=sys.stderr)
+                click.echo(loop.session.to_yaml(), file=sys.stderr)
+
         except Exception as exc:
+            if loop.session:
+                loop.session.exit_code = 1
+                loop.session.error = str(exc)
+                if save_session:
+                    loop.session.save(Path(save_session))
             click.echo(f"Error: {exc}", err=True)
             sys.exit(1)
 

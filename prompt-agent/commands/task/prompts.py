@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from core.task_prompt import TaskPromptConfig, DEFAULT_PROMPT_TEMPLATE
+
 
 SYSTEM_COMMAND_DOCS = {
     "ls": {
@@ -376,3 +378,55 @@ You can read and write files in this directory. Relative paths are resolved from
 - **Ask for help** - if truly stuck, explain what you need
 
 """
+
+
+def get_active_prompt_config() -> TaskPromptConfig:
+    """Get the active prompt configuration."""
+    from common.core.config import load_tool_config
+    from common.core.paths import get_fastmarket_dir
+
+    config = load_tool_config("prompt")
+    active_prompt = config.get("task", {}).get("active_prompt", "default")
+
+    if active_prompt == "default":
+        return TaskPromptConfig(
+            name="default",
+            description="Default task execution prompt",
+            template=DEFAULT_PROMPT_TEMPLATE,
+        )
+
+    prompt_path = get_fastmarket_dir() / "task_prompts" / f"{active_prompt}.yaml"
+    prompt_config = TaskPromptConfig.from_yaml(prompt_path)
+    if not prompt_config:
+        return TaskPromptConfig(
+            name="default",
+            description="Default task execution prompt",
+            template=DEFAULT_PROMPT_TEMPLATE,
+        )
+
+    return prompt_config
+
+
+def build_system_prompt(
+    task_description: str,
+    allowed_commands: list[str],
+    workdir: Path,
+    task_params: dict[str, str] | None = None,
+) -> str:
+    """Build system prompt for task execution agent."""
+    prompt_config = get_active_prompt_config()
+    command_docs = build_command_documentation(allowed_commands)
+
+    params_section = ""
+    if task_params:
+        params_section = "\n# Task Parameters (Already Resolved)\n"
+        for key, value in sorted(task_params.items()):
+            display_value = value if len(value) < 200 else value[:197] + "..."
+            params_section += f"- **{key}**: {display_value}\n"
+
+    return prompt_config.render(
+        task_description=task_description,
+        params_section=params_section,
+        workdir=str(workdir),
+        command_docs=command_docs,
+    )

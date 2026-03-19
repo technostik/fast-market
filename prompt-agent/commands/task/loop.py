@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from common import structlog
+from core.session import Session, Turn, ToolCallEvent
 from plugins.base import (
     LLMRequest,
     _format_debug_request,
@@ -95,6 +98,8 @@ class TaskLoop:
     model: str | None
     verbose: bool = False
     debug: str = ""  # "" = off, "normal" = inner dialog, "full" = everything
+    silent: bool = False
+    session: Optional[Session] = None
 
     @property
     def _debug_enabled(self) -> bool:
@@ -127,6 +132,26 @@ class TaskLoop:
         llm_provider = providers[self.provider]
         if hasattr(llm_provider, "set_debug"):
             llm_provider.set_debug(self._debug_enabled)
+
+        self.session = Session(
+            task_description=task_description,
+            workdir=str(self.workdir),
+            provider=self.provider,
+            model=self.model or "",
+            max_iterations=self.config.max_iterations,
+            task_params=task_params or {},
+        )
+
+        self.session.add_turn(
+            Turn(
+                role="user",
+                content=f"## Task\n{task_description}\n\nBegin executing commands to complete this task.",
+                timestamp=datetime.utcnow(),
+            )
+        )
+
+        if not self.silent:
+            self._print_session_header()
 
         system_prompt = build_system_prompt(
             task_description=task_description,
@@ -199,16 +224,26 @@ class TaskLoop:
                 if not should_continue:
                     break
             elif is_termination_message(response.content):
+                self.session.end_time = datetime.utcnow()
                 self._log("\n=== TASK COMPLETE ===")
-                print(response.content)
+                if not self.silent:
+                    print(response.content)
                 break
             else:
                 self._debug(f">>> No tool_calls, final response")
                 messages.append({"role": "assistant", "content": response.content})
-                print(response.content)
+                if not self.silent:
+                    print(response.content)
                 break
         else:
-            print(f"\nMax iterations ({max_iter}) reached. Task may not be complete.")
+            self.session.end_time = datetime.utcnow()
+            if not self.silent:
+                print(
+                    f"\nMax iterations ({max_iter}) reached. Task may not be complete."
+                )
+
+        if self.session and not self.session.end_time:
+            self.session.end_time = datetime.utcnow()
 
     def _handle_tool_calls(
         self,
@@ -224,6 +259,29 @@ class TaskLoop:
         from common.core.aliases import get_all_aliases
 
         aliases = get_all_aliases()
+
+        assistant_turn = Turn(
+            role="assistant",
+            content=response.content or "",
+            timestamp=datetime.utcnow(),
+        )
+
+        for tc in response.tool_calls:
+            tool_event = ToolCallEvent(
+                tool_call_id=tc.id,
+                tool_name=tc.name,
+                arguments=tc.arguments if isinstance(tc.arguments, dict) else {},
+                explanation=tc.arguments.get("explanation", "")
+                if isinstance(tc.arguments, dict)
+                else "",
+            )
+            assistant_turn.tool_calls.append(tool_event)
+
+        if self.session:
+            self.session.add_turn(assistant_turn)
+
+        if not self.silent:
+            self._print_assistant_turn(assistant_turn)
 
         messages.append(
             {
@@ -244,7 +302,9 @@ class TaskLoop:
             }
         )
 
-        for tool_call in response.tool_calls:
+        for tool_call, tool_event in zip(
+            response.tool_calls, assistant_turn.tool_calls
+        ):
             command = tool_call.arguments.get("command", "")
             explanation = tool_call.arguments.get("explanation", "")
             self._debug(f">>> TOOL: {tool_call.name}")
@@ -263,6 +323,11 @@ class TaskLoop:
 
             result = execute_fn(command.strip())
 
+            tool_event.result = {"timed_out": result.timed_out}
+            tool_event.exit_code = result.exit_code
+            tool_event.stdout = result.stdout or ""
+            tool_event.stderr = result.stderr or ""
+
             if self._debug_full:
                 self._debug(f"    Exit: {result.exit_code}")
                 if result.stdout:
@@ -274,6 +339,9 @@ class TaskLoop:
                 self._debug(
                     f"    -> Exit {result.exit_code}, Output: {output_preview[:80]}..."
                 )
+
+            if not self.silent:
+                self._print_tool_result(tool_event)
 
             tool_result = self._format_tool_result(command, result)
 
@@ -303,6 +371,43 @@ Timed out: {result.timed_out}"""
     def _debug(self, msg: str) -> None:
         if self._debug_enabled:
             print(f"[DEBUG] {msg}", file=sys.stderr)
+
+    def _print_session_header(self) -> None:
+        if not self.session:
+            return
+        print("\n" + "=" * 60)
+        print(f"TASK SESSION: {self.session.task_description}")
+        print(
+            f"Provider: {self.session.provider}, Model: {self.session.model or 'default'}"
+        )
+        print(f"Workdir: {self.session.workdir}")
+        if self.session.task_params:
+            print("Parameters:")
+            for k, v in self.session.task_params.items():
+                print(f"  {k}: {v[:50]}...")
+        print("=" * 60 + "\n")
+
+    def _print_assistant_turn(self, turn: Turn) -> None:
+        print("\n---")
+        print(f"ASSISTANT ({turn.timestamp.strftime('%H:%M:%S')})")
+        if turn.content:
+            print(turn.content)
+        if turn.tool_calls:
+            print("\nTOOL CALLS:")
+            for tc in turn.tool_calls:
+                print(f"  - {tc.tool_name}: {tc.arguments.get('command', '')}")
+                if tc.explanation:
+                    print(f"    Reason: {tc.explanation}")
+
+    def _print_tool_result(self, tool_event: ToolCallEvent) -> None:
+        print(f"\n-> TOOL RESULT (exit: {tool_event.exit_code})")
+        if tool_event.stdout:
+            preview = tool_event.stdout[:200] + (
+                "..." if len(tool_event.stdout) > 200 else ""
+            )
+            print(preview)
+        if tool_event.stderr and tool_event.exit_code != 0:
+            print(f"Error: {tool_event.stderr[:200]}")
 
 
 def run_dry_run(
