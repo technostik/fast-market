@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "message-agent"
+version = "0.1.0"
+description = "Alert and interact with users via messaging platforms"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "python-telegram-bot>=20.0",
+    "structlog>=24.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+message = "message_entry:main"
+
+[tool.setuptools]
+packages = [
+    "common",
+    "common.core",
+    "common.cli",
+    "common.auth",
+    "common.storage",
+    "message_entry",
+    "cli",
+    "core",
+    "plugins",
+    "plugins.telegram",
+    "commands",
+    "commands.ask",
+    "commands.alert",
+    "commands.setup",
+]
