@@ -101,6 +101,7 @@ prompt setup --set-prompt my-prompt  # Activate a prompt
 prompt setup --edit-prompt my-prompt # Edit in editor
 prompt setup --show-prompt my-prompt # View prompt content
 prompt setup --import-prompt file.yaml # Import from file
+prompt setup --show-task-tools   # Preview inner tool documentation
 ```
 
 Prompts are stored in `~/.local/share/fast-market/task_prompts/`.

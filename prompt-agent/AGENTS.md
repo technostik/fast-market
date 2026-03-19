@@ -92,7 +92,8 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 2. Use `prompt setup --set-prompt <name>` to activate a prompt
 3. Use `prompt setup --edit-prompt <name>` to customize a prompt
 4. Use `prompt setup --import-prompt <file>` to import from YAML
-5. Task prompts are stored in `~/.local/share/fast-market/task_prompts/`
+5. Use `prompt setup --show-task-tools` to preview the inner tool documentation
+6. Task prompts are stored in `~/.local/share/fast-market/task_prompts/`
 
 ## 📚 Related Documentation
 

@@ -292,15 +292,20 @@ def build_command_documentation(allowed_commands: list[str]) -> str:
         docs.append("## Fast-Market Tools\n")
         for cmd in sorted(fm_allowed):
             info = get_fastmarket_command_help(cmd)
-            docs.append(f"### {info.name}")
-            docs.append(info.description)
-            docs.append(f"**Usage**: `{info.usage}`")
+            if info is None:
+                docs.append(f"### {cmd}")
+                docs.append(f"{cmd} command-line tool")
+                docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
+            else:
+                docs.append(f"### {info.name}")
+                docs.append(info.description)
+                docs.append(f"**Usage**: `{info.usage}`")
             cmd_aliases = reverse_aliases.get(cmd, [])
             if cmd_aliases:
                 docs.append(
                     f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
                 )
-            if info.examples:
+            if info and info.examples:
                 docs.append("\n**Quick Examples**:")
                 for ex in info.examples:
                     docs.append(f"- `{ex}`")

@@ -11,6 +11,7 @@ from commands.base import CommandManifest
 from common.core.config import _resolve_config_path, load_tool_config
 from common.core.paths import get_tool_config
 from core.task_prompt import TaskPromptConfig, DEFAULT_PROMPT_TEMPLATE
+from commands.task.prompts import build_command_documentation
 
 _SUPPORTED_PROVIDERS = {"anthropic", "openai", "openai-compatible", "ollama"}
 _DEFAULT_TASK_COMMANDS = {
@@ -71,6 +72,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--import-prompt", type=click.Path(exists=True), help="Import prompt from YAML"
     )
+    @click.option(
+        "--show-task-tools",
+        is_flag=True,
+        help="Show the inner tool documentation generated for task prompt",
+    )
     @click.pass_context
     def setup_cmd(
         ctx,
@@ -90,6 +96,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         show_prompt,
         edit_prompt,
         import_prompt,
+        show_task_tools,
     ):
         """Setup wizard for managing LLM providers and task configuration."""
         config_path = _resolve_config_path("prompt")
@@ -144,6 +151,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
         if import_prompt:
             _import_prompt(config, import_prompt)
+            return
+        if show_task_tools:
+            _show_task_tools(config)
             return
 
         _run_interactive_wizard(config_path, config)
@@ -514,3 +524,11 @@ def _import_prompt(config: dict, import_path: str) -> None:
 
     prompt_config.save(target_file)
     click.echo(f"✓ Imported prompt '{prompt_config.name}' to: {target_file}")
+
+
+def _show_task_tools(config: dict) -> None:
+    """Show the inner tool documentation generated for task prompt."""
+    task = _init_task_config(config)
+    allowed_commands = task.get("allowed_commands", list(_DEFAULT_TASK_COMMANDS))
+    docs = build_command_documentation(allowed_commands)
+    click.echo(docs)
