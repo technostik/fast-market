@@ -75,6 +75,20 @@ Remove a source.
 monitor setup source-delete --id <source-uuid>
 ```
 
+#### `monitor setup source-edit`
+
+Edit an existing source.
+
+```bash
+# Update description and metadata
+monitor setup source-edit <source-id> \
+  --description "Updated description" \
+  --meta theme=tech --meta priority=high
+
+# Disable a source
+monitor setup source-edit <source-id> --disable
+```
+
 #### `monitor setup action-add`
 
 Add or replace an action (shell script) to execute.
@@ -92,6 +106,20 @@ monitor setup action-add --id telegram-notify \
 # Replace an existing action
 monitor setup action-add --replace-id telegram-notify --name telegram \
   --command 'curl -s "https://api.telegram.org/bot$TOKEN/sendMessage?..."'
+```
+
+#### `monitor setup action-edit`
+
+Edit an existing action.
+
+```bash
+# Update command
+monitor setup action-edit telegram-notify --command 'new curl command'
+
+# Update name and description
+monitor setup action-edit telegram-notify \
+  --name "Telegram Alert" \
+  --description "Production alert"
 ```
 
 **Available Placeholders:**
@@ -228,6 +256,24 @@ Remove a rule.
 monitor setup rule-delete --id <rule-uuid>
 ```
 
+#### `monitor setup rule-edit`
+
+Edit an existing rule.
+
+```bash
+# Update name
+monitor setup rule-edit tech-shorts --name "New Tech Shorts"
+
+# Update conditions from file
+monitor setup rule-edit tech-shorts --rule-file new-conditions.yaml
+
+# Update action references
+monitor setup rule-edit tech-shorts --action-ids new-action-id
+
+# Disable a rule
+monitor setup rule-edit tech-shorts --disable
+```
+
 #### `monitor setup list`
 
 Unified listing of sources, actions, and rules.
@@ -254,13 +300,13 @@ Rename an entity ID (source, action, or rule) and update all references automati
 monitor setup rename --from-id notify-v1 --to-id notify-v2
 ```
 
-#### `monitor setup show`
+#### `monitor setup config-show`
 
 Show configuration paths or export all config.
 
 ```bash
 # Show paths
-monitor setup show
+monitor setup config-show
 
 # Export all config
 monitor setup show --export yaml > backup.yaml
@@ -397,6 +443,7 @@ monitor logs --before 7d --clean
   "item_id": "vid123",
   "item_title": "Video Title",
   "item_url": "https://youtube.com/...",
+  "item_extra": {"duration_seconds": 600, "channel_name": "Tech Channel", "categories": ["tech"]},
   "triggered_at": "2024-01-15T12:00:00",
   "exit_code": 0,
   "output": "Command output..."

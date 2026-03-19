@@ -76,6 +76,37 @@ monitor setup rename --from-id old-id --to-id new-id
 monitor setup rename --from-id notify-v1 --to-id notify-v2
 ```
 
+### source-edit
+Edit an existing source.
+```
+monitor setup source-edit <source-id> --description "New description"
+monitor setup source-edit <source-id> --meta theme=tech --meta priority=high
+monitor setup source-edit <source-id> --disable
+```
+
+### action-edit
+Edit an existing action.
+```
+monitor setup action-edit <action-id> --name "New name"
+monitor setup action-edit <action-id> --command 'new command'
+```
+
+### rule-edit
+Edit an existing rule.
+```
+monitor setup rule-edit <rule-id> --name "New name"
+monitor setup rule-edit <rule-id> --rule-file new-conditions.yaml
+monitor setup rule-edit <rule-id> --action-ids new-action-id
+```
+
+### config-show
+Show configuration file paths or export all config.
+```
+monitor setup config-show
+monitor setup config-show --export yaml > backup.yaml
+monitor setup config-show --export json > backup.json
+```
+
 ## 🔗 Dependencies
 - Imports from: `core.storage`, `core.models`, `click`, `yaml`
 - Used by: CLI entry point

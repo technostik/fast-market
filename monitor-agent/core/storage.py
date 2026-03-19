@@ -90,6 +90,13 @@ class MonitorStorage:
             except Exception:
                 pass
 
+            try:
+                conn.execute("""
+                    ALTER TABLE trigger_logs ADD COLUMN item_extra TEXT
+                """)
+            except Exception:
+                pass
+
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
         conn = sqlite3.connect(str(self.db_path))
@@ -318,8 +325,8 @@ class MonitorStorage:
             conn.execute(
                 """INSERT INTO trigger_logs
                    (id, rule_id, source_id, action_id, item_id, item_title,
-                    item_url, triggered_at, exit_code, output)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    item_url, item_extra, triggered_at, exit_code, output)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     log.id,
                     log.rule_id,
@@ -328,6 +335,7 @@ class MonitorStorage:
                     log.item_id,
                     log.item_title,
                     log.item_url,
+                    json.dumps(log.item_extra) if log.item_extra else None,
                     log.triggered_at.isoformat(),
                     log.exit_code,
                     log.output,
@@ -473,6 +481,7 @@ class MonitorStorage:
         )
 
     def _row_to_trigger_log(self, row: sqlite3.Row) -> TriggerLog:
+        extra_val = row["item_extra"] if "item_extra" in row.keys() else None
         return TriggerLog(
             id=row["id"],
             rule_id=row["rule_id"],
@@ -484,6 +493,7 @@ class MonitorStorage:
             triggered_at=datetime.fromisoformat(row["triggered_at"]),
             exit_code=row["exit_code"],
             output=row["output"],
+            item_extra=json.loads(extra_val) if extra_val else None,
         )
 
     def _row_to_trigger_log_with_metadata(self, row: sqlite3.Row) -> TriggerLogWithMetadata:
@@ -501,5 +511,6 @@ class MonitorStorage:
             triggered_at=base.triggered_at,
             exit_code=base.exit_code,
             output=base.output,
+            item_extra=base.item_extra,
             source_metadata=metadata,
         )

@@ -70,8 +70,10 @@ class TriggerLog:
     triggered_at: datetime
     exit_code: int | None
     output: str | None
+    item_extra: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
 class TriggerLogWithMetadata(TriggerLog):
     source_metadata: dict[str, str] | None = None
+    item_extra: dict[str, Any] | None = None

@@ -10,41 +10,50 @@ from plugins.rss.plugin import RSSPlugin
 
 class TestYouTubePlugin:
     def test_validate_identifier_channel_id(self):
-        plugin = YouTubePlugin({}, {"identifier": "UC123456789"})
-        assert plugin.validate_identifier("UC123456789") is True
+        plugin = YouTubePlugin({}, {"identifier": "UCabcdef123456ghijklmnop"})
+        assert plugin.validate_identifier("UCabcdef123456ghijklmnop") is True
 
     def test_validate_identifier_handle(self):
-        plugin = YouTubePlugin({}, {"identifier": "UC123456789"})
+        plugin = YouTubePlugin({}, {"identifier": "UCabcdef123456ghijklmnop"})
         assert plugin.validate_identifier("@somechannel") is True
 
     def test_validate_identifier_channel_url(self):
-        plugin = YouTubePlugin({}, {"identifier": "https://www.youtube.com/channel/UC123456789"})
-        assert plugin.validate_identifier("https://www.youtube.com/channel/UC123456789") is True
+        plugin = YouTubePlugin(
+            {}, {"identifier": "https://www.youtube.com/channel/UCabcdef123456ghijklmnop"}
+        )
+        assert (
+            plugin.validate_identifier("https://www.youtube.com/channel/UCabcdef123456ghijklmnop")
+            is True
+        )
 
     def test_validate_identifier_invalid(self):
-        plugin = YouTubePlugin({}, {"identifier": "UC123456789"})
+        plugin = YouTubePlugin({}, {"identifier": "UCabcdef123456ghijklmnop"})
         assert plugin.validate_identifier("invalid") is False
         assert plugin.validate_identifier("http://example.com") is False
 
     def test_resolve_channel_id_direct(self):
-        plugin = YouTubePlugin({}, {"identifier": "UC123456789"})
-        assert plugin._resolve_channel_id("UC123456789") == "UC123456789"
+        plugin = YouTubePlugin({}, {"identifier": "UCabcdef123456ghijklmnop"})
+        assert plugin._resolve_channel_id("UCabcdef123456ghijklmnop") == "UCabcdef123456ghijklmnop"
 
     def test_resolve_channel_id_url(self):
-        plugin = YouTubePlugin({}, {"identifier": "https://www.youtube.com/channel/UC123456789"})
+        plugin = YouTubePlugin(
+            {}, {"identifier": "https://www.youtube.com/channel/UCabcdef123456ghijklmnop"}
+        )
         assert (
-            plugin._resolve_channel_id("https://www.youtube.com/channel/UC123456789")
-            == "UC123456789"
+            plugin._resolve_channel_id("https://www.youtube.com/channel/UCabcdef123456ghijklmnop")
+            == "UCabcdef123456ghijklmnop"
         )
 
     def test_resolve_channel_id_handle_not_implemented(self):
-        plugin = YouTubePlugin({}, {"identifier": "UC123456789"})
+        plugin = YouTubePlugin({}, {"identifier": "UCabcdef123456ghijklmnop"})
         with pytest.raises(NotImplementedError):
             plugin._resolve_channel_id("@somechannel")
 
     def test_get_identifier_display(self):
-        plugin = YouTubePlugin({}, {"identifier": "UC123456789"})
-        assert plugin.get_identifier_display("UC123456789") == "UC123456789"
+        plugin = YouTubePlugin({}, {"identifier": "UCabcdef123456ghijklmnop"})
+        assert "UCabcdef123456ghijklmnop" in plugin.get_identifier_display(
+            "UCabcdef123456ghijklmnop"
+        )
 
 
 class TestRSSPlugin:

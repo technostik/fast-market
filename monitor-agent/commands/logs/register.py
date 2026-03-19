@@ -58,6 +58,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "item_id": log.item_id,
                 "item_title": log.item_title,
                 "item_url": log.item_url,
+                "item_extra": log.item_extra,
                 "triggered_at": log.triggered_at.isoformat(),
                 "exit_code": log.exit_code,
                 "output": log.output[:500] if log.output and len(log.output) > 500 else log.output,

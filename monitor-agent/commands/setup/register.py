@@ -83,6 +83,37 @@ def register(plugin_manifests: dict) -> CommandManifest:
         storage.delete_source(source_id)
         out_formatted({"message": f"Source {source_id} deleted"}, fmt)
 
+    @setup_group.command("source-edit")
+    @click.argument("source_id")
+    @click.option("--description", help="New description")
+    @click.option("--meta", multiple=True, help="Metadata key=value pairs (adds/updates)")
+    @click.option("--enable/--disable", default=None, help="Enable or disable source")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    def source_edit(source_id, description, meta, enable, fmt):
+        """Edit an existing source."""
+        storage = get_storage()
+        existing = storage.get_source(source_id)
+        if not existing:
+            out_formatted({"error": f"Source {source_id} not found"}, fmt)
+            return
+
+        if description is not None:
+            existing.description = description
+
+        for m in meta:
+            if "=" not in m:
+                raise click.BadParameter(f"Metadata must be key=value format, got: {m}")
+            key, value = m.split("=", 1)
+            existing.metadata[key.strip()] = value.strip()
+
+        if enable is not None:
+            existing.enabled = enable
+
+        storage.update_source(existing)
+        out_formatted(
+            {"id": existing.id, "message": "Source updated", "source": to_dict(existing)}, fmt
+        )
+
     @setup_group.command("action-add")
     @click.option("--id", "custom_id", help="Custom ID (instead of auto-generated)")
     @click.option("--replace-id", help="Replace existing action with this ID")
@@ -168,6 +199,35 @@ def register(plugin_manifests: dict) -> CommandManifest:
         storage = get_storage()
         storage.delete_action(action_id)
         out_formatted({"message": f"Action {action_id} deleted"}, fmt)
+
+    @setup_group.command("action-edit")
+    @click.argument("action_id")
+    @click.option("--name", help="New action name")
+    @click.option("--command", help="New shell command")
+    @click.option("--description", help="New description")
+    @click.option("--enable/--disable", default=None, help="Enable or disable action")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    def action_edit(action_id, name, command, description, enable, fmt):
+        """Edit an existing action."""
+        storage = get_storage()
+        existing = storage.get_action(action_id)
+        if not existing:
+            out_formatted({"error": f"Action {action_id} not found"}, fmt)
+            return
+
+        if name is not None:
+            existing.name = name
+        if command is not None:
+            existing.command = command
+        if description is not None:
+            existing.description = description
+        if enable is not None:
+            existing.enabled = enable
+
+        storage.update_action(existing)
+        out_formatted(
+            {"id": existing.id, "message": "Action updated", "action": to_dict(existing)}, fmt
+        )
 
     @setup_group.command("rule-add")
     @click.option("--id", "custom_id", help="Custom ID (instead of auto-generated)")
@@ -276,6 +336,56 @@ def register(plugin_manifests: dict) -> CommandManifest:
         storage.delete_rule(rule_id)
         out_formatted({"message": f"Rule {rule_id} deleted"}, fmt)
 
+    @setup_group.command("rule-edit")
+    @click.argument("rule_id")
+    @click.option("--name", help="New rule name")
+    @click.option(
+        "--rule-file",
+        type=click.Path(exists=True),
+        help="YAML/JSON file with new rule conditions",
+    )
+    @click.option(
+        "--conditions",
+        help="JSON string with new rule conditions",
+    )
+    @click.option("--action-ids", help="Comma-separated action IDs")
+    @click.option("--description", help="New description")
+    @click.option("--enable/--disable", default=None, help="Enable or disable rule")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    def rule_edit(rule_id, name, rule_file, conditions, action_ids, description, enable, fmt):
+        """Edit an existing rule."""
+        storage = get_storage()
+        existing = storage.get_rule(rule_id)
+        if not existing:
+            out_formatted({"error": f"Rule {rule_id} not found"}, fmt)
+            return
+
+        if name is not None:
+            existing.name = name
+
+        if rule_file:
+            with open(rule_file) as f:
+                if rule_file.endswith(".json"):
+                    existing.conditions = json.load(f)
+                else:
+                    existing.conditions = yaml.safe_load(f)
+        elif conditions:
+            existing.conditions = json.loads(conditions)
+
+        if action_ids is not None:
+            existing.action_ids = [aid.strip() for aid in action_ids.split(",")]
+
+        if description is not None:
+            existing.description = description
+
+        if enable is not None:
+            existing.enabled = enable
+
+        storage.update_rule(existing)
+        out_formatted(
+            {"id": existing.id, "message": "Rule updated", "rule": to_dict(existing)}, fmt
+        )
+
     @setup_group.command("rename")
     @click.option("--from-id", required=True, help="Current ID to rename")
     @click.option("--to-id", required=True, help="New ID")
@@ -289,7 +399,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         else:
             out_formatted({"error": message}, fmt)
 
-    @setup_group.command("show")
+    @setup_group.command("config-show")
     @click.option("--export", type=click.Choice(["yaml", "json"]), help="Export all configuration")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
     def show_config(export, fmt):

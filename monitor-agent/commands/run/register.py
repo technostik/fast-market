@@ -144,6 +144,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                     item_id=item.id,
                                     item_title=item.title,
                                     item_url=item.url,
+                                    item_extra=item.extra,
                                     triggered_at=datetime.now(timezone.utc),
                                     exit_code=code,
                                     output=output,
