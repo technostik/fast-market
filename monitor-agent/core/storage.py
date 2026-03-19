@@ -8,7 +8,7 @@ from typing import Generator
 
 import sqlite3
 
-from core.models import Action, Rule, Source, TriggerLog, ItemMetadata
+from core.models import Action, Rule, Source, TriggerLog, ItemMetadata, TriggerLogWithMetadata
 
 
 class MonitorStorage:
@@ -256,6 +256,63 @@ class MonitorStorage:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
 
+    def rename_id(self, old_id: str, new_id: str) -> tuple[str | None, str]:
+        """Rename an entity ID across sources, actions, and rules.
+
+        Returns (entity_type, message) where entity_type is 'source', 'action', 'rule', or None.
+        """
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM sources WHERE id = ?", (old_id,)).fetchone()
+            if row:
+                conn.execute("UPDATE sources SET id = ? WHERE id = ?", (new_id, old_id))
+                conn.execute(
+                    "UPDATE trigger_logs SET source_id = ? WHERE source_id = ?", (new_id, old_id)
+                )
+                return "source", f"Renamed source {old_id} -> {new_id}"
+
+            row = conn.execute("SELECT id FROM actions WHERE id = ?", (old_id,)).fetchone()
+            if row:
+                conn.execute("UPDATE actions SET id = ? WHERE id = ?", (new_id, old_id))
+                conn.execute(
+                    "UPDATE trigger_logs SET action_id = ? WHERE action_id = ?", (new_id, old_id)
+                )
+                rows = conn.execute("SELECT id, action_ids FROM rules").fetchall()
+                for r in rows:
+                    action_ids = json.loads(r["action_ids"])
+                    if old_id in action_ids:
+                        action_ids = [new_id if a == old_id else a for a in action_ids]
+                        conn.execute(
+                            "UPDATE rules SET action_ids = ? WHERE id = ?",
+                            (json.dumps(action_ids), r["id"]),
+                        )
+                return "action", f"Renamed action {old_id} -> {new_id} and updated rule references"
+
+            row = conn.execute("SELECT id FROM rules WHERE id = ?", (old_id,)).fetchone()
+            if row:
+                conn.execute("UPDATE rules SET id = ? WHERE id = ?", (new_id, old_id))
+                conn.execute(
+                    "UPDATE trigger_logs SET rule_id = ? WHERE rule_id = ?", (new_id, old_id)
+                )
+                return "rule", f"Renamed rule {old_id} -> {new_id}"
+
+            return None, f"ID {old_id} not found"
+
+    def clean_trigger_logs(
+        self, since: datetime | None = None, before: datetime | None = None
+    ) -> int:
+        """Delete trigger logs. Returns number of deleted rows."""
+        with self._get_conn() as conn:
+            query = "DELETE FROM trigger_logs WHERE 1=1"
+            params: list = []
+            if since:
+                query += " AND triggered_at >= ?"
+                params.append(since.isoformat())
+            if before:
+                query += " AND triggered_at <= ?"
+                params.append(before.isoformat())
+            cur = conn.execute(query, params)
+            return cur.rowcount
+
     def log_trigger(self, log: TriggerLog) -> None:
         with self._get_conn() as conn:
             conn.execute(
@@ -307,6 +364,48 @@ class MonitorStorage:
 
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_trigger_log(row) for row in rows]
+
+    def get_trigger_logs_with_metadata(
+        self,
+        since: datetime | None = None,
+        rule_id: str | None = None,
+        source_id: str | None = None,
+        action_id: str | None = None,
+        meta_key: str | None = None,
+        meta_value: str | None = None,
+        limit: int = 100,
+    ) -> list[TriggerLogWithMetadata]:
+        with self._get_conn() as conn:
+            query = """
+                SELECT t.*, s.metadata as source_metadata
+                FROM trigger_logs t
+                LEFT JOIN sources s ON t.source_id = s.id
+                WHERE 1=1
+            """
+            params: list = []
+
+            if since:
+                query += " AND t.triggered_at >= ?"
+                params.append(since.isoformat())
+            if rule_id:
+                query += " AND t.rule_id = ?"
+                params.append(rule_id)
+            if source_id:
+                query += " AND t.source_id = ?"
+                params.append(source_id)
+            if action_id:
+                query += " AND t.action_id = ?"
+                params.append(action_id)
+
+            if meta_key and meta_value:
+                query += " AND s.metadata LIKE ?"
+                params.append(f'%"' + meta_key + '":"' + meta_value + '"%')
+
+            query += " ORDER BY t.triggered_at DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(query, params).fetchall()
+            return [self._row_to_trigger_log_with_metadata(row) for row in rows]
 
     def get_stats(self) -> dict:
         with self._get_conn() as conn:
@@ -385,4 +484,22 @@ class MonitorStorage:
             triggered_at=datetime.fromisoformat(row["triggered_at"]),
             exit_code=row["exit_code"],
             output=row["output"],
+        )
+
+    def _row_to_trigger_log_with_metadata(self, row: sqlite3.Row) -> TriggerLogWithMetadata:
+        base = self._row_to_trigger_log(row)
+        metadata_val = row["source_metadata"] if "source_metadata" in row.keys() else "{}"
+        metadata = json.loads(metadata_val) if metadata_val else None
+        return TriggerLogWithMetadata(
+            id=base.id,
+            rule_id=base.rule_id,
+            source_id=base.source_id,
+            action_id=base.action_id,
+            item_id=base.item_id,
+            item_title=base.item_title,
+            item_url=base.item_url,
+            triggered_at=base.triggered_at,
+            exit_code=base.exit_code,
+            output=base.output,
+            source_metadata=metadata,
         )

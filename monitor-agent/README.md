@@ -53,8 +53,10 @@ monitor setup source-add --plugin youtube --identifier UC123456789
 # RSS feed
 monitor setup source-add --plugin rss --identifier https://example.com/feed.xml
 
-# With description
-monitor setup source-add --plugin youtube --identifier UC123456789 --description "Tech Reviews"
+# With description and metadata
+monitor setup source-add --plugin youtube --identifier UC123456789 \
+  --description "Tech Reviews" \
+  --meta theme=technology --meta priority=high
 ```
 
 #### `monitor setup source-list`
@@ -75,20 +77,21 @@ monitor setup source-delete --id <source-uuid>
 
 #### `monitor setup action-add`
 
-Add an action (shell script) to execute.
+Add or replace an action (shell script) to execute.
 
 ```bash
 # Simple notification
 monitor setup action-add --name notify --command 'echo "New video: $ITEM_TITLE"'
 
-# With multiple placeholders
-monitor setup action-add --name summarize \
-  --command 'python summarize.py --url "$ITEM_URL" --title "$ITEM_TITLE"'
-
-# Telegram notification
-monitor setup action-add --name telegram \
+# With custom ID (for easy referencing in rules)
+monitor setup action-add --id telegram-notify \
+  --name telegram \
   --command 'curl -s "https://api.telegram.org/bot$BOT_TOKEN/sendMessage?chat_id=$CHAT_ID&text=New: $ITEM_TITLE"' \
   --description "Send Telegram message"
+
+# Replace an existing action
+monitor setup action-add --replace-id telegram-notify --name telegram \
+  --command 'curl -s "https://api.telegram.org/bot$TOKEN/sendMessage?..."'
 ```
 
 **Available Placeholders:**
@@ -109,18 +112,27 @@ monitor setup action-add --name telegram \
 
 #### `monitor setup rule-add`
 
-Add a rule to match content.
+Add or replace a rule to match content.
 
 ```bash
 # From file (YAML)
 monitor setup rule-add --name "Long Videos" \
   --rule-file rule.yaml \
-  --action-ids <action-uuid>
+  --action-ids telegram-notify
+
+# With custom ID
+monitor setup rule-add --id tech-shorts --name "Tech Shorts" \
+  --rule-file shorts.yaml \
+  --action-ids telegram-notify
 
 # Inline (JSON)
 monitor setup rule-add --name "YouTube Shorts" \
   --conditions '{"all":[{"field":"content_type","operator":"==","value":"short"}]}' \
-  --action-ids <action-uuid>
+  --action-ids telegram-notify
+
+# Replace an existing rule
+monitor setup rule-add --replace-id tech-shorts --name "Tech Shorts" \
+  --rule-file new-shorts.yaml --action-ids telegram-notify
 ```
 
 **Rule Condition Format:**
@@ -131,6 +143,19 @@ monitor setup rule-add --name "YouTube Shorts" \
   "any": [...]   // OR: any condition can match
 }
 ```
+
+**Available Rule Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id`, `title`, `url` | string | Item fields |
+| `content_type` | string | video, short, article |
+| `published_at` | datetime | Item publish time |
+| `source_plugin` | string | youtube, rss |
+| `source_identifier` | string | Channel ID or RSS URL |
+| `source_description` | string | Source description |
+| `source_metadata` | dict | Source metadata key-value pairs |
+| `extra.*` | any | Plugin-specific fields (duration_seconds, categories, etc.) |
 
 **Operators:**
 
@@ -176,6 +201,17 @@ all:
       value: programming
 ```
 
+```yaml
+# priority_shorts.yaml - Shorts from high-priority sources
+all:
+  - field: content_type
+    operator: "=="
+    value: short
+  - field: source_metadata.priority
+    operator: "=="
+    value: high
+```
+
 #### `monitor setup rule-list`
 
 List all configured rules.
@@ -194,12 +230,41 @@ monitor setup rule-delete --id <rule-uuid>
 
 #### `monitor setup list`
 
-Unified listing.
+Unified listing of sources, actions, and rules.
 
 ```bash
+# List all (default)
+monitor setup list
+
+# List by type
 monitor setup list --type sources
 monitor setup list --type actions
 monitor setup list --type rules
+
+# JSON export
+monitor setup list --type all --format json
+```
+
+#### `monitor setup rename`
+
+Rename an entity ID (source, action, or rule) and update all references automatically.
+
+```bash
+# Rename an action and update all rules that reference it
+monitor setup rename --from-id notify-v1 --to-id notify-v2
+```
+
+#### `monitor setup show`
+
+Show configuration paths or export all config.
+
+```bash
+# Show paths
+monitor setup show
+
+# Export all config
+monitor setup show --export yaml > backup.yaml
+monitor setup show --export json > backup.json
 ```
 
 ---
@@ -224,7 +289,10 @@ monitor run --force --dry-run
 # Specific source only
 monitor run --source-id <uuid>
 
-# Cron mode - minimal output
+# Silent mode - suppress command output replay
+monitor run --silent
+
+# Cron mode - minimal output (implies silent)
 */1 * * * * monitor run --cron
 ```
 
@@ -234,10 +302,11 @@ monitor run --source-id <uuid>
 |--------|-------------|
 | `--cron` | Suppress output unless errors |
 | `--dry-run` | Evaluate rules without executing actions |
-| `--force` | Ignore last_item_id, process all items |
+| `--force` | Ignore last_fetched_at, process all available items |
 | `--limit` | Max items per source (default: 50) |
+| `--silent` | Suppress command output replay |
 | `--source-id` | Run only for specific source |
-| `--format` | Output format: `json` or `text` |
+| `--format` | Output format: `json`, `yaml`, or `text` |
 
 **Output Example:**
 
@@ -250,10 +319,18 @@ monitor run --source-id <uuid>
   "triggers": [
     {
       "rule": "Long Videos",
+      "rule_id": "abc123",
       "source": "UC123456789",
-      "item": "Introduction to Python",
-      "item_id": "vid123",
-      "new_item": true
+      "source_id": "def456",
+      "source_metadata": {"theme": "tech", "priority": "high"},
+      "item": {
+        "id": "vid123",
+        "title": "Introduction to Python",
+        "url": "https://youtube.com/watch?v=vid123",
+        "content_type": "video",
+        "published": "2024-01-15T12:00:00+00:00",
+        "extra": {"duration_seconds": 600}
+      }
     }
   ]
 }
@@ -263,7 +340,7 @@ monitor run --source-id <uuid>
 
 ### `monitor logs`
 
-View trigger history.
+View or clean trigger history.
 
 ```bash
 # Last 24 hours
@@ -278,22 +355,53 @@ monitor logs --rule-id <uuid>
 # Specific source
 monitor logs --source-id <uuid>
 
+# Filter by source metadata
+monitor logs --meta-filter theme=technology
+
 # JSON for scripting
 monitor logs --since 7d --format json
 
 # Find failed triggers
 monitor logs --since 7d --format json | jq '.[] | select(.exit_code != 0)'
+
+# Clean old logs
+monitor logs --since 30d --clean
+
+# Clean logs before a date
+monitor logs --before 7d --clean
 ```
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--since` | Time filter: `1d`, `1h`, `30m`, or ISO date |
+| `--since` | Show/delete logs since: `1d`, `1h`, `30m`, or ISO date |
+| `--before` | Delete logs before: `7d`, `30d`, or ISO date |
+| `--clean` | Delete matching logs instead of showing |
 | `--rule-id` | Filter by rule ID |
 | `--source-id` | Filter by source ID |
+| `--action-id` | Filter by action ID |
+| `--meta-filter` | Filter by source metadata (key=value) |
 | `--limit` | Max logs (default: 100) |
-| `--format` | Output format: `json` or `text` |
+| `--format` | Output format: `json`, `yaml`, or `text` |
+
+**Log Entry Fields:**
+
+```json
+{
+  "id": "log-uuid",
+  "rule_id": "rule-uuid",
+  "source_id": "source-uuid",
+  "source_metadata": {"theme": "tech", "priority": "high"},
+  "action_id": "action-uuid",
+  "item_id": "vid123",
+  "item_title": "Video Title",
+  "item_url": "https://youtube.com/...",
+  "triggered_at": "2024-01-15T12:00:00",
+  "exit_code": 0,
+  "output": "Command output..."
+}
+```
 
 ---
 

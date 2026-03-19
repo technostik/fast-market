@@ -62,7 +62,19 @@ monitor setup show --export json > backup.json
 ```
 
 ### list
-Unified listing of sources, actions, or rules.
+Unified listing of sources, actions, or rules (default: all).
+```
+monitor setup list
+monitor setup list --type actions
+monitor setup list --type all --format json
+```
+
+### rename
+Rename an entity ID (source, action, or rule) and update all references.
+```
+monitor setup rename --from-id old-id --to-id new-id
+monitor setup rename --from-id notify-v1 --to-id notify-v2
+```
 
 ## 🔗 Dependencies
 - Imports from: `core.storage`, `core.models`, `click`, `yaml`

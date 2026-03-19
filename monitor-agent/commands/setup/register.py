@@ -276,6 +276,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         storage.delete_rule(rule_id)
         out_formatted({"message": f"Rule {rule_id} deleted"}, fmt)
 
+    @setup_group.command("rename")
+    @click.option("--from-id", required=True, help="Current ID to rename")
+    @click.option("--to-id", required=True, help="New ID")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    def rename_id(from_id, to_id, fmt):
+        """Rename an entity ID (source, action, or rule) and update all references."""
+        storage = get_storage()
+        entity_type, message = storage.rename_id(from_id, to_id)
+        if entity_type:
+            out_formatted({"type": entity_type, "message": message}, fmt)
+        else:
+            out_formatted({"error": message}, fmt)
+
     @setup_group.command("show")
     @click.option("--export", type=click.Choice(["yaml", "json"]), help="Export all configuration")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
@@ -316,22 +329,24 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--type",
         "type_",
-        type=click.Choice(["sources", "actions", "rules"]),
-        default="sources",
+        type=click.Choice(["sources", "actions", "rules", "all"]),
+        default="all",
     )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
     def list_items(type_, fmt):
         """List configured items."""
         storage = get_storage()
-        if type_ == "sources":
-            items = storage.get_all_sources()
-            out_formatted([to_dict(s) for s in items], fmt)
+        if type_ == "all":
+            sources = [to_dict(s) for s in storage.get_all_sources()]
+            actions = [to_dict(a) for a in storage.get_all_actions()]
+            rules = [to_dict(r) for r in storage.get_all_rules()]
+            out_formatted({"sources": sources, "actions": actions, "rules": rules}, fmt)
+        elif type_ == "sources":
+            out_formatted([to_dict(s) for s in storage.get_all_sources()], fmt)
         elif type_ == "actions":
-            items = storage.get_all_actions()
-            out_formatted([to_dict(a) for a in items], fmt)
+            out_formatted([to_dict(a) for a in storage.get_all_actions()], fmt)
         else:
-            items = storage.get_all_rules()
-            out_formatted([to_dict(r) for r in items], fmt)
+            out_formatted([to_dict(r) for r in storage.get_all_rules()], fmt)
 
     return CommandManifest(
         name="setup",

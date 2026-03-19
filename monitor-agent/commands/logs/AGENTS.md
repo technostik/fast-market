@@ -19,11 +19,20 @@ Filter by source ID.
 ### --action-id
 Filter by action ID.
 
+### --meta-filter
+Filter by source metadata key=value (e.g., `--meta-filter theme=technology`).
+
 ### --limit
 Maximum number of logs to show (default: 100).
 
 ### --format
 Output format: `json`, `yaml`, or `text`.
+
+### --clean
+Delete matching logs instead of showing. Use with `--since` or `--before`.
+
+### --before
+Delete logs before timestamp (e.g., `--before 7d`).
 
 ## Log Entry Fields
 
@@ -56,6 +65,12 @@ monitor logs --rule-id abc123
 
 # View logs for specific source
 monitor logs --source-id def456
+
+# Filter by source metadata
+monitor logs --meta-filter theme=technology
+
+# Clean old logs
+monitor logs --since 30d --clean
 
 # Limit to 10 most recent
 monitor logs --limit 10
