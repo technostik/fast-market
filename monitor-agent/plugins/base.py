@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from core.models import ItemMetadata
@@ -23,7 +24,10 @@ class SourcePlugin(ABC):
 
     @abstractmethod
     async def fetch_new_items(
-        self, last_item_id: str | None = None, limit: int = 50
+        self,
+        last_item_id: str | None = None,
+        limit: int = 50,
+        last_fetched_at: datetime | None = None,
     ) -> list[ItemMetadata]:
         pass
 

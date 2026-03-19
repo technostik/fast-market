@@ -28,6 +28,7 @@ class Source:
     description: str | None
     enabled: bool = True
     last_check: datetime | None = None
+    last_fetched_at: datetime | None = None
     last_item_id: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
 

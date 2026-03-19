@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime, timezone
+from typing import Any
 
 import feedparser
 
@@ -30,14 +32,17 @@ class YouTubePlugin(SourcePlugin):
         raise ValueError(f"Invalid YouTube identifier: {identifier}")
 
     async def fetch_new_items(
-        self, last_item_id: str | None = None, limit: int = 50
+        self,
+        last_item_id: str | None = None,
+        limit: int = 50,
+        last_fetched_at: datetime | None = None,
     ) -> list[ItemMetadata]:
-        rss_url = (
-            f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
-        )
+        rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
         feed = feedparser.parse(rss_url)
 
         items = []
+        newest_published: datetime | None = None
+
         for entry in feed.entries[:limit]:
             duration = 0
             is_short = False
@@ -47,14 +52,18 @@ class YouTubePlugin(SourcePlugin):
 
             if hasattr(entry, "published_parsed") and entry.published_parsed:
                 published = datetime.fromtimestamp(
-                    entry.published_parsed.timestamp(), tz=timezone.utc
+                    time.mktime(entry.published_parsed), tz=timezone.utc
                 )
             else:
                 published = datetime.now(timezone.utc)
 
-            vid_id = getattr(entry, "yt_videoid", None) or getattr(
-                entry, "id", entry.link
-            )
+            vid_id = getattr(entry, "yt_videoid", None) or getattr(entry, "id", entry.link)
+
+            if last_item_id and vid_id == last_item_id:
+                break
+
+            if last_fetched_at and published <= last_fetched_at:
+                break
 
             item = ItemMetadata(
                 id=vid_id,
@@ -75,18 +84,16 @@ class YouTubePlugin(SourcePlugin):
                 },
             )
 
-            if last_item_id and item.id == last_item_id:
-                break
-
             items.append(item)
+
+            if newest_published is None or published > newest_published:
+                newest_published = published
 
         return items
 
     def validate_identifier(self, identifier: str) -> bool:
         return bool(
-            identifier.startswith("UC")
-            or "@" in identifier
-            or "youtube.com/channel/" in identifier
+            identifier.startswith("UC") or "@" in identifier or "youtube.com/channel/" in identifier
         )
 
     def get_identifier_display(self, identifier: str) -> str:

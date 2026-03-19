@@ -27,7 +27,7 @@ dev = [
 ]
 
 [project.scripts]
-monitor-agent = "monitor_entry:main"
+monitor = "monitor_entry:main"
 
 [tool.setuptools]
 packages = [

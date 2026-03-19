@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -21,10 +21,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--cron", is_flag=True, help="Run in cron mode (no output unless errors)")
     @click.option("--source-id", help="Run only for specific source")
     @click.option("--dry-run", is_flag=True, help="Evaluate rules without executing actions")
+    @click.option(
+        "--force",
+        is_flag=True,
+        help="Ignore last_fetched_at, process all available items (for testing)",
+    )
+    @click.option(
+        "--limit", type=int, default=50, help="Max items to process per source (default: 50)"
+    )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
     @click.pass_context
-    def run_cmd(ctx, cron, source_id, dry_run, fmt):
-        """Check sources and execute matching rules."""
+    def run_cmd(ctx, cron, source_id, dry_run, force, limit, fmt):
+        """Check sources and execute matching rules.
+
+        Use --force to re-process already seen items for testing.
+        """
         storage = get_storage()
 
         sources = storage.get_all_sources()
@@ -34,9 +45,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not sources:
             if not cron:
                 out_formatted(
-                    {
-                        "error": "No enabled sources found. Run 'monitor-agent setup source-add' first."
-                    },
+                    {"error": "No enabled sources found. Run 'monitor setup source-add' first."},
                     fmt,
                 )
             return
@@ -47,7 +56,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not rules:
             if not cron:
                 out_formatted(
-                    {"error": "No enabled rules found. Run 'monitor-agent setup rule-add' first."},
+                    {"error": "No enabled rules found. Run 'monitor setup rule-add' first."},
                     fmt,
                 )
             return
@@ -64,9 +73,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
             plugin_instance = plugin_cls(config, {"identifier": source.identifier})
 
             try:
-                items = asyncio.run(
-                    plugin_instance.fetch_new_items(last_item_id=source.last_item_id)
-                )
+                if force:
+                    if not cron:
+                        click.echo(
+                            f"⚠️  FORCE MODE: Processing up to {limit} items from {source.identifier}",
+                            err=True,
+                        )
+                    items = asyncio.run(
+                        plugin_instance.fetch_new_items(
+                            last_item_id=None, limit=limit, last_fetched_at=None
+                        )
+                    )
+                else:
+                    items = asyncio.run(
+                        plugin_instance.fetch_new_items(
+                            last_item_id=None, limit=limit, last_fetched_at=source.last_fetched_at
+                        )
+                    )
             except Exception as e:
                 errors.append(f"Failed to fetch from {source.identifier}: {str(e)}")
                 continue
@@ -79,13 +102,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     except Exception as e:
                         errors.append(f"Rule evaluation error for {rule.name}: {str(e)}")
 
-                if items:
-                    source.last_item_id = item.id
-
-            if items:
-                storage.update_source_last_check(
-                    source.id, items[-1].id if items else source.last_item_id
-                )
+            if items and not force:
+                newest_item = max(items, key=lambda x: x.published_at)
+                source.last_fetched_at = newest_item.published_at
+                storage.update_source_last_fetched_at(source.id, source.last_fetched_at)
+            elif force and items:
+                if not cron:
+                    click.echo(
+                        f"  → Force mode: NOT updating last_fetched_at",
+                        err=True,
+                    )
 
         for entry in triggered:
             rule = entry["rule"]
@@ -108,13 +134,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                     item_id=item.id,
                                     item_title=item.title,
                                     item_url=item.url,
-                                    triggered_at=datetime.now(),
+                                    triggered_at=datetime.now(timezone.utc),
                                     exit_code=code,
                                     output=output,
                                 )
                             )
 
-                            action.last_run = datetime.now()
+                            action.last_run = datetime.now(timezone.utc)
                             action.last_output = output
                             action.last_exit_code = code
                             storage.update_action(action)
@@ -126,15 +152,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if not cron:
             result = {
+                "mode": "force" if force else "normal",
                 "checked_sources": len(sources),
                 "triggered_rules": len(triggered),
+                "limit_per_source": limit if force else "unlimited",
                 "errors": errors,
                 "triggers": [
                     {
                         "rule": r["rule"].name,
                         "source": r["source"].identifier,
                         "item": r["item"].title,
-                        "item_url": r["item"].url,
+                        "item_id": r["item"].id,
                     }
                     for r in triggered
                 ],

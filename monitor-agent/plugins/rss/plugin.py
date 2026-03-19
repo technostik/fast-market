@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
+from typing import Any
 
 import feedparser
 
@@ -11,7 +13,10 @@ class RSSPlugin(SourcePlugin):
     name = "rss"
 
     async def fetch_new_items(
-        self, last_item_id: str | None = None, limit: int = 50
+        self,
+        last_item_id: str | None = None,
+        limit: int = 50,
+        last_fetched_at: datetime | None = None,
     ) -> list[ItemMetadata]:
         feed = feedparser.parse(self.source_config["identifier"])
 
@@ -28,10 +33,16 @@ class RSSPlugin(SourcePlugin):
 
             if hasattr(entry, "published_parsed") and entry.published_parsed:
                 published = datetime.fromtimestamp(
-                    entry.published_parsed.timestamp(), tz=timezone.utc
+                    time.mktime(entry.published_parsed), tz=timezone.utc
                 )
             else:
                 published = datetime.now(timezone.utc)
+
+            if last_item_id and entry.id == last_item_id:
+                break
+
+            if last_fetched_at and published <= last_fetched_at:
+                break
 
             item = ItemMetadata(
                 id=entry.id,
@@ -46,14 +57,9 @@ class RSSPlugin(SourcePlugin):
                     "author": entry.get("author", ""),
                     "categories": categories,
                     "word_count": word_count,
-                    "feed_title": feed.feed.get("title", "")
-                    if hasattr(feed, "feed")
-                    else "",
+                    "feed_title": feed.feed.get("title", "") if hasattr(feed, "feed") else "",
                 },
             )
-
-            if last_item_id and item.id == last_item_id:
-                break
 
             items.append(item)
 

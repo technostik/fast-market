@@ -26,6 +26,7 @@ class MonitorStorage:
                     description TEXT,
                     enabled INTEGER DEFAULT 1,
                     last_check TEXT,
+                    last_fetched_at TEXT,
                     last_item_id TEXT,
                     created_at TEXT NOT NULL
                 );
@@ -75,6 +76,13 @@ class MonitorStorage:
                 ON trigger_logs(rule_id, triggered_at);
             """)
 
+            try:
+                conn.execute("""
+                    ALTER TABLE sources ADD COLUMN last_fetched_at TEXT
+                """)
+            except Exception:
+                pass
+
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
         conn = sqlite3.connect(str(self.db_path))
@@ -92,22 +100,23 @@ class MonitorStorage:
 
     def get_source(self, source_id: str) -> Source | None:
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM sources WHERE id = ?", (source_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
             return self._row_to_source(row) if row else None
 
     def add_source(self, source: Source) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO sources (id, plugin, identifier, description, enabled, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO sources (id, plugin, identifier, description, enabled, last_check, last_fetched_at, last_item_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     source.id,
                     source.plugin,
                     source.identifier,
                     source.description,
                     int(source.enabled),
+                    source.last_check.isoformat() if source.last_check else None,
+                    source.last_fetched_at.isoformat() if source.last_fetched_at else None,
+                    source.last_item_id,
                     source.created_at.isoformat(),
                 ),
             )
@@ -116,25 +125,31 @@ class MonitorStorage:
         with self._get_conn() as conn:
             conn.execute(
                 """UPDATE sources SET plugin = ?, identifier = ?, description = ?, enabled = ?,
-                   last_check = ?, last_item_id = ? WHERE id = ?""",
+                   last_check = ?, last_fetched_at = ?, last_item_id = ? WHERE id = ?""",
                 (
                     source.plugin,
                     source.identifier,
                     source.description,
                     int(source.enabled),
                     source.last_check.isoformat() if source.last_check else None,
+                    source.last_fetched_at.isoformat() if source.last_fetched_at else None,
                     source.last_item_id,
                     source.id,
                 ),
             )
 
-    def update_source_last_check(
-        self, source_id: str, last_item_id: str | None
-    ) -> None:
+    def update_source_last_check(self, source_id: str, last_item_id: str | None) -> None:
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE sources SET last_check = ?, last_item_id = ? WHERE id = ?",
                 (datetime.now().isoformat(), last_item_id, source_id),
+            )
+
+    def update_source_last_fetched_at(self, source_id: str, last_fetched_at: datetime) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sources SET last_fetched_at = ? WHERE id = ?",
+                (last_fetched_at.isoformat(), source_id),
             )
 
     def delete_source(self, source_id: str) -> None:
@@ -148,9 +163,7 @@ class MonitorStorage:
 
     def get_action(self, action_id: str) -> Action | None:
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM actions WHERE id = ?", (action_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
             return self._row_to_action(row) if row else None
 
     def add_action(self, action: Action) -> None:
@@ -196,9 +209,7 @@ class MonitorStorage:
 
     def get_rule(self, rule_id: str) -> Rule | None:
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM rules WHERE id = ?", (rule_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM rules WHERE id = ?", (rule_id,)).fetchone()
             return self._row_to_rule(row) if row else None
 
     def add_rule(self, rule: Rule) -> None:
@@ -286,15 +297,9 @@ class MonitorStorage:
 
     def get_stats(self) -> dict:
         with self._get_conn() as conn:
-            sources = conn.execute(
-                "SELECT COUNT(*) FROM sources WHERE enabled = 1"
-            ).fetchone()[0]
-            actions = conn.execute(
-                "SELECT COUNT(*) FROM actions WHERE enabled = 1"
-            ).fetchone()[0]
-            rules = conn.execute(
-                "SELECT COUNT(*) FROM rules WHERE enabled = 1"
-            ).fetchone()[0]
+            sources = conn.execute("SELECT COUNT(*) FROM sources WHERE enabled = 1").fetchone()[0]
+            actions = conn.execute("SELECT COUNT(*) FROM actions WHERE enabled = 1").fetchone()[0]
+            rules = conn.execute("SELECT COUNT(*) FROM rules WHERE enabled = 1").fetchone()[0]
             triggers = conn.execute("SELECT COUNT(*) FROM trigger_logs").fetchone()[0]
             failed_triggers = conn.execute(
                 "SELECT COUNT(*) FROM trigger_logs WHERE exit_code != 0"
@@ -314,14 +319,16 @@ class MonitorStorage:
             }
 
     def _row_to_source(self, row: sqlite3.Row) -> Source:
+        last_fetched_at_val = row["last_fetched_at"] if "last_fetched_at" in row.keys() else None
         return Source(
             id=row["id"],
             plugin=row["plugin"],
             identifier=row["identifier"],
             description=row["description"],
             enabled=bool(row["enabled"]),
-            last_check=datetime.fromisoformat(row["last_check"])
-            if row["last_check"]
+            last_check=datetime.fromisoformat(row["last_check"]) if row["last_check"] else None,
+            last_fetched_at=datetime.fromisoformat(last_fetched_at_val)
+            if last_fetched_at_val
             else None,
             last_item_id=row["last_item_id"],
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -335,9 +342,7 @@ class MonitorStorage:
             description=row["description"],
             enabled=bool(row["enabled"]),
             created_at=datetime.fromisoformat(row["created_at"]),
-            last_run=datetime.fromisoformat(row["last_run"])
-            if row["last_run"]
-            else None,
+            last_run=datetime.fromisoformat(row["last_run"]) if row["last_run"] else None,
             last_output=row["last_output"],
             last_exit_code=row["last_exit_code"],
         )
