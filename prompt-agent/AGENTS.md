@@ -7,7 +7,8 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 
 - `cli/main.py` — CLI entry point that discovers and registers all commands
 - `commands/apply/register.py` — Core execution engine with three input modes (saved/direct/stdin)
-- `commands/setup/register.py` — Configuration wizard for provider management
+- `commands/task/register.py` — Agentic task execution with LLM-driven CLI loop
+- `commands/setup/register.py` — Configuration wizard for provider and task management
 - `core/substitution.py` — Placeholder resolution with file/stdin injection
 - `core/models.py` — Domain models (Prompt, PromptExecution)
 - `plugins/base.py` — Provider interfaces (LLMProvider, LazyLLMProvider)
@@ -71,9 +72,14 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - Extend `resolve_arguments()` in `core/substitution.py`
 - Keep injection patterns (`@file`, `-`) consistent
 
+**To add a command to task whitelist:**
+1. Add to `_DEFAULT_ALLOWED` in `commands/task/executor.py`, or
+2. Use `prompt setup --add-task-command <name>`
+
 ## 📚 Related Documentation
 
 - See `AGENTS.md` in root for project-wide golden rules (DRY, KISS, CODE IS LAW, FAIL LOUDLY)
 - Refer to provider-specific READMEs in `plugins/` for implementation details
 - Check `CHANGELOG.md` for test scenarios and edge cases
 - See `alembic.ini` for database migration setup
+- See `TASK.md` for `prompt task` command usage examples

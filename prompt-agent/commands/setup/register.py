@@ -10,6 +10,31 @@ from commands.base import CommandManifest
 from common.core.paths import get_tool_config
 
 _SUPPORTED_PROVIDERS = {"anthropic", "openai", "openai-compatible", "ollama"}
+_DEFAULT_TASK_COMMANDS = {
+    "corpus",
+    "image",
+    "youtube",
+    "message",
+    "prompt",
+    "ls",
+    "cat",
+    "jq",
+    "grep",
+    "find",
+    "echo",
+    "head",
+    "tail",
+    "wc",
+    "mkdir",
+    "touch",
+    "rm",
+    "cp",
+    "mv",
+    "sort",
+    "uniq",
+    "awk",
+    "sed",
+}
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -25,6 +50,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--config-path", "show_config_path", is_flag=True, help="Show config file path"
     )
+    @click.option(
+        "--list-task-commands", is_flag=True, help="List task allowed commands"
+    )
+    @click.option("--add-task-command", help="Add a command to task whitelist")
+    @click.option("--remove-task-command", help="Remove a command from task whitelist")
+    @click.option(
+        "--set-task-max-iterations", type=int, help="Set max iterations for task"
+    )
+    @click.option(
+        "--set-task-timeout", type=int, help="Set default timeout (seconds) for task"
+    )
     @click.pass_context
     def setup_cmd(
         ctx,
@@ -34,11 +70,31 @@ def register(plugin_manifests: dict) -> CommandManifest:
         set_default,
         show_config,
         show_config_path,
+        list_task_commands,
+        add_task_command,
+        remove_task_command,
+        set_task_max_iterations,
+        set_task_timeout,
     ):
-        """Setup wizard for managing LLM providers."""
+        """Setup wizard for managing LLM providers and task configuration."""
         config_path = get_tool_config("prompt")
         config = _load_config(config_path)
 
+        if list_task_commands:
+            _list_task_config(config)
+            return
+        if add_task_command:
+            _add_task_command(config_path, config, add_task_command)
+            return
+        if remove_task_command:
+            _remove_task_command(config_path, config, remove_task_command)
+            return
+        if set_task_max_iterations is not None:
+            _set_task_max_iterations(config_path, config, set_task_max_iterations)
+            return
+        if set_task_timeout is not None:
+            _set_task_timeout(config_path, config, set_task_timeout)
+            return
         if list_providers:
             _list_providers(config)
             return
@@ -222,3 +278,68 @@ def _run_interactive_wizard(config_path: Path, config: dict) -> None:
         click.echo(f"  export {env_var}=your-api-key")
     click.echo("\nYou can add more providers with:")
     click.echo("  prompt setup --add-provider <name>")
+
+
+def _init_task_config(config: dict) -> dict:
+    """Ensure task config exists and return it."""
+    task = config.setdefault("task", {})
+    if not isinstance(task, dict):
+        raise ValueError("task config must be a mapping")
+    task.setdefault("allowed_commands", list(_DEFAULT_TASK_COMMANDS))
+    task.setdefault("max_iterations", 20)
+    task.setdefault("default_timeout", 60)
+    return task
+
+
+def _list_task_config(config: dict) -> None:
+    task = _init_task_config(config)
+    click.echo("Task configuration:")
+    click.echo(f"  Max iterations: {task.get('max_iterations', 20)}")
+    click.echo(f"  Default timeout: {task.get('default_timeout', 60)}s")
+    click.echo(f"  Allowed commands:")
+    for cmd in sorted(task.get("allowed_commands", [])):
+        click.echo(f"    - {cmd}")
+
+
+def _add_task_command(config_path: Path, config: dict, command: str) -> None:
+    task = _init_task_config(config)
+    allowed = set(task.get("allowed_commands", []))
+    if command in allowed:
+        click.echo(f"Command already allowed: {command}")
+        return
+    allowed.add(command)
+    task["allowed_commands"] = sorted(allowed)
+    _save_config(config_path, config)
+    click.echo(f"✓ Added '{command}' to task allowed commands")
+
+
+def _remove_task_command(config_path: Path, config: dict, command: str) -> None:
+    task = _init_task_config(config)
+    allowed = set(task.get("allowed_commands", []))
+    if command not in allowed:
+        click.echo(f"Command not in whitelist: {command}", err=True)
+        sys.exit(1)
+    allowed.discard(command)
+    task["allowed_commands"] = sorted(allowed)
+    _save_config(config_path, config)
+    click.echo(f"✓ Removed '{command}' from task allowed commands")
+
+
+def _set_task_max_iterations(config_path: Path, config: dict, max_iter: int) -> None:
+    if max_iter < 1:
+        click.echo("Max iterations must be at least 1", err=True)
+        sys.exit(1)
+    task = _init_task_config(config)
+    task["max_iterations"] = max_iter
+    _save_config(config_path, config)
+    click.echo(f"✓ Set task max iterations to {max_iter}")
+
+
+def _set_task_timeout(config_path: Path, config: dict, timeout: int) -> None:
+    if timeout < 1:
+        click.echo("Timeout must be at least 1 second", err=True)
+        sys.exit(1)
+    task = _init_task_config(config)
+    task["default_timeout"] = timeout
+    _save_config(config_path, config)
+    click.echo(f"✓ Set task default timeout to {timeout}s")
