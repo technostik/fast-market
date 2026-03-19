@@ -94,7 +94,15 @@ class TaskLoop:
     provider: str
     model: str | None
     verbose: bool = False
-    debug: bool = False
+    debug: str = ""  # "" = off, "normal" = inner dialog, "full" = everything
+
+    @property
+    def _debug_enabled(self) -> bool:
+        return bool(self.debug)
+
+    @property
+    def _debug_full(self) -> bool:
+        return self.debug == "full"
 
     def run(
         self,
@@ -118,7 +126,7 @@ class TaskLoop:
 
         llm_provider = providers[self.provider]
         if hasattr(llm_provider, "set_debug"):
-            llm_provider.set_debug(self.debug)
+            llm_provider.set_debug(self._debug_enabled)
 
         system_prompt = build_system_prompt(
             task_description=task_description,
@@ -148,10 +156,13 @@ class TaskLoop:
             self._debug(f"ITERATION {iteration}/{max_iter}")
             self._debug(f"{'=' * 50}")
 
-            self._debug(f"\n>>> LLM REQUEST")
-            self._debug(f"System prompt: {len(system_prompt)} chars")
-            self._debug(f"User message: {len(format_message_history(messages))} chars")
-            self._debug(f"Tools: {len(tools)} defined")
+            if self._debug_full:
+                self._debug(f"\n>>> LLM REQUEST")
+                self._debug(f"System prompt: {len(system_prompt)} chars")
+                self._debug(
+                    f"User message: {len(format_message_history(messages))} chars"
+                )
+                self._debug(f"Tools: {len(tools)} defined")
 
             from plugins.base import LLMRequest
 
@@ -163,11 +174,19 @@ class TaskLoop:
                 tools=tools,
             )
 
-            self._debug("\n" + _format_debug_request(request))
+            if self._debug_full:
+                self._debug("\n" + _format_debug_request(request))
 
             response = llm_provider.complete(request)
 
-            self._debug("\n" + _format_debug_response(response))
+            if self._debug_full:
+                self._debug("\n" + _format_debug_response(response))
+            else:
+                self._debug(f"\n>>> LLM RESPONSE ({len(response.content)} chars)")
+                self._debug(
+                    response.content[:300]
+                    + ("..." if len(response.content) > 300 else "")
+                )
 
             if response.tool_calls:
                 self._debug(f"\n>>> {len(response.tool_calls)} tool_call(s) detected")
@@ -223,16 +242,23 @@ class TaskLoop:
 
         for tool_call in response.tool_calls:
             self._debug(f"\n>>> TOOL: {tool_call.name}")
-            self._debug(f"    Args: {tool_call.arguments}")
+            if self._debug_full:
+                self._debug(f"    Args: {tool_call.arguments}")
 
             command = tool_call.arguments.get("command", "")
             result = execute_fn(command.strip())
 
-            self._debug(f"    Exit: {result.exit_code}")
-            if result.stdout:
-                self._debug(f"    Stdout: {result.stdout[:100]}...")
-            if result.stderr:
-                self._debug(f"    Stderr: {result.stderr[:100]}...")
+            if self._debug_full:
+                self._debug(f"    Exit: {result.exit_code}")
+                if result.stdout:
+                    self._debug(f"    Stdout: {result.stdout[:100]}...")
+                if result.stderr:
+                    self._debug(f"    Stderr: {result.stderr[:100]}...")
+            else:
+                output_preview = (result.stdout or result.stderr or "").strip()[:100]
+                self._debug(
+                    f"    -> Exit {result.exit_code}, Output: {output_preview[:80]}..."
+                )
 
             tool_result = self._format_tool_result(command, result)
 
@@ -260,7 +286,7 @@ Timed out: {result.timed_out}"""
             print(f"[VERBOSE] {msg}", file=sys.stderr)
 
     def _debug(self, msg: str) -> None:
-        if self.debug:
+        if self._debug_enabled:
             print(f"[DEBUG] {msg}", file=sys.stderr)
 
 

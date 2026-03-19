@@ -67,8 +67,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--debug",
-        is_flag=True,
-        help="Show full LLM dialogs (requests/responses) for debugging",
+        type=click.Choice(["normal", "full"]),
+        default="",
+        is_flag=False,
+        flag_value="normal",
+        help="Debug output: 'normal' shows LLM/third calls, 'full' shows everything",
     )
     @click.option(
         "--format",
