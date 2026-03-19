@@ -16,11 +16,14 @@ Filter by rule ID.
 ### --source-id
 Filter by source ID.
 
+### --action-id
+Filter by action ID.
+
 ### --limit
 Maximum number of logs to show (default: 100).
 
 ### --format
-Output format: `json` or `text`.
+Output format: `json`, `yaml`, or `text`.
 
 ## Log Entry Fields
 

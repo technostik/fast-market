@@ -24,7 +24,7 @@ Max items to process per source (default: 50).
 Suppress replay of command output. Action results are still logged. `--cron` mode already implies silent.
 
 ### --format
-Output format: `json` or `text`.
+Output format: `json`, `yaml`, or `text`.
 
 ## Execution Flow
 
@@ -70,6 +70,21 @@ Output format: `json` or `text`.
 | `$RULE_NAME` | Matching rule name |
 | `$EXTRA_*` | Any field from extra dict |
 
+## Available Rule Fields
+
+Rule conditions can reference these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id`, `title`, `url` | string | Item fields |
+| `content_type` | string | video, short, article |
+| `published_at` | datetime | Item publish time |
+| `source_plugin` | string | youtube, rss |
+| `source_identifier` | string | Channel ID or RSS URL |
+| `source_description` | string | Source description |
+| `source_metadata` | dict | Source metadata key-value pairs |
+| `extra.*` | any | Plugin-specific fields |
+
 ## Example Rule Conditions
 
 ```json
@@ -87,6 +102,17 @@ Output format: `json` or `text`.
     {"field": "extra.categories", "operator": "contains", "value": "technology"},
     {"field": "title", "operator": "matches", "value": ".*AI.*"}
   ]
+}
+```
+
+```json
+{
+  "all": [
+    {"field": "source_metadata.theme", "operator": "==", "value": "technology"},
+    {"field": "content_type", "operator": "==", "value": "short"}
+  ]
+}
+```
 }
 ```
 

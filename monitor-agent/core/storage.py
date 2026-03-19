@@ -83,6 +83,13 @@ class MonitorStorage:
             except Exception:
                 pass
 
+            try:
+                conn.execute("""
+                    ALTER TABLE sources ADD COLUMN metadata TEXT DEFAULT '{}'
+                """)
+            except Exception:
+                pass
+
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
         conn = sqlite3.connect(str(self.db_path))
@@ -106,13 +113,14 @@ class MonitorStorage:
     def add_source(self, source: Source) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO sources (id, plugin, identifier, description, enabled, last_check, last_fetched_at, last_item_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO sources (id, plugin, identifier, description, metadata, enabled, last_check, last_fetched_at, last_item_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     source.id,
                     source.plugin,
                     source.identifier,
                     source.description,
+                    json.dumps(source.metadata),
                     int(source.enabled),
                     source.last_check.isoformat() if source.last_check else None,
                     source.last_fetched_at.isoformat() if source.last_fetched_at else None,
@@ -124,12 +132,13 @@ class MonitorStorage:
     def update_source(self, source: Source) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """UPDATE sources SET plugin = ?, identifier = ?, description = ?, enabled = ?,
+                """UPDATE sources SET plugin = ?, identifier = ?, description = ?, metadata = ?, enabled = ?,
                    last_check = ?, last_fetched_at = ?, last_item_id = ? WHERE id = ?""",
                 (
                     source.plugin,
                     source.identifier,
                     source.description,
+                    json.dumps(source.metadata),
                     int(source.enabled),
                     source.last_check.isoformat() if source.last_check else None,
                     source.last_fetched_at.isoformat() if source.last_fetched_at else None,
@@ -273,6 +282,7 @@ class MonitorStorage:
         since: datetime | None = None,
         rule_id: str | None = None,
         source_id: str | None = None,
+        action_id: str | None = None,
         limit: int = 100,
     ) -> list[TriggerLog]:
         with self._get_conn() as conn:
@@ -288,6 +298,9 @@ class MonitorStorage:
             if source_id:
                 query += " AND source_id = ?"
                 params.append(source_id)
+            if action_id:
+                query += " AND action_id = ?"
+                params.append(action_id)
 
             query += " ORDER BY triggered_at DESC LIMIT ?"
             params.append(limit)
@@ -320,11 +333,13 @@ class MonitorStorage:
 
     def _row_to_source(self, row: sqlite3.Row) -> Source:
         last_fetched_at_val = row["last_fetched_at"] if "last_fetched_at" in row.keys() else None
+        metadata_val = row["metadata"] if "metadata" in row.keys() else "{}"
         return Source(
             id=row["id"],
             plugin=row["plugin"],
             identifier=row["identifier"],
             description=row["description"],
+            metadata=json.loads(metadata_val) if metadata_val else {},
             enabled=bool(row["enabled"]),
             last_check=datetime.fromisoformat(row["last_check"]) if row["last_check"] else None,
             last_fetched_at=datetime.fromisoformat(last_fetched_at_val)

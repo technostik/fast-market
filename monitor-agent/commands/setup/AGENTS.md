@@ -6,9 +6,11 @@ Configure sources, actions, and rules for the monitor agent. Provides CRUD opera
 ## 📋 Commands
 
 ### source-add
-Add a new source to monitor.
+Add a new source to monitor with optional metadata.
 ```
 monitor setup source-add --plugin youtube --identifier UC123456789
+monitor setup source-add --plugin youtube --identifier UC123456789 \
+  --meta theme=technology --meta priority=high
 ```
 
 ### source-list
@@ -18,9 +20,11 @@ List all configured sources.
 Delete a source by ID.
 
 ### action-add
-Add a new action (shell script).
+Add or replace an action (shell script).
 ```
 monitor setup action-add --name notify --command 'echo "$ITEM_TITLE"'
+monitor setup action-add --id telegram-notify --name notify --command 'curl ...'
+monitor setup action-add --replace-id telegram-notify --command 'new command'
 ```
 
 ### action-list
@@ -30,15 +34,17 @@ List all configured actions.
 Delete an action by ID.
 
 ### rule-add
-Add a new rule from file or inline conditions.
+Add or replace a rule from file or inline conditions.
 ```
 monitor setup rule-add --name "Long Videos" \
   --rule-file rule.yaml \
   --action-ids action1,action2
 
-monitor setup rule-add --name "Shorts" \
+monitor setup rule-add --id tech-shorts --name "Tech Shorts" \
   --conditions '{"all":[{"field":"content_type","operator":"==","value":"short"}]}' \
-  --action-ids action1
+  --action-ids notify
+
+monitor setup rule-add --replace-id tech-shorts --rule-file new.yaml
 ```
 
 ### rule-list
@@ -46,6 +52,14 @@ List all configured rules.
 
 ### rule-delete
 Delete a rule by ID.
+
+### show
+Show configuration file paths or export all config.
+```
+monitor setup show
+monitor setup show --export yaml > backup.yaml
+monitor setup show --export json > backup.json
+```
 
 ### list
 Unified listing of sources, actions, or rules.

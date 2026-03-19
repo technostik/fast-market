@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import click
 import yaml
 
 from commands.base import CommandManifest
-from commands.helpers import get_storage, out_formatted
+from commands.helpers import get_storage, out_formatted, to_dict
 from core.models import Source, Action, Rule
 
 
@@ -22,10 +23,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--plugin", type=click.Choice(["youtube", "rss"]), required=True)
     @click.option("--identifier", required=True, help="Channel ID, @handle, or RSS URL")
     @click.option("--description", help="Optional description")
+    @click.option(
+        "--meta", multiple=True, help="Metadata key=value pairs (can be used multiple times)"
+    )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def source_add(plugin, identifier, description, fmt):
-        """Add a new source to monitor."""
+    def source_add(plugin, identifier, description, meta, fmt):
+        """Add a new source to monitor with optional metadata."""
         storage = get_storage()
+
+        metadata = {}
+        for m in meta:
+            if "=" not in m:
+                raise click.BadParameter(f"Metadata must be key=value format, got: {m}")
+            key, value = m.split("=", 1)
+            metadata[key.strip()] = value.strip()
 
         plugin_class = plugin_manifests[plugin].source_plugin_class
         temp_config = plugin_class({"identifier": identifier}, {"identifier": identifier})
@@ -38,6 +49,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             plugin=plugin,
             identifier=identifier,
             description=description,
+            metadata=metadata,
             created_at=datetime.now(),
         )
 
@@ -48,6 +60,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "plugin": source.plugin,
                 "identifier": source.identifier,
                 "description": source.description,
+                "metadata": metadata,
                 "message": "Source added successfully",
             },
             fmt,
@@ -59,7 +72,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """List all configured sources."""
         storage = get_storage()
         sources = storage.get_all_sources()
-        out_formatted([s.__dict__ for s in sources], fmt)
+        out_formatted([to_dict(s) for s in sources], fmt)
 
     @setup_group.command("source-delete")
     @click.option("--id", "source_id", required=True, help="Source ID to delete")
@@ -71,6 +84,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         out_formatted({"message": f"Source {source_id} deleted"}, fmt)
 
     @setup_group.command("action-add")
+    @click.option("--id", "custom_id", help="Custom ID (instead of auto-generated)")
+    @click.option("--replace-id", help="Replace existing action with this ID")
     @click.option("--name", required=True, help="Action name")
     @click.option(
         "--command",
@@ -79,12 +94,34 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option("--description", help="Optional description")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def action_add(name, command, description, fmt):
-        """Add a new action (shell script)."""
+    def action_add(custom_id, replace_id, name, command, description, fmt):
+        """Add or replace an action."""
         storage = get_storage()
 
+        if replace_id:
+            existing = storage.get_action(replace_id)
+            if not existing:
+                out_formatted({"error": f"Action {replace_id} not found"}, fmt)
+                return
+
+            existing.name = name
+            existing.command = command
+            existing.description = description
+            storage.update_action(existing)
+            out_formatted({"id": replace_id, "message": "Action replaced"}, fmt)
+            return
+
+        action_id = custom_id or str(uuid.uuid4())
+
+        if custom_id and storage.get_action(custom_id):
+            out_formatted(
+                {"error": f"Action ID {custom_id} already exists. Use --replace-id to update."},
+                fmt,
+            )
+            return
+
         action = Action(
-            id=str(uuid.uuid4()),
+            id=action_id,
             name=name,
             command=command,
             description=description,
@@ -133,6 +170,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         out_formatted({"message": f"Action {action_id} deleted"}, fmt)
 
     @setup_group.command("rule-add")
+    @click.option("--id", "custom_id", help="Custom ID (instead of auto-generated)")
+    @click.option("--replace-id", help="Replace existing rule with this ID")
     @click.option("--name", required=True, help="Rule name")
     @click.option(
         "--rule-file",
@@ -146,8 +185,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--action-ids", required=True, help="Comma-separated action IDs")
     @click.option("--description", help="Optional description")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def rule_add(name, rule_file, conditions, action_ids, description, fmt):
-        """Add a new rule (conditions from file or inline)."""
+    def rule_add(custom_id, replace_id, name, rule_file, conditions, action_ids, description, fmt):
+        """Add or replace a rule."""
         storage = get_storage()
 
         if rule_file:
@@ -162,11 +201,36 @@ def register(plugin_manifests: dict) -> CommandManifest:
             out_formatted({"error": "Either --rule-file or --conditions required"}, fmt)
             return
 
+        action_id_list = [aid.strip() for aid in action_ids.split(",")]
+
+        if replace_id:
+            existing = storage.get_rule(replace_id)
+            if not existing:
+                out_formatted({"error": f"Rule {replace_id} not found"}, fmt)
+                return
+
+            existing.name = name
+            existing.conditions = conditions_data
+            existing.action_ids = action_id_list
+            existing.description = description
+            storage.update_rule(existing)
+            out_formatted({"id": replace_id, "message": "Rule replaced"}, fmt)
+            return
+
+        rule_id = custom_id or str(uuid.uuid4())
+
+        if custom_id and storage.get_rule(custom_id):
+            out_formatted(
+                {"error": f"Rule ID {custom_id} already exists. Use --replace-id to update."},
+                fmt,
+            )
+            return
+
         rule = Rule(
-            id=str(uuid.uuid4()),
+            id=rule_id,
             name=name,
             conditions=conditions_data,
-            action_ids=[aid.strip() for aid in action_ids.split(",")],
+            action_ids=action_id_list,
             description=description,
             created_at=datetime.now(),
         )
@@ -212,6 +276,42 @@ def register(plugin_manifests: dict) -> CommandManifest:
         storage.delete_rule(rule_id)
         out_formatted({"message": f"Rule {rule_id} deleted"}, fmt)
 
+    @setup_group.command("show")
+    @click.option("--export", type=click.Choice(["yaml", "json"]), help="Export all configuration")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    def show_config(export, fmt):
+        """Show configuration files and optionally export all configs."""
+        storage = get_storage()
+
+        db_path = Path(storage.db_path)
+        config_paths = {
+            "database": str(db_path),
+            "config_dir": str(db_path.parent),
+            "log_dir": str(Path.home() / ".local" / "state" / "fast-market" / "monitor" / "logs"),
+        }
+
+        if export:
+            all_configs = {
+                "sources": [to_dict(s) for s in storage.get_all_sources()],
+                "actions": [to_dict(a) for a in storage.get_all_actions()],
+                "rules": [to_dict(r) for r in storage.get_all_rules()],
+                "metadata": {
+                    "version": "0.1.0",
+                    "exported_at": datetime.now().isoformat(),
+                },
+            }
+
+            if export == "yaml":
+                click.echo(
+                    yaml.dump(
+                        all_configs, allow_unicode=True, default_flow_style=False, sort_keys=False
+                    )
+                )
+            else:
+                click.echo(json.dumps(all_configs, indent=2, default=str))
+        else:
+            out_formatted(config_paths, fmt)
+
     @setup_group.command("list")
     @click.option(
         "--type",
@@ -225,13 +325,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         storage = get_storage()
         if type_ == "sources":
             items = storage.get_all_sources()
-            out_formatted([s.__dict__ for s in items], fmt)
+            out_formatted([to_dict(s) for s in items], fmt)
         elif type_ == "actions":
             items = storage.get_all_actions()
-            out_formatted([a.__dict__ for a in items], fmt)
+            out_formatted([to_dict(a) for a in items], fmt)
         else:
             items = storage.get_all_rules()
-            out_formatted([r.__dict__ for r in items], fmt)
+            out_formatted([to_dict(r) for r in items], fmt)
 
     return CommandManifest(
         name="setup",

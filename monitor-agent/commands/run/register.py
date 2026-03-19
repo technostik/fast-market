@@ -34,7 +34,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Suppress replay of command output (action results will still be logged)",
     )
-    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text", "yaml"]), default="text")
     @click.pass_context
     def run_cmd(ctx, cron, source_id, dry_run, force, limit, silent, fmt):
         """Check sources and execute matching rules.
@@ -170,9 +170,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "triggers": [
                     {
                         "rule": r["rule"].name,
+                        "rule_id": r["rule"].id,
                         "source": r["source"].identifier,
-                        "item": r["item"].title,
-                        "item_id": r["item"].id,
+                        "source_id": r["source"].id,
+                        "source_metadata": r["source"].metadata,
+                        "item": {
+                            "id": r["item"].id,
+                            "title": r["item"].title,
+                            "url": r["item"].url,
+                            "content_type": r["item"].content_type,
+                            "published": r["item"].published_at.isoformat(),
+                            "extra": r["item"].extra,
+                        },
                     }
                     for r in triggered
                 ],

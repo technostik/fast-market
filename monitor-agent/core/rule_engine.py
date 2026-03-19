@@ -17,6 +17,7 @@ def evaluate_rule(rule: Rule, item: ItemMetadata, source: Source) -> bool:
         "source_plugin": item.source_plugin,
         "source_identifier": item.source_identifier,
         "source_description": source.description,
+        "source_metadata": source.metadata,
         **item.extra,
     }
 

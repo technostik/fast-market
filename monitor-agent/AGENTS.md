@@ -175,17 +175,23 @@ Tables:
 ## Usage Examples
 
 ```bash
-# Add a YouTube channel source
-monitor setup source-add --plugin youtube --identifier UC123456789
+# Add a YouTube channel source with metadata
+monitor setup source-add --plugin youtube --identifier UC123456789 \
+  --meta theme=technology --meta priority=high
 
 # Add an RSS feed source
 monitor setup source-add --plugin rss --identifier https://example.com/feed.xml
 
-# Add an action
-monitor setup action-add --name notify --command 'echo "New: $ITEM_TITLE"'
+# Add an action with custom ID
+monitor setup action-add --id telegram-notify --name notify \
+  --command 'curl -X POST https://api.telegram.org/...'
 
-# Add a rule (from file)
-monitor setup rule-add --name "Long Videos" --rule-file rule.yaml --action-ids <action-id>
+# Replace an existing action
+monitor setup action-add --replace-id telegram-notify --command 'new command'
+
+# Add a rule with custom ID
+monitor setup rule-add --id tech-shorts --name "Tech Shorts" \
+  --rule-file rule.yaml --action-ids telegram-notify
 
 # Add inline rule
 monitor setup rule-add --name "YouTube Shorts" \
@@ -198,10 +204,20 @@ monitor run
 # Force mode (for testing)
 monitor run --force --limit 10 --dry-run
 
+# Run with YAML output
+monitor run --force --limit 5 --format yaml
+
 # Cron mode
 */1 * * * * monitor run --cron
 
-# View logs
+# Export all config
+monitor setup show --export yaml > backup.yaml
+
+# View logs with filters
+monitor logs --since 1d --action-id telegram-notify --format yaml
+
+# Check status
+monitor status --format json
 monitor logs --since 1d --format json
 
 # Check status

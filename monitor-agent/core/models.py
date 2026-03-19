@@ -26,6 +26,7 @@ class Source:
     plugin: str
     identifier: str
     description: str | None
+    metadata: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
     last_check: datetime | None = None
     last_fetched_at: datetime | None = None

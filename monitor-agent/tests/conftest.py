@@ -26,6 +26,7 @@ def sample_source():
         plugin="youtube",
         identifier="UC123456789",
         description="Test Channel",
+        metadata={"theme": "tech", "priority": "high"},
         created_at=datetime.now(),
     )
 

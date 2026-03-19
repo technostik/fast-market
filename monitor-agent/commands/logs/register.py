@@ -10,19 +10,14 @@ from commands.helpers import get_storage, out_formatted
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("logs")
-    @click.option(
-        "--since", help="Show logs since (e.g., '1d', '1h', '30m', or ISO date)"
-    )
+    @click.option("--since", help="Show logs since (e.g., '1d', '1h', '30m', or ISO date)")
     @click.option("--rule-id", help="Filter by rule ID")
     @click.option("--source-id", help="Filter by source ID")
-    @click.option(
-        "--limit", type=int, default=100, help="Maximum number of logs to show"
-    )
-    @click.option(
-        "--format", "fmt", type=click.Choice(["json", "text"]), default="text"
-    )
+    @click.option("--action-id", help="Filter by action ID")
+    @click.option("--limit", type=int, default=100, help="Maximum number of logs to show")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text", "yaml"]), default="text")
     @click.pass_context
-    def logs_cmd(ctx, since, rule_id, source_id, limit, fmt):
+    def logs_cmd(ctx, since, rule_id, source_id, action_id, limit, fmt):
         """View trigger history."""
         storage = get_storage()
 
@@ -31,7 +26,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             since_dt = _parse_since(since)
 
         logs = storage.get_trigger_logs(
-            since=since_dt, rule_id=rule_id, source_id=source_id, limit=limit
+            since=since_dt, rule_id=rule_id, source_id=source_id, action_id=action_id, limit=limit
         )
 
         formatted_logs = [
@@ -45,9 +40,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "item_url": log.item_url,
                 "triggered_at": log.triggered_at.isoformat(),
                 "exit_code": log.exit_code,
-                "output": log.output[:500]
-                if log.output and len(log.output) > 500
-                else log.output,
+                "output": log.output[:500] if log.output and len(log.output) > 500 else log.output,
             }
             for log in logs
         ]
