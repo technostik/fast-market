@@ -7,6 +7,7 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from common.core.config import _resolve_config_path, load_tool_config
 from common.core.paths import get_tool_config
 
 _SUPPORTED_PROVIDERS = {"anthropic", "openai", "openai-compatible", "ollama"}
@@ -77,7 +78,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         set_task_timeout,
     ):
         """Setup wizard for managing LLM providers and task configuration."""
-        config_path = get_tool_config("prompt")
+        config_path = _resolve_config_path("prompt")
         config = _load_config(config_path)
 
         if list_task_commands:

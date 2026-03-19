@@ -13,7 +13,7 @@ from commands.task.executor import (
     validate_workdir,
 )
 from commands.task.loop import TaskConfig, TaskLoop, run_dry_run
-from common.core.paths import get_tool_config
+from common.core.config import _resolve_config_path
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -108,7 +108,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if debug and debug not in ("normal", "full"):
             raise click.BadParameter("--debug must be 'normal' or 'full'")
 
-        config_path = get_tool_config("prompt")
+        config_path = _resolve_config_path("prompt")
         config = _load_config(config_path)
         task_config = _get_task_config(config, max_iterations, timeout)
         workdir_path = _resolve_workdir(workdir)
