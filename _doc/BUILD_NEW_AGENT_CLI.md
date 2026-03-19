@@ -1,6 +1,6 @@
-# How to Build a New Agent CLI (corpus-agent Architecture)
+# How to Build a New Agent CLI (your-agent Architecture for fast-market project)
 
-This document explains how to build a new CLI application with the same modular plugin/command architecture as corpus-agent, using shared `common/` utilities.
+This document explains how to build a new CLI application with the same modular plugin/command architecture as existing xxx-agents in the fast-market project, using shared `common/` utilities.
 
 ## Architecture Overview
 
