@@ -34,8 +34,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="text",
         help="Output format",
     )
+    @click.option(
+        "--description", "-d", "description", help="Description for the alias"
+    )
     def alias_cmd(
-        name, command, list_aliases, remove, config_path, config_file, file, export, fmt
+        name,
+        command,
+        list_aliases,
+        remove,
+        config_path,
+        config_file,
+        file,
+        export,
+        fmt,
+        description,
     ):
         """Manage command aliases for prompt task.
 
@@ -43,6 +55,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
           prompt alias                           # List all aliases
           prompt alias --list                    # List all aliases
           prompt alias alert-me "message alert"  # Create/update alias
+          prompt alias alert-me "message alert" -d "Alert me with a message"  # Create with description
           prompt alias alert-me --remove         # Remove alias
           prompt alias --config-path             # Show config file path
           prompt alias --export > backup.yaml     # Export aliases
@@ -103,7 +116,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             _show_alias(name, fmt)
             return
 
-        is_new = create_or_update_alias(name, command)
+        is_new = create_or_update_alias(name, command, description)
         if is_new:
             click.echo(f"✓ Alias created: {name} → {command}")
         else:
@@ -133,8 +146,17 @@ def _list_all_aliases(fmt: str) -> None:
         )
         return
 
-    for alias_name, actual_cmd in sorted(aliases.items()):
-        click.echo(f"{alias_name}: {actual_cmd}")
+    for alias_name, alias_data in sorted(aliases.items()):
+        if isinstance(alias_data, dict):
+            cmd = alias_data.get("command", "")
+            desc = alias_data.get("description", "")
+        else:
+            cmd = alias_data
+            desc = ""
+        if desc:
+            click.echo(f"{alias_name}: {cmd} - {desc}")
+        else:
+            click.echo(f"{alias_name}: {cmd}")
 
 
 def _show_alias(name: str, fmt: str) -> None:
@@ -147,12 +169,26 @@ def _show_alias(name: str, fmt: str) -> None:
         click.echo(f"Error: Alias not found: {name}", err=True)
         sys.exit(1)
 
-    actual_cmd = aliases[name]
+    alias_data = aliases[name]
+    if isinstance(alias_data, dict):
+        actual_cmd = alias_data.get("command", "")
+        desc = alias_data.get("description", "")
+    else:
+        actual_cmd = alias_data
+        desc = ""
 
     if fmt == "json":
-        click.echo(json.dumps({"alias": name, "command": actual_cmd}, indent=2))
+        click.echo(
+            json.dumps(
+                {"alias": name, "command": actual_cmd, "description": desc}, indent=2
+            )
+        )
     elif fmt == "yaml":
-        data = {"aliases": {name: actual_cmd}}
+        data = {"aliases": {name: {"command": actual_cmd, "description": desc}}}
         click.echo(yaml.dump(data, default_flow_style=False, sort_keys=False))
     else:
-        click.echo(f"{name}: {actual_cmd}")
+        if desc:
+            click.echo(f"{name}: {actual_cmd}")
+            click.echo(f"  Description: {desc}")
+        else:
+            click.echo(f"{name}: {actual_cmd}")

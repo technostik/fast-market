@@ -12,13 +12,16 @@ logger = structlog.get_logger(__name__)
 
 _MAX_ALIAS_DEPTH = 5
 
-_aliases_cache: dict[str, str] | None = None
+_aliases_cache: dict[str, dict] | None = None
+
+AliasValue = dict[str, str] | str
 
 
-def load_aliases(force_reload: bool = False) -> dict[str, str]:
+def load_aliases(force_reload: bool = False) -> dict[str, dict]:
     """Load aliases from YAML config file with caching.
 
-    Returns a dict mapping alias names to their actual commands.
+    Returns a dict mapping alias names to {command, description} dicts.
+    Handles both old format (alias: command) and new format (alias: {command, description}).
     Handles missing/invalid files gracefully.
     """
     global _aliases_cache
@@ -53,7 +56,20 @@ def load_aliases(force_reload: bool = False) -> dict[str, str]:
             _aliases_cache = {}
             return _aliases_cache
 
-        _aliases_cache = {str(k): str(v) for k, v in aliases.items()}
+        normalized: dict[str, dict] = {}
+        for k, v in aliases.items():
+            key = str(k)
+            if isinstance(v, dict):
+                normalized[key] = {
+                    "command": str(v.get("command", "")),
+                    "description": str(v.get("description", "")),
+                }
+            else:
+                normalized[key] = {
+                    "command": str(v),
+                    "description": "",
+                }
+        _aliases_cache = normalized
         logger.debug("loaded aliases", count=len(_aliases_cache), path=str(config_path))
         return _aliases_cache
 
@@ -65,7 +81,7 @@ def load_aliases(force_reload: bool = False) -> dict[str, str]:
         return _aliases_cache
 
 
-def save_aliases(aliases: dict[str, str]) -> None:
+def save_aliases(aliases: dict[str, dict]) -> None:
     """Save aliases to YAML config file."""
     config_path = _get_aliases_path()
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,8 +102,8 @@ def _get_aliases_path() -> Path:
     return get_prompt_aliases_path()
 
 
-def get_all_aliases() -> dict[str, str]:
-    """Get all aliases as a dict."""
+def get_all_aliases() -> dict[str, dict]:
+    """Get all aliases as a dict mapping name to {command, description}."""
     return load_aliases().copy()
 
 
@@ -99,7 +115,8 @@ def get_reverse_aliases() -> dict[str, list[str]]:
     aliases = load_aliases()
     reverse: dict[str, list[str]] = {}
 
-    for alias_name, actual_cmd in aliases.items():
+    for alias_name, alias_data in aliases.items():
+        actual_cmd = alias_data["command"]
         if actual_cmd not in reverse:
             reverse[actual_cmd] = []
         reverse[actual_cmd].append(alias_name)
@@ -135,7 +152,7 @@ def resolve_alias(
         return command_string, None
 
     alias_name = first_token
-    actual_cmd = aliases[alias_name]
+    actual_cmd = aliases[alias_name]["command"]
 
     logger.debug("resolving alias", alias=alias_name, resolved=actual_cmd)
 
@@ -165,16 +182,44 @@ def get_aliases_for_command(command_name: str) -> list[str]:
     return reverse.get(command_name, [])
 
 
-def create_or_update_alias(alias_name: str, actual_command: str) -> bool:
+def create_or_update_alias(
+    alias_name: str, actual_command: str, description: str | None = None
+) -> bool:
     """Create or update an alias.
 
     Returns True if this was a new alias, False if updated.
     """
     aliases = load_aliases()
     is_new = alias_name not in aliases
-    aliases[alias_name] = actual_command
+    existing = aliases.get(alias_name, {})
+    if isinstance(existing, str):
+        existing = {"command": existing, "description": ""}
+    aliases[alias_name] = {
+        "command": actual_command,
+        "description": description
+        if description is not None
+        else existing.get("description", ""),
+    }
     save_aliases(aliases)
     return is_new
+
+
+def get_alias_description(alias_name: str) -> str:
+    """Get the description for an alias, or empty string if not found."""
+    aliases = load_aliases()
+    alias_data = aliases.get(alias_name, {})
+    if isinstance(alias_data, str):
+        return ""
+    return alias_data.get("description", "")
+
+
+def get_alias_command(alias_name: str) -> str:
+    """Get the command for an alias, or empty string if not found."""
+    aliases = load_aliases()
+    alias_data = aliases.get(alias_name, {})
+    if isinstance(alias_data, str):
+        return alias_data
+    return alias_data.get("command", "")
 
 
 def remove_alias(alias_name: str) -> bool:
@@ -213,7 +258,15 @@ def merge_aliases_from_file(file_path: Path) -> int:
         raise ValueError("Alias file must contain an 'aliases' mapping")
 
     current = load_aliases()
-    current.update({str(k): str(v) for k, v in new_aliases.items()})
+    for k, v in new_aliases.items():
+        key = str(k)
+        if isinstance(v, dict):
+            current[key] = {
+                "command": str(v.get("command", "")),
+                "description": str(v.get("description", "")),
+            }
+        else:
+            current[key] = {"command": str(v), "description": ""}
     save_aliases(current)
 
     return len(new_aliases)

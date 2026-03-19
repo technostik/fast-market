@@ -272,8 +272,17 @@ def build_command_documentation(allowed_commands: list[str]) -> str:
     if aliases:
         docs.append("## Aliases\n")
         docs.append("You can use these shortcuts instead of full commands:\n")
-        for alias_name, actual_cmd in sorted(aliases.items()):
-            docs.append(f"- `{alias_name}` → `{actual_cmd}`")
+        for alias_name, alias_data in sorted(aliases.items()):
+            if isinstance(alias_data, dict):
+                actual_cmd = alias_data.get("command", "")
+                desc = alias_data.get("description", "")
+            else:
+                actual_cmd = alias_data
+                desc = ""
+            if desc:
+                docs.append(f"- `{alias_name}` → `{actual_cmd}` - {desc}")
+            else:
+                docs.append(f"- `{alias_name}` → `{actual_cmd}`")
         docs.append("\nYou can use either the alias or the actual command.\n")
         docs.append("---\n")
 
