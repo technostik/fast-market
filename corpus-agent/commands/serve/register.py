@@ -8,7 +8,7 @@ from commands.helpers import _configure_logging
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("serve")
-    @click.option("--port", type=int, default=8000)
+    @click.option("--port", "-p", type=int, default=8000)
     @click.pass_context
     def serve_cmd(ctx, port, **kwargs):
         import uvicorn

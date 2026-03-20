@@ -346,6 +346,51 @@ commands/hello/
 └── register.py    # Returns CommandManifest
 ```
 
+### 4.4 CLI Syntax Conventions
+
+Follow these conventions for consistent CLI options across all commands:
+
+#### Standard Short Forms
+
+| Option | Short Form | Example |
+|--------|------------|---------|
+| `--format` | `-F` | `--format json` / `-F yaml` |
+| `--port` | `-p` | `--port 8080` / `-p 8080` |
+| `--model` | `-m` | `--model gpt-4` / `-m gpt-4` |
+| `--host` | `-H` | `--host localhost` / `-H localhost` |
+| `--output` | `-o` | `--output file.txt` / `-o file.txt` |
+| `--limit` | `-l` | `--limit 10` / `-l 10` |
+| `--file` | `-f` | `--file config.yaml` / `-f config.yaml` |
+
+#### Option Guidelines
+
+```python
+# CORRECT: Always include short form for commonly-used options
+@click.option("--port", "-p", type=int, default=8000)
+@click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
+
+# INCORRECT: Missing short form
+@click.option("--port", type=int, default=8000)
+
+# INCORRECT: Non-standard short form
+@click.option("--format", "-o", "fmt", ...)  # -o conflicts with --output
+```
+
+#### Positional vs Options
+
+- **Positional args** (`@click.argument`): Only for required primary inputs (query, name, id)
+- **Options** (`@click.option`): For modifiers, format, limits, optional values
+- **Flags** (`is_flag=True`): For boolean toggles
+
+#### Multiple Values
+
+```python
+# Use multiple=True for options that can be repeated
+@click.option("--source", multiple=True, help="Filter by source (can repeat)")
+
+# Usage: command --source a --source b --source c
+```
+
 ---
 
 ## Step 5: Setup pyproject.toml

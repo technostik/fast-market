@@ -28,7 +28,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--export", "-e", is_flag=True, help="Export all aliases to stdout")
     @click.option(
         "--format",
-        "-o",
+        "-F",
         "fmt",
         type=click.Choice(["text", "json", "yaml"]),
         default="text",

@@ -34,7 +34,11 @@ def _read_state() -> tuple[int, int | None, str | None] | None:
         return None
     try:
         data = json.loads(raw)
-        return int(data["pid"]), int(data.get("port")) if data.get("port") else None, data.get("model")
+        return (
+            int(data["pid"]),
+            int(data.get("port")) if data.get("port") else None,
+            data.get("model"),
+        )
     except Exception:
         try:
             return int(raw), None, None
@@ -43,7 +47,9 @@ def _read_state() -> tuple[int, int | None, str | None] | None:
 
 
 def _write_state(pid: int, port: int, model: str) -> None:
-    _pid_file().write_text(json.dumps({"pid": pid, "port": port, "model": model}), encoding="utf-8")
+    _pid_file().write_text(
+        json.dumps({"pid": pid, "port": port, "model": model}), encoding="utf-8"
+    )
 
 
 def _is_running() -> tuple[bool, int | None, int | None, str | None]:
@@ -78,7 +84,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Manage persistent embedding server."""
 
     @embed_server_group.command("start")
-    @click.option("--model", help="Model name override")
+    @click.option("--model", "-m", help="Model name override")
     @click.option("--port", type=int, help="Port override")
     def start_cmd(model: str | None, port: int | None) -> None:
         from common.core.config import load_config
@@ -93,7 +99,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not isinstance(embeddings_cfg, dict):
             embeddings_cfg = {}
 
-        resolved_model = str(model or embeddings_cfg.get("model", "paraphrase-multilingual-mpnet-base-v2"))
+        resolved_model = str(
+            model
+            or embeddings_cfg.get("model", "paraphrase-multilingual-mpnet-base-v2")
+        )
         resolved_port = int(port or embeddings_cfg.get("server_port", 8765))
 
         cmd = [
@@ -105,7 +114,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             "--port",
             str(resolved_port),
         ]
-        logger.info("starting_embedding_server", port=resolved_port, model=resolved_model)
+        logger.info(
+            "starting_embedding_server", port=resolved_port, model=resolved_model
+        )
 
         log_file = _log_file()
         with log_file.open("ab") as log_handle:
@@ -123,7 +134,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         for _ in range(10):
             time.sleep(0.2)
             if _health(resolved_port, timeout=0.2) is not None:
-                click.echo(f"Embedding server started in background (PID {process.pid})")
+                click.echo(
+                    f"Embedding server started in background (PID {process.pid})"
+                )
                 click.echo("Server health: OK")
                 click.echo(f"Server logs: {log_file}")
                 return
@@ -178,7 +191,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         running, pid, port, model = _is_running()
         expected_port = int(embeddings_cfg.get("server_port", 8765))
-        expected_model = str(embeddings_cfg.get("model", "paraphrase-multilingual-mpnet-base-v2"))
+        expected_model = str(
+            embeddings_cfg.get("model", "paraphrase-multilingual-mpnet-base-v2")
+        )
 
         if not running:
             click.echo("Status: NOT RUNNING")
@@ -198,7 +213,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Model loaded: {health.get('model_loaded')}")
 
     @embed_server_group.command("restart")
-    @click.option("--model", help="Model name override")
+    @click.option("--model", "-m", help="Model name override")
     @click.option("--port", type=int, help="Port override")
     @click.pass_context
     def restart_cmd(ctx: click.Context, model: str | None, port: int | None) -> None:

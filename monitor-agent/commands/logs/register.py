@@ -92,23 +92,3 @@ def _parse_since(since: str) -> datetime:
             return datetime.fromisoformat(since)
         except ValueError:
             return now - timedelta(days=1)
-
-
-def _parse_since(since: str) -> datetime:
-    """Parse time string like '1d', '1h', '30m' or ISO date."""
-    now = datetime.now()
-
-    if since.endswith("d"):
-        days = int(since[:-1])
-        return now - timedelta(days=days)
-    elif since.endswith("h"):
-        hours = int(since[:-1])
-        return now - timedelta(hours=hours)
-    elif since.endswith("m"):
-        minutes = int(since[:-1])
-        return now - timedelta(minutes=minutes)
-    else:
-        try:
-            return datetime.fromisoformat(since)
-        except ValueError:
-            return now - timedelta(days=1)
