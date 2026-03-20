@@ -85,9 +85,9 @@ youtube setup [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--locate` | Show config file locations and status |
-| `--show` | Display current configuration |
-| `--create` | Create default configuration file |
+| `-l, --locate` | Show config file locations and status |
+| `-s, --show` | Display current configuration |
+| `-c, --create` | Create default configuration file |
 
 **Examples:**
 ```bash
@@ -115,7 +115,7 @@ youtube search KEYWORDS... [OPTIONS]
 | `--order` | Sort order: date, relevance, rating, title, viewCount | relevance |
 | `--language` | Language code (e.g., en, fr, es) | en |
 | `--combine` | Use OR instead of AND for keywords | False |
-| `--format` | Output: json, yaml, text | text |
+| `-f, --format` | Output: json, yaml, text | text |
 | `-o, --output` | Save results to file | None |
 | `--stdin` | Read video IDs from stdin for filtering | False |
 | `--use-yt-dlp` | Use yt-dlp instead of YouTube API (requires yt-dlp) | False |
@@ -153,7 +153,7 @@ youtube comments [VIDEO_ID] [OPTIONS]
 |--------|-------------|---------|
 | `-n, --max-results` | Maximum comments per video | 20 |
 | `--order` | Sort order: relevance, time | relevance |
-| `--format` | Output: json, yaml, text | text |
+| `-f, --format` | Output: json, yaml, text | text |
 | `-o, --output` | Save results to file | None |
 | `--stdin` | Read video IDs from stdin | False |
 | `--field` | JSON field to extract IDs from stdin | video_id |
@@ -186,7 +186,7 @@ youtube reply [COMMENT_ID] [TEXT] [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--from-file` | JSON/YAML file with array of {comment_id, text} |
-| `--format` | Output: json, yaml, text |
+| `-f, --format` | Output: json, yaml, text |
 | `-o, --output` | Save results to file |
 | `--stdin` | Read from stdin (JSON array) |
 

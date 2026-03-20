@@ -8,9 +8,9 @@ from common.core.paths import get_tool_config
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("setup")
-    @click.option("--show", is_flag=True, help="Display current configuration")
-    @click.option("--locate", is_flag=True, help="Show config file path")
-    @click.option("--create", is_flag=True, help="Create default config file")
+    @click.option("--show", "-s", is_flag=True, help="Display current configuration")
+    @click.option("--locate", "-l", is_flag=True, help="Show config file path")
+    @click.option("--create", "-c", is_flag=True, help="Create default config file")
     def setup_cmd(show, locate, create, **kwargs):
         """Setup and show youtube-agent configuration."""
         from pathlib import Path

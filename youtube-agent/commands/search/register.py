@@ -90,6 +90,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--combine", is_flag=True, help="Use OR for keywords")
     @click.option(
         "--format",
+        "-f",
         "fmt",
         type=click.Choice(["json", "yaml", "text"]),
         default="text",

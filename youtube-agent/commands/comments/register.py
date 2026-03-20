@@ -25,6 +25,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--format",
+        "-f",
         "fmt",
         type=click.Choice(["json", "yaml", "text"]),
         default="text",
