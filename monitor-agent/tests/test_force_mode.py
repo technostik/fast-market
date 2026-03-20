@@ -73,10 +73,13 @@ class TestForceMode:
 
         called_args = {}
 
-        async def mock_fetch_new_items(last_item_id=None, limit=50, last_fetched_at=None):
+        async def mock_fetch_new_items(
+            last_item_id=None, limit=50, last_fetched_at=None, force=False
+        ):
             called_args["last_item_id"] = last_item_id
             called_args["limit"] = limit
             called_args["last_fetched_at"] = last_fetched_at
+            called_args["force"] = force
             return items
 
         mock_plugin_instance = MagicMock()
@@ -248,7 +251,9 @@ class TestForceMode:
 
         called_args = {}
 
-        async def mock_fetch_new_items(last_item_id=None, limit=50, last_fetched_at=None):
+        async def mock_fetch_new_items(
+            last_item_id=None, limit=50, last_fetched_at=None, force=False
+        ):
             called_args["limit"] = limit
             return []
 

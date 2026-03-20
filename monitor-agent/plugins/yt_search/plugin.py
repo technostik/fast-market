@@ -114,8 +114,9 @@ class YouTubeSearchPlugin(SourcePlugin):
         last_item_id: str | None = None,
         limit: int = 50,
         last_fetched_at: datetime | None = None,
+        force: bool = False,
     ) -> list[ItemMetadata]:
-        if not self._should_fetch():
+        if not self._should_fetch(force):
             return []
 
         effective_limit = min(self.max_results, limit)

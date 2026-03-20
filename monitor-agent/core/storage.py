@@ -182,6 +182,13 @@ class MonitorStorage:
                 (datetime.now().isoformat(), last_item_id, source_id),
             )
 
+    def update_source_last_check_time(self, source_id: str, last_check: datetime) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sources SET last_check = ? WHERE id = ?",
+                (last_check.isoformat(), source_id),
+            )
+
     def update_source_last_fetched_at(self, source_id: str, last_fetched_at: datetime) -> None:
         with self._get_conn() as conn:
             conn.execute(

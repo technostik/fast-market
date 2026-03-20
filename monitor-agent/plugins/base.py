@@ -43,13 +43,19 @@ class SourcePlugin(ABC):
         except (ValueError, TypeError):
             return 900
 
-    def _should_fetch(self) -> bool:
+    def _should_fetch(self, force: bool = False) -> bool:
         """Check if cooldown has elapsed since last fetch.
+
+        Args:
+            force: If True, bypass cooldown check.
 
         Returns:
             True if no cooldown is active (never checked, or enough time has passed).
             False if still in cooldown period.
         """
+        if force:
+            return True
+
         if self.last_check is None:
             return True
 
@@ -77,6 +83,7 @@ class SourcePlugin(ABC):
         last_item_id: str | None = None,
         limit: int = 50,
         last_fetched_at: datetime | None = None,
+        force: bool = False,
     ) -> list[ItemMetadata]:
         pass
 
