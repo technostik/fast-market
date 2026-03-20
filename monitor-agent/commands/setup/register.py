@@ -352,9 +352,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Configure sources, actions, and rules."""
         pass
 
+    plugin_choices = list(plugin_manifests.keys())
+
     @setup_group.command("source-add")
-    @click.option("--plugin", type=click.Choice(["youtube", "rss"]), required=True)
-    @click.option("--identifier", required=True, help="Channel ID, @handle, or RSS URL")
+    @click.option("--plugin", type=click.Choice(plugin_choices), required=True)
+    @click.option("--identifier", required=True, help="Channel ID, search keywords, or RSS URL")
     @click.option("--description", help="Optional description")
     @click.option(
         "--meta", multiple=True, help="Metadata key=value pairs (can be used multiple times)"
