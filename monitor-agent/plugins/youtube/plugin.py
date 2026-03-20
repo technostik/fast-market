@@ -3,11 +3,13 @@ from __future__ import annotations
 import re
 import time
 import asyncio
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 
 import feedparser
+import requests
 import yt_dlp
 
 from plugins.base import SourcePlugin, ItemMetadata
@@ -21,13 +23,13 @@ class YouTubePlugin(SourcePlugin):
         self.channel_id = self._resolve_channel_id(source_config["identifier"])
         self.executor = ThreadPoolExecutor(max_workers=5)  # For running yt-dlp sync calls
         self.ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
-            'force_generic_extractor': False,
-            'ignoreerrors': True,
-            'no_color': True,
-            'geo_bypass': True,
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": False,
+            "force_generic_extractor": False,
+            "ignoreerrors": True,
+            "no_color": True,
+            "geo_bypass": True,
         }
 
     def _resolve_channel_id(self, identifier: str) -> str:
@@ -80,11 +82,7 @@ class YouTubePlugin(SourcePlugin):
         loop = asyncio.get_event_loop()
         try:
             # Run yt-dlp in thread pool since it's blocking
-            info = await loop.run_in_executor(
-                self.executor,
-                self._extract_video_info,
-                url
-            )
+            info = await loop.run_in_executor(self.executor, self._extract_video_info, url)
             return info
         except Exception as e:
             print(f"Error getting video details for {video_id}: {e}")
@@ -101,43 +99,43 @@ class YouTubePlugin(SourcePlugin):
 
                 # Parse upload date
                 upload_date = None
-                if info.get('upload_date'):
+                if info.get("upload_date"):
                     try:
-                        upload_date = datetime.strptime(
-                            info['upload_date'], '%Y%m%d'
-                        ).replace(tzinfo=timezone.utc)
+                        upload_date = datetime.strptime(info["upload_date"], "%Y%m%d").replace(
+                            tzinfo=timezone.utc
+                        )
                     except ValueError:
                         pass
 
                 # Get like count (may be None for some videos)
-                like_count = info.get('like_count')
-                if like_count is None and 'like_count' in info:
+                like_count = info.get("like_count")
+                if like_count is None and "like_count" in info:
                     like_count = 0
 
                 # Get comment count
-                comment_count = info.get('comment_count')
+                comment_count = info.get("comment_count")
                 if comment_count is None:
                     comment_count = 0
 
                 # Determine if it's a Short
-                duration = info.get('duration', 0)
-                is_short = duration < 60 or info.get('webpage_url_basename') == 'shorts'
+                duration = info.get("duration", 0)
+                is_short = duration < 60 or info.get("webpage_url_basename") == "shorts"
 
                 return {
-                    'duration_seconds': duration,
-                    'views': info.get('view_count', 0),
-                    'likes': like_count,
-                    'comments': comment_count,
-                    'upload_date': upload_date,
-                    'is_short': is_short,
-                    'channel_id': info.get('channel_id', ''),
-                    'channel_name': info.get('channel', info.get('uploader', '')),
-                    'channel_url': info.get('channel_url', ''),
-                    'description': info.get('description', '')[:500],  # Truncate description
-                    'tags': info.get('tags', [])[:10],  # Limit tags
-                    'categories': info.get('categories', []),
-                    'age_limit': info.get('age_limit', 0),
-                    'availability': info.get('availability', 'public'),
+                    "duration_seconds": duration,
+                    "views": info.get("view_count", 0),
+                    "likes": like_count,
+                    "comments": comment_count,
+                    "upload_date": upload_date,
+                    "is_short": is_short,
+                    "channel_id": info.get("channel_id", ""),
+                    "channel_name": info.get("channel", info.get("uploader", "")),
+                    "channel_url": info.get("channel_url", ""),
+                    "description": info.get("description", "")[:500],  # Truncate description
+                    "tags": info.get("tags", [])[:10],  # Limit tags
+                    "categories": info.get("categories", []),
+                    "age_limit": info.get("age_limit", 0),
+                    "availability": info.get("availability", "public"),
                 }
             except Exception as e:
                 print(f"yt-dlp extraction error: {e}")
@@ -147,11 +145,11 @@ class YouTubePlugin(SourcePlugin):
         """Parse feed entry for basic metadata"""
         # Get video ID from various possible locations
         vid_id = None
-        if hasattr(entry, 'yt_videoid'):
+        if hasattr(entry, "yt_videoid"):
             vid_id = entry.yt_videoid
-        elif hasattr(entry, 'id') and 'video:' in entry.id:
-            vid_id = entry.id.split('video:')[-1]
-        elif hasattr(entry, 'link'):
+        elif hasattr(entry, "id") and "video:" in entry.id:
+            vid_id = entry.id.split("video:")[-1]
+        elif hasattr(entry, "link"):
             # Extract from link
             match = re.search(r"v=([a-zA-Z0-9_-]+)", entry.link)
             if match:
@@ -159,7 +157,7 @@ class YouTubePlugin(SourcePlugin):
 
         # Parse published date
         published = datetime.now(timezone.utc)
-        if hasattr(entry, 'published_parsed') and entry.published_parsed:
+        if hasattr(entry, "published_parsed") and entry.published_parsed:
             try:
                 published = datetime.fromtimestamp(
                     time.mktime(entry.published_parsed), tz=timezone.utc
@@ -169,20 +167,20 @@ class YouTubePlugin(SourcePlugin):
 
         # Get duration from media content if available
         duration = 0
-        if hasattr(entry, 'media_content') and entry.media_content:
+        if hasattr(entry, "media_content") and entry.media_content:
             try:
-                duration = int(entry.media_content[0].get('duration', 0))
+                duration = int(entry.media_content[0].get("duration", 0))
             except (ValueError, TypeError):
                 pass
 
         return {
-            'id': vid_id,
-            'title': entry.get('title', 'Untitled'),
-            'url': entry.get('link', f'https://youtube.com/watch?v={vid_id}'),
-            'published': published,
-            'duration': duration,
-            'author': entry.get('author', ''),
-            'summary': entry.get('summary', '')[:200],
+            "id": vid_id,
+            "title": entry.get("title", "Untitled"),
+            "url": entry.get("link", f"https://youtube.com/watch?v={vid_id}"),
+            "published": published,
+            "duration": duration,
+            "author": entry.get("author", ""),
+            "summary": entry.get("summary", "")[:200],
         }
 
     async def fetch_new_items(
@@ -198,65 +196,86 @@ class YouTubePlugin(SourcePlugin):
             # Parse RSS feed
             feed = feedparser.parse(rss_url)
 
-            if hasattr(feed, 'bozo_exception'):
-                print(f"RSS feed parsing error: {feed.bozo_exception}")
+            if hasattr(feed, "bozo_exception") and feed.bozo_exception:
+                exc = feed.bozo_exception
+                exc_details = str(exc)
+                if hasattr(exc, "getLineNumber"):
+                    exc_details += f" (line {exc.getLineNumber()}, col {exc.getColumnNumber()})"
+
+                raw_excerpt = "(unable to fetch raw content)"
+                try:
+                    resp = requests.get(
+                        rss_url,
+                        timeout=10,
+                        headers={"User-Agent": "Mozilla/5.0 (compatible; monitor-agent/1.0)"},
+                    )
+                    if resp.status_code == 200:
+                        raw_excerpt = resp.text[:500].replace("\n", " ").strip()
+                except Exception:
+                    pass
+
+                raise Exception(
+                    f"RSS feed parsing error: {exc_details}\n"
+                    f"URL: {rss_url}\n"
+                    f"Content excerpt: {raw_excerpt}"
+                )
 
             items = []
-            feed_title = getattr(feed.feed, 'title', '')
+            feed_title = getattr(feed.feed, "title", "")
 
             # Process entries
             for entry in feed.entries[:limit]:
                 # Parse basic info from feed
                 parsed = self._parse_feed_entry(entry, feed_title)
 
-                if not parsed['id']:
+                if not parsed["id"]:
                     continue
 
                 # Check if we've reached last fetched item
-                if last_item_id and parsed['id'] == last_item_id:
+                if last_item_id and parsed["id"] == last_item_id:
                     break
 
-                if last_fetched_at and parsed['published'] <= last_fetched_at:
+                if last_fetched_at and parsed["published"] <= last_fetched_at:
                     break
 
                 # Get detailed info with yt-dlp
-                details = await self._get_video_details_async(parsed['id'])
+                details = await self._get_video_details_async(parsed["id"])
 
                 # Merge data, preferring yt-dlp data where available
                 extra = {
-                    'channel_id': self.channel_id,
-                    'channel_name': details.get('channel_name', feed_title),
-                    'duration_seconds': details.get('duration_seconds', parsed['duration']),
-                    'is_short': details.get('is_short', parsed['duration'] < 60),
-                    'views': details.get('views', 0),
-                    'likes': details.get('likes', 0),
-                    'comments': details.get('comments', 0),
-                    'description': details.get('description', parsed['summary']),
-                    'tags': details.get('tags', []),
-                    'categories': details.get('categories', []),
-                    'age_limit': details.get('age_limit', 0),
-                    'availability': details.get('availability', 'public'),
+                    "channel_id": self.channel_id,
+                    "channel_name": details.get("channel_name", feed_title),
+                    "duration_seconds": details.get("duration_seconds", parsed["duration"]),
+                    "is_short": details.get("is_short", parsed["duration"] < 60),
+                    "views": details.get("views", 0),
+                    "likes": details.get("likes", 0),
+                    "comments": details.get("comments", 0),
+                    "description": details.get("description", parsed["summary"]),
+                    "tags": details.get("tags", []),
+                    "categories": details.get("categories", []),
+                    "age_limit": details.get("age_limit", 0),
+                    "availability": details.get("availability", "public"),
                 }
 
                 # Use more accurate upload date if available
-                published_at = details.get('upload_date', parsed['published'])
+                published_at = details.get("upload_date", parsed["published"])
 
                 # Determine content type
-                content_type = 'short' if extra['is_short'] else 'video'
-                if extra['duration_seconds'] > 3600:
-                    content_type = 'long_video'
+                content_type = "short" if extra["is_short"] else "video"
+                if extra["duration_seconds"] > 3600:
+                    content_type = "long_video"
 
                 item = ItemMetadata(
-                    id=parsed['id'],
-                    title=parsed['title'],
-                    url=parsed['url'],
+                    id=parsed["id"],
+                    title=parsed["title"],
+                    url=parsed["url"],
                     published_at=published_at,
                     content_type=content_type,
                     source_plugin=self.name,
                     source_identifier=self.channel_id,
                     raw={
-                        'rss_entry': entry.__dict__ if hasattr(entry, '__dict__') else {},
-                        'yt_dlp': details,
+                        "rss_entry": entry.__dict__ if hasattr(entry, "__dict__") else {},
+                        "yt_dlp": details,
                     },
                     extra=extra,
                 )
@@ -269,23 +288,18 @@ class YouTubePlugin(SourcePlugin):
             return items
 
         except Exception as e:
-            print(f"Error fetching YouTube items: {e}")
-            return []
+            raise
 
-    async def get_video_comments(
-        self,
-        video_id: str,
-        max_comments: int = 100
-    ) -> list[dict]:
+    async def get_video_comments(self, video_id: str, max_comments: int = 100) -> list[dict]:
         """Fetch comments for a specific video"""
         url = f"https://youtube.com/watch?v={video_id}"
 
         # yt-dlp options for comments
         ydl_opts = {
             **self.ydl_opts,
-            'getcomments': True,
-            'extract_flat': True,  # Don't download video
-            'max_comments': max_comments,
+            "getcomments": True,
+            "extract_flat": True,  # Don't download video
+            "max_comments": max_comments,
         }
 
         loop = asyncio.get_event_loop()
@@ -294,20 +308,22 @@ class YouTubePlugin(SourcePlugin):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 try:
                     info = ydl.extract_info(url, download=False)
-                    comments = info.get('comments', [])
+                    comments = info.get("comments", [])
 
                     # Format comments
                     formatted_comments = []
                     for comment in comments[:max_comments]:
-                        formatted_comments.append({
-                            'id': comment.get('id'),
-                            'author': comment.get('author'),
-                            'author_id': comment.get('author_id'),
-                            'text': comment.get('text', ''),
-                            'timestamp': comment.get('timestamp'),
-                            'likes': comment.get('like_count', 0),
-                            'reply_count': comment.get('reply_count', 0),
-                        })
+                        formatted_comments.append(
+                            {
+                                "id": comment.get("id"),
+                                "author": comment.get("author"),
+                                "author_id": comment.get("author_id"),
+                                "text": comment.get("text", ""),
+                                "timestamp": comment.get("timestamp"),
+                                "likes": comment.get("like_count", 0),
+                                "reply_count": comment.get("reply_count", 0),
+                            }
+                        )
                     return formatted_comments
                 except Exception as e:
                     print(f"Error extracting comments: {e}")

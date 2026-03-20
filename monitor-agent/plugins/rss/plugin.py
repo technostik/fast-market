@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import feedparser
+import requests
 
 from plugins.base import SourcePlugin, ItemMetadata
 
@@ -18,7 +19,34 @@ class RSSPlugin(SourcePlugin):
         limit: int = 50,
         last_fetched_at: datetime | None = None,
     ) -> list[ItemMetadata]:
-        feed = feedparser.parse(self.source_config["identifier"])
+        rss_url = self.source_config["identifier"]
+        feed = feedparser.parse(rss_url)
+
+        if hasattr(feed, "bozo_exception") and feed.bozo_exception:
+            exc = feed.bozo_exception
+            exc_details = str(exc)
+            if hasattr(exc, "getLineNumber"):
+                exc_details += f" (line {exc.getLineNumber()}, col {exc.getColumnNumber()})"
+
+            raw_excerpt = "(unable to fetch raw content)"
+            try:
+                resp = requests.get(
+                    rss_url,
+                    timeout=10,
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; monitor-agent/1.0)"},
+                )
+                if resp.status_code == 200:
+                    raw_excerpt = resp.text[:500].replace("\n", " ").strip()
+                else:
+                    raw_excerpt = f"(HTTP {resp.status_code}, content-type: {resp.headers.get('content-type', 'unknown')})"
+            except Exception:
+                pass
+
+            raise Exception(
+                f"RSS feed parsing error: {exc_details}\n"
+                f"URL: {rss_url}\n"
+                f"Content excerpt: {raw_excerpt}"
+            )
 
         items = []
         for entry in feed.entries[:limit]:
