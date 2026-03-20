@@ -77,7 +77,15 @@ monitor setup rename --from-id notify-v1 --to-id notify-v2
 ```
 
 ### source-edit
-Edit an existing source.
+Edit an existing source interactively or with options.
+
+**Interactive mode** (`-i` flag):
+```
+monitor setup source-edit <source-id> -i  # Opens $EDITOR with YAML format
+monitor setup source-edit <source-id> -i --editor vim
+```
+
+**With options**:
 ```
 monitor setup source-edit <source-id> --description "New description"
 monitor setup source-edit <source-id> --meta theme=tech --meta priority=high
@@ -85,7 +93,15 @@ monitor setup source-edit <source-id> --disable
 ```
 
 ### action-edit
-Edit an existing action.
+Edit an existing action interactively or with options.
+
+**Interactive mode** (`-i` flag):
+```
+monitor setup action-edit <action-id> -i  # Opens $EDITOR with YAML format
+monitor setup action-edit <action-id> -i --editor vim
+```
+
+**With options**:
 ```
 monitor setup action-edit <action-id> --name "New name"
 monitor setup action-edit <action-id> --command 'new command'

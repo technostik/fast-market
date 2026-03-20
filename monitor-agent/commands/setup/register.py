@@ -20,6 +20,185 @@ from core.rule_formatter import RuleFormatter
 from core.time_scheduler import validate_cron_expression, validate_interval_expression
 
 
+def _interactive_source_edit(source, storage, editor_cmd, fmt):
+    """Open an interactive editor to edit a source."""
+    meta_yaml = ""
+    if source.metadata:
+        meta_lines = [f"  {k}: {v}" for k, v in source.metadata.items()]
+        meta_yaml = "metadata:\n" + "\n".join(meta_lines) + "\n"
+
+    template = f"""# Edit source: {source.id}
+# Lines starting with # are comments and will be ignored.
+#
+# Available options:
+#   name: Human-readable name (optional)
+#   description: Description of this source
+#   enabled: true or false
+#   metadata: Key-value pairs for custom fields
+
+plugin: {source.plugin}
+identifier: {source.identifier}
+name: {source.name or ""}
+description: {source.description or ""}
+enabled: {str(source.enabled).lower()}
+{meta_yaml}""".strip()
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp_file:
+        tmp_path = Path(tmp_file.name)
+        tmp_file.write(template)
+
+    try:
+        while True:
+            editor_path = shutil.which(editor_cmd)
+            if not editor_path:
+                click.echo(
+                    f"Error: Editor '{editor_cmd}' not found. Install it or set $EDITOR.", err=True
+                )
+                return
+
+            result = subprocess.run(
+                [editor_cmd, str(tmp_path)],
+                check=False,
+            )
+
+            if result.returncode != 0:
+                click.echo("Editor closed with error. Source not saved.", err=True)
+                return
+
+            with open(tmp_path) as f:
+                content = f.read()
+
+            try:
+                edited_source = yaml.safe_load(content)
+            except yaml.YAMLError as e:
+                click.echo(f"YAML parse error: {e}", err=True)
+                click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                input()
+                continue
+
+            if not edited_source or not isinstance(edited_source, dict):
+                click.echo("Error: Invalid YAML format", err=True)
+                click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                input()
+                continue
+
+            enabled_str = edited_source.get("enabled", "")
+            if isinstance(enabled_str, str):
+                source.enabled = enabled_str.lower() in ("true", "1", "yes")
+            elif isinstance(enabled_str, bool):
+                source.enabled = enabled_str
+
+            source.name = edited_source.get("name") or None
+            source.description = edited_source.get("description") or None
+
+            if edited_source.get("metadata"):
+                if isinstance(edited_source["metadata"], dict):
+                    source.metadata = edited_source["metadata"]
+                else:
+                    click.echo("Error: metadata must be a dictionary", err=True)
+                    click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                    input()
+                    continue
+
+            storage.update_source(source)
+            out_formatted(
+                {"id": source.id, "message": "Source updated", "source": to_dict(source)}, fmt
+            )
+            return
+
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _interactive_action_edit(action, storage, editor_cmd, fmt):
+    """Open an interactive editor to edit an action."""
+    template = f"""# Edit action: {action.id}
+# Lines starting with # are comments and will be ignored.
+#
+# Available options:
+#   name: Human-readable action name
+#   description: Description of what this action does
+#   command: Shell command to execute (use $VARIABLE for placeholders)
+#   enabled: true or false
+#
+# Placeholders available in commands:
+#   $ITEM_TITLE, $ITEM_URL, $ITEM_ID, $ITEM_TIMESTAMP
+#   $SOURCE_ID, $SOURCE_NAME, $SOURCE_PLUGIN
+#   $RULE_NAME, $RULE_ID
+#   $SOURCE_META_<KEY> (e.g., $SOURCE_META_THEME)
+
+name: {action.name}
+description: {action.description or ""}
+command: |
+  {action.command}
+enabled: {str(action.enabled).lower()}
+""".strip()
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp_file:
+        tmp_path = Path(tmp_file.name)
+        tmp_file.write(template)
+
+    try:
+        while True:
+            editor_path = shutil.which(editor_cmd)
+            if not editor_path:
+                click.echo(
+                    f"Error: Editor '{editor_cmd}' not found. Install it or set $EDITOR.", err=True
+                )
+                return
+
+            result = subprocess.run(
+                [editor_cmd, str(tmp_path)],
+                check=False,
+            )
+
+            if result.returncode != 0:
+                click.echo("Editor closed with error. Action not saved.", err=True)
+                return
+
+            with open(tmp_path) as f:
+                content = f.read()
+
+            try:
+                edited_action = yaml.safe_load(content)
+            except yaml.YAMLError as e:
+                click.echo(f"YAML parse error: {e}", err=True)
+                click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                input()
+                continue
+
+            if not edited_action or not isinstance(edited_action, dict):
+                click.echo("Error: Invalid YAML format", err=True)
+                click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                input()
+                continue
+
+            if not edited_action.get("command"):
+                click.echo("Error: command field cannot be empty", err=True)
+                click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                input()
+                continue
+
+            enabled_str = edited_action.get("enabled", "")
+            if isinstance(enabled_str, str):
+                action.enabled = enabled_str.lower() in ("true", "1", "yes")
+            elif isinstance(enabled_str, bool):
+                action.enabled = enabled_str
+
+            action.name = edited_action.get("name", action.name)
+            action.description = edited_action.get("description") or None
+            action.command = edited_action.get("command", action.command)
+
+            storage.update_action(action)
+            out_formatted(
+                {"id": action.id, "message": "Action updated", "action": to_dict(action)}, fmt
+            )
+            return
+
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def _interactive_rule_edit(rule, parser, formatter, storage, editor_cmd, fmt):
     """Open an interactive editor to edit a rule in DSL format."""
     current_dsl = formatter.format(rule.conditions, pretty=True)
@@ -239,16 +418,41 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
     @setup_group.command("source-edit")
     @click.argument("source_id")
+    @click.option(
+        "-i",
+        "--interactive",
+        "interactive",
+        is_flag=True,
+        help="Open interactive editor",
+    )
     @click.option("--description", help="New description")
     @click.option("--meta", multiple=True, help="Metadata key=value pairs (adds/updates)")
     @click.option("--enable/--disable", default=None, help="Enable or disable source")
+    @click.option("--editor", help="Editor to use (default: $EDITOR or nano)")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def source_edit(source_id, description, meta, enable, fmt):
-        """Edit an existing source."""
+    def source_edit(source_id, interactive, description, meta, enable, editor, fmt):
+        """Edit an existing source interactively or with options.
+
+        Use -i/--interactive to open the editor.
+
+        Examples:
+            monitor setup source-edit my-source -i  # Interactive editor
+            monitor setup source-edit my-source --description "New desc"
+            monitor setup source-edit my-source --meta theme=tech --enable
+        """
         storage = get_storage()
         existing = storage.get_source(source_id)
         if not existing:
             out_formatted({"error": f"Source {source_id} not found"}, fmt)
+            return
+
+        if interactive:
+            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            _interactive_source_edit(existing, storage, editor_cmd, fmt)
+            return
+        elif description is None and not meta and enable is None:
+            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            _interactive_source_edit(existing, storage, editor_cmd, fmt)
             return
 
         if description is not None:
@@ -356,17 +560,42 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
     @setup_group.command("action-edit")
     @click.argument("action_id")
+    @click.option(
+        "-i",
+        "--interactive",
+        "interactive",
+        is_flag=True,
+        help="Open interactive editor",
+    )
     @click.option("--name", help="New action name")
     @click.option("--command", help="New shell command")
     @click.option("--description", help="New description")
     @click.option("--enable/--disable", default=None, help="Enable or disable action")
+    @click.option("--editor", help="Editor to use (default: $EDITOR or nano)")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def action_edit(action_id, name, command, description, enable, fmt):
-        """Edit an existing action."""
+    def action_edit(action_id, interactive, name, command, description, enable, editor, fmt):
+        """Edit an existing action interactively or with options.
+
+        Use -i/--interactive to open the editor.
+
+        Examples:
+            monitor setup action-edit my-action -i  # Interactive editor
+            monitor setup action-edit my-action --name "New name"
+            monitor setup action-edit my-action --command 'curl ...'
+        """
         storage = get_storage()
         existing = storage.get_action(action_id)
         if not existing:
             out_formatted({"error": f"Action {action_id} not found"}, fmt)
+            return
+
+        if interactive:
+            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            _interactive_action_edit(existing, storage, editor_cmd, fmt)
+            return
+        elif name is None and command is None and description is None and enable is None:
+            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            _interactive_action_edit(existing, storage, editor_cmd, fmt)
             return
 
         if name is not None:

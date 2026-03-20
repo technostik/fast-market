@@ -79,9 +79,12 @@ monitor setup source-delete --id <source-uuid>
 
 #### `monitor setup source-edit`
 
-Edit an existing source.
+Edit an existing source interactively or with options.
 
 ```bash
+# Interactive editor (opens $EDITOR)
+monitor setup source-edit <source-id> -i
+
 # Update description and metadata
 monitor setup source-edit <source-id> \
   --description "Updated description" \
@@ -112,9 +115,12 @@ monitor setup action-add --replace-id telegram-notify --name telegram \
 
 #### `monitor setup action-edit`
 
-Edit an existing action.
+Edit an existing action interactively or with options.
 
 ```bash
+# Interactive editor (opens $EDITOR)
+monitor setup action-edit <action-id> -i
+
 # Update command
 monitor setup action-edit telegram-notify --command 'new curl command'
 
