@@ -9,6 +9,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters
 
 from commands.base import CommandManifest
+from core.config import load_config
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -19,9 +20,33 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="telegram",
         help="Plugin to configure",
     )
+    @click.option(
+        "-c",
+        "--show-config",
+        is_flag=True,
+        help="Show current configuration",
+    )
+    @click.option(
+        "-p",
+        "--show-config-path",
+        is_flag=True,
+        help="Show configuration file path",
+    )
     @click.pass_context
-    def setup_cmd(ctx, plugin, **kwargs):
+    def setup_cmd(ctx, plugin, show_config, show_config_path, **kwargs):
         config_path = _get_config_path()
+
+        if show_config_path:
+            click.echo(str(config_path))
+            return
+
+        if show_config:
+            config = load_config()
+            if config:
+                click.echo(yaml.dump(config, default_flow_style=False))
+            else:
+                click.echo("(no configuration found)")
+            return
 
         click.echo(f"Setting up {plugin} plugin...")
         click.echo("")
