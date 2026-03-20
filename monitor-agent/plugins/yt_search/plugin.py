@@ -159,8 +159,14 @@ class YouTubeSearchPlugin(SourcePlugin):
                 "check_interval": self.check_interval,
             }
 
-            content_type = "short" if extra["is_short"] else "video"
-            if video["duration"] > 3600:
+            if extra["is_short"]:
+                content_type = "short"
+            elif video["duration"] > 3600:
+                content_type = "long_video"
+            elif video["duration"] > 600:
+                content_type = "medium_video"
+            else:
+                content_type = "video"
                 content_type = "long_video"
 
             items.append(

@@ -181,9 +181,14 @@ class YouTubePlugin(SourcePlugin):
                     "fetch_method": "yt-dlp",
                 }
 
-                content_type = "short" if extra["is_short"] else "video"
-                if video["duration"] > 3600:
+                if extra["is_short"]:
+                    content_type = "short"
+                elif video["duration"] > 3600:
                     content_type = "long_video"
+                elif video["duration"] > 600:
+                    content_type = "medium_video"
+                else:
+                    content_type = "video"
 
                 items.append(
                     ItemMetadata(
@@ -371,9 +376,14 @@ class YouTubePlugin(SourcePlugin):
                 }
 
                 published_at = details.get("upload_date", parsed["published"])
-                content_type = "short" if extra["is_short"] else "video"
-                if extra["duration_seconds"] > 3600:
+                if extra["is_short"]:
+                    content_type = "short"
+                elif extra["duration_seconds"] > 3600:
                     content_type = "long_video"
+                elif extra["duration_seconds"] > 600:
+                    content_type = "medium_video"
+                else:
+                    content_type = "video"
 
                 items.append(
                     ItemMetadata(

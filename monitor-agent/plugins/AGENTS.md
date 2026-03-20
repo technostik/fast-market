@@ -52,6 +52,7 @@ All plugins inherit cooldown functionality from `SourcePlugin`:
 
 ### YouTube Plugin
 - Detect shorts (duration < 60 seconds)
+- Content types: `short`, `medium_video` (1-10min), `video` (10-60min), `long_video` (> 1h)
 - Extract duration from `media_content`
 - Parse `published_parsed` with timezone
 - Support channel ID, @handle, and channel URLs
@@ -74,6 +75,8 @@ Monitors YouTube search results for keywords instead of a specific channel.
 - `channel_id`, `channel_name` — Video's source channel
 - `duration_seconds`, `views`, `likes`, `comments`
 - `is_short`, `tags`, `categories`
+
+**Content Types**: `short`, `medium_video`, `video`, `long_video`
 
 **Advanced Search Syntax**:
 ```

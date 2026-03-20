@@ -324,7 +324,7 @@ monitor setup rule-add --name "Tech Videos or Priority Shorts" \
 | Field | Type | Description |
 |-------|------|-------------|
 | `id`, `title`, `url` | string | Item fields |
-| `content_type` | string | video, short, article |
+| `content_type` | string | short (< 60s), medium_video (1-10min), video (10-60min), long_video (> 1h), article |
 | `published_at` | datetime | Item publish time |
 | `source_plugin` | string | youtube, rss, yt-search |
 | `source_identifier` | string | Channel ID or RSS URL |

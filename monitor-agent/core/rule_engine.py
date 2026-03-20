@@ -18,6 +18,7 @@ def evaluate_rule(rule: Rule, item: ItemMetadata, source: Source) -> bool:
         "source_identifier": item.source_identifier,
         "source_description": source.description,
         "source_metadata": source.metadata,
+        "extra": item.extra,
         **item.extra,
     }
 
@@ -41,6 +42,13 @@ def _evaluate_single_condition(cond: dict, context: dict) -> bool:
     expected = cond["value"]
 
     value = _get_nested_value(context, field)
+
+    if value is None:
+        if operator == "==":
+            return expected is None
+        elif operator == "!=":
+            return expected is not None
+        return False
 
     if operator == "==":
         return value == expected
