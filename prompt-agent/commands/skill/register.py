@@ -20,6 +20,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @skill_group.command("list")
     @click.option(
         "--format",
+        "-F",
         "fmt",
         type=click.Choice(["text", "json"]),
         default="text",
@@ -66,7 +67,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @skill_group.command("create")
     @click.argument("name")
     @click.option("--description", "-d", help="Skill description")
-    @click.option("--with-scripts", is_flag=True, help="Create scripts directory")
+    @click.option("--with-scripts", "-s", is_flag=True, help="Create scripts directory")
     def create_skill(name, description, with_scripts):
         """Create a new skill scaffold."""
         skills_dir = get_skills_dir()

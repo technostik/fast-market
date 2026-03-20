@@ -81,7 +81,7 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 
 **To add a command to task whitelist:**
 1. Add to `_DEFAULT_ALLOWED` in `commands/task/executor.py`, or
-2. Use `prompt setup --add-task-command <name>`
+2. Use `prompt setup task-commands add <name>`
 
 **To add command aliases:**
 1. Create/edit `~/.config/prompt-agent/aliases.yaml`
@@ -91,19 +91,19 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 5. Aliases are automatically documented in task system prompts
 
 **To manage task prompts:**
-1. Use `prompt setup --list-task-prompts` to see available prompts
-2. Use `prompt setup --set-task-prompt <name>` to activate a prompt
-3. Use `prompt setup --edit-task-prompt <name>` to customize a prompt
-4. Use `prompt setup --import-task-prompt <file>` to import from YAML
+1. Use `prompt setup task-prompts list` to see available prompts
+2. Use `prompt setup task-prompts set <name>` to activate a prompt
+3. Use `prompt setup task-prompts edit <name>` to customize a prompt
+4. Use `prompt setup task-prompts import <file>` to import from YAML
 5. Use `prompt setup --show-task-tools` to preview the inner tool documentation
 6. Task prompts are stored in `~/.local/share/fast-market/task_prompts/`
 
 **To manage tools doc prompts:**
-1. Use `prompt setup --list-tools-doc-prompts` to see available prompts
-2. Use `prompt setup --set-tools-doc-prompt <name>` to activate a prompt
-3. Use `prompt setup --show-tools-doc-prompt <name>` to view a prompt template
-4. Use `prompt setup --edit-tools-doc-prompt <name>` to customize a prompt
-5. Use `prompt setup --import-tools-doc-prompt <file>` to import from YAML
+1. Use `prompt setup tools-doc-prompts list` to see available prompts
+2. Use `prompt setup tools-doc-prompts set <name>` to activate a prompt
+3. Use `prompt setup tools-doc-prompts show <name>` to view a prompt template
+4. Use `prompt setup tools-doc-prompts edit <name>` to customize a prompt
+5. Use `prompt setup tools-doc-prompts import <file>` to import from YAML
 6. Tools doc prompts are stored in `~/.local/share/fast-market/tools_doc_prompts/`
 7. Default template uses placeholders: `{aliases}`, `{fastmarket_tools}`, `{system_commands}`, `{other_commands}`, `{skills}`
 

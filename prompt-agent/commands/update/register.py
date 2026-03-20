@@ -11,15 +11,31 @@ from commands.base import CommandManifest
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("update")
     @click.argument("name")
-    @click.option("--content", default=None, help="New prompt template content")
-    @click.option("--from-file", type=click.Path(exists=True), default=None, help="Load content from file")
-    @click.option("--description", default=None, help="New description")
-    @click.option("--provider", default=None, help="Default provider")
-    @click.option("--model", default=None, help="Default model")
-    @click.option("--temperature", type=float, default=None)
-    @click.option("--max-tokens", type=int, default=None)
+    @click.option("--content", "-c", default=None, help="New prompt template content")
+    @click.option(
+        "--from-file",
+        "-f",
+        type=click.Path(exists=True),
+        default=None,
+        help="Load content from file",
+    )
+    @click.option("--description", "-d", default=None, help="New description")
+    @click.option("--provider", "-P", default=None, help="Default provider")
+    @click.option("--model", "-m", default=None, help="Default model")
+    @click.option("--temperature", "-T", type=float, default=None)
+    @click.option("--max-tokens", "-M", type=int, default=None)
     @click.pass_context
-    def update_cmd(ctx, name, content, from_file, description, provider, model, temperature, max_tokens):
+    def update_cmd(
+        ctx,
+        name,
+        content,
+        from_file,
+        description,
+        provider,
+        model,
+        temperature,
+        max_tokens,
+    ):
         """Update a prompt template."""
         from storage.store import PromptStore
 

@@ -12,15 +12,27 @@ from commands.base import CommandManifest
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("create")
     @click.argument("name")
-    @click.option("--content", help="Prompt template content")
-    @click.option("--from-file", type=click.Path(exists=True), help="Load content from file")
-    @click.option("--description", default="", help="Description")
-    @click.option("--provider", default="", help="Default provider")
-    @click.option("--model", default="", help="Default model")
-    @click.option("--temperature", type=float, default=0.7)
-    @click.option("--max-tokens", type=int, default=2048)
+    @click.option("--content", "-c", help="Prompt template content")
+    @click.option(
+        "--from-file", "-f", type=click.Path(exists=True), help="Load content from file"
+    )
+    @click.option("--description", "-d", default="", help="Description")
+    @click.option("--provider", "-P", default="", help="Default provider")
+    @click.option("--model", "-m", default="", help="Default model")
+    @click.option("--temperature", "-T", type=float, default=0.7)
+    @click.option("--max-tokens", "-M", type=int, default=2048)
     @click.pass_context
-    def create_cmd(ctx, name, content, from_file, description, provider, model, temperature, max_tokens):
+    def create_cmd(
+        ctx,
+        name,
+        content,
+        from_file,
+        description,
+        provider,
+        model,
+        temperature,
+        max_tokens,
+    ):
         """Create a new prompt template."""
         from core.models import Prompt
         from storage.store import PromptStore

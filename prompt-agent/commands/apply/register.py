@@ -14,15 +14,37 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
     @click.command("apply")
     @click.argument("prompt_name_or_content")
-    @click.option("--provider", type=click.Choice(provider_choices) if provider_choices else str, default=None)
-    @click.option("--model", default=None)
-    @click.option("--temperature", type=float, default=None)
-    @click.option("--max-tokens", type=int, default=None)
-    @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
-    @click.option("--stdin", is_flag=True, help="Read prompt content from stdin (for piping)")
+    @click.option(
+        "--provider",
+        "-P",
+        type=click.Choice(provider_choices) if provider_choices else str,
+        default=None,
+    )
+    @click.option("--model", "-m", default=None)
+    @click.option("--temperature", "-T", type=float, default=None)
+    @click.option("--max-tokens", "-M", type=int, default=None)
+    @click.option(
+        "--format", "-F", "fmt", type=click.Choice(["text", "json"]), default="text"
+    )
+    @click.option(
+        "--stdin",
+        "-s",
+        is_flag=True,
+        help="Read prompt content from stdin (for piping)",
+    )
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
     @click.pass_context
-    def apply_cmd(ctx, prompt_name_or_content, provider, model, temperature, max_tokens, fmt, stdin, args):
+    def apply_cmd(
+        ctx,
+        prompt_name_or_content,
+        provider,
+        model,
+        temperature,
+        max_tokens,
+        fmt,
+        stdin,
+        args,
+    ):
         """Apply a prompt with placeholder substitution.
 
         PROMPT_NAME_OR_CONTENT can be:
@@ -58,7 +80,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 is_direct_prompt = True
                 prompt_name_or_content = "<stdin>"
             else:
-                click.echo("Error: No stdin available (pipe content into this command)", err=True)
+                click.echo(
+                    "Error: No stdin available (pipe content into this command)",
+                    err=True,
+                )
                 sys.exit(1)
         else:
             # Try to load as saved prompt first
@@ -91,7 +116,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         # Determine provider and model settings
         config = load_tool_config("prompt")
         if saved_prompt:
-            provider_name = provider or saved_prompt.model_provider or get_default_provider(config)
+            provider_name = (
+                provider or saved_prompt.model_provider or get_default_provider(config)
+            )
             model_name = model or saved_prompt.model_name or None
             temp = temperature if temperature is not None else saved_prompt.temperature
             max_tok = max_tokens or saved_prompt.max_tokens
@@ -105,7 +132,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         providers = build_engine(ctx.obj["verbose"])
         if provider_name not in providers:
             click.echo(f"Provider not found: {provider_name}", err=True)
-            click.echo(f"Run 'prompt setup --add-provider {provider_name}' first", err=True)
+            click.echo(
+                f"Run 'prompt setup providers add {provider_name}' first", err=True
+            )
             sys.exit(1)
 
         # Execute the prompt

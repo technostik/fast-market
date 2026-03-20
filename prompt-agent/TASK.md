@@ -45,9 +45,9 @@ Only whitelisted commands can run. Default whitelist includes:
 
 Manage with:
 ```bash
-prompt setup --list-task-commands
-prompt setup --add-task-command python3
-prompt setup --remove-task-command rm
+prompt setup task-commands list
+prompt setup task-commands add python3
+prompt setup task-commands remove rm
 ```
 
 ## Examples
@@ -278,17 +278,17 @@ Or use the setup command:
 
 ```bash
 # List current config
-prompt setup --list-task-commands
+prompt setup task-commands list
 
 # Add a new allowed command
-prompt setup --add-task-command python3
+prompt setup task-commands add python3
 
 # Remove a command
-prompt setup --remove-task-command rm
+prompt setup task-commands remove rm
 
 # Adjust limits
-prompt setup --set-task-max-iterations 50
-prompt setup --set-task-timeout 120
+prompt setup task set-max-iterations 50
+prompt setup task set-timeout 120
 ```
 
 ### Custom Task Prompts
@@ -297,19 +297,19 @@ You can customize the system prompt used by `prompt task`:
 
 ```bash
 # List available prompts
-prompt setup --list-prompts
+prompt setup task-prompts list
 
 # Set active prompt
-prompt setup --set-prompt my-custom-prompt
+prompt setup task-prompts set my-custom-prompt
 
 # Reset to built-in default
-prompt setup --set-prompt default
+prompt setup task-prompts set default
 
 # Edit a custom prompt
-prompt setup --edit-prompt my-custom-prompt
+prompt setup task-prompts edit my-custom-prompt
 
 # Import from YAML file
-prompt setup --import-prompt ./custom-prompt.yaml
+prompt setup task-prompts import ./custom-prompt.yaml
 ```
 
 Prompts are stored in `~/.local/share/fast-market/task_prompts/` as YAML files.
@@ -384,6 +384,6 @@ prompt task "for each .txt file: count words, create {name}.stats" \
 ## See Also
 
 - `prompt setup --help` — Configure providers and task settings
-- `prompt setup --list-prompts --help` — Prompt management options
+- `prompt setup task-prompts --help` — Prompt management options
 - [corpus search](../corpus-agent/) — Knowledge search
 - [image generate](../image-agent/) — Image generation

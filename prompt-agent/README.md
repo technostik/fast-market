@@ -277,23 +277,33 @@ Configuration wizard and provider management.
 # Interactive wizard
 prompt setup
 
-# List configured providers
-prompt setup --list-providers
-
-# Add a provider non-interactively
-prompt setup --add-provider openai
-
-# Remove a provider
-prompt setup --remove-provider ollama
-
-# Set default provider
-prompt setup --set-default anthropic
-
 # Show current config
 prompt setup --show-config
+# or: prompt setup -c
 
 # Show config file path
 prompt setup --config-path
+# or: prompt setup -p
+
+# Show task tools documentation
+prompt setup --show-task-tools
+# or: prompt setup -t
+```
+
+#### Provider Management
+
+```bash
+# List configured providers
+prompt setup providers list
+
+# Add a provider (interactive)
+prompt setup providers add openai
+
+# Remove a provider
+prompt setup providers remove ollama
+
+# Set default provider
+prompt setup providers set-default anthropic
 ```
 
 #### Task Prompt Management
@@ -302,22 +312,22 @@ Manage custom task prompts that control the LLM's behavior in `prompt task`:
 
 ```bash
 # List available task prompts
-prompt setup --list-prompts
+prompt setup task-prompts list
 
 # Set active task prompt
-prompt setup --set-prompt my-custom-prompt
+prompt setup task-prompts set my-custom-prompt
 
 # Reset to built-in default prompt
-prompt setup --set-prompt default
+prompt setup task-prompts set default
 
 # Show a specific prompt's content
-prompt setup --show-prompt my-custom-prompt
+prompt setup task-prompts show my-custom-prompt
 
 # Edit a prompt in your default editor
-prompt setup --edit-prompt my-custom-prompt
+prompt setup task-prompts edit my-custom-prompt
 
 # Import a prompt from YAML file
-prompt setup --import-prompt ./my-prompt.yaml
+prompt setup task-prompts import ./my-prompt.yaml
 ```
 
 **Prompt YAML format:**
@@ -333,19 +343,19 @@ template: |
 
 ```bash
 # List task configuration
-prompt setup --list-task-commands
+prompt setup task-commands list
 
 # Add a command to task whitelist
-prompt setup --add-task-command python3
+prompt setup task-commands add python3
 
 # Remove a command from task whitelist
-prompt setup --remove-task-command rm
+prompt setup task-commands remove rm
 
 # Set max iterations for task
-prompt setup --set-task-max-iterations 50
+prompt setup task set-max-iterations 50
 
 # Set default timeout (seconds)
-prompt setup --set-task-timeout 120
+prompt setup task set-timeout 120
 ```
 
 ---

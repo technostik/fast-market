@@ -24,63 +24,55 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.argument("task_description")
     @click.option(
         "--from-file",
+        "-f",
         type=click.Path(exists=True),
         help="Load task description from file",
     )
     @click.option(
-        "--workdir",
-        default=".",
-        help="Working directory for command execution",
+        "--workdir", "-w", default=".", help="Working directory for command execution"
     )
     @click.option(
         "--param",
         "-p",
         multiple=True,
-        help="Task parameter (key=value). Can be repeated. @- reads from stdin, @file reads from file.",
+        help="Task parameter (key=value). Can be repeated.",
     )
     @click.option(
         "--provider",
+        "-P",
         type=click.Choice(provider_choices) if provider_choices else str,
         default=None,
         help="LLM provider to use",
     )
-    @click.option(
-        "--model",
-        default=None,
-        help="Override default model",
-    )
+    @click.option("--model", "-m", default=None, help="Override default model")
     @click.option(
         "--max-iterations",
+        "-i",
         type=int,
         default=None,
         help="Max tool calls before stopping",
     )
     @click.option(
-        "--timeout",
-        type=int,
-        default=None,
-        help="Timeout per command (seconds)",
+        "--timeout", "-t", type=int, default=None, help="Timeout per command (seconds)"
     )
     @click.option(
-        "--dry-run",
-        is_flag=True,
-        help="Show commands without executing",
+        "--dry-run", "-n", is_flag=True, help="Show commands without executing"
     )
     @click.option(
-        "--debug",
-        type=str,
-        default="",
-        help="Debug output: 'normal' shows LLM/third calls, 'full' shows everything",
+        "--debug", "-d", type=str, default="", help="Debug output: 'normal' or 'full'"
     )
     @click.option(
         "--format",
+        "-F",
         "fmt",
         type=click.Choice(["text", "json"]),
         default="text",
         help="Output format",
     )
-    @click.option("--silent", is_flag=True, help="Suppress session output")
-    @click.option("--save-session", type=click.Path(), help="Save session to YAML file")
+    @click.option("--silent", "-s", is_flag=True, help="Suppress session output")
+    @click.option(
+        "--save-session", "-o", type=click.Path(), help="Save session to YAML file"
+    )
     @click.pass_context
     def task_cmd(
         ctx,

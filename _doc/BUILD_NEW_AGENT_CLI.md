@@ -401,6 +401,80 @@ All options in the table below **must** have the specified short form in every c
 # Usage: command --source a --source b --source c
 ```
 
+#### Command vs Subcommand Groups
+
+When a command has many related operations, prefer **subcommand groups** over boolean flags or pseudo-options:
+
+| Pattern | Use When | Example |
+|---------|----------|---------|
+| **Single command with options** | One primary action, modifiers via flags | `alias`, `delete` |
+| **Subcommand group** | Multiple related operations on the same noun | `setup providers list`, `task-prompts edit` |
+| **Positional argument** | Command needs exactly one required identifier | `get <name>`, `delete <name>` |
+
+**WRONG**: Boolean flags acting as subcommands:
+```python
+# BAD: Pseudo-options that should be subcommands
+@click.option("--list-providers", is_flag=True)      # setup --list-providers
+@click.option("--add-provider")                        # setup --add-provider <name>
+@click.option("--show-prompt")                         # setup --show-prompt <name>
+```
+
+**CORRECT**: Subcommand groups:
+```python
+@click.group("setup")
+def setup_group():
+    """Setup management."""
+    pass
+
+@setup_group.command("providers-list")
+def providers_list():
+    """List providers."""
+
+@setup_group.command("providers-add")
+@click.argument("name")
+def providers_add(name):
+    """Add a provider."""
+
+@setup_group.command("task-prompts-show")
+@click.argument("name")
+def task_prompts_show(name):
+    """Show a task prompt."""
+```
+
+**Flat subcommand naming** (recommended for simplicity):
+```
+prompt setup providers-list
+prompt setup providers-add <name>
+prompt setup task-prompts-list
+prompt setup task-prompts-show <name>
+```
+
+#### Real Options vs Pseudo-Options Checklist
+
+Ask these questions for each potential option:
+
+| Question | If Yes → | If No → |
+|----------|----------|---------|
+| Does the command NEED this to work? | **Positional argument** | Continue... |
+| Does it select a noun (entity) to operate on? | **Subcommand**, not `--select-noun` | Continue... |
+| Can it be combined with other options? | **Option** | Continue... |
+| Is it a modifier toggle (yes/no)? | **Flag** (`is_flag=True`) | **Option with value** |
+
+**Examples**:
+
+| Feature Request | Correct Pattern | Reason |
+|-----------------|------------------|--------|
+| "list providers" | `providers-list` subcommand | Selects noun + verb |
+| "add provider X" | `providers-add <name>` subcommand | Positional for required name |
+| "show config" | `--show-config` option | Lightweight query, no noun |
+| "show config for provider X" | `providers-show <name>` subcommand | Selects noun to operate on |
+| "set timeout to N" | `task set-timeout <n>` subcommand | Verb on configuration noun |
+| "quiet mode" | `--quiet` flag | Modifier toggle |
+
+#### Option Short Forms
+
+All standard options must have short forms. See [Mandatory Short Forms](#mandatory-short-forms).
+
 #### Plugin-Aware Commands
 
 Commands that work with plugins (sync, search, list, reindex, retry-failures) should build `--source` choices dynamically:
