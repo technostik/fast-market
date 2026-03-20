@@ -25,11 +25,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Prompt not found: {name}", err=True)
             sys.exit(1)
 
-        file_path = store.get_prompt_file_path(name)
-        if file_path and file_path.exists():
-            click.echo(file_path.read_text(encoding="utf-8"))
-            return
-
         payload = {
             "name": prompt.name,
             "description": prompt.description,

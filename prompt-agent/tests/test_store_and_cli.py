@@ -10,8 +10,8 @@ from core.models import Prompt
 from storage.store import PromptStore
 
 
-def test_prompt_store_round_trip():
-    store = PromptStore(":memory:")
+def test_prompt_store_round_trip(tmp_path):
+    store = PromptStore(":memory:", prompts_dir=tmp_path / "prompts")
     store.create_prompt(Prompt(name="hello", content="Hello {name}"))
     prompt = store.get_prompt("hello")
     assert prompt is not None

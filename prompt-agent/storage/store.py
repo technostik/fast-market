@@ -21,8 +21,8 @@ logger = structlog.get_logger(__name__)
 
 
 class PromptStore:
-    def __init__(self, path: str | None = None):
-        self._file_store = FilePromptStore()
+    def __init__(self, path: str | None = None, prompts_dir: Path | None = None):
+        self._file_store = FilePromptStore(prompts_dir=prompts_dir)
 
         if path is None:
             path = str(
