@@ -90,43 +90,29 @@ class YouTubePlugin(SourcePlugin):
     async def _fetch_via_yt_dlp(
         self, last_item_id: str | None = None, limit: int = 50
     ) -> list[ItemMetadata]:
-        """Fetch videos using yt-dlp as fallback when RSS fails"""
-        channel_url = f"https://youtube.com/channel/{self.channel_id}"
+        """Fetch videos and shorts using yt-dlp as fallback when RSS fails"""
+        videos_url = f"https://www.youtube.com/channel/{self.channel_id}/videos"
+        shorts_url = f"https://www.youtube.com/channel/{self.channel_id}/shorts"
 
         loop = asyncio.get_event_loop()
 
-        def _extract_channel_videos():
+        def _extract_videos(url, is_short_playlist=False):
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 try:
-                    # Extract channel info and video list
-                    info = ydl.extract_info(channel_url, download=False)
+                    info = ydl.extract_info(url, download=False)
                     if not info:
                         return []
-
-                    # Handle different response structures
-                    entries = []
-                    if "entries" in info:
-                        entries = info["entries"]
-                    elif "videos" in info:
-                        entries = info["videos"]
-                    else:
-                        # Single video? Probably not a channel
-                        return []
-
+                    entries = info.get("entries", []) or []
+                    channel_name = info.get("channel", info.get("uploader", ""))
                     videos = []
                     for entry in entries[:limit]:
                         if not entry:
                             continue
-
                         video_id = entry.get("id")
                         if not video_id:
                             continue
-
-                        # Check if we've reached last fetched item
                         if last_item_id and video_id == last_item_id:
                             break
-
-                        # Get upload date
                         upload_date = None
                         if entry.get("upload_date"):
                             try:
@@ -137,38 +123,46 @@ class YouTubePlugin(SourcePlugin):
                                 upload_date = datetime.now(timezone.utc)
                         else:
                             upload_date = datetime.now(timezone.utc)
-
-                        # Determine if Short (duration < 60 or /shorts/ in URL)
-                        duration = entry.get("duration", 0)
-                        url = entry.get("webpage_url", "")
-                        is_short = duration < 60 or "/shorts/" in url
-
-                        # Build video entry
-                        videos.append({
-                            "id": video_id,
-                            "title": entry.get("title", "Untitled"),
-                            "url": entry.get("webpage_url", f"https://youtube.com/watch?v={video_id}"),
-                            "published": upload_date,
-                            "duration": duration,
-                            "channel_name": info.get("channel", info.get("uploader", "")),
-                            "views": entry.get("view_count", 0),
-                            "likes": entry.get("like_count", 0),
-                            "comments": entry.get("comment_count", 0),
-                            "description": entry.get("description", "")[:500],
-                            "tags": entry.get("tags", [])[:10],
-                            "categories": entry.get("categories", []),
-                            "is_short": is_short,
-                            "availability": entry.get("availability", "public"),
-                        })
-
+                        duration = entry.get("duration") or 0
+                        entry_url = entry.get("url", f"https://www.youtube.com/watch?v={video_id}")
+                        if "/shorts/" not in entry_url and "watch?v=" not in entry_url:
+                            entry_url = f"https://www.youtube.com/watch?v={video_id}"
+                        is_short = "/shorts/" in entry_url or is_short_playlist
+                        if not is_short and 0 < duration < 180:
+                            is_short = True
+                        videos.append(
+                            {
+                                "id": video_id,
+                                "title": entry.get("title", "Untitled"),
+                                "url": entry_url,
+                                "published": upload_date,
+                                "duration": duration,
+                                "channel_name": channel_name,
+                                "views": entry.get("view_count") or 0,
+                                "likes": entry.get("like_count") or 0,
+                                "comments": entry.get("comment_count") or 0,
+                                "description": (entry.get("description") or "")[:500],
+                                "tags": (entry.get("tags") or [])[:10],
+                                "categories": entry.get("categories") or [],
+                                "is_short": is_short,
+                                "availability": entry.get("availability"),
+                            }
+                        )
                     return videos
-
                 except Exception as e:
-                    print(f"yt-dlp channel extraction error: {e}")
+                    print(f"yt-dlp extraction error for {url}: {e}")
                     return []
 
         try:
-            videos = await loop.run_in_executor(self.executor, _extract_channel_videos)
+            all_videos = await loop.run_in_executor(
+                self.executor, lambda: _extract_videos(videos_url)
+            )
+            all_shorts = await loop.run_in_executor(
+                self.executor, lambda: _extract_videos(shorts_url, is_short_playlist=True)
+            )
+            videos = all_videos + all_shorts
+            videos.sort(key=lambda v: v["published"], reverse=True)
+            videos = videos[:limit]
 
             items = []
             for video in videos:
@@ -184,24 +178,26 @@ class YouTubePlugin(SourcePlugin):
                     "tags": video["tags"],
                     "categories": video["categories"],
                     "availability": video["availability"],
-                    "fetch_method": "yt-dlp",  # Track which method succeeded
+                    "fetch_method": "yt-dlp",
                 }
 
                 content_type = "short" if extra["is_short"] else "video"
                 if video["duration"] > 3600:
                     content_type = "long_video"
 
-                items.append(ItemMetadata(
-                    id=video["id"],
-                    title=video["title"],
-                    url=video["url"],
-                    published_at=video["published"],
-                    content_type=content_type,
-                    source_plugin=self.name,
-                    source_identifier=self.channel_id,
-                    raw={"yt_dlp": video},
-                    extra=extra,
-                ))
+                items.append(
+                    ItemMetadata(
+                        id=video["id"],
+                        title=video["title"],
+                        url=video["url"],
+                        published_at=video["published"],
+                        content_type=content_type,
+                        source_plugin=self.name,
+                        source_identifier=self.channel_id,
+                        raw={"yt_dlp": video},
+                        extra=extra,
+                    )
+                )
 
             return items
 
@@ -214,9 +210,7 @@ class YouTubePlugin(SourcePlugin):
 
         loop = asyncio.get_event_loop()
         try:
-            info = await loop.run_in_executor(
-                self.executor, self._extract_video_info, url
-            )
+            info = await loop.run_in_executor(self.executor, self._extract_video_info, url)
             return info
         except Exception as e:
             print(f"Error getting video details for {video_id}: {e}")
@@ -246,7 +240,7 @@ class YouTubePlugin(SourcePlugin):
 
                 comment_count = info.get("comment_count", 0)
                 duration = info.get("duration", 0)
-                is_short = duration < 60 or info.get("webpage_url_basename") == "shorts"
+                is_short = duration < 180 or info.get("webpage_url_basename") == "shorts"
 
                 return {
                     "duration_seconds": duration,
@@ -296,10 +290,17 @@ class YouTubePlugin(SourcePlugin):
             except (ValueError, TypeError):
                 pass
 
+        video_url = f"https://youtube.com/watch?v={vid_id}" if vid_id else ""
+        if hasattr(entry, "link") and entry.link:
+            if "watch?v=" in entry.link:
+                video_url = entry.link
+            elif vid_id:
+                video_url = f"https://youtube.com/watch?v={vid_id}"
+
         return {
             "id": vid_id,
             "title": entry.get("title", "Untitled"),
-            "url": entry.get("link", f"https://youtube.com/watch?v={vid_id}"),
+            "url": video_url,
             "published": published,
             "duration": duration,
             "author": entry.get("author", ""),
@@ -353,7 +354,7 @@ class YouTubePlugin(SourcePlugin):
                     "channel_id": self.channel_id,
                     "channel_name": details.get("channel_name", feed_title),
                     "duration_seconds": details.get("duration_seconds", parsed["duration"]),
-                    "is_short": details.get("is_short", parsed["duration"] < 60),
+                    "is_short": details.get("is_short", parsed["duration"] < 180),
                     "views": details.get("views", 0),
                     "likes": details.get("likes", 0),
                     "comments": details.get("comments", 0),
@@ -370,17 +371,19 @@ class YouTubePlugin(SourcePlugin):
                 if extra["duration_seconds"] > 3600:
                     content_type = "long_video"
 
-                items.append(ItemMetadata(
-                    id=parsed["id"],
-                    title=parsed["title"],
-                    url=parsed["url"],
-                    published_at=published_at,
-                    content_type=content_type,
-                    source_plugin=self.name,
-                    source_identifier=self.channel_id,
-                    raw={"rss_entry": entry.__dict__ if hasattr(entry, "__dict__") else {}},
-                    extra=extra,
-                ))
+                items.append(
+                    ItemMetadata(
+                        id=parsed["id"],
+                        title=parsed["title"],
+                        url=parsed["url"],
+                        published_at=published_at,
+                        content_type=content_type,
+                        source_plugin=self.name,
+                        source_identifier=self.channel_id,
+                        raw={"rss_entry": entry.__dict__ if hasattr(entry, "__dict__") else {}},
+                        extra=extra,
+                    )
+                )
 
                 await asyncio.sleep(0.1)
 
@@ -411,15 +414,17 @@ class YouTubePlugin(SourcePlugin):
 
                     formatted_comments = []
                     for comment in comments[:max_comments]:
-                        formatted_comments.append({
-                            "id": comment.get("id"),
-                            "author": comment.get("author"),
-                            "author_id": comment.get("author_id"),
-                            "text": comment.get("text", ""),
-                            "timestamp": comment.get("timestamp"),
-                            "likes": comment.get("like_count", 0),
-                            "reply_count": comment.get("reply_count", 0),
-                        })
+                        formatted_comments.append(
+                            {
+                                "id": comment.get("id"),
+                                "author": comment.get("author"),
+                                "author_id": comment.get("author_id"),
+                                "text": comment.get("text", ""),
+                                "timestamp": comment.get("timestamp"),
+                                "likes": comment.get("like_count", 0),
+                                "reply_count": comment.get("reply_count", 0),
+                            }
+                        )
                     return formatted_comments
                 except Exception as e:
                     print(f"Error extracting comments: {e}")

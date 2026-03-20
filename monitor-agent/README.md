@@ -136,12 +136,12 @@ monitor setup action-edit telegram-notify \
 |------------|-------------|
 | `$ITEM_ID` | Item unique ID |
 | `$ITEM_TITLE` | Item title |
-| `$ITEM_URL` | Item URL |
+| `$ITEM_URL` | Item URL (video URL for YouTube) |
 | `$ITEM_CONTENT_TYPE` | video, short, article |
 | `$ITEM_PUBLISHED` | ISO timestamp |
 | `$SOURCE_ID` | Source UUID |
 | `$SOURCE_PLUGIN` | youtube, rss |
-| `$SOURCE_URL` | Channel ID or RSS URL |
+| `$SOURCE_URL` | Channel/feed URL (e.g., `https://youtube.com/channel/UC...`) |
 | `$SOURCE_DESC` | Source description |
 | `$RULE_NAME` | Matching rule name |
 | `$EXTRA_*` | Any field from item metadata |

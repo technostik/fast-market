@@ -73,6 +73,11 @@ Provides the foundational infrastructure for rule-based content monitoring: data
 3. Handle None values gracefully
 4. Add tests for the new placeholder
 
+### Add Source URL Helper
+1. Update `_get_source_url()` in `executor.py`
+2. Handle plugin-specific URL construction
+3. Return proper URLs for each plugin type (e.g., YouTube channel URLs)
+
 ## DSL Condition Format
 
 ### Supported Operators
