@@ -20,9 +20,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Also retry permanent failures",
     )
-    @click.option("--limit", type=int, default=None)
+    @click.option("--limit", "-l", type=int, default=None)
     @click.option(
-        "--format", "fmt", type=click.Choice(["json", "text"]), default="text"
+        "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
     )
     @click.pass_context
     def retry_failures_cmd(ctx, source, clear_permanent, limit, fmt):

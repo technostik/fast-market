@@ -89,6 +89,26 @@ Core → Embedder (server/local fallback)
 - Delegate business logic to core components (commands are thin orchestrators)
 - Raise explicit exceptions with clear messages
 
+### CLI Syntax Conventions
+All commands must follow standard short form conventions:
+
+| Option | Short | When to Use |
+|--------|-------|-------------|
+| `--format` | `-F` | All data output commands (search, list, sync, etc.) |
+| `--limit` | `-l` | Commands with pagination or item limits |
+| `--port` | `-p` | Server commands |
+| `--model` | `-m` | Model-related commands |
+
+```python
+# CORRECT: Include standard short forms
+@click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.option("--limit", "-l", type=int, default=10)
+
+# INCORRECT: Missing short form (violates standard)
+@click.option("--format", "fmt", ...)
+@click.option("--limit", type=int, ...)
+```
+
 ### Server & API
 - Load plugins/commands dynamically at startup
 - Serve UI files read-only from filesystem
@@ -129,7 +149,7 @@ Core → Embedder (server/local fallback)
 ### Add New Command
 1. Create `commands/your_command/` with `__init__.py` and `register.py`
 2. Implement `register(plugin_manifests) -> CommandManifest`
-3. Define base Click options
+3. Define base Click options (include `-F` for `--format`, `-l` for `--limit`)
 4. Add API router via `CommandManifest.api_router` (optional)
 5. Add frontend JS via `CommandManifest.frontend_js` (optional)
 6. Registry auto-injects plugin options and registers command

@@ -14,7 +14,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
     @click.command("reindex")
     @click.option("--source", type=click.Choice(source_choices), default="all")
-    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    @click.option(
+        "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
+    )
     @click.pass_context
     def reindex_cmd(ctx, source, fmt, **kwargs):
         engine, plugins, _ = build_engine(ctx.obj["verbose"])
@@ -22,7 +24,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         results = []
         for name in targets:
             result = engine.reindex(plugins[name])
-            results.append({"source": result.source, "documents": result.documents, "chunks": result.chunks})
+            results.append(
+                {
+                    "source": result.source,
+                    "documents": result.documents,
+                    "chunks": result.chunks,
+                }
+            )
         out(results, fmt)
 
     return CommandManifest(
@@ -52,6 +60,10 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         engine = SyncEngine(store, embedder)
         plugins = build_plugins(config, tool_root=Path(__file__).resolve().parents[2])
         result = engine.reindex(plugins[source])
-        return {"source": result.source, "documents": result.documents, "chunks": result.chunks}
+        return {
+            "source": result.source,
+            "documents": result.documents,
+            "chunks": result.chunks,
+        }
 
     return router

@@ -14,6 +14,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("list")
     @click.option(
         "--limit",
+        "-l",
         type=int,
         default=10,
         show_default=True,
@@ -26,7 +27,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         show_default=True,
         help="Number of items to skip for pagination.",
     )
-    @click.option("--source", type=click.Choice(source_choices), default=None, help="Filter by source plugin.")
+    @click.option(
+        "--source",
+        type=click.Choice(source_choices),
+        default=None,
+        help="Filter by source plugin.",
+    )
     @click.option(
         "--order-by",
         type=click.Choice(["date", "size", "duration", "title"]),
@@ -35,7 +41,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Sort field.",
     )
     @click.option("--reverse", is_flag=True, default=False, help="Reverse sort order.")
-    @click.option("--format", "fmt", type=click.Choice(["json", "text", "table"]), default="text")
+    @click.option(
+        "--format",
+        "-F",
+        "fmt",
+        type=click.Choice(["json", "text", "table"]),
+        default="text",
+    )
     @click.pass_context
     def list_cmd(ctx, limit, offset, source, order_by, reverse, fmt, **kwargs):
         """List indexed documents with filtering, sorting, and pagination."""
@@ -113,7 +125,9 @@ def _print_table(docs: list[dict], source: str | None) -> None:
     plugin = source or docs[0]["source_plugin"]
 
     if plugin == "youtube":
-        click.echo(f"{'HANDLE':<25} {'TITLE':<40} {'DATE':<12} {'DURATION':<10} {'PRIVACY':<10}")
+        click.echo(
+            f"{'HANDLE':<25} {'TITLE':<40} {'DATE':<12} {'DURATION':<10} {'PRIVACY':<10}"
+        )
         click.echo("-" * 100)
 
         for doc in docs:
@@ -156,16 +170,32 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         limit: int = Query(10, ge=1, le=1000, description="Number of items to return"),
         offset: int = Query(0, ge=0, description="Number of items to skip"),
         source: str | None = Query(None, description="Filter by source plugin"),
-        order_by: str = Query("date", description="Sort field: date|size|duration|title"),
+        order_by: str = Query(
+            "date", description="Sort field: date|size|duration|title"
+        ),
         reverse: bool = Query(False, description="Reverse sort order"),
         video_type: str | None = Query(None, description="YouTube: short|long"),
-        min_duration: int | None = Query(None, ge=0, description="Min duration in seconds"),
-        max_duration: int | None = Query(None, ge=0, description="Max duration in seconds"),
-        privacy_status: str | None = Query(None, description="YouTube: public|private|unlisted|unknown"),
-        since: str | None = Query(None, description="Filter by date: YYYY-MM-DD (inclusive)"),
-        until: str | None = Query(None, description="Filter by date: YYYY-MM-DD (inclusive)"),
-        min_size: int | None = Query(None, ge=0, description="Min content size in chars"),
-        max_size: int | None = Query(None, ge=0, description="Max content size in chars"),
+        min_duration: int | None = Query(
+            None, ge=0, description="Min duration in seconds"
+        ),
+        max_duration: int | None = Query(
+            None, ge=0, description="Max duration in seconds"
+        ),
+        privacy_status: str | None = Query(
+            None, description="YouTube: public|private|unlisted|unknown"
+        ),
+        since: str | None = Query(
+            None, description="Filter by date: YYYY-MM-DD (inclusive)"
+        ),
+        until: str | None = Query(
+            None, description="Filter by date: YYYY-MM-DD (inclusive)"
+        ),
+        min_size: int | None = Query(
+            None, ge=0, description="Min content size in chars"
+        ),
+        max_size: int | None = Query(
+            None, ge=0, description="Max content size in chars"
+        ),
     ):
         from common.core.config import load_config
         from storage.sqlite_store import SQLiteStore, SearchFilters

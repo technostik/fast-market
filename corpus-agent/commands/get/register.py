@@ -12,8 +12,12 @@ from commands.helpers import build_engine, out
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("get")
     @click.argument("handle")
-    @click.option("--what", type=click.Choice(["meta", "content", "all"]), default="meta")
-    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    @click.option(
+        "--what", type=click.Choice(["meta", "content", "all"]), default="meta"
+    )
+    @click.option(
+        "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
+    )
     @click.pass_context
     def get_cmd(ctx, handle, what, fmt, **kwargs):
         _, _, store = build_engine(ctx.obj["verbose"])

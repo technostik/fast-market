@@ -12,7 +12,9 @@ from commands.helpers import build_engine, out
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("delete")
     @click.argument("handle")
-    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    @click.option(
+        "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
+    )
     @click.pass_context
     def delete_cmd(ctx, handle, fmt, **kwargs):
         _, _, store = build_engine(ctx.obj["verbose"])

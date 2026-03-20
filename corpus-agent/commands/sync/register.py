@@ -18,10 +18,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("sync")
     @click.option("--source", type=click.Choice(source_choices), default="all")
     @click.option("--mode", type=click.Choice(["new", "backfill"]), default="new")
-    @click.option("--limit", type=int, default=None)
+    @click.option("--limit", "-l", type=int, default=None)
     @click.option("--clean", is_flag=True, default=False)
     @click.option(
-        "--format", "fmt", type=click.Choice(["json", "text"]), default="text"
+        "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
     )
     @click.pass_context
     def sync_cmd(ctx, source, mode, limit, clean, fmt, **kwargs):

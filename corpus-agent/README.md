@@ -179,6 +179,23 @@ The first time you run `corpus sync --source youtube`, a browser window will ope
 
 ## CLI reference
 
+### CLI Syntax Conventions
+
+All commands follow standard short form conventions:
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--format` | `-F` | Output format (json/text) |
+| `--limit` | `-l` | Item/pagination limit |
+| `--port` | `-p` | Server port |
+| `--source` | — | Source plugin filter |
+
+```bash
+# Long and short forms are equivalent:
+corpus sync --format json    ==    corpus sync -F json
+corpus list --limit 20       ==    corpus list -l 20
+```
+
 ### Global flag
 
 ```bash
@@ -209,16 +226,16 @@ Fetch and index new content.
 |--------|---------|-------------|
 | `--source obsidian\|youtube\|all` | `all` | Which source to sync |
 | `--mode new\|backfill` | `new` | `new`: only items newer than last sync run. `backfill`: ignore last-sync timestamp |
-| `--limit N` | 10 obsidian / 5 youtube | Max items to fetch |
+| `--limit N`, `-l N` | 10 obsidian / 5 youtube | Max items to fetch |
 | `--clean` | off | Wipe entire index and sync log before syncing |
-| `--format json\|text` | `text` | Output format |
+| `--format json\|text`, `-F` | `text` | Output format |
 
 ```bash
 corpus sync                                      # sync all sources, new items only
-corpus sync --source youtube --limit 20          # last 20 YouTube videos
+corpus sync --source youtube -l 20                # last 20 YouTube videos
 corpus sync --source obsidian --mode backfill    # reprocess all Obsidian notes
 corpus sync --clean                              # wipe index and start fresh
-corpus sync --format json                        # machine-readable result
+corpus sync -F json                              # machine-readable result
 ```
 
 ---
@@ -244,7 +261,7 @@ Search the index. Returns handles, titles, excerpts, scores, and privacy status.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--mode semantic\|keyword` | `semantic` | Semantic uses embeddings; keyword uses SQLite FTS |
-| `--limit N` | `5` | Max results |
+| `--limit N`, `-l N` | `5` | Max results |
 | `--source obsidian\|youtube` | — | Filter by source |
 | `--type short\|long` | — | YouTube only: short ≤ 60s, long > 60s |
 | `--min-duration N` | — | Min duration in seconds |
@@ -254,20 +271,20 @@ Search the index. Returns handles, titles, excerpts, scores, and privacy status.
 | `--min-size N` | — | Min content length in chars (useful for Obsidian) |
 | `--max-size N` | — | Max content length in chars |
 | `--privacy public\|private\|unlisted` | — | Filter by YouTube privacy status |
-| `--format json\|text` | `text` | Output format |
+| `--format json\|text`, `-F` | `text` | Output format |
 
 ```bash
 corpus search "landing page"
 corpus search "IA" --source youtube --type long
-corpus search "startup" --since 2024-01-01 --limit 10
+corpus search "startup" --since 2024-01-01 -l 10
 corpus search "notes" --source obsidian --min-size 1000
 corpus search "topic" --privacy public
-corpus search "topic" --format json | jq '.[0].handle'
+corpus search "topic" -F json | jq '.[0].handle'
 ```
 
 **Chaining example — get full transcript of top result:**
 ```bash
-corpus search "bureaucratie" --source youtube --format json \
+corpus search "bureaucratie" --source youtube -F json \
   | jq -r '.[0].handle' \
   | xargs corpus get --what content
 ```
@@ -285,12 +302,12 @@ List indexed documents with filtering, sorting, and pagination.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--limit N` | `10` | Number of items to return |
+| `--limit N`, `-l N` | `10` | Number of items to return |
 | `--offset N` | `0` | Skip first N items (pagination) |
 | `--source obsidian\|youtube` | — | Filter by source |
 | `--order-by date\|size\|duration\|title` | `date` | Sort field |
 | `--reverse` | off | Reverse sort order |
-| `--format json\|text\|table` | `text` | Output format |
+| `--format json\|text\|table`, `-F` | `text` | Output format |
 
 **YouTube filters:**
 | Option | Description |
@@ -314,12 +331,12 @@ List indexed documents with filtering, sorting, and pagination.
 
 ```bash
 corpus list
-corpus list --limit 1
+corpus list -l 1
 corpus list --source youtube --type short --since 2024-01-01
-corpus list --source obsidian --order-by size --limit 20
-corpus list --limit 20 --offset 20
+corpus list --source obsidian --order-by size -l 20
+corpus list -l 20 --offset 20
 corpus list --format table
-corpus list --limit 5 --format json | jq '.[0].handle'
+corpus list -l 5 -F json | jq '.[0].handle'
 ```
 
 ---
@@ -335,12 +352,12 @@ Retrieve a document by its **handle** (e.g. `yt-my-video-a3f2`) or by `source_id
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--what meta\|content\|all` | `meta` | `meta`: all fields except raw text. `content`: raw text only. `all`: everything |
-| `--format json\|text` | `text` | Output format |
+| `--format json\|text`, `-F` | `text` | Output format |
 
 ```bash
 corpus get yt-my-video-a3f2                        # metadata only
 corpus get yt-my-video-a3f2 --what content         # transcript/text only
-corpus get yt-my-video-a3f2 --what all --format json
+corpus get yt-my-video-a3f2 --what all -F json
 corpus get "Note.md" --what meta
 ```
 
@@ -359,7 +376,7 @@ Remove a document and all its chunks from the index.
 ```bash
 corpus delete yt-my-video-a3f2
 corpus delete "Note.md"
-corpus delete yt-my-video-a3f2 --format json
+corpus delete yt-my-video-a3f2 -F json
 ```
 
 ---
@@ -367,7 +384,7 @@ corpus delete yt-my-video-a3f2 --format json
 ### reindex
 
 ```bash
-corpus reindex [--source obsidian|youtube|all] [--format json|text]
+corpus reindex [--source obsidian|youtube|all] [-F json|text]
 ```
 
 Rebuild embeddings for all indexed documents without re-fetching from source. Use after changing the embedding model or chunking logic.
@@ -377,7 +394,7 @@ Rebuild embeddings for all indexed documents without re-fetching from source. Us
 ### status
 
 ```bash
-corpus status [--format json|text]
+corpus status [-F json|text]
 ```
 
 Print document counts and sync failure stats per source.
@@ -459,6 +476,8 @@ No external fixtures or data files are required.
 
 ```bash
 corpus retry-failures --clear-permanent
+corpus retry-failures --source youtube -l 10
+corpus retry-failures -F json
 ```
 
 - If only transient failures should be retried, run:

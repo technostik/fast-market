@@ -11,7 +11,9 @@ from commands.helpers import build_engine, out
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("status")
-    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    @click.option(
+        "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
+    )
     @click.pass_context
     def status_cmd(ctx, fmt, **kwargs):
         _, _, store = build_engine(ctx.obj["verbose"])
@@ -33,7 +35,9 @@ def _build_router(plugin_manifests: dict) -> APIRouter:
         from common.core.registry import build_plugins
 
         config = load_config()
-        return list(build_plugins(config, tool_root=Path(__file__).resolve().parents[2]).keys())
+        return list(
+            build_plugins(config, tool_root=Path(__file__).resolve().parents[2]).keys()
+        )
 
     @router.get("/items")
     def items(

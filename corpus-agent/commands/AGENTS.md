@@ -34,6 +34,25 @@ Provides a self-contained, plugin-agnostic command module system where each subd
 - Raise explicit exceptions with clear error messages (fail loudly)
 - Use `structlog` for all logging with appropriate context
 - Keep commands focused on orchestration — delegate business logic to core components
+- **Include standard short forms** (`-F` for `--format`, `-l` for `--limit`)
+
+## 🎯 Standard CLI Short Forms
+
+All commands must follow these conventions:
+
+| Option | Short | When to Use |
+|--------|-------|-------------|
+| `--format` | `-F` | All data output commands |
+| `--limit` | `-l` | Pagination/item limits |
+
+```python
+# CORRECT: Include standard short forms
+@click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.option("--limit", "-l", type=int, default=10)
+
+# INCORRECT: Missing short form
+@click.option("--format", "fmt", ...)
+```
 
 ## ❌ Don'ts
 - NEVER import plugin names directly (e.g., `obsidian`, `youtube`) — always use the plugin manifests

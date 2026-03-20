@@ -10,10 +10,16 @@ from commands.helpers import build_engine, fmt_duration, make_filters, out
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("search")
     @click.argument("query")
-    @click.option("--mode", type=click.Choice(["semantic", "keyword"]), default="semantic")
-    @click.option("--limit", type=int, default=5)
-    @click.option("--source", type=click.Choice(list(plugin_manifests.keys())), default=None)
-    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    @click.option(
+        "--mode", type=click.Choice(["semantic", "keyword"]), default="semantic"
+    )
+    @click.option("--limit", "-l", type=int, default=5)
+    @click.option(
+        "--source", type=click.Choice(list(plugin_manifests.keys())), default=None
+    )
+    @click.option(
+        "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
+    )
     @click.pass_context
     def search_cmd(ctx, query, mode, limit, source, fmt, **kwargs):
         engine, _, store = build_engine(ctx.obj["verbose"])
@@ -25,22 +31,32 @@ def register(plugin_manifests: dict) -> CommandManifest:
             results = store.semantic_search(vector, limit, filters)
 
         if fmt == "json":
-            out([{
-                "handle": r.handle,
-                "source_plugin": r.source_plugin,
-                "source_id": r.source_id,
-                "title": r.title,
-                "score": round(r.score, 4),
-                "duration_seconds": r.duration_seconds,
-                "privacy_status": r.privacy_status,
-                "excerpt": r.excerpt,
-            } for r in results], fmt)
+            out(
+                [
+                    {
+                        "handle": r.handle,
+                        "source_plugin": r.source_plugin,
+                        "source_id": r.source_id,
+                        "title": r.title,
+                        "score": round(r.score, 4),
+                        "duration_seconds": r.duration_seconds,
+                        "privacy_status": r.privacy_status,
+                        "excerpt": r.excerpt,
+                    }
+                    for r in results
+                ],
+                fmt,
+            )
         else:
             if not results:
                 click.echo("no results")
                 return
             for r in results:
-                dur = f"  duration={fmt_duration(r.duration_seconds)}" if r.duration_seconds else ""
+                dur = (
+                    f"  duration={fmt_duration(r.duration_seconds)}"
+                    if r.duration_seconds
+                    else ""
+                )
                 priv = f"  privacy={r.privacy_status}" if r.privacy_status else ""
                 click.echo(f"[{r.handle}] {r.title}{dur}{priv}")
                 click.echo(f"  score={round(r.score, 4)}  source={r.source_plugin}")
@@ -99,14 +115,17 @@ def _build_router() -> APIRouter:
             results = store.semantic_search(vector, limit, filters)
         else:
             raise HTTPException(status_code=400, detail="Invalid mode")
-        return [{
-            "handle": r.handle,
-            "source_plugin": r.source_plugin,
-            "source_id": r.source_id,
-            "title": r.title,
-            "excerpt": r.excerpt,
-            "score": r.score,
-            "duration_seconds": r.duration_seconds,
-        } for r in results]
+        return [
+            {
+                "handle": r.handle,
+                "source_plugin": r.source_plugin,
+                "source_id": r.source_id,
+                "title": r.title,
+                "excerpt": r.excerpt,
+                "score": r.score,
+                "duration_seconds": r.duration_seconds,
+            }
+            for r in results
+        ]
 
     return router

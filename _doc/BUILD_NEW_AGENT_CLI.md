@@ -350,37 +350,47 @@ commands/hello/
 
 Follow these conventions for consistent CLI options across all commands:
 
-#### Standard Short Forms
+#### Mandatory Short Forms
 
-| Option | Short Form | Example |
-|--------|------------|---------|
-| `--format` | `-F` | `--format json` / `-F yaml` |
-| `--port` | `-p` | `--port 8080` / `-p 8080` |
-| `--model` | `-m` | `--model gpt-4` / `-m gpt-4` |
-| `--host` | `-H` | `--host localhost` / `-H localhost` |
-| `--output` | `-o` | `--output file.txt` / `-o file.txt` |
-| `--limit` | `-l` | `--limit 10` / `-l 10` |
-| `--file` | `-f` | `--file config.yaml` / `-f config.yaml` |
+All options in the table below **must** have the specified short form in every command:
+
+| Option | Short | Used By |
+|--------|-------|---------|
+| `--format` | `-F` | All data output commands (search, list, sync, etc.) |
+| `--limit` | `-l` | Commands with pagination or item limits |
+| `--output` | `-o` | File output commands |
+| `--file` | `-f` | File input commands |
 
 #### Option Guidelines
 
 ```python
-# CORRECT: Always include short form for commonly-used options
-@click.option("--port", "-p", type=int, default=8000)
+# CORRECT: Always include short form for standard options
 @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
+@click.option("--limit", "-l", type=int, default=10)
 
-# INCORRECT: Missing short form
-@click.option("--port", type=int, default=8000)
+# INCORRECT: Missing short form (violates standard)
+@click.option("--format", "fmt", ...)
+@click.option("--limit", type=int, ...)
 
-# INCORRECT: Non-standard short form
-@click.option("--format", "-o", "fmt", ...)  # -o conflicts with --output
+# INCORRECT: Non-standard short form (conflicts with convention)
+@click.option("--format", "-o", "fmt", ...)  # -o reserved for --output
 ```
 
 #### Positional vs Options
 
-- **Positional args** (`@click.argument`): Only for required primary inputs (query, name, id)
-- **Options** (`@click.option`): For modifiers, format, limits, optional values
-- **Flags** (`is_flag=True`): For boolean toggles
+| Type | Decorator | When to Use |
+|------|-----------|-------------|
+| **Positional** | `@click.argument` | Required primary inputs (query, handle, id) |
+| **Option** | `@click.option` | Modifiers, format, limits, optional values |
+| **Flag** | `@click.option(is_flag=True)` | Boolean toggles |
+
+**Examples of correct usage:**
+```python
+@click.argument("query")                          # search query
+@click.argument("handle")                         # document handle
+@click.option("--source", type=click.Choice(...)) # filter (not positional)
+@click.option("--limit", "-l", ...)               # pagination
+```
 
 #### Multiple Values
 
@@ -389,6 +399,26 @@ Follow these conventions for consistent CLI options across all commands:
 @click.option("--source", multiple=True, help="Filter by source (can repeat)")
 
 # Usage: command --source a --source b --source c
+```
+
+#### Plugin-Aware Commands
+
+Commands that work with plugins (sync, search, list, reindex, retry-failures) should build `--source` choices dynamically:
+
+```python
+def register(plugin_manifests: dict) -> CommandManifest:
+    source_choices = list(plugin_manifests.keys()) + ["all"]
+
+    @click.command("my-command")
+    @click.option("--source", type=click.Choice(source_choices), default="all")
+    # ...
+```
+
+**Standard plugin-aware command structure:**
+```python
+@click.command("plugin-command")
+@click.option("--source", type=click.Choice(source_choices), default="all")
+@click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
 ```
 
 ---
