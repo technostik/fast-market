@@ -41,9 +41,9 @@ telegram:
 Send a message and wait for the user's reply:
 
 ```bash
-message ask -m "Do you want to continue?"
-message ask -m "What is your name?" --timeout 60
-message ask -m "Select an option" --format json
+message ask "Do you want to continue?"
+message ask "What is your name?" --timeout 60
+message ask "Select an option" --format json
 ```
 
 ### Send an Alert
@@ -51,15 +51,15 @@ message ask -m "Select an option" --format json
 Fire-and-forget notification:
 
 ```bash
-message alert -m "Build complete!"
-message alert -m "Deploy finished" --format json
+message alert "Build complete!"
+message alert "Deploy finished" --format json
 ```
 
 Alert with acknowledgment wait:
 
 ```bash
-message alert -m "Deployment started" --wait
-message alert -m "Please confirm" --wait --timeout 120
+message alert "Deployment started" --wait
+message alert "Please confirm" --wait --timeout 120
 ```
 
 ## Commands
@@ -69,8 +69,10 @@ message alert -m "Please confirm" --wait --timeout 120
 Send a message and wait for a reply.
 
 ```
+Arguments:
+  MESSAGE    Message to send to user
+
 Options:
-  -m, --message TEXT    Message to send to user  [required]
   --source [telegram]  Messaging platform to use
   --format [json|text] Output format
   --timeout INTEGER    Timeout in seconds (0 = no timeout, default from config)
@@ -81,8 +83,10 @@ Options:
 Send a notification message.
 
 ```
+Arguments:
+  MESSAGE    Message to send to user
+
 Options:
-  -m, --message TEXT    Message to send to user  [required]
   --source [telegram]   Messaging platform to use
   --format [json|text]  Output format
   --wait                Wait for acknowledgment instead of fire-and-forget
@@ -129,7 +133,7 @@ message-agent/
 
 ```bash
 # Wait for deployment approval
-response=$(message ask -m "Deploy to production?" --timeout 600)
+response=$(message ask "Deploy to production?" --timeout 600)
 if [ "$response" = "yes" ]; then
   deploy_to_production
 fi
@@ -139,17 +143,17 @@ fi
 
 ```bash
 # Start backup
-message alert -m "Backup started"
+message alert "Backup started"
 
 # ... run backup ...
 
 # Notify completion
-message alert -m "Backup complete!" --wait
+message alert "Backup complete!" --wait
 ```
 
 ### Interactive CLI
 
 ```bash
 # Ask for confirmation
-message ask -m "Delete all data?" --timeout 60
+message ask "Delete all data?" --timeout 60
 ```

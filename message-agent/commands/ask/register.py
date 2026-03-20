@@ -9,12 +9,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     source_choices = list(plugin_manifests.keys())
 
     @click.command("ask")
-    @click.option(
-        "--message",
-        "-m",
-        required=True,
-        help="Message to send to user",
-    )
+    @click.argument("message")
     @click.option(
         "--source",
         type=click.Choice(source_choices),
