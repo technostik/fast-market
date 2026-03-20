@@ -9,9 +9,9 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
-from core.rule_engine import evaluate_rule
 from core.executor import execute_action
 from core.models import TriggerLog
+from core.rule_engine import evaluate_rule
 from core.time_scheduler import should_run_rule
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
@@ -76,7 +76,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 continue
 
             plugin_cls = plugin_manifests[source.plugin].source_plugin_class
-            plugin_instance = plugin_cls(config, {"identifier": source.identifier})
+            plugin_instance = plugin_cls(
+                config,
+                {
+                    "identifier": source.identifier,
+                    "metadata": source.metadata,
+                    "last_check": source.last_check,
+                },
+            )
 
             try:
                 if force:
@@ -119,7 +126,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             elif force and items:
                 if not cron:
                     click.echo(
-                        f"  → Force mode: NOT updating last_fetched_at",
+                        "  → Force mode: NOT updating last_fetched_at",
                         err=True,
                     )
 

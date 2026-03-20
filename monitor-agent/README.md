@@ -4,7 +4,7 @@ Rule-based content monitoring agent that watches web sources and triggers action
 
 ## Features
 
-- **Source Monitoring**: Watch YouTube channels and RSS feeds for new content
+- **Source Monitoring**: Watch YouTube channels, RSS feeds, and search keywords for new content
 - **Rule Engine**: Define conditions with AND/OR logic and operators like `==`, `>`, `contains`, `matches`
 - **DSL Conditions**: Human-readable condition syntax (e.g., `content_type == 'video' and duration > 600`)
 - **Time-Based Scheduling**: Schedule rules with cron expressions or intervals
@@ -38,6 +38,28 @@ Monitor stores data in XDG-compliant directories:
 
 No YAML configuration file required — all settings are stored in the SQLite database.
 
+## Source Cooldown
+
+All sources have a built-in cooldown to prevent excessive fetching:
+
+| Plugin | Default Interval | Configurable |
+|--------|------------------|--------------|
+| All plugins | `15m` | Yes |
+
+Set `check_interval` in source metadata to control cooldown:
+
+```bash
+# More frequent checks
+monitor setup source-add --plugin youtube --identifier UC123456789 \
+  --meta check_interval=5m
+
+# Less frequent checks
+monitor setup source-add --plugin rss --identifier https://example.com/feed.xml \
+  --meta check_interval=1h
+```
+
+If no `check_interval` is set, all sources default to 15 minutes.
+
 ## CLI Reference
 
 ### `monitor setup`
@@ -55,10 +77,65 @@ monitor setup source-add --plugin youtube --identifier UC123456789
 # RSS feed
 monitor setup source-add --plugin rss --identifier https://example.com/feed.xml
 
-# With description and metadata
-monitor setup source-add --plugin youtube --identifier UC123456789 \
-  --description "Tech Reviews" \
-  --meta theme=technology --meta priority=high
+# YouTube search by keywords (with config)
+monitor setup source-add --plugin yt-search \
+  --identifier "AI tutorial machine learning" \
+  --meta theme=technology \
+  --meta check_interval=30m \
+  --meta min_views=5000 \
+  --meta max_results=30
+
+**yt-search Metadata Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `check_interval` | `15m` | Minimum time between searches (e.g., `15m`, `1h`, `30m`) |
+| `min_views` | `1000` | Minimum view count to include (filters low-view videos) |
+| `max_results` | `50` | Maximum videos to fetch per search |
+| `theme` | - | User-defined theme (used in rules: `source_metadata.theme`) |
+
+**YouTube Search Advanced Syntax:**
+
+YouTube search keywords support advanced operators:
+
+```bash
+# Exclude shorts
+monitor setup source-add --plugin yt-search \
+  --identifier "AI tutorial -shorts"
+
+# OR operator (pipe)
+monitor setup source-add --plugin yt-search \
+  --identifier "cat video | dog video"
+
+# Exact phrase
+monitor setup source-add --plugin yt-search \
+  --identifier "\"machine learning\" basics"
+
+# Date range
+monitor setup source-add --plugin yt-search \
+  --identifier "AI tutorial 2024..2026"
+
+# Exclude specific terms
+monitor setup source-add --plugin yt-search \
+  --identifier "python -beginner -tutorial"
+
+# Combined advanced search
+monitor setup source-add --plugin yt-search \
+  --identifier "\"machine learning\" tutorial -shorts | \"deep learning\""
+```
+
+**Example: YouTube Search Rule**
+
+```bash
+# Add rule to trigger on new AI tutorial videos with 5000+ views
+monitor setup rule-add --name "AI Tutorials" \
+  --conditions "source_plugin == 'yt-search' and extra.views > 5000" \
+  --action-ids notify
+
+# Rule for popular shorts from tech search
+monitor setup rule-add --name "Popular Tech Shorts" \
+  --conditions "source_plugin == 'yt-search' and extra.is_short == True and extra.views > 10000" \
+  --action-ids notify
 ```
 
 #### `monitor setup source-list`
@@ -249,11 +326,26 @@ monitor setup rule-add --name "Tech Videos or Priority Shorts" \
 | `id`, `title`, `url` | string | Item fields |
 | `content_type` | string | video, short, article |
 | `published_at` | datetime | Item publish time |
-| `source_plugin` | string | youtube, rss |
+| `source_plugin` | string | youtube, rss, yt-search |
 | `source_identifier` | string | Channel ID or RSS URL |
 | `source_description` | string | Source description |
 | `source_metadata` | dict | Source metadata key-value pairs |
 | `extra.*` | any | Plugin-specific fields (duration_seconds, categories, etc.) |
+
+**YouTube Search (yt-search) Extra Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `extra.search_keywords` | string | Search keywords used |
+| `extra.channel_id` | string | Video's source channel ID |
+| `extra.channel_name` | string | Video's source channel name |
+| `extra.duration_seconds` | int | Video duration in seconds |
+| `extra.views` | int | Video view count |
+| `extra.likes` | int | Like count |
+| `extra.comments` | int | Comment count |
+| `extra.is_short` | bool | True if video is a short (< 3 min) |
+| `extra.tags` | list | Video tags |
+| `extra.categories` | list | Video categories |
 
 **Operators:**
 
@@ -721,7 +813,7 @@ crontab -e
 ```
 monitor-agent/
 ├── core/              # Rule engine, executor, storage
-├── plugins/           # youtube, rss source plugins
+├── plugins/           # youtube, rss, yt_search source plugins
 ├── commands/          # CLI commands
 └── monitor_entry/    # Entry point
 ```

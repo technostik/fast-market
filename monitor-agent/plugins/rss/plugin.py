@@ -19,6 +19,9 @@ class RSSPlugin(SourcePlugin):
         limit: int = 50,
         last_fetched_at: datetime | None = None,
     ) -> list[ItemMetadata]:
+        if not self._should_fetch():
+            return []
+
         rss_url = self.source_config["identifier"]
         feed = feedparser.parse(rss_url)
 

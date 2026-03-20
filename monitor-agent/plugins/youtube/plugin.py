@@ -314,6 +314,9 @@ class YouTubePlugin(SourcePlugin):
         last_fetched_at: datetime | None = None,
     ) -> list[ItemMetadata]:
         """Fetch new videos from YouTube channel with RSS fallback to yt-dlp"""
+        if not self._should_fetch():
+            return []
+
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
 
         # First check if RSS is available

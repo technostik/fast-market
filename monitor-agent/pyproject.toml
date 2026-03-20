@@ -38,6 +38,7 @@ packages = [
     "plugins",
     "plugins.youtube",
     "plugins.rss",
+    "plugins.yt_search",
     "commands",
     "commands.setup",
     "commands.run",
