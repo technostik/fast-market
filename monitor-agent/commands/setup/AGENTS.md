@@ -92,12 +92,24 @@ monitor setup action-edit <action-id> --command 'new command'
 ```
 
 ### rule-edit
-Edit an existing rule.
+Edit an existing rule interactively or with options.
+
+**Interactive mode** (`-i` flag):
+```
+monitor setup rule-edit <rule-id> -i  # Opens $EDITOR with DSL format
+monitor setup rule-edit <rule-id> -i --editor vim
+```
+
+**With options**:
 ```
 monitor setup rule-edit <rule-id> --name "New name"
+monitor setup rule-edit <rule-id> --conditions "content_type == 'video'"
+monitor setup rule-edit <rule-id> --cron "0 6 * * *"
 monitor setup rule-edit <rule-id> --rule-file new-conditions.yaml
 monitor setup rule-edit <rule-id> --action-ids new-action-id
 ```
+
+The interactive editor opens your `$EDITOR` (default: nano) with the rule in human-readable DSL format. Shows helpful comments and validates on save.
 
 ### config-show
 Show configuration file paths or export all config.

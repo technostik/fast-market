@@ -97,6 +97,27 @@ class MonitorStorage:
             except Exception:
                 pass
 
+            try:
+                conn.execute("""
+                    ALTER TABLE rules ADD COLUMN schedule TEXT
+                """)
+            except Exception:
+                pass
+
+            try:
+                conn.execute("""
+                    ALTER TABLE rules ADD COLUMN timezone TEXT DEFAULT 'UTC'
+                """)
+            except Exception:
+                pass
+
+            try:
+                conn.execute("""
+                    ALTER TABLE rules ADD COLUMN last_triggered_at TEXT
+                """)
+            except Exception:
+                pass
+
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
         conn = sqlite3.connect(str(self.db_path))
@@ -231,8 +252,8 @@ class MonitorStorage:
     def add_rule(self, rule: Rule) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO rules (id, name, conditions, action_ids, enabled, description, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO rules (id, name, conditions, action_ids, enabled, description, created_at, schedule, timezone, last_triggered_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rule.id,
                     rule.name,
@@ -241,6 +262,9 @@ class MonitorStorage:
                     int(rule.enabled),
                     rule.description,
                     rule.created_at.isoformat(),
+                    json.dumps(rule.schedule) if rule.schedule else None,
+                    rule.timezone,
+                    rule.last_triggered_at.isoformat() if rule.last_triggered_at else None,
                 ),
             )
 
@@ -248,13 +272,16 @@ class MonitorStorage:
         with self._get_conn() as conn:
             conn.execute(
                 """UPDATE rules SET name = ?, conditions = ?, action_ids = ?, enabled = ?,
-                   description = ? WHERE id = ?""",
+                   description = ?, schedule = ?, timezone = ?, last_triggered_at = ? WHERE id = ?""",
                 (
                     rule.name,
                     json.dumps(rule.conditions),
                     json.dumps(rule.action_ids),
                     int(rule.enabled),
                     rule.description,
+                    json.dumps(rule.schedule) if rule.schedule else None,
+                    rule.timezone,
+                    rule.last_triggered_at.isoformat() if rule.last_triggered_at else None,
                     rule.id,
                 ),
             )
@@ -262,6 +289,13 @@ class MonitorStorage:
     def delete_rule(self, rule_id: str) -> None:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
+
+    def update_rule_last_triggered_at(self, rule_id: str, last_triggered_at: datetime) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE rules SET last_triggered_at = ? WHERE id = ?",
+                (last_triggered_at.isoformat(), rule_id),
+            )
 
     def rename_id(self, old_id: str, new_id: str) -> tuple[str | None, str]:
         """Rename an entity ID across sources, actions, and rules.
@@ -470,6 +504,10 @@ class MonitorStorage:
         )
 
     def _row_to_rule(self, row: sqlite3.Row) -> Rule:
+        schedule_val = row["schedule"] if "schedule" in row.keys() else None
+        timezone_val = row["timezone"] if "timezone" in row.keys() else "UTC"
+        last_triggered_val = row["last_triggered_at"] if "last_triggered_at" in row.keys() else None
+
         return Rule(
             id=row["id"],
             name=row["name"],
@@ -478,6 +516,11 @@ class MonitorStorage:
             enabled=bool(row["enabled"]),
             description=row["description"],
             created_at=datetime.fromisoformat(row["created_at"]),
+            schedule=json.loads(schedule_val) if schedule_val else None,
+            timezone=timezone_val,
+            last_triggered_at=datetime.fromisoformat(last_triggered_val)
+            if last_triggered_val
+            else None,
         )
 
     def _row_to_trigger_log(self, row: sqlite3.Row) -> TriggerLog:

@@ -28,6 +28,19 @@ monitor-agent/
 - Dot notation for nested fields (`extra.duration_seconds`)
 - Regex support via `matches` operator
 
+### DSL Condition Syntax
+- Human-readable condition strings (e.g., `content_type == 'video' and duration > 600`)
+- Parse with `RuleParser` class
+- Format back with `RuleFormatter` class
+- Supports logical operators: `and`, `or`, parentheses grouping
+
+### Time-Based Scheduling
+- Schedule rules with cron expressions or intervals
+- Cron: `--cron "0 * * * *"` for hourly runs
+- Intervals: `--interval "30m"` for periodic runs
+- Timezone support for scheduled rules
+- `should_run_rule()` checks if rule should trigger
+
 ### Action Execution
 - Shell script execution with placeholder substitution
 - Placeholders: `$ITEM_TITLE`, `$ITEM_URL`, `$SOURCE_ID`, `$RULE_NAME`, etc.
@@ -52,11 +65,14 @@ Commands:
   status/ → Storage (statistics)
 
 Core:
-  models.py       → Dataclasses: Source, Action, Rule, ItemMetadata, TriggerLog
-  rule_engine.py  → evaluate_rule() recursive evaluator
-  executor.py     → execute_action() with placeholders
-  storage.py      → MonitorStorage with SQLite
-  scheduler.py    → XDG path utilities
+  models.py           → Dataclasses: Source, Action, Rule, ItemMetadata, TriggerLog
+  rule_engine.py      → evaluate_rule() recursive evaluator
+  rule_parser.py      → DSL string to internal format parser
+  rule_formatter.py   → Internal format to DSL string formatter
+  executor.py         → execute_action() with placeholders
+  storage.py          → MonitorStorage with SQLite
+  scheduler.py        → XDG path utilities
+  time_scheduler.py   → Cron/interval scheduling logic
 ```
 
 ## ✅ System-Wide Do's
@@ -71,6 +87,8 @@ Core:
 - Use `all` for AND conditions, `any` for OR conditions
 - Nest groups for complex logic (max 3 levels recommended)
 - Test rules with `--force --dry-run` before production
+- Use DSL syntax for human-readable conditions: `content_type == 'video' and duration > 600`
+- Schedule rules with `--cron` or `--interval` options
 
 ### Plugin Development
 - Implement `fetch_new_items()` as async method
@@ -118,6 +136,16 @@ Core:
 1. Update `_evaluate_single_condition()` in `core/rule_engine.py`
 2. Add operator case with clear error message for unknown operators
 3. Add tests for the new operator
+
+### Add DSL Parser Feature
+1. Update `core/rule_parser.py` tokenizer or expression handlers
+2. Update `core/rule_formatter.py` to handle new syntax
+3. Add tests for parsing, formatting, and round-trip
+
+### Add Schedule Type
+1. Update `core/time_scheduler.py` with new trigger logic
+2. Add validation function for the new schedule format
+3. Update `should_run_rule()` to handle the new type
 
 ### Customize Placeholder Substitution
 1. Modify `placeholders` dict in `core/executor.py`
@@ -193,10 +221,33 @@ monitor setup action-add --replace-id telegram-notify --command 'new command'
 monitor setup rule-add --id tech-shorts --name "Tech Shorts" \
   --rule-file rule.yaml --action-ids telegram-notify
 
-# Add inline rule
-monitor setup rule-add --name "YouTube Shorts" \
-  --conditions '{"all":[{"field":"content_type","operator":"==","value":"short"}]}' \
+# Add inline rule with DSL (human-readable)
+monitor setup rule-add --name "Tech Videos" \
+  --conditions "source_plugin == 'youtube' and content_type == 'video' and extra.duration > 600" \
   --action-ids <action-id>
+
+# Add rule with DSL OR conditions
+monitor setup rule-add --name "YouTube or RSS" \
+  --conditions "source_plugin == 'youtube' or source_plugin == 'rss'" \
+  --action-ids <action-id>
+
+# Add rule with cron scheduling (hourly)
+monitor setup rule-add --name "Hourly Check" \
+  --conditions "content_type == 'video'" \
+  --cron "0 * * * *" \
+  --action-ids <action-id>
+
+# Add rule with interval scheduling (every 30 minutes)
+monitor setup rule-add --name "Frequent Check" \
+  --conditions "source_metadata.priority == 'high'" \
+  --interval "30m" \
+  --action-ids <action-id>
+
+# Validate DSL condition without saving
+monitor setup rule-validate "title matches '.*AI.*' and duration > 300"
+
+# Show rule in human-readable format
+monitor setup rule-show tech-shorts
 
 # Run monitoring (normal mode)
 monitor run

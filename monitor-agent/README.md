@@ -6,6 +6,8 @@ Rule-based content monitoring agent that watches web sources and triggers action
 
 - **Source Monitoring**: Watch YouTube channels and RSS feeds for new content
 - **Rule Engine**: Define conditions with AND/OR logic and operators like `==`, `>`, `contains`, `matches`
+- **DSL Conditions**: Human-readable condition syntax (e.g., `content_type == 'video' and duration > 600`)
+- **Time-Based Scheduling**: Schedule rules with cron expressions or intervals
 - **Action Execution**: Run shell scripts with content placeholders
 - **Incremental Tracking**: Avoid processing the same content twice
 - **Force Mode**: Test rules without affecting tracking state
@@ -148,12 +150,17 @@ monitor setup rule-add --name "Long Videos" \
   --rule-file rule.yaml \
   --action-ids telegram-notify
 
-# With custom ID
-monitor setup rule-add --id tech-shorts --name "Tech Shorts" \
-  --rule-file shorts.yaml \
+# With DSL conditions (human-readable)
+monitor setup rule-add --name "Tech Videos" \
+  --conditions "source_plugin == 'youtube' and content_type == 'video' and extra.duration > 600" \
   --action-ids telegram-notify
 
-# Inline (JSON)
+# With custom ID
+monitor setup rule-add --id tech-shorts --name "Tech Shorts" \
+  --conditions "content_type == 'short'" \
+  --action-ids telegram-notify
+
+# Inline JSON (legacy format)
 monitor setup rule-add --name "YouTube Shorts" \
   --conditions '{"all":[{"field":"content_type","operator":"==","value":"short"}]}' \
   --action-ids telegram-notify
@@ -163,7 +170,64 @@ monitor setup rule-add --replace-id tech-shorts --name "Tech Shorts" \
   --rule-file new-shorts.yaml --action-ids telegram-notify
 ```
 
-**Rule Condition Format:**
+### DSL Condition Syntax
+
+Rules support a human-readable condition DSL in addition to JSON format:
+
+```bash
+# Simple equality
+monitor setup rule-add --name "Videos" \
+  --conditions "content_type == 'video'" \
+  --action-ids notify
+
+# Comparison operators
+monitor setup rule-add --name "Long Videos" \
+  --conditions "extra.duration > 600" \
+  --action-ids notify
+
+# Regex matching
+monitor setup rule-add --name "AI Videos" \
+  --conditions "title matches '.*AI.*'" \
+  --action-ids notify
+
+# AND conditions
+monitor setup rule-add --name "Tech Videos" \
+  --conditions "source_plugin == 'youtube' and extra.duration > 600" \
+  --action-ids notify
+
+# OR conditions
+monitor setup rule-add --name "YouTube or RSS" \
+  --conditions "source_plugin == 'youtube' or source_plugin == 'rss'" \
+  --action-ids notify
+
+# Nested grouping with parentheses
+monitor setup rule-add --name "Tech Videos or Priority Shorts" \
+  --conditions "(source_plugin == 'youtube' and content_type == 'video') or (source_metadata.priority == 'high' and content_type == 'short')" \
+  --action-ids notify
+```
+
+**DSL Operators:**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `==` | Equals | `content_type == 'video'` |
+| `!=` | Not equals | `source_plugin != 'rss'` |
+| `>` | Greater than | `extra.duration > 600` |
+| `<` | Less than | `extra.views < 100` |
+| `>=` | Greater or equal | `extra.rating >= 4.5` |
+| `<=` | Less or equal | `extra.word_count <= 500` |
+| `contains` | List contains | `extra.categories contains 'tech'` |
+| `matches` | Regex match | `title matches '.*AI.*'` |
+
+**Logical Operators:**
+
+| Operator | Description |
+|----------|-------------|
+| `and` | All conditions must match |
+| `or` | Any condition can match |
+| `()` | Group conditions |
+
+**Rule Condition Format (JSON):**
 
 ```json
 {
@@ -197,6 +261,80 @@ monitor setup rule-add --replace-id tech-shorts --name "Tech Shorts" \
 | `<=` | Less or equal | `{"field": "extra.views", "operator": "<=", "value": 100}` |
 | `contains` | Contains value | `{"field": "extra.categories", "operator": "contains", "value": "tech"}` |
 | `matches` | Regex match | `{"field": "title", "operator": "matches", "value": ".*AI.*"}` |
+
+### Time-Based Rule Scheduling
+
+Rules can be scheduled to run at specific times using cron expressions or intervals.
+
+```bash
+# Run hourly (at minute 0 of every hour)
+monitor setup rule-add --name "Hourly Check" \
+  --conditions "content_type == 'video'" \
+  --cron "0 * * * *" \
+  --action-ids notify
+
+# Run every 30 minutes
+monitor setup rule-add --name "Frequent Check" \
+  --conditions "source_metadata.priority == 'high'" \
+  --interval "30m" \
+  --action-ids notify
+
+# Run daily at 6 AM (UTC timezone)
+monitor setup rule-add --name "Daily Digest" \
+  --conditions "content_type == 'article'" \
+  --cron "0 6 * * *" \
+  --timezone "UTC" \
+  --action-ids notify
+
+# Run every 2 hours
+monitor setup rule-add --name "Every 2 Hours" \
+  --conditions "source_plugin == 'youtube'" \
+  --interval "2h" \
+  --action-ids notify
+```
+
+**Scheduling Options:**
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--cron` | Cron expression (minute hour day month weekday) | `0 * * * *` (hourly) |
+| `--interval` | Time interval | `5m`, `1h`, `1d` |
+| `--timezone` | Timezone for schedule (default: UTC) | `America/New_York` |
+
+**Interval Format:**
+
+| Unit | Description | Examples |
+|------|-------------|----------|
+| `s` | Seconds | `30s` |
+| `m` | Minutes | `5m`, `30m` |
+| `h` | Hours | `1h`, `2h`, `24h` |
+| `d` | Days | `1d`, `7d` |
+
+**Cron Format:**
+
+```
+┌───────────── minute (0-59)
+│ ┌───────────── hour (0-23)
+│ │ ┌───────────── day of month (1-31)
+│ │ │ ┌───────────── month (1-12)
+│ │ │ │ ┌───────────── day of week (0-6, Sunday=0)
+│ │ │ │ │
+* * * * *
+```
+
+**Common Cron Examples:**
+
+| Expression | Description |
+|------------|-------------|
+| `0 * * * *` | Every hour at minute 0 |
+| `*/5 * * * *` | Every 5 minutes |
+| `0 6 * * *` | Every day at 6 AM |
+| `0 6 * * 1-5` | Weekdays at 6 AM |
+| `30 18 * * *` | Every day at 6:30 PM |
+
+**Rules without schedule:**
+
+Rules without `--cron` or `--interval` will run every time `monitor run` is executed (default behavior).
 
 **Example Rule Files:**
 
@@ -258,11 +396,26 @@ monitor setup rule-delete --id <rule-uuid>
 
 #### `monitor setup rule-edit`
 
-Edit an existing rule.
+Edit an existing rule interactively or with options.
 
 ```bash
+# Interactive editor (opens your $EDITOR with DSL format)
+monitor setup rule-edit tech-shorts -i
+
+# With specific editor
+monitor setup rule-edit tech-shorts -i --editor vim
+
 # Update name
 monitor setup rule-edit tech-shorts --name "New Tech Shorts"
+
+# Update conditions with DSL
+monitor setup rule-edit tech-shorts --conditions "content_type == 'short' and extra.views > 1000"
+
+# Update schedule
+monitor setup rule-edit tech-shorts --cron "0 6 * * *"
+
+# Remove schedule (run on every monitor run)
+monitor setup rule-edit tech-shorts --no-schedule
 
 # Update conditions from file
 monitor setup rule-edit tech-shorts --rule-file new-conditions.yaml
@@ -272,6 +425,49 @@ monitor setup rule-edit tech-shorts --action-ids new-action-id
 
 # Disable a rule
 monitor setup rule-edit tech-shorts --disable
+```
+
+**Interactive Editor:**
+
+Use `-i` flag to open your preferred editor (from `$EDITOR` or defaults to `nano`) with the rule in human-readable DSL format:
+
+```yaml
+name: Tech Shorts
+description: My tech shorts rule
+actions: [notify, backup]
+timezone: UTC
+conditions: |
+  (source == 'youtube' and content_type == 'short') or
+  (priority == 'high' and title matches '.*AI.*')
+```
+
+The editor shows helpful comments explaining the DSL syntax. After saving, the rule is validated and saved. If there are errors, you can re-edit.
+
+#### `monitor setup rule-validate`
+
+Validate a DSL condition string without saving.
+
+```bash
+# Validate a simple condition
+monitor setup rule-validate "content_type == 'video'"
+
+# Validate complex conditions
+monitor setup rule-validate "(source_plugin == 'youtube' and content_type == 'video') or source_metadata.priority == 'high'"
+```
+
+#### `monitor setup rule-show`
+
+Show a rule in human-readable format.
+
+```bash
+# Show as DSL (default)
+monitor setup rule-show tech-shorts
+
+# Show as JSON
+monitor setup rule-show tech-shorts --format json
+
+# Show as YAML
+monitor setup rule-show tech-shorts --format yaml
 ```
 
 #### `monitor setup list`

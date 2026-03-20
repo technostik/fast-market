@@ -56,6 +56,9 @@ class Rule:
     enabled: bool = True
     description: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
+    schedule: dict | None = None
+    timezone: str = "UTC"
+    last_triggered_at: datetime | None = None
 
 
 @dataclass(slots=True)

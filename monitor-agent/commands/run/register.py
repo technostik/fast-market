@@ -12,6 +12,7 @@ from commands.helpers import get_storage, out_formatted
 from core.rule_engine import evaluate_rule
 from core.executor import execute_action
 from core.models import TriggerLog
+from core.time_scheduler import should_run_rule
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
 
@@ -102,6 +103,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
             for item in items:
                 for rule in rules:
                     try:
+                        if not should_run_rule(rule):
+                            if not cron:
+                                click.echo(f"  Skipping {rule.name} (schedule not due)", err=True)
+                            continue
                         if evaluate_rule(rule, item, source):
                             triggered.append({"rule": rule, "item": item, "source": source})
                     except Exception as e:
@@ -123,6 +128,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             item = entry["item"]
             source = entry["source"]
 
+            triggered_at = datetime.now(timezone.utc)
             if not dry_run:
                 for action_id in rule.action_ids:
                     action = storage.get_action(action_id)
@@ -145,13 +151,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                     item_title=item.title,
                                     item_url=item.url,
                                     item_extra=item.extra,
-                                    triggered_at=datetime.now(timezone.utc),
+                                    triggered_at=triggered_at,
                                     exit_code=code,
                                     output=output,
                                 )
                             )
 
-                            action.last_run = datetime.now(timezone.utc)
+                            storage.update_rule_last_triggered_at(rule.id, triggered_at)
+
+                            action.last_run = triggered_at
                             action.last_output = output
                             action.last_exit_code = code
                             storage.update_action(action)

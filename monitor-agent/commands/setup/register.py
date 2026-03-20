@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +15,156 @@ import yaml
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted, to_dict
 from core.models import Source, Action, Rule
+from core.rule_parser import RuleParser, RuleParseError
+from core.rule_formatter import RuleFormatter
+from core.time_scheduler import validate_cron_expression, validate_interval_expression
+
+
+def _interactive_rule_edit(rule, parser, formatter, storage, editor_cmd, fmt):
+    """Open an interactive editor to edit a rule in DSL format."""
+    current_dsl = formatter.format(rule.conditions, pretty=True)
+
+    schedule_yaml = ""
+    if rule.schedule:
+        if "cron" in rule.schedule:
+            schedule_yaml = f"schedule:\n  cron: {rule.schedule['cron']}\n"
+        elif "interval" in rule.schedule:
+            schedule_yaml = f"schedule:\n  interval: {rule.schedule['interval']}\n"
+    else:
+        schedule_yaml = '# schedule:\n#   cron: "0 * * * *"  # uncomment to add cron schedule\n#   interval: "1h"  # uncomment to add interval schedule\n'
+
+    actions_yaml = ", ".join(rule.action_ids)
+
+    template = f"""# Edit rule: {rule.id}
+# Lines starting with # are comments and will be ignored.
+#
+# DSL Condition Syntax:
+#   - Operators: ==, !=, >, <, >=, <=, contains, matches
+#   - Logical: and, or, parentheses for grouping
+#   Examples:
+#     content_type == 'video'
+#     extra.duration > 600
+#     title matches '.*AI.*'
+#     (source == 'youtube' and type == 'video') or priority == 'high'
+#
+# Schedule (optional, uncomment one):
+{schedule_yaml}#
+# Available options:
+#   schedule: cron expression like "0 * * * *" (minute hour day month weekday)
+#   schedule: interval like "30m", "1h", "2h", "1d"
+#   timezone: e.g., "UTC", "America/New_York"
+
+name: {rule.name}
+description: {rule.description or ""}
+actions: [{actions_yaml}]
+timezone: {rule.timezone}
+conditions: |
+  {current_dsl}
+""".strip()
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp_file:
+        tmp_path = Path(tmp_file.name)
+        tmp_file.write(template)
+
+    try:
+        while True:
+            editor_path = shutil.which(editor_cmd)
+            if not editor_path:
+                click.echo(
+                    f"Error: Editor '{editor_cmd}' not found. Install it or set $EDITOR.", err=True
+                )
+                return
+
+            result = subprocess.run(
+                [editor_cmd, str(tmp_path)],
+                check=False,
+            )
+
+            if result.returncode != 0:
+                click.echo("Editor closed with error. Rule not saved.", err=True)
+                return
+
+            with open(tmp_path) as f:
+                content = f.read()
+
+            try:
+                edited_rule = yaml.safe_load(content)
+            except yaml.YAMLError as e:
+                click.echo(f"YAML parse error: {e}", err=True)
+                click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                input()
+                continue
+
+            new_conditions_str = edited_rule.get("conditions", "").strip()
+            if new_conditions_str:
+                try:
+                    new_conditions = parser.parse(new_conditions_str)
+                except RuleParseError as e:
+                    click.echo(f"DSL parse error: {e}", err=True)
+                    click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                    input()
+                    continue
+            else:
+                click.echo("Error: conditions field cannot be empty", err=True)
+                click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                input()
+                continue
+
+            if edited_rule.get("schedule"):
+                sched = edited_rule["schedule"]
+                if isinstance(sched, dict):
+                    if "cron" in sched:
+                        if not validate_cron_expression(sched["cron"]):
+                            click.echo(f"Invalid cron expression: {sched['cron']}", err=True)
+                            click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                            input()
+                            continue
+                    elif "interval" in sched:
+                        if not validate_interval_expression(sched["interval"]):
+                            click.echo(f"Invalid interval: {sched['interval']}", err=True)
+                            click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                            input()
+                            continue
+                    else:
+                        click.echo("Invalid schedule format. Use 'cron' or 'interval'.", err=True)
+                        click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                        input()
+                        continue
+                else:
+                    click.echo(
+                        "Invalid schedule format. Use a dict with 'cron' or 'interval'.", err=True
+                    )
+                    click.echo("Press Enter to re-edit, Ctrl+C to cancel...", err=True)
+                    input()
+                    continue
+
+            rule.name = edited_rule.get("name", rule.name)
+            rule.description = edited_rule.get("description") or None
+            rule.conditions = new_conditions
+            rule.timezone = edited_rule.get("timezone", rule.timezone)
+
+            actions_str = edited_rule.get("actions", "")
+            if isinstance(actions_str, str):
+                rule.action_ids = [
+                    a.strip()
+                    for a in actions_str.replace("[", "").replace("]", "").split(",")
+                    if a.strip()
+                ]
+            elif isinstance(actions_str, list):
+                rule.action_ids = [str(a).strip() for a in actions_str if a]
+
+            if edited_rule.get("schedule"):
+                sched = edited_rule["schedule"]
+                rule.schedule = {"cron" if "cron" in sched else "interval": list(sched.values())[0]}
+            else:
+                rule.schedule = None
+
+            storage.update_rule(rule)
+            click.echo(f"Rule '{rule.name}' updated successfully.")
+            return
+
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -240,26 +394,87 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--conditions",
-        help="JSON string with rule conditions (alternative to --rule-file)",
+        help="Condition DSL string (e.g., \"content_type == 'video' and duration > 600\")",
     )
     @click.option("--action-ids", required=True, help="Comma-separated action IDs")
     @click.option("--description", help="Optional description")
+    @click.option("--cron", help="Cron schedule (e.g., '0 * * * *' for hourly)")
+    @click.option("--interval", help="Interval schedule (e.g., '1h', '30m', '1d')")
+    @click.option("--timezone", default="UTC", help="Timezone for schedule (default: UTC)")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def rule_add(custom_id, replace_id, name, rule_file, conditions, action_ids, description, fmt):
-        """Add or replace a rule."""
+    def rule_add(
+        custom_id,
+        replace_id,
+        name,
+        rule_file,
+        conditions,
+        action_ids,
+        description,
+        cron,
+        interval,
+        timezone,
+        fmt,
+    ):
+        """Add or replace a rule with DSL conditions and optional schedule.
+
+        Examples:
+            monitor setup rule-add --name "Tech Videos" \\
+                --conditions "content_type == 'video' and extra.theme == 'tech'" \\
+                --action-ids notify
+
+            monitor setup rule-add --name "Hourly Check" \\
+                --conditions "source_metadata.priority == 'high'" \\
+                --cron "0 * * * *" \\
+                --action-ids notify
+
+            monitor setup rule-add --name "Every 5 Minutes" \\
+                --conditions "extra.views > 1000" \\
+                --interval "5m" \\
+                --action-ids notify
+        """
         storage = get_storage()
+        parser = RuleParser()
 
         if rule_file:
             with open(rule_file) as f:
                 if rule_file.endswith(".json"):
                     conditions_data = json.load(f)
                 else:
-                    conditions_data = yaml.safe_load(f)
+                    yaml_data = yaml.safe_load(f)
+                    if "conditions" in yaml_data and isinstance(yaml_data["conditions"], str):
+                        try:
+                            conditions_data = parser.parse(yaml_data["conditions"])
+                        except RuleParseError as e:
+                            out_formatted({"error": f"Invalid DSL in rule file: {e}"}, fmt)
+                            return
+                    else:
+                        conditions_data = yaml_data
         elif conditions:
-            conditions_data = json.loads(conditions)
+            try:
+                conditions_data = parser.parse(conditions)
+            except RuleParseError as e:
+                out_formatted({"error": f"Invalid DSL conditions: {e}"}, fmt)
+                return
         else:
             out_formatted({"error": "Either --rule-file or --conditions required"}, fmt)
             return
+
+        schedule = None
+        if cron:
+            if not validate_cron_expression(cron):
+                out_formatted({"error": f"Invalid cron expression: {cron}"}, fmt)
+                return
+            schedule = {"cron": cron}
+        elif interval:
+            if not validate_interval_expression(interval):
+                out_formatted(
+                    {
+                        "error": f"Invalid interval expression: {interval}. Expected format: <number><unit> (e.g., '1h', '30m', '1d')"
+                    },
+                    fmt,
+                )
+                return
+            schedule = {"interval": interval}
 
         action_id_list = [aid.strip() for aid in action_ids.split(",")]
 
@@ -273,8 +488,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
             existing.conditions = conditions_data
             existing.action_ids = action_id_list
             existing.description = description
+            existing.schedule = schedule
+            existing.timezone = timezone
             storage.update_rule(existing)
-            out_formatted({"id": replace_id, "message": "Rule replaced"}, fmt)
+            out_formatted({"id": replace_id, "message": "Rule replaced", "schedule": schedule}, fmt)
             return
 
         rule_id = custom_id or str(uuid.uuid4())
@@ -293,15 +510,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
             action_ids=action_id_list,
             description=description,
             created_at=datetime.now(),
+            schedule=schedule,
+            timezone=timezone,
         )
 
         storage.add_rule(rule)
+        formatter = RuleFormatter()
+        dsl_conditions = formatter.format(rule.conditions)
         out_formatted(
             {
                 "id": rule.id,
                 "name": rule.name,
-                "conditions": rule.conditions,
+                "conditions_dsl": dsl_conditions,
                 "action_ids": rule.action_ids,
+                "schedule": schedule,
+                "timezone": timezone,
                 "message": "Rule added successfully",
             },
             fmt,
@@ -313,14 +536,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """List all configured rules."""
         storage = get_storage()
         rules = storage.get_all_rules()
+        formatter = RuleFormatter()
         out_formatted(
             [
                 {
                     "id": r.id,
                     "name": r.name,
+                    "conditions_dsl": formatter.format(r.conditions),
                     "conditions": r.conditions,
                     "action_ids": r.action_ids,
+                    "schedule": r.schedule,
+                    "timezone": r.timezone,
                     "description": r.description,
+                    "last_triggered_at": r.last_triggered_at.isoformat()
+                    if r.last_triggered_at
+                    else None,
                 }
                 for r in rules
             ],
@@ -338,6 +568,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
     @setup_group.command("rule-edit")
     @click.argument("rule_id")
+    @click.option(
+        "-i",
+        "--interactive",
+        "interactive",
+        is_flag=True,
+        help="Open interactive editor with DSL format",
+    )
     @click.option("--name", help="New rule name")
     @click.option(
         "--rule-file",
@@ -346,18 +583,70 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--conditions",
-        help="JSON string with new rule conditions",
+        help="DSL condition string (e.g., \"content_type == 'video' and duration > 600\")",
     )
     @click.option("--action-ids", help="Comma-separated action IDs")
     @click.option("--description", help="New description")
     @click.option("--enable/--disable", default=None, help="Enable or disable rule")
+    @click.option("--cron", help="Cron schedule (e.g., '0 * * * *' for hourly)")
+    @click.option("--interval", help="Interval schedule (e.g., '1h', '30m', '1d')")
+    @click.option("--timezone", help="Timezone for schedule")
+    @click.option("--no-schedule", is_flag=True, help="Remove schedule from rule")
+    @click.option("--editor", help="Editor to use (default: $EDITOR or nano)")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def rule_edit(rule_id, name, rule_file, conditions, action_ids, description, enable, fmt):
-        """Edit an existing rule."""
+    def rule_edit(
+        rule_id,
+        interactive,
+        name,
+        rule_file,
+        conditions,
+        action_ids,
+        description,
+        enable,
+        cron,
+        interval,
+        timezone,
+        no_schedule,
+        editor,
+        fmt,
+    ):
+        """Edit an existing rule interactively or with options.
+
+        Use -i/--interactive to open the editor with DSL format.
+
+        Examples:
+            monitor setup rule-edit my-rule -i  # Interactive editor
+            monitor setup rule-edit my-rule --name "New Name"
+            monitor setup rule-edit my-rule --conditions "content_type == 'video'"
+            monitor setup rule-edit my-rule --cron "0 6 * * *"
+            monitor setup rule-edit my-rule --no-schedule
+        """
         storage = get_storage()
+        parser = RuleParser()
+        formatter = RuleFormatter()
         existing = storage.get_rule(rule_id)
         if not existing:
             out_formatted({"error": f"Rule {rule_id} not found"}, fmt)
+            return
+
+        if interactive:
+            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            _interactive_rule_edit(existing, parser, formatter, storage, editor_cmd, fmt)
+            return
+        elif (
+            name is None
+            and not rule_file
+            and not conditions
+            and not action_ids
+            and not description
+            and enable is None
+            and not cron
+            and not interval
+            and not timezone
+            and not no_schedule
+        ):
+            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            _interactive_rule_edit(existing, parser, formatter, storage, editor_cmd, fmt)
             return
 
         if name is not None:
@@ -368,9 +657,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 if rule_file.endswith(".json"):
                     existing.conditions = json.load(f)
                 else:
-                    existing.conditions = yaml.safe_load(f)
+                    yaml_data = yaml.safe_load(f)
+                    if "conditions" in yaml_data and isinstance(yaml_data["conditions"], str):
+                        try:
+                            existing.conditions = parser.parse(yaml_data["conditions"])
+                        except RuleParseError as e:
+                            out_formatted({"error": f"Invalid DSL in rule file: {e}"}, fmt)
+                            return
+                    else:
+                        existing.conditions = yaml_data
         elif conditions:
-            existing.conditions = json.loads(conditions)
+            try:
+                existing.conditions = parser.parse(conditions)
+            except RuleParseError as e:
+                out_formatted({"error": f"Invalid DSL conditions: {e}"}, fmt)
+                return
 
         if action_ids is not None:
             existing.action_ids = [aid.strip() for aid in action_ids.split(",")]
@@ -381,10 +682,137 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if enable is not None:
             existing.enabled = enable
 
+        if no_schedule:
+            existing.schedule = None
+        elif cron:
+            if not validate_cron_expression(cron):
+                out_formatted({"error": f"Invalid cron expression: {cron}"}, fmt)
+                return
+            existing.schedule = {"cron": cron}
+        elif interval:
+            if not validate_interval_expression(interval):
+                out_formatted({"error": f"Invalid interval expression: {interval}"}, fmt)
+                return
+            existing.schedule = {"interval": interval}
+
+        if timezone is not None:
+            existing.timezone = timezone
+
         storage.update_rule(existing)
+        formatter = RuleFormatter()
         out_formatted(
-            {"id": existing.id, "message": "Rule updated", "rule": to_dict(existing)}, fmt
+            {
+                "id": existing.id,
+                "message": "Rule updated",
+                "rule": {
+                    "id": existing.id,
+                    "name": existing.name,
+                    "conditions_dsl": formatter.format(existing.conditions),
+                    "action_ids": existing.action_ids,
+                    "schedule": existing.schedule,
+                    "timezone": existing.timezone,
+                    "description": existing.description,
+                },
+            },
+            fmt,
         )
+
+    @setup_group.command("rule-validate")
+    @click.argument("condition_string")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    def rule_validate(condition_string, fmt):
+        """Validate a condition DSL string without saving.
+
+        Examples:
+            monitor setup rule-validate "content_type == 'video'"
+            monitor setup rule-validate "(source_plugin == 'youtube' and content_type == 'video') or source_metadata.priority == 'high'"
+        """
+        parser = RuleParser()
+        formatter = RuleFormatter()
+        try:
+            result = parser.parse(condition_string)
+            click.echo("Valid condition string")
+            click.echo(f"\nParsed DSL (normalized):")
+            click.echo(formatter.format(result))
+            click.echo(f"\nInternal format:")
+            out_formatted(result, fmt)
+        except RuleParseError as e:
+            out_formatted({"error": f"Invalid DSL: {e}"}, fmt)
+
+    @setup_group.command("rule-show")
+    @click.argument("rule_id")
+    @click.option("--format", type=click.Choice(["dsl", "json", "yaml"]), default="dsl")
+    def rule_show(rule_id, format):
+        """Show a rule in human-readable format.
+
+        Examples:
+            monitor setup rule-show my-rule
+            monitor setup rule-show my-rule --format json
+        """
+        storage = get_storage()
+        rule = storage.get_rule(rule_id)
+        if not rule:
+            click.echo(f"Error: Rule {rule_id} not found", err=True)
+            return
+
+        formatter = RuleFormatter()
+
+        if format == "json":
+            output = {
+                "id": rule.id,
+                "name": rule.name,
+                "conditions": rule.conditions,
+                "conditions_dsl": formatter.format(rule.conditions),
+                "action_ids": rule.action_ids,
+                "schedule": rule.schedule,
+                "timezone": rule.timezone,
+                "enabled": rule.enabled,
+                "description": rule.description,
+                "created_at": rule.created_at.isoformat(),
+                "last_triggered_at": rule.last_triggered_at.isoformat()
+                if rule.last_triggered_at
+                else None,
+            }
+            click.echo(json.dumps(output, indent=2))
+        elif format == "yaml":
+            output = {
+                "id": rule.id,
+                "name": rule.name,
+                "conditions": formatter.format(rule.conditions),
+                "action_ids": rule.action_ids,
+                "schedule": rule.schedule,
+                "timezone": rule.timezone,
+                "enabled": rule.enabled,
+                "description": rule.description,
+                "created_at": rule.created_at.isoformat(),
+                "last_triggered_at": rule.last_triggered_at.isoformat()
+                if rule.last_triggered_at
+                else None,
+            }
+            click.echo(yaml.dump(output, default_flow_style=False, sort_keys=False))
+        else:
+            schedule_str = ""
+            if rule.schedule:
+                if "cron" in rule.schedule:
+                    schedule_str = f"  schedule:\n    cron: {rule.schedule['cron']}"
+                elif "interval" in rule.schedule:
+                    schedule_str = f"  schedule:\n    interval: {rule.schedule['interval']}"
+
+            click.echo(f"id: {rule.id}")
+            click.echo(f"name: {rule.name}")
+            if rule.description:
+                click.echo(f"description: {rule.description}")
+            click.echo(f"enabled: {rule.enabled}")
+            click.echo(f"actions: {rule.action_ids}")
+            click.echo(f"timezone: {rule.timezone}")
+            if schedule_str:
+                click.echo(schedule_str)
+            click.echo(f"conditions: |")
+            dsl = formatter.format(rule.conditions, pretty=True)
+            for line in dsl.split("\n"):
+                click.echo(f"  {line}")
+            if rule.last_triggered_at:
+                click.echo(f"last_triggered_at: {rule.last_triggered_at.isoformat()}")
 
     @setup_group.command("rename")
     @click.option("--from-id", required=True, help="Current ID to rename")
