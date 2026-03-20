@@ -19,7 +19,8 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - `common/core/aliases.py` — Alias resolution with caching and nested alias support
 - `common/core/paths.py` — XDG-compliant paths including skills directory
 - `plugins/base.py` — Provider interfaces (LLMProvider, LazyLLMProvider)
-- `storage/store.py` — SQLite persistence with PromptStore
+- `storage/store.py` — PromptStore with flat-file storage for prompts and SQLite for executions
+- `storage/file_store.py` — FilePromptStore for managing prompts as Markdown files
 - `plugins/anthropic/plugin.py` — Anthropic provider implementation
 - `plugins/openai/plugin.py` — OpenAI provider implementation
 - `plugins/openai_compatible/plugin.py` — Generic OpenAI-compatible endpoints
@@ -39,7 +40,7 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 
 - Imports from: `common.core.config` (config loading), `common.core.registry` (plugin discovery), `common.cli.helpers` (output formatting), `common.storage` (base storage)
 - Used by: End users via CLI, potential API layer in future
-- External deps: `click` (CLI), `pyyaml` (config), `sqlalchemy`+`alembic` (storage), `anthropic`, `openai` (optional)
+- External deps: `click` (CLI), `pyyaml` (config), `sqlalchemy` (executions storage), `python-frontmatter` (prompt parsing), `anthropic`, `openai` (optional)
 
 ## ✅ Do's
 
@@ -122,5 +123,44 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - See `AGENTS.md` in root for project-wide golden rules (DRY, KISS, CODE IS LAW, FAIL LOUDLY)
 - Refer to provider-specific READMEs in `plugins/` for implementation details
 - Check `CHANGELOG.md` for test scenarios and edge cases
-- See `alembic.ini` for database migration setup
 - See `TASK.md` for `prompt task` command usage examples
+
+## 💾 Prompt Storage
+
+Prompts are stored as flat Markdown files with YAML frontmatter in `~/.local/share/fast-market/prompts/`.
+
+**Prompt file format:**
+```markdown
+---
+name: my-prompt
+description: A useful prompt
+model_provider: anthropic
+model_name: claude-sonnet-4-20250514
+temperature: 0.7
+max_tokens: 2048
+created_at: "2026-03-20T10:00:00"
+updated_at: "2026-03-20T10:00:00"
+---
+Your prompt content here with {placeholders}.
+```
+
+**Shell-friendly operations:**
+```bash
+# List prompts
+ls ~/.local/share/fast-market/prompts/*.md
+
+# View prompt
+cat ~/.local/share/fast-market/prompts/my-prompt.md
+
+# Edit prompt
+prompt update my-prompt --edit
+
+# Search prompts by content
+grep -l "keyword" ~/.local/share/fast-market/prompts/*.md
+
+# View execution logs
+prompt logs
+
+# Cleanup execution logs
+prompt logs --clean --yes
+```

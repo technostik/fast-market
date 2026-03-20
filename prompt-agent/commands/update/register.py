@@ -24,6 +24,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--model", "-m", default=None, help="Default model")
     @click.option("--temperature", "-T", type=float, default=None)
     @click.option("--max-tokens", "-M", type=int, default=None)
+    @click.option("--edit", "-e", is_flag=True, help="Edit prompt in default editor")
     @click.pass_context
     def update_cmd(
         ctx,
@@ -35,9 +36,22 @@ def register(plugin_manifests: dict) -> CommandManifest:
         model,
         temperature,
         max_tokens,
+        edit,
     ):
         """Update a prompt template."""
+        from commands.setup import run_default_editor
         from storage.store import PromptStore
+
+        store = PromptStore()
+
+        if edit:
+            file_path = store.get_prompt_file_path(name)
+            if not file_path or not file_path.exists():
+                click.echo(f"Prompt not found: {name}", err=True)
+                sys.exit(1)
+            run_default_editor(file_path)
+            click.echo(f"✓ Edited prompt: {name}")
+            return
 
         updates: dict[str, object] = {}
         if from_file:
@@ -58,7 +72,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("Error: no updates provided", err=True)
             sys.exit(1)
 
-        store = PromptStore()
         try:
             updated = store.update_prompt(name, **updates)
         except ValueError as exc:

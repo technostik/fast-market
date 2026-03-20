@@ -60,6 +60,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         except ValueError as exc:
             click.echo(f"Error: {exc}", err=True)
             sys.exit(1)
+        file_path = store.get_prompt_file_path(name)
         click.echo(f"✓ Prompt created: {name}")
+        if file_path:
+            click.echo(f"  File: {file_path}")
 
     return CommandManifest(name="create", click_command=create_cmd)

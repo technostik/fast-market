@@ -64,3 +64,10 @@ def get_skills_dir() -> Path:
     path = config_home / "prompt-agent" / "skills"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_prompts_dir() -> Path:
+    """Return and create prompts directory for flat-file storage."""
+    path = get_fastmarket_dir() / "prompts"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

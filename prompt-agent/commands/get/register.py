@@ -5,23 +5,30 @@ import sys
 import click
 
 from commands.base import CommandManifest
-from common.cli.helpers import out
 from core.substitution import extract_placeholders
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("get")
     @click.argument("name")
-    @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+    @click.option(
+        "--format", "fmt", type=click.Choice(["text", "json"]), default="text"
+    )
     @click.pass_context
     def get_cmd(ctx, name, fmt):
         """Show a stored prompt."""
         from storage.store import PromptStore
 
-        prompt = PromptStore().get_prompt(name)
+        store = PromptStore()
+        prompt = store.get_prompt(name)
         if not prompt:
             click.echo(f"Prompt not found: {name}", err=True)
             sys.exit(1)
+
+        file_path = store.get_prompt_file_path(name)
+        if file_path and file_path.exists():
+            click.echo(file_path.read_text(encoding="utf-8"))
+            return
 
         payload = {
             "name": prompt.name,
@@ -34,7 +41,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             "max_tokens": prompt.max_tokens,
         }
         if fmt == "json":
-            out(payload, fmt)
+            import json
+
+            click.echo(json.dumps(payload, indent=2))
             return
 
         click.echo(prompt.name)
