@@ -3,14 +3,14 @@ from __future__ import annotations
 import re
 import time
 import asyncio
-import urllib.request
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 
 import feedparser
 import requests
 import yt_dlp
+from requests.exceptions import RequestException
 
 from plugins.base import SourcePlugin, ItemMetadata
 
@@ -21,20 +21,24 @@ class YouTubePlugin(SourcePlugin):
     def __init__(self, config: dict, source_config: dict):
         super().__init__(config, source_config)
         self.channel_id = self._resolve_channel_id(source_config["identifier"])
-        self.executor = ThreadPoolExecutor(max_workers=5)  # For running yt-dlp sync calls
+        self.executor = ThreadPoolExecutor(max_workers=5)
         self.ydl_opts = {
             "quiet": True,
             "no_warnings": True,
-            "extract_flat": False,
+            "extract_flat": True,  # Changed to True for playlist extraction
             "force_generic_extractor": False,
             "ignoreerrors": True,
             "no_color": True,
             "geo_bypass": True,
         }
+        # Separate options for detailed video info
+        self.detail_ydl_opts = {
+            **self.ydl_opts,
+            "extract_flat": False,
+        }
 
     def _resolve_channel_id(self, identifier: str) -> str:
         """Resolve various YouTube identifier formats to channel ID"""
-        # Clean the identifier
         identifier = identifier.strip()
 
         # Already a channel ID
@@ -43,9 +47,6 @@ class YouTubePlugin(SourcePlugin):
 
         # Handle handle format (@username)
         if identifier.startswith("@"):
-            # For handles, we still need to resolve via API or fallback
-            # This is a simplified version - ideally you'd use the YouTube API
-            # or implement handle resolution via webpage scraping
             raise NotImplementedError(
                 "YouTube handle resolution requires API key. "
                 "Use channel ID directly or set up YouTube API.\n"
@@ -65,8 +66,6 @@ class YouTubePlugin(SourcePlugin):
             if match:
                 if "UC" in match.group(1) and match.group(1).startswith("UC"):
                     return match.group(1)
-                # If it's a custom URL or handle, we'd need to resolve it
-                # For now, raise error
                 raise NotImplementedError(
                     f"Custom URL/handle resolution not implemented. "
                     f"Extracted: {match.group(1)}\n"
@@ -75,29 +74,163 @@ class YouTubePlugin(SourcePlugin):
 
         raise ValueError(f"Invalid YouTube identifier: {identifier}")
 
+    def _check_rss_availability(self, rss_url: str) -> bool:
+        """Check if RSS feed is available (returns 200)"""
+        try:
+            response = requests.head(
+                rss_url,
+                timeout=5,
+                allow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; monitor-agent/1.0)"},
+            )
+            return response.status_code == 200
+        except RequestException:
+            return False
+
+    async def _fetch_via_yt_dlp(
+        self, last_item_id: str | None = None, limit: int = 50
+    ) -> list[ItemMetadata]:
+        """Fetch videos using yt-dlp as fallback when RSS fails"""
+        channel_url = f"https://youtube.com/channel/{self.channel_id}"
+
+        loop = asyncio.get_event_loop()
+
+        def _extract_channel_videos():
+            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                try:
+                    # Extract channel info and video list
+                    info = ydl.extract_info(channel_url, download=False)
+                    if not info:
+                        return []
+
+                    # Handle different response structures
+                    entries = []
+                    if "entries" in info:
+                        entries = info["entries"]
+                    elif "videos" in info:
+                        entries = info["videos"]
+                    else:
+                        # Single video? Probably not a channel
+                        return []
+
+                    videos = []
+                    for entry in entries[:limit]:
+                        if not entry:
+                            continue
+
+                        video_id = entry.get("id")
+                        if not video_id:
+                            continue
+
+                        # Check if we've reached last fetched item
+                        if last_item_id and video_id == last_item_id:
+                            break
+
+                        # Get upload date
+                        upload_date = None
+                        if entry.get("upload_date"):
+                            try:
+                                upload_date = datetime.strptime(
+                                    entry["upload_date"], "%Y%m%d"
+                                ).replace(tzinfo=timezone.utc)
+                            except ValueError:
+                                upload_date = datetime.now(timezone.utc)
+                        else:
+                            upload_date = datetime.now(timezone.utc)
+
+                        # Determine if Short (duration < 60 or /shorts/ in URL)
+                        duration = entry.get("duration", 0)
+                        url = entry.get("webpage_url", "")
+                        is_short = duration < 60 or "/shorts/" in url
+
+                        # Build video entry
+                        videos.append({
+                            "id": video_id,
+                            "title": entry.get("title", "Untitled"),
+                            "url": entry.get("webpage_url", f"https://youtube.com/watch?v={video_id}"),
+                            "published": upload_date,
+                            "duration": duration,
+                            "channel_name": info.get("channel", info.get("uploader", "")),
+                            "views": entry.get("view_count", 0),
+                            "likes": entry.get("like_count", 0),
+                            "comments": entry.get("comment_count", 0),
+                            "description": entry.get("description", "")[:500],
+                            "tags": entry.get("tags", [])[:10],
+                            "categories": entry.get("categories", []),
+                            "is_short": is_short,
+                            "availability": entry.get("availability", "public"),
+                        })
+
+                    return videos
+
+                except Exception as e:
+                    print(f"yt-dlp channel extraction error: {e}")
+                    return []
+
+        try:
+            videos = await loop.run_in_executor(self.executor, _extract_channel_videos)
+
+            items = []
+            for video in videos:
+                extra = {
+                    "channel_id": self.channel_id,
+                    "channel_name": video["channel_name"],
+                    "duration_seconds": video["duration"],
+                    "is_short": video["is_short"],
+                    "views": video["views"],
+                    "likes": video["likes"],
+                    "comments": video["comments"],
+                    "description": video["description"],
+                    "tags": video["tags"],
+                    "categories": video["categories"],
+                    "availability": video["availability"],
+                    "fetch_method": "yt-dlp",  # Track which method succeeded
+                }
+
+                content_type = "short" if extra["is_short"] else "video"
+                if video["duration"] > 3600:
+                    content_type = "long_video"
+
+                items.append(ItemMetadata(
+                    id=video["id"],
+                    title=video["title"],
+                    url=video["url"],
+                    published_at=video["published"],
+                    content_type=content_type,
+                    source_plugin=self.name,
+                    source_identifier=self.channel_id,
+                    raw={"yt_dlp": video},
+                    extra=extra,
+                ))
+
+            return items
+
+        except Exception as e:
+            raise Exception(f"yt-dlp fallback failed: {e}")
+
     async def _get_video_details_async(self, video_id: str) -> dict:
         """Get detailed video info using yt-dlp (async wrapper)"""
         url = f"https://youtube.com/watch?v={video_id}"
 
         loop = asyncio.get_event_loop()
         try:
-            # Run yt-dlp in thread pool since it's blocking
-            info = await loop.run_in_executor(self.executor, self._extract_video_info, url)
+            info = await loop.run_in_executor(
+                self.executor, self._extract_video_info, url
+            )
             return info
         except Exception as e:
             print(f"Error getting video details for {video_id}: {e}")
             return {}
 
     def _extract_video_info(self, url: str) -> dict:
-        """Synchronous yt-dlp extraction"""
-        with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+        """Synchronous yt-dlp extraction for detailed video info"""
+        with yt_dlp.YoutubeDL(self.detail_ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=False)
 
                 if not info:
                     return {}
 
-                # Parse upload date
                 upload_date = None
                 if info.get("upload_date"):
                     try:
@@ -107,17 +240,11 @@ class YouTubePlugin(SourcePlugin):
                     except ValueError:
                         pass
 
-                # Get like count (may be None for some videos)
                 like_count = info.get("like_count")
-                if like_count is None and "like_count" in info:
+                if like_count is None:
                     like_count = 0
 
-                # Get comment count
-                comment_count = info.get("comment_count")
-                if comment_count is None:
-                    comment_count = 0
-
-                # Determine if it's a Short
+                comment_count = info.get("comment_count", 0)
                 duration = info.get("duration", 0)
                 is_short = duration < 60 or info.get("webpage_url_basename") == "shorts"
 
@@ -131,8 +258,8 @@ class YouTubePlugin(SourcePlugin):
                     "channel_id": info.get("channel_id", ""),
                     "channel_name": info.get("channel", info.get("uploader", "")),
                     "channel_url": info.get("channel_url", ""),
-                    "description": info.get("description", "")[:500],  # Truncate description
-                    "tags": info.get("tags", [])[:10],  # Limit tags
+                    "description": info.get("description", "")[:500],
+                    "tags": info.get("tags", [])[:10],
                     "categories": info.get("categories", []),
                     "age_limit": info.get("age_limit", 0),
                     "availability": info.get("availability", "public"),
@@ -143,19 +270,16 @@ class YouTubePlugin(SourcePlugin):
 
     def _parse_feed_entry(self, entry: feedparser.FeedParserDict, feed_title: str) -> dict:
         """Parse feed entry for basic metadata"""
-        # Get video ID from various possible locations
         vid_id = None
         if hasattr(entry, "yt_videoid"):
             vid_id = entry.yt_videoid
         elif hasattr(entry, "id") and "video:" in entry.id:
             vid_id = entry.id.split("video:")[-1]
         elif hasattr(entry, "link"):
-            # Extract from link
             match = re.search(r"v=([a-zA-Z0-9_-]+)", entry.link)
             if match:
                 vid_id = match.group(1)
 
-        # Parse published date
         published = datetime.now(timezone.utc)
         if hasattr(entry, "published_parsed") and entry.published_parsed:
             try:
@@ -165,7 +289,6 @@ class YouTubePlugin(SourcePlugin):
             except (OverflowError, ValueError, TypeError):
                 pass
 
-        # Get duration from media content if available
         duration = 0
         if hasattr(entry, "media_content") and entry.media_content:
             try:
@@ -189,49 +312,34 @@ class YouTubePlugin(SourcePlugin):
         limit: int = 50,
         last_fetched_at: datetime | None = None,
     ) -> list[ItemMetadata]:
-        """Fetch new videos from YouTube channel"""
+        """Fetch new videos from YouTube channel with RSS fallback to yt-dlp"""
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
 
+        # First check if RSS is available
+        rss_available = self._check_rss_availability(rss_url)
+
+        if not rss_available:
+            print(f"⚠️ RSS feed not available for {self.channel_id}, falling back to yt-dlp")
+            return await self._fetch_via_yt_dlp(last_item_id, limit)
+
+        # Try RSS first
         try:
-            # Parse RSS feed
             feed = feedparser.parse(rss_url)
 
             if hasattr(feed, "bozo_exception") and feed.bozo_exception:
-                exc = feed.bozo_exception
-                exc_details = str(exc)
-                if hasattr(exc, "getLineNumber"):
-                    exc_details += f" (line {exc.getLineNumber()}, col {exc.getColumnNumber()})"
-
-                raw_excerpt = "(unable to fetch raw content)"
-                try:
-                    resp = requests.get(
-                        rss_url,
-                        timeout=10,
-                        headers={"User-Agent": "Mozilla/5.0 (compatible; monitor-agent/1.0)"},
-                    )
-                    if resp.status_code == 200:
-                        raw_excerpt = resp.text[:500].replace("\n", " ").strip()
-                except Exception:
-                    pass
-
-                raise Exception(
-                    f"RSS feed parsing error: {exc_details}\n"
-                    f"URL: {rss_url}\n"
-                    f"Content excerpt: {raw_excerpt}"
-                )
+                # RSS parsing failed, fall back to yt-dlp
+                print(f"⚠️ RSS parsing failed for {self.channel_id}, falling back to yt-dlp")
+                return await self._fetch_via_yt_dlp(last_item_id, limit)
 
             items = []
             feed_title = getattr(feed.feed, "title", "")
 
-            # Process entries
             for entry in feed.entries[:limit]:
-                # Parse basic info from feed
                 parsed = self._parse_feed_entry(entry, feed_title)
 
                 if not parsed["id"]:
                     continue
 
-                # Check if we've reached last fetched item
                 if last_item_id and parsed["id"] == last_item_id:
                     break
 
@@ -241,7 +349,6 @@ class YouTubePlugin(SourcePlugin):
                 # Get detailed info with yt-dlp
                 details = await self._get_video_details_async(parsed["id"])
 
-                # Merge data, preferring yt-dlp data where available
                 extra = {
                     "channel_id": self.channel_id,
                     "channel_name": details.get("channel_name", feed_title),
@@ -255,17 +362,15 @@ class YouTubePlugin(SourcePlugin):
                     "categories": details.get("categories", []),
                     "age_limit": details.get("age_limit", 0),
                     "availability": details.get("availability", "public"),
+                    "fetch_method": "rss+yt-dlp",
                 }
 
-                # Use more accurate upload date if available
                 published_at = details.get("upload_date", parsed["published"])
-
-                # Determine content type
                 content_type = "short" if extra["is_short"] else "video"
                 if extra["duration_seconds"] > 3600:
                     content_type = "long_video"
 
-                item = ItemMetadata(
+                items.append(ItemMetadata(
                     id=parsed["id"],
                     title=parsed["title"],
                     url=parsed["url"],
@@ -273,57 +378,48 @@ class YouTubePlugin(SourcePlugin):
                     content_type=content_type,
                     source_plugin=self.name,
                     source_identifier=self.channel_id,
-                    raw={
-                        "rss_entry": entry.__dict__ if hasattr(entry, "__dict__") else {},
-                        "yt_dlp": details,
-                    },
+                    raw={"rss_entry": entry.__dict__ if hasattr(entry, "__dict__") else {}},
                     extra=extra,
-                )
+                ))
 
-                items.append(item)
-
-                # Small delay to avoid rate limiting
                 await asyncio.sleep(0.1)
 
             return items
 
         except Exception as e:
-            raise
+            # Any other error, try yt-dlp as fallback
+            print(f"⚠️ RSS fetch failed for {self.channel_id}: {e}, falling back to yt-dlp")
+            return await self._fetch_via_yt_dlp(last_item_id, limit)
 
     async def get_video_comments(self, video_id: str, max_comments: int = 100) -> list[dict]:
         """Fetch comments for a specific video"""
         url = f"https://youtube.com/watch?v={video_id}"
 
-        # yt-dlp options for comments
-        ydl_opts = {
-            **self.ydl_opts,
+        comment_opts = {
+            **self.detail_ydl_opts,
             "getcomments": True,
-            "extract_flat": True,  # Don't download video
             "max_comments": max_comments,
         }
 
         loop = asyncio.get_event_loop()
 
         def _extract_comments():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(comment_opts) as ydl:
                 try:
                     info = ydl.extract_info(url, download=False)
                     comments = info.get("comments", [])
 
-                    # Format comments
                     formatted_comments = []
                     for comment in comments[:max_comments]:
-                        formatted_comments.append(
-                            {
-                                "id": comment.get("id"),
-                                "author": comment.get("author"),
-                                "author_id": comment.get("author_id"),
-                                "text": comment.get("text", ""),
-                                "timestamp": comment.get("timestamp"),
-                                "likes": comment.get("like_count", 0),
-                                "reply_count": comment.get("reply_count", 0),
-                            }
-                        )
+                        formatted_comments.append({
+                            "id": comment.get("id"),
+                            "author": comment.get("author"),
+                            "author_id": comment.get("author_id"),
+                            "text": comment.get("text", ""),
+                            "timestamp": comment.get("timestamp"),
+                            "likes": comment.get("like_count", 0),
+                            "reply_count": comment.get("reply_count", 0),
+                        })
                     return formatted_comments
                 except Exception as e:
                     print(f"Error extracting comments: {e}")
@@ -340,21 +436,18 @@ class YouTubePlugin(SourcePlugin):
         """Validate if identifier is a supported YouTube format"""
         identifier = identifier.strip()
 
-        # Check for direct channel ID
         if identifier.startswith("UC") and len(identifier) == 24:
             return True
 
-        # Check for handle
         if identifier.startswith("@"):
             return True
 
-        # Check for URLs
         url_patterns = [
             r"youtube\.com/channel/UC[a-zA-Z0-9_-]+",
             r"youtube\.com/c/[^/?#&]+",
             r"youtube\.com/user/[^/?#&]+",
             r"youtube\.com/@[^/?#&]+",
-            r"youtu\.be/",  # Video URL, not channel
+            r"youtu\.be/",
         ]
 
         for pattern in url_patterns:
@@ -367,15 +460,12 @@ class YouTubePlugin(SourcePlugin):
         """Return a user-friendly display version of the identifier"""
         identifier = identifier.strip()
 
-        # If it's a channel ID, add a label
         if identifier.startswith("UC") and len(identifier) == 24:
             return f"Channel ID: {identifier}"
 
-        # If it's a handle, format nicely
         if identifier.startswith("@"):
             return f"YouTube Handle: {identifier}"
 
-        # Try to extract username from URL for cleaner display
         patterns = [
             (r"youtube\.com/channel/(UC[a-zA-Z0-9_-]+)", r"Channel: \1"),
             (r"youtube\.com/c/([^/?#&]+)", r"Custom URL: \1"),
