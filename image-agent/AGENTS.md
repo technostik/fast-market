@@ -119,11 +119,11 @@ available_formats:
 | Command | Description |
 |---------|-------------|
 | `image generate "prompt"` | Generate image from text |
-| `image generate "prompt" --size portrait --steps 8` | With options |
+| `image generate "prompt" -s portrait -S 8` | With options |
 | `image setup` | Interactive setup wizard |
-| `image setup --add-engine flux2` | Add engine non-interactively |
-| `image setup --show-config` | Display current config |
-| `image serve --port 8080` | Start API server |
+| `image setup -a flux2` | Add engine non-interactively |
+| `image setup -c` | Display current config |
+| `image serve -p 8080` | Start API server |
 
 ## API Endpoints
 

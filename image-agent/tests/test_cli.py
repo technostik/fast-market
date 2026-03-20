@@ -47,6 +47,9 @@ class TestCLICommands:
         assert "--list-engines" in result.output
         assert "--add-engine" in result.output
         assert "--show-config" in result.output
+        assert "-l" in result.output
+        assert "-a" in result.output
+        assert "-c" in result.output
 
     def test_serve_help(self, runner):
         """Test that serve --help works."""
@@ -57,6 +60,8 @@ class TestCLICommands:
         assert result.exit_code == 0
         assert "--host" in result.output
         assert "--port" in result.output
+        assert "-H" in result.output
+        assert "-p" in result.output
 
 
 class TestSetupWizard:

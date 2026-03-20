@@ -107,19 +107,19 @@ image generate "a serene mountain landscape at sunset" [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--engine, -e` | Engine to use (flux2) | from config |
-| `--size, -s` | Size preset (square/portrait/landscape/youtube/wide/tall/custom) | square |
-| `--width, -w` | Image width (overrides size) | from config |
-| `--height, -h` | Image height (overrides size) | from config |
-| `--guidance-scale, -g` | Guidance scale | from config |
-| `--steps` | Number of inference steps | from config |
-| `--seed` | Random seed for reproducibility | random |
-| `--init-image` | Path to initial image for img2img | None |
+| `-e, --engine` | Engine to use (flux2) | from config |
+| `-s, --size` | Size preset (square/portrait/landscape/youtube/wide/tall/custom) | square |
+| `-w, --width` | Image width (overrides size) | from config |
+| `-h, --height` | Image height (overrides size) | from config |
+| `-g, --guidance-scale` | Guidance scale | from config |
+| `-S, --steps` | Number of inference steps | from config |
+| `-d, --seed` | Random seed for reproducibility | random |
+| `-i, --init-image` | Path to initial image for img2img | None |
 | `--keep-original-size` | Keep original size of init image | False |
-| `--strength` | Strength for img2img (0.0-1.0) | None |
-| `--output-format, -f` | Output format (PNG/JPEG/WEBP) | from config |
-| `--output-dir, -o` | Output directory | from config |
-| `--format` | Output format for CLI (json/text) | text |
+| `-t, --strength` | Strength for img2img (0.0-1.0) | None |
+| `--output-format` | Output format (PNG/JPEG/WEBP) | from config |
+| `-o, --output-dir` | Output directory | from config |
+| `-F, --format` | Output format for CLI (json/text) | text |
 | `-v, --verbose` | Enable verbose logging | |
 
 **Examples:**
@@ -138,7 +138,7 @@ image generate "abstract art" --seed 42 --width 768 --height 768
 image generate "make it sunset" --init-image photo.jpg --strength 0.7
 
 # JSON output for scripting
-image generate "minimalist logo" --format json | jq '.path'
+image generate "minimalist logo" -F json | jq '.path'
 
 # Generate multiple variations with xargs
 seq 1 5 | xargs -I {} image generate "variation {} of abstract pattern" --format json | jq -r '.path' | xargs open
@@ -154,15 +154,15 @@ image setup [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--list-engines` | List configured engines |
-| `--add-engine` | Add an engine (flux2) |
-| `--remove-engine` | Remove an engine |
-| `--set-default-engine` | Set default engine |
-| `--set-model-path` | Set model path (format: engine:path) |
-| `--set-defaults` | Set generation defaults interactively |
-| `--set-output-dir` | Set default output directory |
-| `--show-config` | Show current configuration |
-| `--show-config-path` | Show config file path |
+| `-l, --list-engines` | List configured engines |
+| `-a, --add-engine` | Add an engine (flux2) |
+| `-r, --remove-engine` | Remove an engine |
+| `-d, --set-default-engine` | Set default engine |
+| `-m, --set-model-path` | Set model path (format: engine:path) |
+| `-s, --set-defaults` | Set generation defaults interactively |
+| `-o, --set-output-dir` | Set default output directory |
+| `-c, --show-config` | Show current configuration |
+| `-p, --show-config-path` | Show config file path |
 
 **Examples:**
 
@@ -190,8 +190,8 @@ image serve [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--host` | Host to bind to | 127.0.0.1 |
-| `--port` | Port to bind to | 8000 |
+| `-H, --host` | Host to bind to | 127.0.0.1 |
+| `-p, --port` | Port to bind to | 8000 |
 
 **Example:**
 

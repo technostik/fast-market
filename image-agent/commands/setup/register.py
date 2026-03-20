@@ -17,21 +17,28 @@ _SUPPORTED_ENGINES = {"flux2"}
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("setup")
-    @click.option("--list-engines", is_flag=True, help="List configured engines")
+    @click.option("--list-engines", "-l", is_flag=True, help="List configured engines")
     @click.option(
         "--add-engine",
+        "-a",
         type=click.Choice(["flux2"]),
         help="Add an engine (flux2)",
     )
-    @click.option("--remove-engine", help="Remove an engine")
-    @click.option("--set-default-engine", help="Set default engine")
+    @click.option("--remove-engine", "-r", help="Remove an engine")
+    @click.option("--set-default-engine", "-d", help="Set default engine")
     @click.option(
-        "--set-model-path", help="Set model path for an engine (format: engine:path)"
+        "--set-model-path",
+        "-m",
+        help="Set model path for an engine (format: engine:path)",
     )
-    @click.option("--set-defaults", is_flag=True, help="Set generation defaults")
-    @click.option("--set-output-dir", help="Set default output directory")
-    @click.option("--show-config", is_flag=True, help="Show current configuration")
-    @click.option("--show-config-path", is_flag=True, help="Show config file path")
+    @click.option("--set-defaults", "-s", is_flag=True, help="Set generation defaults")
+    @click.option("--set-output-dir", "-o", help="Set default output directory")
+    @click.option(
+        "--show-config", "-c", is_flag=True, help="Show current configuration"
+    )
+    @click.option(
+        "--show-config-path", "-p", is_flag=True, help="Show config file path"
+    )
     @click.pass_context
     def setup_cmd(
         ctx,

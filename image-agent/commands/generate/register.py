@@ -54,18 +54,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--steps",
+        "-S",
         type=int,
         default=None,
         help="Number of inference steps",
     )
     @click.option(
         "--seed",
+        "-d",
         type=int,
         default=None,
         help="Random seed for reproducibility",
     )
     @click.option(
         "--init-image",
+        "-i",
         type=click.Path(exists=True),
         default=None,
         help="Initial image for img2img generation",
@@ -78,13 +81,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--strength",
+        "-t",
         type=float,
         default=None,
         help="Strength for img2img (0.0-1.0, how much to change init image)",
     )
     @click.option(
         "--output-format",
-        "-f",
         type=click.Choice(["PNG", "JPEG", "WEBP"]),
         default=None,
         help="Output image format",
@@ -98,6 +101,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--format",
+        "-F",
         "fmt",
         type=click.Choice(["json", "text"]),
         default="text",
