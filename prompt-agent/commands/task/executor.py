@@ -61,17 +61,35 @@ _DEFAULT_ALLOWED = {
 }
 
 
-def is_command_allowed(cmd_str: str, allowed: set[str]) -> bool:
-    """Check if command is in whitelist (first token must match basename)."""
+def _parse_command_tokens(cmd_str: str) -> tuple[bool, list[str], str | None]:
+    """Parse command string into tokens.
+
+    Returns (success, tokens, error_message).
+    If success is False, error_message contains the parsing error.
+    """
     try:
         tokens = shlex.split(cmd_str)
-    except ValueError:
-        return False
+        return True, tokens, None
+    except ValueError as exc:
+        return False, [], str(exc)
+
+
+def is_command_allowed(cmd_str: str, allowed: set[str]) -> tuple[bool, str | None]:
+    """Check if command is in whitelist (first token must match basename).
+
+    Returns (is_allowed, error_message).
+    If is_allowed is False, error_message explains why.
+    """
+    success, tokens, error_msg = _parse_command_tokens(cmd_str)
+    if not success:
+        return False, error_msg
     if not tokens:
-        return False
+        return False, "Empty command"
     first_token = tokens[0]
     cmd_name = Path(first_token).name
-    return cmd_name in allowed
+    if cmd_name not in allowed:
+        return False, f"Command '{cmd_name}' not in whitelist"
+    return True, None
 
 
 def validate_workdir(workdir: Path, forbidden: list[Path]) -> None:
@@ -90,16 +108,18 @@ def validate_workdir(workdir: Path, forbidden: list[Path]) -> None:
             raise ValueError(f"Workdir cannot be in {f}")
 
 
-def reject_absolute_paths(cmd_str: str) -> bool:
-    """Reject commands with absolute paths in arguments."""
-    try:
-        tokens = shlex.split(cmd_str)
-    except ValueError:
-        return True
+def reject_absolute_paths(cmd_str: str) -> tuple[bool, str | None]:
+    """Reject commands with absolute paths in arguments.
+
+    Returns (has_absolute_paths, error_message).
+    """
+    success, tokens, error_msg = _parse_command_tokens(cmd_str)
+    if not success:
+        return True, error_msg
     for token in tokens[1:]:
         if token.startswith("/") and len(token) > 1:
-            return True
-    return False
+            return True, "Absolute paths not allowed in command arguments"
+    return False, None
 
 
 def execute_command(
@@ -109,19 +129,21 @@ def execute_command(
     timeout: int = 60,
 ) -> CommandResult:
     """Execute a whitelisted command in the workdir."""
-    if not is_command_allowed(cmd_str, allowed):
+    is_allowed, error_msg = is_command_allowed(cmd_str, allowed)
+    if not is_allowed:
         return CommandResult(
             command=cmd_str,
             stdout="",
-            stderr=f"Command not allowed: {shlex.split(cmd_str)[0]}",
+            stderr=error_msg,
             exit_code=126,
         )
 
-    if reject_absolute_paths(cmd_str):
+    has_abs, abs_error = reject_absolute_paths(cmd_str)
+    if has_abs:
         return CommandResult(
             command=cmd_str,
             stdout="",
-            stderr="Absolute paths not allowed in command arguments",
+            stderr=abs_error,
             exit_code=126,
         )
 
@@ -195,23 +217,25 @@ def execute_dry_run(cmd_str: str, workdir: Path, allowed: set[str]) -> dict:
 
     resolved_cmd, alias_used = _resolve_alias(cmd_str)
 
-    if not is_command_allowed(resolved_cmd, allowed):
+    is_allowed, error_msg = is_command_allowed(resolved_cmd, allowed)
+    if not is_allowed:
         return {
             "command": cmd_str,
             "resolved_command": resolved_cmd,
             "alias_used": alias_used,
             "allowed": False,
             "would_execute": False,
-            "reason": f"Command not allowed: {shlex.split(resolved_cmd)[0]}",
+            "reason": error_msg,
         }
-    if reject_absolute_paths(resolved_cmd):
+    has_abs, abs_error = reject_absolute_paths(resolved_cmd)
+    if has_abs:
         return {
             "command": cmd_str,
             "resolved_command": resolved_cmd,
             "alias_used": alias_used,
             "allowed": True,
             "would_execute": False,
-            "reason": "Absolute paths not allowed",
+            "reason": abs_error,
         }
     return {
         "command": cmd_str,
@@ -353,19 +377,21 @@ def _execute_whitelisted_command(
     timeout: int,
 ) -> CommandResult:
     """Execute a whitelisted command (internal)."""
-    if not is_command_allowed(cmd_str, allowed):
+    is_allowed, error_msg = is_command_allowed(cmd_str, allowed)
+    if not is_allowed:
         return CommandResult(
             command=cmd_str,
             stdout="",
-            stderr=f"Command not allowed: {shlex.split(cmd_str)[0]}",
+            stderr=error_msg,
             exit_code=126,
         )
 
-    if reject_absolute_paths(cmd_str):
+    has_abs, abs_error = reject_absolute_paths(cmd_str)
+    if has_abs:
         return CommandResult(
             command=cmd_str,
             stdout="",
-            stderr="Absolute paths not allowed in command arguments",
+            stderr=abs_error,
             exit_code=126,
         )
 

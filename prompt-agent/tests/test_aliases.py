@@ -474,7 +474,7 @@ class TestExecutorWithAliases:
         )
 
         assert result.exit_code == 126
-        assert "not allowed" in result.stderr.lower()
+        assert "not in whitelist" in result.stderr.lower()
         assert "from alias 'bad-alias'" in result.stderr
 
     def test_execute_dry_run_with_alias(self, temp_aliases_file, monkeypatch):
@@ -508,4 +508,4 @@ class TestExecutorWithAliases:
         assert result["resolved_command"] == "not-allowed arg"
         assert result["alias_used"] == "bad-dry-alias"
         assert result["would_execute"] is False
-        assert "not allowed" in result["reason"].lower()
+        assert "not in whitelist" in result["reason"].lower()
