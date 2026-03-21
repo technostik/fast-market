@@ -127,7 +127,8 @@ def execute_command(
 
     try:
         result = subprocess.run(
-            shlex.split(cmd_str),
+            cmd_str,
+            shell=True,
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -275,11 +276,12 @@ def execute_skill_command(
         )
 
     try:
-        cmd_parts = [str(script_path)]
+        cmd_line = str(script_path)
         if args_part:
-            cmd_parts.extend(shlex.split(args_part))
+            cmd_line += " " + args_part
         result = subprocess.run(
-            cmd_parts,
+            cmd_line,
+            shell=True,
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -369,7 +371,8 @@ def _execute_whitelisted_command(
 
     try:
         result = subprocess.run(
-            shlex.split(cmd_str),
+            cmd_str,
+            shell=True,
             cwd=workdir,
             capture_output=True,
             text=True,

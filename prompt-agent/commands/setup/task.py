@@ -42,4 +42,18 @@ def create_task_group() -> click.Group:
         save_config(config_path, config)
         click.echo(f"✓ Set task default timeout to {timeout}s")
 
+    @task.command("set-default-workdir")
+    @click.argument("workdir", type=str)
+    def set_default_workdir(workdir: str):
+        """Set default working directory for task execution."""
+        config_path = _resolve_config_path("prompt")
+        config = load_config(config_path)
+        task = init_task_config(config)
+        task["default_workdir"] = workdir if workdir != "" else None
+        save_config(config_path, config)
+        if workdir:
+            click.echo(f"✓ Set task default workdir to {workdir}")
+        else:
+            click.echo("✓ Cleared task default workdir (will use cwd)")
+
     return task

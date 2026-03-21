@@ -103,6 +103,7 @@ def init_task_config(config: dict) -> dict:
     task.setdefault("allowed_commands", list(_DEFAULT_TASK_COMMANDS))
     task.setdefault("max_iterations", 20)
     task.setdefault("default_timeout", 60)
+    task.setdefault("default_workdir", None)
     return task
 
 

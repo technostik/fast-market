@@ -29,7 +29,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Load task description from file",
     )
     @click.option(
-        "--workdir", "-w", default=".", help="Working directory for command execution"
+        "--workdir",
+        "-w",
+        default=None,
+        help="Working directory for command execution (default: from config or cwd)",
     )
     @click.option(
         "--param",
@@ -71,7 +74,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option("--silent", "-s", is_flag=True, help="Suppress session output")
     @click.option(
-        "--save-session", "-o", type=click.Path(), help="Save session to YAML file"
+        "--save-session",
+        "-o",
+        type=click.Path(),
+        default=None,
+        help="Save session to YAML file (relative path uses workdir, default: workdir/.last-session.yaml)",
     )
     @click.pass_context
     def task_cmd(
@@ -108,7 +115,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
         config_path = _resolve_config_path("prompt")
         config = _load_config(config_path)
         task_config = _get_task_config(config, max_iterations, timeout)
-        workdir_path = _resolve_workdir(workdir)
+        resolved_workdir = workdir or config.get("task", {}).get("default_workdir", ".")
+        workdir_path = _resolve_workdir(resolved_workdir)
+        if save_session is not None:
+            save_path = Path(save_session)
+            if save_path.is_absolute():
+                save_session = str(save_path)
+            else:
+                save_session = str(workdir_path / save_path)
+        else:
+            save_session = str(workdir_path / ".last-session.yaml")
 
         if from_file:
             task_description = Path(from_file).read_text(encoding="utf-8").strip()
