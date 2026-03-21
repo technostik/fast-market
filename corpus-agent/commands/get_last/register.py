@@ -14,7 +14,10 @@ _FALLBACK_LIMIT = 10
 def register(plugin_manifests: dict) -> CommandManifest:
     source_choices = list(plugin_manifests.keys()) + ["all"]
 
-    @click.command("get-last")
+    @click.command(
+        "get-last",
+        help="Sync sources and retrieve the most recently indexed documents.",
+    )
     @click.option(
         "--limit",
         "-l",
