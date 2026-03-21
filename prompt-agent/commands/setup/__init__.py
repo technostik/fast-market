@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import click
 import yaml
 
 from common.core.config import _resolve_config_path
-from core.task_prompt import TaskPromptConfig, DEFAULT_PROMPT_TEMPLATE
-from commands.task.prompts import (
-    build_command_documentation,
-    DEFAULT_TOOLS_DOC_TEMPLATE,
-)
 
 _SUPPORTED_PROVIDERS = {"anthropic", "openai", "openai-compatible", "ollama"}
 _DEFAULT_TASK_COMMANDS = {
@@ -39,6 +33,47 @@ _DEFAULT_TASK_COMMANDS = {
     "awk",
     "sed",
 }
+
+DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
+
+# Your Task
+{task_description}
+{params_section}
+
+# Working Directory
+All commands execute in: `{workdir}`
+
+You can read and write files in this directory. Relative paths are resolved from here.
+
+---
+
+{command_docs}
+
+---
+
+# How to Work
+
+1. **Understand the task**: Break it down into clear steps
+2. **Explore first**: Use `ls` and `cat` to understand what files exist
+3. **Execute incrementally**: Run one command, check the result, then decide next step
+4. **Handle errors**: If a command fails, read the error message and try a different approach
+5. **Stay focused**: Only use commands that advance the task
+6. **Finish clearly**: When done, summarize what you accomplished (without making tool calls)
+
+# Critical Rules
+
+- **Only use listed commands** - others will be rejected
+- **Work within the directory** - you cannot escape `{workdir}`
+- **Check outputs** - always verify command results before proceeding
+- **Be efficient** - prefer one good command over many guesses
+- **Ask for help** - if truly stuck, explain what you need
+"""
+
+DEFAULT_TOOLS_DOC_FULL_TEMPLATE = (
+    "{aliases}{fastmarket_tools}{system_commands}{other_commands}{skills}"
+)
+
+DEFAULT_TOOLS_DOC_MINIMAL_TEMPLATE = "{aliases}{fastmarket_tools_minimal}{system_commands_minimal}{other_commands_minimal}{skills_minimal}"
 
 
 def load_config(config_path: Path) -> dict:
@@ -104,23 +139,34 @@ def init_task_config(config: dict) -> dict:
     task.setdefault("max_iterations", 20)
     task.setdefault("default_timeout", 60)
     task.setdefault("default_workdir", None)
+
+    if "agent_prompt" not in task:
+        task["agent_prompt"] = {
+            "active": "default",
+            "templates": {
+                "default": {
+                    "description": "Default task execution prompt",
+                    "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
+                },
+            },
+        }
+
+    if "tools_doc" not in task:
+        task["tools_doc"] = {
+            "active": "minimal",
+            "templates": {
+                "full": {
+                    "description": "Verbose with examples and options",
+                    "template": DEFAULT_TOOLS_DOC_FULL_TEMPLATE,
+                },
+                "minimal": {
+                    "description": "Just command names",
+                    "template": DEFAULT_TOOLS_DOC_MINIMAL_TEMPLATE,
+                },
+            },
+        }
+
     return task
-
-
-def get_task_prompts_dir() -> Path:
-    from common.core.paths import get_fastmarket_dir
-
-    prompts_dir = get_fastmarket_dir() / "task_prompts"
-    prompts_dir.mkdir(parents=True, exist_ok=True)
-    return prompts_dir
-
-
-def get_tools_doc_prompts_dir() -> Path:
-    from common.core.paths import get_fastmarket_dir
-
-    prompts_dir = get_fastmarket_dir() / "tools_doc_prompts"
-    prompts_dir.mkdir(parents=True, exist_ok=True)
-    return prompts_dir
 
 
 def run_interactive_wizard(config_path: Path, config: dict) -> None:
@@ -162,20 +208,3 @@ def run_interactive_wizard(config_path: Path, config: dict) -> None:
         click.echo(f"  export {env_var}=your-api-key")
     click.echo("\nYou can add more providers with:")
     click.echo("  prompt setup providers-add <name>")
-
-
-def run_default_editor(prompt_file: Path) -> None:
-    editor = (
-        subprocess.run(
-            ["git", "var", "GIT_EDITOR"],
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        or subprocess.run(
-            ["sed", "-n", "s/^.*EDITOR.//p", "/etc/environment"],
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        or "nano"
-    )
-    subprocess.run([editor, str(prompt_file)], check=True)

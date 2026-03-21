@@ -1,24 +1,30 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 import click
+import yaml
 
 from common.core.config import _resolve_config_path
 from commands.setup import (
     load_config,
     save_config,
-    get_task_prompts_dir,
-    run_default_editor,
+    init_task_config,
 )
-from core.task_prompt import TaskPromptConfig, DEFAULT_PROMPT_TEMPLATE
+from commands.setup.task_edit import _get_editor
+from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
 
 
 def create_task_prompts_group() -> click.Group:
     @click.group("task-prompts")
     def task_prompts():
-        """Manage task prompt templates."""
+        """Manage task prompt templates.
+
+        Note: For human-friendly editing, use 'prompt setup task edit'
+        to edit all task configuration in one place.
+        """
         pass
 
     @task_prompts.command("list")
@@ -26,24 +32,23 @@ def create_task_prompts_group() -> click.Group:
         """List available task prompts."""
         config_path = _resolve_config_path("prompt")
         config = load_config(config_path)
-        prompts_dir = get_task_prompts_dir()
-        active = config.get("task", {}).get("active_prompt", "default")
+        task = init_task_config(config)
+        agent_prompt = task.get("agent_prompt", {})
+        active = agent_prompt.get("active", "default")
+        templates = agent_prompt.get("templates", {})
 
         click.echo("Available task prompts:")
 
         marker = "*" if active == "default" else " "
-        click.echo(f" {marker} default (built-in)")
+        click.echo(f" {marker} default (built-in) - Default task execution prompt")
 
-        for file in prompts_dir.glob("*.yaml"):
-            prompt_config = TaskPromptConfig.from_yaml(file)
-            if prompt_config:
-                marker = "*" if active == prompt_config.name else " "
-                desc = (
-                    f" - {prompt_config.description}"
-                    if prompt_config.description
-                    else ""
-                )
-                click.echo(f" {marker} {prompt_config.name}{desc}")
+        for name, tpl in sorted(templates.items()):
+            if name == "default":
+                continue
+            marker = "*" if active == name else " "
+            desc = tpl.get("description", "")
+            desc_str = f" - {desc}" if desc else ""
+            click.echo(f" {marker} {name}{desc_str}")
 
     @task_prompts.command("set")
     @click.argument("name")
@@ -51,19 +56,18 @@ def create_task_prompts_group() -> click.Group:
         """Set active task prompt."""
         config_path = _resolve_config_path("prompt")
         config = load_config(config_path)
-        if name == "default":
-            config.setdefault("task", {})["active_prompt"] = name
-            save_config(config_path, config)
-            click.echo(f"✓ Active task prompt set to: default (built-in)")
-            return
+        task = init_task_config(config)
+        agent_prompt = task.get("agent_prompt", {})
+        templates = agent_prompt.get("templates", {})
 
-        prompts_dir = get_task_prompts_dir()
-        prompt_file = prompts_dir / f"{name}.yaml"
-        if not prompt_file.exists():
-            click.echo(f"Error: Prompt '{name}' not found", err=True)
+        if name not in templates:
+            click.echo(f"Error: Task prompt '{name}' not found", err=True)
+            click.echo("Available prompts:", err=True)
+            for tname in templates.keys():
+                click.echo(f"  - {tname}", err=True)
             sys.exit(1)
 
-        config.setdefault("task", {})["active_prompt"] = name
+        agent_prompt["active"] = name
         save_config(config_path, config)
         click.echo(f"✓ Active task prompt set to: {name}")
 
@@ -72,83 +76,72 @@ def create_task_prompts_group() -> click.Group:
     def show_task_prompt(name: str):
         """Show a task prompt's configuration."""
         if name == "default":
-            click.echo(f"=== Default Task Prompt ===")
-            click.echo(f"Name: default")
-            click.echo(f"Description: Built-in default task prompt")
+            click.echo(f"=== default (built-in) ===")
+            click.echo(f"Description: Default task execution prompt")
             click.echo(f"\nTemplate:\n")
-            click.echo(DEFAULT_PROMPT_TEMPLATE)
+            click.echo(DEFAULT_AGENT_PROMPT_TEMPLATE)
             return
 
-        prompts_dir = get_task_prompts_dir()
-        prompt_file = prompts_dir / f"{name}.yaml"
-        if not prompt_file.exists():
+        config_path = _resolve_config_path("prompt")
+        config = load_config(config_path)
+        task = init_task_config(config)
+        agent_prompt = task.get("agent_prompt", {})
+        templates = agent_prompt.get("templates", {})
+
+        if name not in templates:
             click.echo(f"Error: Task prompt '{name}' not found", err=True)
             sys.exit(1)
 
-        prompt_config = TaskPromptConfig.from_yaml(prompt_file)
-        if not prompt_config:
-            click.echo(f"Error: Could not parse prompt file", err=True)
-            sys.exit(1)
-
-        click.echo(f"=== {prompt_config.name} ===")
-        if prompt_config.description:
-            click.echo(f"Description: {prompt_config.description}")
+        tpl = templates[name]
+        click.echo(f"=== {name} ===")
+        if tpl.get("description"):
+            click.echo(f"Description: {tpl['description']}")
         click.echo(f"\nTemplate:\n")
-        click.echo(prompt_config.template)
+        click.echo(tpl.get("template", ""))
 
-    @task_prompts.command("edit")
+    @task_prompts.command("add")
     @click.argument("name")
-    def edit_task_prompt(name: str):
-        """Edit a task prompt in the default editor."""
-        prompts_dir = get_task_prompts_dir()
-
-        if name == "default":
-            click.echo("Error: Cannot edit the built-in default prompt", err=True)
-            sys.exit(1)
-
-        prompt_file = prompts_dir / f"{name}.yaml"
-        if not prompt_file.exists():
-            click.echo(f"Prompt '{name}' not found. Creating new prompt...")
-            default_config = TaskPromptConfig(
-                name=name,
-                description="Custom task prompt",
-                template=DEFAULT_PROMPT_TEMPLATE,
-            )
-            default_config.save(prompt_file)
-            click.echo(f"Created: {prompt_file}")
-
-        run_default_editor(prompt_file)
-        click.echo(f"✓ Edited prompt: {name}")
-
-    @task_prompts.command("import")
-    @click.argument("file", type=click.Path(exists=True))
-    def import_task_prompt(file: str):
-        """Import a task prompt from a YAML file."""
+    def add_task_prompt(name: str):
+        """Add a new task prompt."""
         config_path = _resolve_config_path("prompt")
         config = load_config(config_path)
-        source_path = Path(file)
-        prompt_config = TaskPromptConfig.from_yaml(source_path)
+        task = init_task_config(config)
+        agent_prompt = task.setdefault("agent_prompt", {})
+        templates = agent_prompt.setdefault("templates", {})
 
-        if not prompt_config:
-            click.echo(f"Error: Could not parse prompt file: {file}", err=True)
+        if name in templates:
+            click.echo(f"Error: Task prompt '{name}' already exists", err=True)
             sys.exit(1)
 
-        errors = prompt_config.validate()
-        if errors:
-            click.echo(f"Error: Invalid prompt configuration:", err=True)
-            for err in errors:
-                click.echo(f"  - {err}", err=True)
-            sys.exit(1)
+        templates[name] = {
+            "description": f"Custom task prompt: {name}",
+            "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
+        }
+        save_config(config_path, config)
+        click.echo(f"✓ Added task prompt: {name}")
 
-        prompts_dir = get_task_prompts_dir()
-        target_file = prompts_dir / f"{prompt_config.name}.yaml"
+        import subprocess
 
-        if target_file.exists():
-            if not click.confirm(f"Prompt '{prompt_config.name}' exists. Overwrite?"):
-                click.echo("Import cancelled.")
-                return
+        editor = _get_editor()
 
-        prompt_config.save(target_file)
-        click.echo(f"✓ Imported prompt '{prompt_config.name}' to: {target_file}")
+        yaml_content = yaml.safe_dump(templates[name], default_flow_style=False)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".yaml",
+            prefix=f"fastmarket-task-prompt-{name}-",
+            delete=False,
+        ) as f:
+            f.write(yaml_content)
+            temp_path = Path(f.name)
+
+        try:
+            subprocess.run([editor, str(temp_path)], check=True)
+            new_content = yaml.safe_load(temp_path.read_text())
+            if new_content:
+                templates[name] = new_content
+                save_config(config_path, config)
+                click.echo(f"✓ Updated task prompt: {name}")
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     return task_prompts

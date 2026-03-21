@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.task_prompt import TaskPromptConfig, DEFAULT_PROMPT_TEMPLATE
 from common.core.paths import get_skills_dir
 from core.skill import discover_skills
 
@@ -224,9 +223,48 @@ SYSTEM_COMMAND_DOCS = {
     },
 }
 
-DEFAULT_TOOLS_DOC_TEMPLATE = (
-    """{aliases}{fastmarket_tools}{system_commands}{other_commands}{skills}"""
-)
+TOOLS_DOC_TEMPLATES = {
+    "full": "{aliases}{fastmarket_tools}{system_commands}{other_commands}{skills}",
+    "minimal": "{aliases}{fastmarket_tools_minimal}{system_commands_minimal}{other_commands_minimal}{skills_minimal}",
+}
+
+
+def _build_minimal_tools_section(commands: list[str], section_name: str) -> str:
+    """Build minimal section with just command names."""
+    if not commands:
+        return ""
+    names = ", ".join(f"`{c}`" for c in sorted(commands))
+    return f"{section_name}: {names}\n"
+
+
+def format_fastmarket_tool_minimal(cmd_name: str) -> str:
+    """Format minimal fastmarket tool doc."""
+    from commands.task.command_registry import get_fastmarket_command_help
+
+    info = get_fastmarket_command_help(cmd_name)
+    if info:
+        return f"`{info.name}`"
+    return f"`{cmd_name}`"
+
+
+def format_other_command_minimal(cmd_name: str) -> str:
+    """Format minimal other command doc."""
+    return f"`{cmd_name}`"
+
+
+def format_skill_minimal(skill) -> str:
+    """Format minimal skill doc."""
+    return f"`skill:{skill.name}/script`"
+
+
+def format_alias_minimal(alias_name: str, alias_data) -> str:
+    """Format minimal alias doc."""
+    if isinstance(alias_data, dict):
+        cmd = alias_data.get("command", "")
+        desc = alias_data.get("description", "")
+        suffix = f" - {desc}" if desc else ""
+        return f"`{alias_name}` → `{cmd}`{suffix}"
+    return f"`{alias_name}` → `{alias_data}`"
 
 
 def format_standard_command_doc(cmd_name: str) -> str:
@@ -395,143 +433,132 @@ def _build_skills_section() -> str:
     return "\n".join(docs)
 
 
-def get_active_tools_doc_prompt_config() -> TaskPromptConfig:
-    """Get the active tools doc prompt configuration."""
+def get_active_tools_doc_prompt_config() -> dict:
+    """Get the active tools doc prompt configuration from task config."""
     from common.core.config import load_tool_config
-    from common.core.paths import get_fastmarket_dir
+    from commands.setup import init_task_config
 
     config = load_tool_config("prompt")
-    active_tools_doc = config.get("tools_doc_prompt", "default")
+    task = init_task_config(config)
+    tools_doc = task.get("tools_doc", {})
+    active_name = tools_doc.get("active", "minimal")
+    templates = tools_doc.get("templates", {})
 
-    if active_tools_doc == "default":
-        return TaskPromptConfig(
-            name="default",
-            description="Default tools documentation",
-            template=DEFAULT_TOOLS_DOC_TEMPLATE,
-        )
-
-    tools_doc_path = (
-        get_fastmarket_dir() / "tools_doc_prompts" / f"{active_tools_doc}.yaml"
-    )
-    prompt_config = TaskPromptConfig.from_yaml(tools_doc_path)
-    if not prompt_config:
-        return TaskPromptConfig(
-            name="default",
-            description="Default tools documentation",
-            template=DEFAULT_TOOLS_DOC_TEMPLATE,
-        )
-
-    return prompt_config
+    template_config = templates.get(active_name, templates.get("minimal", {}))
+    return {
+        "name": active_name,
+        "description": template_config.get("description", ""),
+        "template": template_config.get("template", TOOLS_DOC_TEMPLATES["minimal"]),
+    }
 
 
-def build_command_documentation(allowed_commands: list[str]) -> str:
-    """Build formatted documentation for all allowed commands using template."""
+def get_active_agent_prompt_config() -> dict:
+    """Get the active agent prompt configuration from task config."""
+    from common.core.config import load_tool_config
+    from commands.setup import init_task_config
+
+    config = load_tool_config("prompt")
+    task = init_task_config(config)
+    agent_prompt = task.get("agent_prompt", {})
+    active_name = agent_prompt.get("active", "default")
+    templates = agent_prompt.get("templates", {})
+
+    template_config = templates.get(active_name, templates.get("default", {}))
+    from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
+
+    return {
+        "name": active_name,
+        "description": template_config.get("description", ""),
+        "template": template_config.get("template", DEFAULT_AGENT_PROMPT_TEMPLATE),
+    }
+
+
+def build_command_documentation(allowed_commands: list[str]) -> dict[str, str]:
+    """Build all command documentation placeholders.
+
+    Returns a dict with keys: aliases, fastmarket_tools, fastmarket_tools_minimal,
+    system_commands, system_commands_minimal, other_commands,
+    other_commands_minimal, skills, skills_minimal
+    """
+    from common.core.aliases import get_reverse_aliases
+
     aliases_section = _build_aliases_section()
     fastmarket_tools_section = _build_fastmarket_tools_section(allowed_commands)
     system_commands_section = _build_system_commands_section(allowed_commands)
     other_commands_section = _build_other_commands_section(allowed_commands)
     skills_section = _build_skills_section()
 
-    if not any(
-        [
-            aliases_section,
-            fastmarket_tools_section,
-            system_commands_section,
-            other_commands_section,
-            skills_section,
-        ]
-    ):
-        return ""
+    fastmarket_cmds = {"corpus", "youtube", "image", "message", "prompt"}
+    fm_allowed = [c for c in allowed_commands if c in fastmarket_cmds]
+    system_cmds = set(SYSTEM_COMMAND_DOCS.keys())
+    sys_allowed = [c for c in allowed_commands if c in system_cmds]
+    other_allowed = [
+        c for c in allowed_commands if c not in fastmarket_cmds and c not in system_cmds
+    ]
 
-    prompt_config = get_active_tools_doc_prompt_config()
+    skills_dir = get_skills_dir()
+    skills = discover_skills(skills_dir)
 
-    return prompt_config.render(
-        aliases=aliases_section,
-        fastmarket_tools=fastmarket_tools_section,
-        system_commands=system_commands_section,
-        other_commands=other_commands_section,
-        skills=skills_section,
+    fastmarket_tools_minimal = ", ".join(
+        format_fastmarket_tool_minimal(c) for c in sorted(fm_allowed)
+    )
+    if fastmarket_tools_minimal:
+        fastmarket_tools_minimal = (
+            f"**Fast-Market Tools**: {fastmarket_tools_minimal}\n"
+        )
+
+    system_commands_minimal = _build_minimal_tools_section(
+        sys_allowed, "**System Commands**"
+    )
+    other_commands_minimal = _build_minimal_tools_section(
+        other_allowed, "**Other Commands**"
     )
 
+    from common.core.aliases import get_all_aliases
 
-def build_system_prompt(
-    task_description: str,
-    allowed_commands: list[str],
-    workdir: Path,
-    task_params: dict[str, str] | None = None,
-) -> str:
-    """Build system prompt for task execution agent."""
-    command_docs = build_command_documentation(allowed_commands)
+    aliases = get_all_aliases()
+    aliases_minimal_parts = []
+    for alias_name, alias_data in sorted(aliases.items()):
+        aliases_minimal_parts.append(format_alias_minimal(alias_name, alias_data))
+    aliases_minimal = ""
+    if aliases_minimal_parts:
+        aliases_minimal = "**Aliases**: " + ", ".join(aliases_minimal_parts) + "\n"
 
-    params_section = ""
-    if task_params:
-        params_section = "\n# Task Parameters (Already Resolved)\n"
-        for key, value in sorted(task_params.items()):
-            display_value = value if len(value) < 200 else value[:197] + "..."
-            params_section += f"- **{key}**: {display_value}\n"
-
-    return f"""You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
-
-# Your Task
-{task_description}
-{params_section}
-
-# Working Directory
-All commands execute in: `{workdir}`
-
-You can read and write files in this directory. Relative paths are resolved from here.
-
----
-
-{command_docs}
-
----
-
-# How to Work
-
-1. **Understand the task**: Break it down into clear steps
-2. **Explore first**: Use `ls` and `cat` to understand what files exist
-3. **Execute incrementally**: Run one command, check the result, then decide next step
-4. **Handle errors**: If a command fails, read the error message and try a different approach
-5. **Stay focused**: Only use commands that advance the task
-6. **Finish clearly**: When done, summarize what you accomplished (without making tool calls)
-
-# Critical Rules
-
-- **Only use listed commands** - others will be rejected
-- **Work within the directory** - you cannot escape `{workdir}`
-- **Check outputs** - always verify command results before proceeding
-- **Be efficient** - prefer one good command over many guesses
-- **Ask for help** - if truly stuck, explain what you need
-
-"""
-
-
-def get_active_prompt_config() -> TaskPromptConfig:
-    """Get the active prompt configuration."""
-    from common.core.config import load_tool_config
-    from common.core.paths import get_fastmarket_dir
-
-    config = load_tool_config("prompt")
-    active_prompt = config.get("task", {}).get("active_prompt", "default")
-
-    if active_prompt == "default":
-        return TaskPromptConfig(
-            name="default",
-            description="Default task execution prompt",
-            template=DEFAULT_PROMPT_TEMPLATE,
+    skills_minimal_parts = []
+    for skill in skills:
+        if skill.has_scripts:
+            scripts_dir = skill.path / "scripts"
+            scripts = [
+                f.name
+                for f in scripts_dir.iterdir()
+                if f.is_file() and not f.name.startswith(".")
+            ]
+            for script in sorted(scripts):
+                skills_minimal_parts.append(f"skill:{skill.name}/{script}")
+    skills_minimal = ""
+    if skills_minimal_parts:
+        skills_minimal = (
+            "**Skills**: " + ", ".join(f"`{s}`" for s in skills_minimal_parts) + "\n"
         )
 
-    prompt_path = get_fastmarket_dir() / "task_prompts" / f"{active_prompt}.yaml"
-    prompt_config = TaskPromptConfig.from_yaml(prompt_path)
-    if not prompt_config:
-        return TaskPromptConfig(
-            name="default",
-            description="Default task execution prompt",
-            template=DEFAULT_PROMPT_TEMPLATE,
-        )
+    return {
+        "aliases": aliases_section,
+        "fastmarket_tools": fastmarket_tools_section,
+        "fastmarket_tools_minimal": fastmarket_tools_minimal,
+        "system_commands": system_commands_section,
+        "system_commands_minimal": system_commands_minimal,
+        "other_commands": other_commands_section,
+        "other_commands_minimal": other_commands_minimal,
+        "skills": skills_section,
+        "skills_minimal": skills_minimal,
+    }
 
-    return prompt_config
+
+def render_command_documentation(allowed_commands: list[str]) -> str:
+    """Build formatted documentation using active template."""
+    prompt_config = get_active_tools_doc_prompt_config()
+    placeholders = build_command_documentation(allowed_commands)
+    return prompt_config["template"].format(**placeholders)
 
 
 def build_system_prompt(
@@ -541,8 +568,10 @@ def build_system_prompt(
     task_params: dict[str, str] | None = None,
 ) -> str:
     """Build system prompt for task execution agent."""
-    prompt_config = get_active_prompt_config()
-    command_docs = build_command_documentation(allowed_commands)
+    from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
+
+    prompt_config = get_active_agent_prompt_config()
+    command_docs = render_command_documentation(allowed_commands)
 
     params_section = ""
     if task_params:
@@ -551,7 +580,8 @@ def build_system_prompt(
             display_value = value if len(value) < 200 else value[:197] + "..."
             params_section += f"- **{key}**: {display_value}\n"
 
-    return prompt_config.render(
+    template = prompt_config.get("template", DEFAULT_AGENT_PROMPT_TEMPLATE)
+    return template.format(
         task_description=task_description,
         params_section=params_section,
         workdir=str(workdir),

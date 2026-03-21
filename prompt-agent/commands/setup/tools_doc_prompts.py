@@ -1,25 +1,30 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 import click
+import yaml
 
 from common.core.config import _resolve_config_path
 from commands.setup import (
     load_config,
     save_config,
-    get_tools_doc_prompts_dir,
-    run_default_editor,
+    init_task_config,
 )
-from core.task_prompt import TaskPromptConfig
-from commands.task.prompts import DEFAULT_TOOLS_DOC_TEMPLATE
+from commands.setup.task_edit import _get_editor
+from commands.task.prompts import TOOLS_DOC_TEMPLATES
 
 
 def create_tools_doc_prompts_group() -> click.Group:
     @click.group("tools-doc-prompts")
     def tools_doc_prompts():
-        """Manage tools documentation prompt templates."""
+        """Manage tools documentation prompt templates.
+
+        Note: For human-friendly editing, use 'prompt setup task edit'
+        to edit all task configuration in one place.
+        """
         pass
 
     @tools_doc_prompts.command("list")
@@ -27,24 +32,26 @@ def create_tools_doc_prompts_group() -> click.Group:
         """List available tools doc prompts."""
         config_path = _resolve_config_path("prompt")
         config = load_config(config_path)
-        prompts_dir = get_tools_doc_prompts_dir()
-        active = config.get("tools_doc_prompt", "default")
+        task = init_task_config(config)
+        tools_doc = task.get("tools_doc", {})
+        active = tools_doc.get("active", "minimal")
+        templates = tools_doc.get("templates", {})
 
         click.echo("Available tools doc prompts:")
 
-        marker = "*" if active == "default" else " "
-        click.echo(f" {marker} default (built-in)")
+        marker = "*" if active == "minimal" else " "
+        click.echo(f" {marker} minimal (default) - Just command names")
 
-        for file in prompts_dir.glob("*.yaml"):
-            prompt_config = TaskPromptConfig.from_yaml(file)
-            if prompt_config:
-                marker = "*" if active == prompt_config.name else " "
-                desc = (
-                    f" - {prompt_config.description}"
-                    if prompt_config.description
-                    else ""
-                )
-                click.echo(f" {marker} {prompt_config.name}{desc}")
+        marker = "*" if active == "full" else " "
+        click.echo(f" {marker} full - Verbose with examples")
+
+        for name, tpl in sorted(templates.items()):
+            if name in ("minimal", "full"):
+                continue
+            marker = "*" if active == name else " "
+            desc = tpl.get("description", "")
+            desc_str = f" - {desc}" if desc else ""
+            click.echo(f" {marker} {name}{desc_str}")
 
     @tools_doc_prompts.command("set")
     @click.argument("name")
@@ -52,19 +59,18 @@ def create_tools_doc_prompts_group() -> click.Group:
         """Set active tools doc prompt."""
         config_path = _resolve_config_path("prompt")
         config = load_config(config_path)
-        if name == "default":
-            config["tools_doc_prompt"] = name
-            save_config(config_path, config)
-            click.echo(f"✓ Active tools doc prompt set to: default (built-in)")
-            return
+        task = init_task_config(config)
+        tools_doc = task.get("tools_doc", {})
+        templates = tools_doc.get("templates", {})
 
-        prompts_dir = get_tools_doc_prompts_dir()
-        prompt_file = prompts_dir / f"{name}.yaml"
-        if not prompt_file.exists():
+        if name not in templates:
             click.echo(f"Error: Tools doc prompt '{name}' not found", err=True)
+            click.echo("Available prompts:", err=True)
+            for tname in templates.keys():
+                click.echo(f"  - {tname}", err=True)
             sys.exit(1)
 
-        config["tools_doc_prompt"] = name
+        tools_doc["active"] = name
         save_config(config_path, config)
         click.echo(f"✓ Active tools doc prompt set to: {name}")
 
@@ -72,88 +78,72 @@ def create_tools_doc_prompts_group() -> click.Group:
     @click.argument("name")
     def show_tools_doc_prompt(name: str):
         """Show a tools doc prompt's configuration."""
-        if name == "default":
-            click.echo(f"=== Default Tools Doc Prompt ===")
-            click.echo(f"Name: default")
-            click.echo(f"Description: Default tools documentation")
-            click.echo(f"\nTemplate:\n")
-            click.echo(DEFAULT_TOOLS_DOC_TEMPLATE)
-            return
-
-        prompts_dir = get_tools_doc_prompts_dir()
-        prompt_file = prompts_dir / f"{name}.yaml"
-        if not prompt_file.exists():
-            click.echo(f"Error: Tools doc prompt '{name}' not found", err=True)
-            sys.exit(1)
-
-        prompt_config = TaskPromptConfig.from_yaml(prompt_file)
-        if not prompt_config:
-            click.echo(f"Error: Could not parse prompt file", err=True)
-            sys.exit(1)
-
-        click.echo(f"=== {prompt_config.name} ===")
-        if prompt_config.description:
-            click.echo(f"Description: {prompt_config.description}")
-        click.echo(f"\nTemplate:\n")
-        click.echo(prompt_config.template)
-
-    @tools_doc_prompts.command("edit")
-    @click.argument("name")
-    def edit_tools_doc_prompt(name: str):
-        """Edit a tools doc prompt in the default editor."""
-        prompts_dir = get_tools_doc_prompts_dir()
-
-        if name == "default":
-            click.echo("Error: Cannot edit the built-in default prompt", err=True)
-            sys.exit(1)
-
-        prompt_file = prompts_dir / f"{name}.yaml"
-        if not prompt_file.exists():
-            click.echo(f"Prompt '{name}' not found. Creating new prompt...")
-            default_config = TaskPromptConfig(
-                name=name,
-                description="Custom tools doc prompt",
-                template=DEFAULT_TOOLS_DOC_TEMPLATE,
-            )
-            default_config.save(prompt_file)
-            click.echo(f"Created: {prompt_file}")
-
-        run_default_editor(prompt_file)
-        click.echo(f"✓ Edited tools doc prompt: {name}")
-
-    @tools_doc_prompts.command("import")
-    @click.argument("file", type=click.Path(exists=True))
-    def import_tools_doc_prompt(file: str):
-        """Import a tools doc prompt from a YAML file."""
         config_path = _resolve_config_path("prompt")
         config = load_config(config_path)
-        source_path = Path(file)
-        prompt_config = TaskPromptConfig.from_yaml(source_path)
+        task = init_task_config(config)
+        tools_doc = task.get("tools_doc", {})
+        templates = tools_doc.get("templates", {})
 
-        if not prompt_config:
-            click.echo(f"Error: Could not parse prompt file: {file}", err=True)
+        if name not in templates:
+            if name in TOOLS_DOC_TEMPLATES:
+                click.echo(f"=== {name} (built-in) ===")
+                click.echo(f"Template:\n")
+                click.echo(TOOLS_DOC_TEMPLATES[name])
+            else:
+                click.echo(f"Error: Tools doc prompt '{name}' not found", err=True)
+                sys.exit(1)
+            return
+
+        tpl = templates[name]
+        click.echo(f"=== {name} ===")
+        if tpl.get("description"):
+            click.echo(f"Description: {tpl['description']}")
+        click.echo(f"\nTemplate:\n")
+        click.echo(tpl.get("template", ""))
+
+    @tools_doc_prompts.command("add")
+    @click.argument("name")
+    def add_tools_doc_prompt(name: str):
+        """Add a new tools doc prompt."""
+        config_path = _resolve_config_path("prompt")
+        config = load_config(config_path)
+        task = init_task_config(config)
+        tools_doc = task.setdefault("tools_doc", {})
+        templates = tools_doc.setdefault("templates", {})
+
+        if name in templates:
+            click.echo(f"Error: Tools doc prompt '{name}' already exists", err=True)
             sys.exit(1)
 
-        errors = prompt_config.validate()
-        if errors:
-            click.echo(f"Error: Invalid prompt configuration:", err=True)
-            for err in errors:
-                click.echo(f"  - {err}", err=True)
-            sys.exit(1)
+        templates[name] = {
+            "description": f"Custom tools doc prompt: {name}",
+            "template": "{fastmarket_tools_minimal}{system_commands_minimal}{other_commands_minimal}",
+        }
+        save_config(config_path, config)
+        click.echo(f"✓ Added tools doc prompt: {name}")
 
-        prompts_dir = get_tools_doc_prompts_dir()
-        target_file = prompts_dir / f"{prompt_config.name}.yaml"
+        import subprocess
 
-        if target_file.exists():
-            if not click.confirm(
-                f"Tools doc prompt '{prompt_config.name}' exists. Overwrite?"
-            ):
-                click.echo("Import cancelled.")
-                return
+        editor = _get_editor()
 
-        prompt_config.save(target_file)
-        click.echo(
-            f"✓ Imported tools doc prompt '{prompt_config.name}' to: {target_file}"
-        )
+        yaml_content = yaml.safe_dump(templates[name], default_flow_style=False)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".yaml",
+            prefix=f"fastmarket-tools-doc-{name}-",
+            delete=False,
+        ) as f:
+            f.write(yaml_content)
+            temp_path = Path(f.name)
+
+        try:
+            subprocess.run([editor, str(temp_path)], check=True)
+            new_content = yaml.safe_load(temp_path.read_text())
+            if new_content:
+                templates[name] = new_content
+                save_config(config_path, config)
+                click.echo(f"✓ Updated tools doc prompt: {name}")
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     return tools_doc_prompts

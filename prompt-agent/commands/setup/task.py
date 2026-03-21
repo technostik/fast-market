@@ -6,6 +6,7 @@ import click
 
 from common.core.config import _resolve_config_path
 from commands.setup import load_config, save_config, init_task_config
+from commands.setup.task_edit import edit_task_config, show_task_config
 
 
 def create_task_group() -> click.Group:
@@ -13,6 +14,17 @@ def create_task_group() -> click.Group:
     def task():
         """Configure task execution settings."""
         pass
+
+    @task.command("edit")
+    def edit():
+        """Edit task configuration in default editor."""
+        if not edit_task_config():
+            sys.exit(1)
+
+    @task.command("show")
+    def show():
+        """Show current task configuration."""
+        show_task_config()
 
     @task.command("set-max-iterations")
     @click.argument("max_iter", type=int)
