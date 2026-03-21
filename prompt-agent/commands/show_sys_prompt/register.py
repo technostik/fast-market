@@ -35,7 +35,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         config = load_tool_config("prompt")
         task = init_task_config(config)
 
-        allowed_commands = task.get("allowed_commands", [])
+        fastmarket_tools = task.get("fastmarket_tools", {})
+        system_commands = task.get("system_commands", [])
         workdir_path = Path(workdir) if workdir else Path.cwd()
 
         task_params = None
@@ -48,7 +49,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         system_prompt = build_system_prompt(
             task_description=task_description,
-            allowed_commands=allowed_commands,
+            fastmarket_tools_config=fastmarket_tools,
+            system_commands=system_commands,
             workdir=workdir_path,
             task_params=task_params,
         )

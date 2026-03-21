@@ -20,7 +20,8 @@ logger = structlog.get_logger(__name__)
 
 @dataclass
 class TaskConfig:
-    allowed_commands: set[str]
+    fastmarket_tools: dict
+    system_commands: list[str]
     max_iterations: int = 20
     default_timeout: int = 60
 
@@ -155,7 +156,8 @@ class TaskLoop:
 
         system_prompt = build_system_prompt(
             task_description=task_description,
-            allowed_commands=list(self.config.allowed_commands),
+            fastmarket_tools_config=self.config.fastmarket_tools,
+            system_commands=self.config.system_commands,
             workdir=self.workdir,
             task_params=task_params,
         )
@@ -169,7 +171,10 @@ class TaskLoop:
 
         iteration = 0
         max_iter = self.config.max_iterations
-        tools = [build_execute_command_tool(list(self.config.allowed_commands))]
+        allowed_commands = (
+            list(self.config.fastmarket_tools.keys()) + self.config.system_commands
+        )
+        tools = [build_execute_command_tool(allowed_commands)]
 
         self._log(f"Starting task with {max_iter} max iterations...")
         if task_params:

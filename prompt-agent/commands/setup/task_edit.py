@@ -80,11 +80,27 @@ def _validate_task_config(task: dict) -> list[str]:
         if not isinstance(task["default_timeout"], int) or task["default_timeout"] < 1:
             errors.append("default_timeout must be a positive integer")
 
-    if "allowed_commands" in task:
-        if not isinstance(task["allowed_commands"], list):
-            errors.append("allowed_commands must be a list")
-        elif not all(isinstance(c, str) for c in task["allowed_commands"]):
-            errors.append("allowed_commands must contain only strings")
+    if "fastmarket_tools" in task:
+        ft = task["fastmarket_tools"]
+        if not isinstance(ft, dict):
+            errors.append("fastmarket_tools must be a mapping")
+        else:
+            for name, config in ft.items():
+                if isinstance(config, dict):
+                    if "description" not in config and "commands" not in config:
+                        errors.append(
+                            f"fastmarket_tools.{name} should have 'description' and/or 'commands'"
+                        )
+                elif not isinstance(config, str):
+                    errors.append(
+                        f"fastmarket_tools.{name} must be a mapping or string"
+                    )
+
+    if "system_commands" in task:
+        if not isinstance(task["system_commands"], list):
+            errors.append("system_commands must be a list")
+        elif not all(isinstance(c, str) for c in task["system_commands"]):
+            errors.append("system_commands must contain only strings")
 
     if "agent_prompt" in task:
         ap = task["agent_prompt"]
@@ -142,14 +158,21 @@ def _validate_full_config(config: dict) -> list[str]:
 
 def show_task_config() -> None:
     """Show the full system prompt that the LLM will receive."""
-    config = load_tool_config("prompt")
+    from common.core.config import _resolve_config_path
+
+    config_path = _resolve_config_path("prompt")
+    config = load_config(config_path)
     task = init_task_config(config)
+    save_config(config_path, config)
+
     from commands.task.prompts import build_system_prompt
 
-    allowed_commands = task.get("allowed_commands", [])
+    fastmarket_tools = task.get("fastmarket_tools", {})
+    system_commands = task.get("system_commands", [])
     system_prompt = build_system_prompt(
         task_description="[TASK_PLACEHOLDER]",
-        allowed_commands=allowed_commands,
+        fastmarket_tools_config=fastmarket_tools,
+        system_commands=system_commands,
         workdir=Path.cwd(),
         task_params=None,
     )

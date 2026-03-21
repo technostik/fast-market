@@ -321,29 +321,29 @@ def _build_aliases_section() -> str:
     return "\n".join(docs)
 
 
-def _build_fastmarket_tools_section(allowed_commands: list[str]) -> str:
+def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
     """Build the Fast-Market tools section of command documentation."""
     from commands.task.command_registry import get_fastmarket_command_help
     from common.core.aliases import get_reverse_aliases
 
-    fastmarket_cmds = {"corpus", "youtube", "image", "message", "prompt"}
-    fm_allowed = [c for c in allowed_commands if c in fastmarket_cmds]
-    if not fm_allowed:
+    if not fastmarket_tools_config:
         return ""
 
     reverse_aliases = get_reverse_aliases()
     docs = ["## Fast-Market Tools\n"]
 
-    for cmd in sorted(fm_allowed):
+    for cmd, config in sorted(fastmarket_tools_config.items()):
         info = get_fastmarket_command_help(cmd)
-        if info is None:
-            docs.append(f"### {cmd}")
-            docs.append(f"{cmd} command-line tool")
-            docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
-        else:
-            docs.append(f"### {info.name}")
-            docs.append(info.description)
-            docs.append(f"**Usage**: `{info.usage}`")
+        desc = config.get("description", "") if isinstance(config, dict) else ""
+        if info and not desc:
+            desc = info.description
+        if not desc:
+            desc = f"{cmd} command-line tool"
+
+        docs.append(f"### {cmd}")
+        docs.append(desc)
+        docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
+
         cmd_aliases = reverse_aliases.get(cmd, [])
         if cmd_aliases:
             docs.append(
@@ -358,43 +358,18 @@ def _build_fastmarket_tools_section(allowed_commands: list[str]) -> str:
     return "\n".join(docs)
 
 
-def _build_system_commands_section(allowed_commands: list[str]) -> str:
+def _build_system_commands_section(system_commands: list[str]) -> str:
     """Build the system commands section of command documentation."""
-    system_cmds = set(SYSTEM_COMMAND_DOCS.keys())
-    sys_allowed = [c for c in allowed_commands if c in system_cmds]
-    if not sys_allowed:
+    if not system_commands:
         return ""
 
     docs = ["\n## System Commands\n"]
-    for cmd in sorted(sys_allowed):
-        docs.append(format_standard_command_doc(cmd))
-        docs.append("")
-
-    return "\n".join(docs)
-
-
-def _build_other_commands_section(allowed_commands: list[str]) -> str:
-    """Build the other commands section of command documentation."""
-    from common.core.aliases import get_reverse_aliases
-
-    fastmarket_cmds = {"corpus", "youtube", "image", "message", "prompt"}
-    system_cmds = set(SYSTEM_COMMAND_DOCS.keys())
-    other_allowed = [
-        c for c in allowed_commands if c not in fastmarket_cmds and c not in system_cmds
-    ]
-    if not other_allowed:
-        return ""
-
-    reverse_aliases = get_reverse_aliases()
-    docs = ["\n## Other Commands\n"]
-
-    for cmd in sorted(other_allowed):
-        docs.append(f"### {cmd}")
-        docs.append(f"Command: `{cmd}` (run `{cmd} --help` for details)")
-        cmd_aliases = reverse_aliases.get(cmd, [])
-        if cmd_aliases:
+    for cmd in sorted(system_commands):
+        if cmd in SYSTEM_COMMAND_DOCS:
+            docs.append(format_standard_command_doc(cmd))
+        else:
             docs.append(
-                f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
+                f"### {cmd}\nCommand: `{cmd}` (run `{cmd} --help` for details)\n"
             )
         docs.append("")
 
@@ -473,45 +448,64 @@ def get_active_agent_prompt_config() -> dict:
     }
 
 
-def build_command_documentation(allowed_commands: list[str]) -> dict[str, str]:
+def build_command_documentation(
+    fastmarket_tools_config: dict,
+    system_commands: list[str],
+) -> dict[str, str]:
     """Build all command documentation placeholders.
 
+    Args:
+        fastmarket_tools_config: Dict of fastmarket tool configs {name: {description, commands}}
+        system_commands: List of system command names
+
     Returns a dict with keys: aliases, fastmarket_tools, fastmarket_tools_minimal,
-    system_commands, system_commands_minimal, other_commands,
-    other_commands_minimal, skills, skills_minimal
+    fastmarket_tools_brief, fastmarket_tools_commands, system_commands,
+    system_commands_minimal, skills, skills_minimal
     """
-    from common.core.aliases import get_reverse_aliases
-
     aliases_section = _build_aliases_section()
-    fastmarket_tools_section = _build_fastmarket_tools_section(allowed_commands)
-    system_commands_section = _build_system_commands_section(allowed_commands)
-    other_commands_section = _build_other_commands_section(allowed_commands)
+    fastmarket_tools_section = _build_fastmarket_tools_section(fastmarket_tools_config)
+    system_commands_section = _build_system_commands_section(system_commands)
     skills_section = _build_skills_section()
-
-    fastmarket_cmds = {"corpus", "youtube", "image", "message", "prompt"}
-    fm_allowed = [c for c in allowed_commands if c in fastmarket_cmds]
-    system_cmds = set(SYSTEM_COMMAND_DOCS.keys())
-    sys_allowed = [c for c in allowed_commands if c in system_cmds]
-    other_allowed = [
-        c for c in allowed_commands if c not in fastmarket_cmds and c not in system_cmds
-    ]
 
     skills_dir = get_skills_dir()
     skills = discover_skills(skills_dir)
 
     fastmarket_tools_minimal = ", ".join(
-        format_fastmarket_tool_minimal(c) for c in sorted(fm_allowed)
+        f"`{c}`" for c in sorted(fastmarket_tools_config.keys())
     )
     if fastmarket_tools_minimal:
         fastmarket_tools_minimal = (
             f"**Fast-Market Tools**: {fastmarket_tools_minimal}\n"
         )
 
+    fastmarket_tools_brief_parts = []
+    for cmd in sorted(fastmarket_tools_config.keys()):
+        config = fastmarket_tools_config[cmd]
+        desc = config.get("description", "") if isinstance(config, dict) else ""
+        if desc:
+            fastmarket_tools_brief_parts.append(f"- `{cmd}` - {desc}")
+        else:
+            fastmarket_tools_brief_parts.append(f"- `{cmd}`")
+    fastmarket_tools_brief = ""
+    if fastmarket_tools_brief_parts:
+        fastmarket_tools_brief = "\n".join(fastmarket_tools_brief_parts) + "\n"
+
+    fastmarket_tools_commands_parts = []
+    for cmd in sorted(fastmarket_tools_config.keys()):
+        config = fastmarket_tools_config[cmd]
+        if isinstance(config, dict) and config.get("commands"):
+            cmds_list = ", ".join(f"`{c}`" for c in config["commands"])
+            fastmarket_tools_commands_parts.append(f"- `{cmd}`: {cmds_list}")
+    fastmarket_tools_commands = ""
+    if fastmarket_tools_commands_parts:
+        fastmarket_tools_commands = (
+            "**Fast-Market Commands**:\n"
+            + "\n".join(fastmarket_tools_commands_parts)
+            + "\n"
+        )
+
     system_commands_minimal = _build_minimal_tools_section(
-        sys_allowed, "**System Commands**"
-    )
-    other_commands_minimal = _build_minimal_tools_section(
-        other_allowed, "**Other Commands**"
+        system_commands, "**System Commands**"
     )
 
     from common.core.aliases import get_all_aliases
@@ -545,25 +539,29 @@ def build_command_documentation(allowed_commands: list[str]) -> dict[str, str]:
         "aliases": aliases_section,
         "fastmarket_tools": fastmarket_tools_section,
         "fastmarket_tools_minimal": fastmarket_tools_minimal,
+        "fastmarket_tools_brief": fastmarket_tools_brief,
+        "fastmarket_tools_commands": fastmarket_tools_commands,
         "system_commands": system_commands_section,
         "system_commands_minimal": system_commands_minimal,
-        "other_commands": other_commands_section,
-        "other_commands_minimal": other_commands_minimal,
         "skills": skills_section,
         "skills_minimal": skills_minimal,
     }
 
 
-def render_command_documentation(allowed_commands: list[str]) -> str:
+def render_command_documentation(
+    fastmarket_tools_config: dict,
+    system_commands: list[str],
+) -> str:
     """Build formatted documentation using active template."""
     prompt_config = get_active_tools_doc_prompt_config()
-    placeholders = build_command_documentation(allowed_commands)
+    placeholders = build_command_documentation(fastmarket_tools_config, system_commands)
     return prompt_config["template"].format(**placeholders)
 
 
 def build_system_prompt(
     task_description: str,
-    allowed_commands: list[str],
+    fastmarket_tools_config: dict,
+    system_commands: list[str],
     workdir: Path,
     task_params: dict[str, str] | None = None,
 ) -> str:
@@ -571,7 +569,9 @@ def build_system_prompt(
     from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
 
     prompt_config = get_active_agent_prompt_config()
-    command_docs = render_command_documentation(allowed_commands)
+    command_docs = render_command_documentation(
+        fastmarket_tools_config, system_commands
+    )
 
     params_section = ""
     if task_params:

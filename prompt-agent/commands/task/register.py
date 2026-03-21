@@ -9,7 +9,6 @@ import yaml
 
 from commands.base import CommandManifest
 from commands.task.executor import (
-    _DEFAULT_ALLOWED,
     resolve_and_execute_command,
     validate_workdir,
 )
@@ -193,12 +192,14 @@ def _get_task_config(
     max_iterations: int | None,
     timeout: int | None,
 ) -> TaskConfig:
-    task_section = config.get("task", {})
-    allowed = set(task_section.get("allowed_commands", _DEFAULT_ALLOWED))
+    from commands.setup import init_task_config
+
+    task = init_task_config(config)
     return TaskConfig(
-        allowed_commands=allowed,
-        max_iterations=max_iterations or task_section.get("max_iterations", 20),
-        default_timeout=timeout or task_section.get("default_timeout", 60),
+        fastmarket_tools=task.get("fastmarket_tools", {}),
+        system_commands=task.get("system_commands", []),
+        max_iterations=max_iterations or task.get("max_iterations", 20),
+        default_timeout=timeout or task.get("default_timeout", 60),
     )
 
 

@@ -8,12 +8,45 @@ import yaml
 from common.core.config import _resolve_config_path
 
 _SUPPORTED_PROVIDERS = {"anthropic", "openai", "openai-compatible", "ollama"}
-_DEFAULT_TASK_COMMANDS = {
-    "corpus",
-    "image",
-    "youtube",
-    "message",
-    "prompt",
+
+DEFAULT_FASTMARKET_TOOLS = {
+    "corpus": {
+        "description": "Search and query your knowledge base with embeddings. Supports file ingestion, semantic search, and YouTube video indexing.",
+        "commands": ["index", "search", "list", "delete"],
+    },
+    "image": {
+        "description": "Generate images from text prompts using AI image generation APIs.",
+        "commands": ["generate", "serve", "setup"],
+    },
+    "message": {
+        "description": "Send messages and alerts via Telegram. Supports one-way alerts and interactive ask/reply conversations.",
+        "commands": ["alert", "ask", "setup"],
+    },
+    "prompt": {
+        "description": "Manage and execute LLM prompt templates with placeholder substitution. Recursive task execution with LLM-driven CLI loop.",
+        "commands": [
+            "create",
+            "apply",
+            "alias",
+            "task",
+            "skill",
+            "setup",
+            "get",
+            "list",
+            "edit",
+            "delete",
+            "logs",
+            "providers",
+            "show-sys-prompt",
+        ],
+    },
+    "youtube": {
+        "description": "Search YouTube videos and manage comments via the YouTube Data API.",
+        "commands": ["search", "comments", "reply", "setup"],
+    },
+}
+
+DEFAULT_SYSTEM_COMMANDS = [
     "ls",
     "cat",
     "jq",
@@ -32,7 +65,7 @@ _DEFAULT_TASK_COMMANDS = {
     "uniq",
     "awk",
     "sed",
-}
+]
 
 DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
 
@@ -69,11 +102,15 @@ You can read and write files in this directory. Relative paths are resolved from
 - **Ask for help** - if truly stuck, explain what you need
 """
 
-DEFAULT_TOOLS_DOC_FULL_TEMPLATE = (
-    "{aliases}{fastmarket_tools}{system_commands}{other_commands}{skills}"
-)
+DEFAULT_TOOLS_DOC_FULL_TEMPLATE = "{aliases}{fastmarket_tools}{system_commands}{skills}"
 
-DEFAULT_TOOLS_DOC_MINIMAL_TEMPLATE = "{aliases}{fastmarket_tools_minimal}{system_commands_minimal}{other_commands_minimal}{skills_minimal}"
+DEFAULT_TOOLS_DOC_MINIMAL_TEMPLATE = (
+    "{aliases}"
+    "{fastmarket_tools_brief}"
+    "{fastmarket_tools_commands}"
+    "{system_commands_minimal}"
+    "{skills_minimal}"
+)
 
 
 def load_config(config_path: Path) -> dict:
@@ -135,7 +172,9 @@ def init_task_config(config: dict) -> dict:
     task = config.setdefault("task", {})
     if not isinstance(task, dict):
         raise ValueError("task config must be a mapping")
-    task.setdefault("allowed_commands", list(_DEFAULT_TASK_COMMANDS))
+
+    task.setdefault("fastmarket_tools", dict(DEFAULT_FASTMARKET_TOOLS))
+    task.setdefault("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
     task.setdefault("max_iterations", 20)
     task.setdefault("default_timeout", 60)
     task.setdefault("default_workdir", None)
@@ -160,11 +199,29 @@ def init_task_config(config: dict) -> dict:
                     "template": DEFAULT_TOOLS_DOC_FULL_TEMPLATE,
                 },
                 "minimal": {
-                    "description": "Just command names",
+                    "description": "Brief with descriptions",
                     "template": DEFAULT_TOOLS_DOC_MINIMAL_TEMPLATE,
                 },
             },
         }
+    else:
+        td = task.get("tools_doc", {})
+        templates = td.get("templates", {})
+        if "minimal" in templates:
+            minimal_tpl = templates["minimal"].get("template", "")
+            needs_migration = (
+                "{other_commands_minimal}" in minimal_tpl
+                or "{fastmarket_tools_minimal}{fastmarket_tools_commands}"
+                in minimal_tpl
+            )
+            if needs_migration:
+                templates["minimal"]["template"] = DEFAULT_TOOLS_DOC_MINIMAL_TEMPLATE
+                templates["minimal"]["description"] = "Brief with descriptions"
+        if "full" in templates:
+            full_tpl = templates["full"].get("template", "")
+            if "{other_commands}" in full_tpl:
+                full_tpl = full_tpl.replace("{other_commands}", "")
+                templates["full"]["template"] = full_tpl
 
     return task
 
