@@ -7,7 +7,10 @@ from commands.helpers import out
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.command("db-migrate")
+    @click.command(
+        "db-migrate",
+        help="Run database migrations to update the schema to the latest version.",
+    )
     @click.option(
         "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
     )

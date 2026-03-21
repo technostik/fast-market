@@ -7,7 +7,10 @@ from commands.helpers import _configure_logging
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.command("serve")
+    @click.command(
+        "serve",
+        help="Start the HTTP API server and web interface for browsing and searching the corpus.",
+    )
     @click.option("--port", "-p", type=int, default=8000)
     @click.pass_context
     def serve_cmd(ctx, port, **kwargs):

@@ -8,7 +8,10 @@ from commands.helpers import build_engine, fmt_duration, make_filters, out
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.command("search")
+    @click.command(
+        "search",
+        help="Search indexed documents using semantic (embedding-based) or keyword (FTS) matching.",
+    )
     @click.argument("query")
     @click.option(
         "--mode", type=click.Choice(["semantic", "keyword"]), default="semantic"

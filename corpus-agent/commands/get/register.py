@@ -10,7 +10,10 @@ from commands.helpers import build_engine, out
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.command("get")
+    @click.command(
+        "get",
+        help="Retrieve an indexed document by handle and display its metadata or content.",
+    )
     @click.argument("handle")
     @click.option(
         "--what", type=click.Choice(["meta", "content", "all"]), default="meta"

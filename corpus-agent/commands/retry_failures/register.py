@@ -12,7 +12,10 @@ _FALLBACK_LIMIT = 10
 def register(plugin_manifests: dict) -> CommandManifest:
     source_choices = list(plugin_manifests.keys()) + ["all"]
 
-    @click.command("retry-failures")
+    @click.command(
+        "retry-failures",
+        help="Clear tracked sync failures and retry indexing the failed items.",
+    )
     @click.option("--source", type=click.Choice(source_choices), default="all")
     @click.option(
         "--clear-permanent",

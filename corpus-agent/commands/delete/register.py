@@ -10,7 +10,7 @@ from commands.helpers import build_engine, out
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.command("delete")
+    @click.command("delete", help="Delete an indexed document by its handle.")
     @click.argument("handle")
     @click.option(
         "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"

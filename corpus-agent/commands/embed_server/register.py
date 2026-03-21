@@ -79,7 +79,10 @@ def _health(port: int, timeout: float = 1.5) -> dict | None:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.group("embed-server")
+    @click.group(
+        "embed-server",
+        help="Manage the persistent embedding server (start, stop, restart, status).",
+    )
     def embed_server_group() -> None:
         """Manage persistent embedding server."""
 

@@ -12,7 +12,10 @@ from commands.helpers import build_engine, out
 def register(plugin_manifests: dict) -> CommandManifest:
     source_choices = list(plugin_manifests.keys()) + ["all"]
 
-    @click.command("reindex")
+    @click.command(
+        "reindex",
+        help="Re-generate embeddings for existing documents, useful after embedding model changes.",
+    )
     @click.option("--source", type=click.Choice(source_choices), default="all")
     @click.option(
         "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"

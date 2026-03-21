@@ -11,7 +11,9 @@ from commands.helpers import build_engine, fmt_duration, make_filters, out
 def register(plugin_manifests: dict) -> CommandManifest:
     source_choices = list(plugin_manifests.keys())
 
-    @click.command("list")
+    @click.command(
+        "list", help="List indexed documents with filtering, sorting, and pagination."
+    )
     @click.option(
         "--limit",
         "-l",

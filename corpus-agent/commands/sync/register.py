@@ -15,7 +15,10 @@ _FALLBACK_LIMIT = 10
 def register(plugin_manifests: dict) -> CommandManifest:
     source_choices = list(plugin_manifests.keys()) + ["all"]
 
-    @click.command("sync")
+    @click.command(
+        "sync",
+        help="Fetch new content from configured sources and index it into the corpus.",
+    )
     @click.option("--source", type=click.Choice(source_choices), default="all")
     @click.option("--mode", type=click.Choice(["new", "backfill"]), default="new")
     @click.option("--limit", "-l", type=int, default=None)

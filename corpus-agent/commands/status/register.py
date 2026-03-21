@@ -10,7 +10,10 @@ from commands.helpers import build_engine, out
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.command("status")
+    @click.command(
+        "status",
+        help="Show statistics and health of the indexed corpus, including document counts per source.",
+    )
     @click.option(
         "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
     )
