@@ -2,21 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
 
 @dataclass(slots=True)
 class ItemMetadata:
-    """Metadata contract that ALL plugins must return."""
-
     id: str
     title: str
     url: str
     published_at: datetime
     content_type: str
     source_plugin: str
-    source_identifier: str
-    raw: dict | None = None
+    source_id: str
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -24,8 +21,8 @@ class ItemMetadata:
 class Source:
     id: str
     plugin: str
-    identifier: str
-    description: str | None
+    origin: str
+    description: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
     last_check: datetime | None = None
@@ -37,9 +34,8 @@ class Source:
 @dataclass(slots=True)
 class Action:
     id: str
-    name: str
     command: str
-    description: str | None
+    description: str | None = None
     enabled: bool = True
     created_at: datetime = field(default_factory=datetime.now)
     last_run: datetime | None = None
@@ -50,11 +46,10 @@ class Action:
 @dataclass(slots=True)
 class Rule:
     id: str
-    name: str
     conditions: dict
     action_ids: list[str]
-    enabled: bool = True
     description: str | None = None
+    enabled: bool = True
     created_at: datetime = field(default_factory=datetime.now)
     schedule: dict | None = None
     timezone: str = "UTC"
@@ -80,3 +75,20 @@ class TriggerLog:
 class TriggerLogWithMetadata(TriggerLog):
     source_metadata: dict[str, str] | None = None
     item_extra: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class RuleEvaluationResult:
+    matched: bool
+    failed_conditions: list[dict]
+
+
+@dataclass(slots=True)
+class RuleMismatchLog:
+    id: str
+    rule_id: str
+    source_id: str
+    item_id: str
+    item_title: str
+    failed_conditions: list[dict]
+    evaluated_at: datetime

@@ -20,7 +20,8 @@ class YouTubePlugin(SourcePlugin):
 
     def __init__(self, config: dict, source_config: dict):
         super().__init__(config, source_config)
-        self.channel_id = self._resolve_channel_id(source_config["identifier"])
+        self.source_id = source_config.get("id", "")
+        self.channel_id = self._resolve_channel_id(source_config["origin"])
         self.executor = ThreadPoolExecutor(max_workers=5)
         self.ydl_opts = {
             "quiet": True,
@@ -198,8 +199,7 @@ class YouTubePlugin(SourcePlugin):
                         published_at=video["published"],
                         content_type=content_type,
                         source_plugin=self.name,
-                        source_identifier=self.channel_id,
-                        raw={"yt_dlp": video},
+                        source_id=self.source_id,
                         extra=extra,
                     )
                 )
@@ -393,8 +393,7 @@ class YouTubePlugin(SourcePlugin):
                         published_at=published_at,
                         content_type=content_type,
                         source_plugin=self.name,
-                        source_identifier=self.channel_id,
-                        raw={"rss_entry": entry.__dict__ if hasattr(entry, "__dict__") else {}},
+                        source_id=self.source_id,
                         extra=extra,
                     )
                 )

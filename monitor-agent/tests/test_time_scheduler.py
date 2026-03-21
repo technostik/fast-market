@@ -132,7 +132,6 @@ class TestShouldRunRule:
     def test_rule_without_schedule_always_runs(self):
         rule = Rule(
             id="test-rule",
-            name="Test",
             conditions={"all": []},
             action_ids=["action1"],
             schedule=None,
@@ -143,7 +142,6 @@ class TestShouldRunRule:
     def test_rule_with_schedule_first_run(self):
         rule = Rule(
             id="test-rule",
-            name="Test",
             conditions={"all": []},
             action_ids=["action1"],
             schedule={"interval": "1h"},
@@ -155,7 +153,6 @@ class TestShouldRunRule:
     def test_rule_with_interval_not_due(self):
         rule = Rule(
             id="test-rule",
-            name="Test",
             conditions={"all": []},
             action_ids=["action1"],
             schedule={"interval": "1h"},
@@ -167,7 +164,6 @@ class TestShouldRunRule:
     def test_rule_with_interval_due(self):
         rule = Rule(
             id="test-rule",
-            name="Test",
             conditions={"all": []},
             action_ids=["action1"],
             schedule={"interval": "1h"},
@@ -183,7 +179,6 @@ class TestGetNextRunTime:
     def test_rule_without_schedule(self):
         rule = Rule(
             id="test-rule",
-            name="Test",
             conditions={"all": []},
             action_ids=["action1"],
             schedule=None,
@@ -194,7 +189,6 @@ class TestGetNextRunTime:
     def test_rule_with_interval(self):
         rule = Rule(
             id="test-rule",
-            name="Test",
             conditions={"all": []},
             action_ids=["action1"],
             schedule={"interval": "1h"},
@@ -207,7 +201,6 @@ class TestGetNextRunTime:
     def test_rule_with_interval_no_previous_run(self):
         rule = Rule(
             id="test-rule",
-            name="Test",
             conditions={"all": []},
             action_ids=["action1"],
             schedule={"interval": "1h"},

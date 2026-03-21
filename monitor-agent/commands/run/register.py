@@ -10,8 +10,8 @@ import click
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
 from core.executor import execute_action
-from core.models import TriggerLog
-from core.rule_engine import evaluate_rule
+from core.models import RuleMismatchLog, TriggerLog
+from core.rule_engine import evaluate_rule_with_details
 from core.time_scheduler import should_run_rule
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
@@ -35,42 +35,48 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Suppress replay of command output (action results will still be logged)",
     )
+    @click.option(
+        "--ignore-enabled",
+        is_flag=True,
+        help="Execute disabled actions and rules (for testing)",
+    )
     @click.option("--format", "fmt", type=click.Choice(["json", "text", "yaml"]), default="text")
     @click.pass_context
-    def run_cmd(ctx, cron, source_id, dry_run, force, limit, silent, fmt):
+    def run_cmd(ctx, cron, source_id, dry_run, force, limit, silent, ignore_enabled, fmt):
         storage = get_storage()
 
-        sources = storage.get_all_sources()
+        sources = storage.get_all_sources(include_disabled=ignore_enabled)
         if source_id:
             sources = [s for s in sources if s.id == source_id]
 
         if not sources:
             if not cron:
                 out_formatted(
-                    {"error": "No enabled sources found. Run 'monitor setup source-add' first."},
+                    {"error": "No sources found. Run 'monitor setup source-add' first."},
                     fmt,
                 )
             return
 
         config = {}
 
-        rules = storage.get_all_rules()
+        rules = storage.get_all_rules(include_disabled=ignore_enabled)
         if not rules:
             if not cron:
                 out_formatted(
-                    {"error": "No enabled rules found. Run 'monitor setup rule-add' first."},
+                    {"error": "No rules found. Run 'monitor setup rule-add' first."},
                     fmt,
                 )
             return
 
         triggered = []
+        mismatches = []
         errors = []
         source_stats = {}
 
         for source in sources:
-            source_id_str = source.identifier
-            if len(source_id_str) > 40:
-                source_id_str = source_id_str[:37] + "..."
+            source_origin_str = source.origin
+            if len(source_origin_str) > 40:
+                source_origin_str = source_origin_str[:37] + "..."
 
             if source.plugin not in plugin_manifests:
                 error_msg = f"Plugin '{source.plugin}' not found for source '{source.id}'"
@@ -82,7 +88,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             plugin_instance = plugin_cls(
                 config,
                 {
-                    "identifier": source.identifier,
+                    "id": source.id,
+                    "origin": source.origin,
                     "metadata": source.metadata,
                     "last_check": source.last_check,
                 },
@@ -98,7 +105,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         if not cron:
                             remaining = _get_cooldown_remaining(plugin_instance)
                             click.echo(
-                                f"⚠️  FORCE: Bypassing cooldown for '{source_id_str}' "
+                                f"⚠️  FORCE: Bypassing cooldown for '{source_origin_str}' "
                                 f"(cooldown: {remaining} remaining)",
                                 err=True,
                             )
@@ -106,7 +113,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         if not cron:
                             remaining = _get_cooldown_remaining(plugin_instance)
                             click.echo(
-                                f"[COOLDOWN] '{source_id_str}' - "
+                                f"[COOLDOWN] '{source_origin_str}' - "
                                 f"skipped (cooldown: {remaining} remaining)",
                                 err=True,
                             )
@@ -120,7 +127,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 if force:
                     if not cron:
                         click.echo(
-                            f"⚡  FORCE: Processing up to {limit} items from '{source_id_str}'",
+                            f"⚡  FORCE: Processing up to {limit} items from '{source_origin_str}'",
                             err=True,
                         )
                     items = asyncio.run(
@@ -136,7 +143,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     )
             except Exception as e:
                 fetch_error = str(e)
-                error_msg = f"Fetch failed for '{source_id_str}': {fetch_error}"
+                error_msg = f"Fetch failed for '{source_origin_str}': {fetch_error}"
                 errors.append(error_msg)
                 click.echo(f"[ERROR] {error_msg}", err=True)
 
@@ -162,11 +169,34 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     try:
                         if not should_run_rule(rule):
                             continue
-                        if evaluate_rule(rule, item, source):
+                        result = evaluate_rule_with_details(rule, item, source)
+                        if result.matched:
                             triggered.append({"rule": rule, "item": item, "source": source})
                             matched_items.append(item.id)
+                        elif not cron and not silent and source.enabled and rule.enabled:
+                            evaluated_at = datetime.now(timezone.utc)
+                            mismatches.append(
+                                {
+                                    "rule": rule,
+                                    "item": item,
+                                    "source": source,
+                                    "failed_conditions": result.failed_conditions,
+                                    "evaluated_at": evaluated_at,
+                                }
+                            )
+                            click.echo(
+                                f"[NO_MATCH] rule='{rule.id}' item='{item.title}' "
+                                f"failed={len(result.failed_conditions)}",
+                                err=True,
+                            )
+                            for fc in result.failed_conditions:
+                                reason = fc.get("reason", "unknown")
+                                click.echo(
+                                    f"  - {fc['field']} {fc['operator']} {fc.get('expected')!r}: {reason}",
+                                    err=True,
+                                )
                     except Exception as e:
-                        error_msg = f"Rule evaluation error for '{rule.name}': {str(e)}"
+                        error_msg = f"Rule evaluation error for '{rule.id}': {str(e)}"
                         errors.append(error_msg)
                         click.echo(f"[ERROR] {error_msg}", err=True)
 
@@ -180,10 +210,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             if not cron and not silent:
                 if fetched_count == 0:
-                    click.echo(f"  → '{source_id_str}': no items", err=True)
+                    click.echo(f"  → '{source_origin_str}': no items", err=True)
                 else:
                     click.echo(
-                        f"  → '{source_id_str}': fetched={fetched_count}, "
+                        f"  → '{source_origin_str}': fetched={fetched_count}, "
                         f"matched={len(matched_items)}, filtered={filtered_count}",
                         err=True,
                     )
@@ -195,6 +225,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         err=True,
                     )
 
+        for mismatch in mismatches:
+            rule = mismatch["rule"]
+            item = mismatch["item"]
+            source = mismatch["source"]
+            evaluated_at = mismatch["evaluated_at"]
+            storage.log_rule_mismatch(
+                RuleMismatchLog(
+                    id=str(uuid.uuid4()),
+                    rule_id=rule.id,
+                    source_id=source.id,
+                    item_id=item.id,
+                    item_title=item.title,
+                    failed_conditions=mismatch["failed_conditions"],
+                    evaluated_at=evaluated_at,
+                )
+            )
+
         for entry in triggered:
             rule = entry["rule"]
             item = entry["item"]
@@ -204,12 +251,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if not dry_run:
                 for action_id in rule.action_ids:
                     action = storage.get_action(action_id)
-                    if action and action.enabled:
+                    if action and (ignore_enabled or action.enabled):
                         try:
-                            code, output = execute_action(action, item, source, rule.name)
+                            code, output, script_content = execute_action(
+                                action, item, source, rule.id
+                            )
 
                             if not silent and not cron:
-                                click.echo(f"[{action.name}] exit={code}")
+                                click.echo(f"[{action.id}] exit={code}")
                                 if output:
                                     click.echo(output)
 
@@ -237,11 +286,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                             storage.update_action(action)
 
                             if code != 0:
-                                error_msg = f"Action '{action.name}' failed with exit code {code}"
+                                error_msg = f"Action '{action.id}' failed with exit code {code}\n--- Script ---\n{script_content}\n---"
                                 errors.append(error_msg)
                                 click.echo(f"[ERROR] {error_msg}", err=True)
                         except Exception as e:
-                            error_msg = f"Action execution error for '{action.name}': {str(e)}"
+                            error_msg = f"Action execution error for '{action.id}': {str(e)}"
                             errors.append(error_msg)
                             click.echo(f"[ERROR] {error_msg}", err=True)
 
@@ -250,15 +299,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "mode": "force" if force else "normal",
                 "checked_sources": len(sources),
                 "triggered_rules": len(triggered),
+                "mismatches": len(mismatches),
                 "limit_per_source": limit,
                 "errors": errors,
                 "source_stats": source_stats,
                 "triggers": [
                     {
-                        "rule": r["rule"].name,
                         "rule_id": r["rule"].id,
-                        "source": r["source"].identifier,
                         "source_id": r["source"].id,
+                        "source_origin": r["source"].origin,
                         "source_metadata": r["source"].metadata,
                         "item": {
                             "id": r["item"].id,

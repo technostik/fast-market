@@ -18,7 +18,8 @@ class YouTubeSearchPlugin(SourcePlugin):
 
     def __init__(self, config: dict, source_config: dict):
         super().__init__(config, source_config)
-        self.keywords = source_config["identifier"].strip()
+        self.source_id = source_config.get("id", "")
+        self.keywords = source_config["origin"].strip()
         self.min_views = int(self.metadata.get("min_views", self.DEFAULT_MIN_VIEWS))
         self.max_results = int(self.metadata.get("max_results", self.DEFAULT_MAX_RESULTS))
         self.executor = ThreadPoolExecutor(max_workers=3)
@@ -177,8 +178,7 @@ class YouTubeSearchPlugin(SourcePlugin):
                     published_at=video["published"],
                     content_type=content_type,
                     source_plugin=self.name,
-                    source_identifier=self.keywords,
-                    raw={"yt_dlp_search": video},
+                    source_id=self.source_id,
                     extra=extra,
                 )
             )

@@ -31,14 +31,13 @@ def _interactive_source_edit(source, storage, editor_cmd, fmt):
 # Lines starting with # are comments and will be ignored.
 #
 # Available options:
-#   name: Human-readable name (optional)
 #   description: Description of this source
 #   enabled: true or false
 #   metadata: Key-value pairs for custom fields
 
+id: {source.id}
 plugin: {source.plugin}
-identifier: {source.identifier}
-name: {source.name or ""}
+origin: {source.origin}
 description: {source.description or ""}
 enabled: {str(source.enabled).lower()}
 {meta_yaml}""".strip()
@@ -88,7 +87,6 @@ enabled: {str(source.enabled).lower()}
             elif isinstance(enabled_str, bool):
                 source.enabled = enabled_str
 
-            source.name = edited_source.get("name") or None
             source.description = edited_source.get("description") or None
 
             if edited_source.get("metadata"):
@@ -116,18 +114,17 @@ def _interactive_action_edit(action, storage, editor_cmd, fmt):
 # Lines starting with # are comments and will be ignored.
 #
 # Available options:
-#   name: Human-readable action name
 #   description: Description of what this action does
 #   command: Shell command to execute (use $VARIABLE for placeholders)
 #   enabled: true or false
 #
 # Placeholders available in commands:
-#   $ITEM_TITLE, $ITEM_URL, $ITEM_ID, $ITEM_TIMESTAMP
-#   $SOURCE_ID, $SOURCE_NAME, $SOURCE_PLUGIN
-#   $RULE_NAME, $RULE_ID
-#   $SOURCE_META_<KEY> (e.g., $SOURCE_META_THEME)
+#   $ITEM_TITLE, $ITEM_URL, $ITEM_ID, $ITEM_CONTENT_TYPE, $ITEM_PUBLISHED
+#   $SOURCE_ID, $SOURCE_PLUGIN, $SOURCE_ORIGIN, $SOURCE_URL, $SOURCE_DESC
+#   $RULE_ID
+#   $EXTRA_<KEY> (e.g., $EXTRA_VIEWS)
 
-name: {action.name}
+id: {action.id}
 description: {action.description or ""}
 command: |
   {action.command}
@@ -185,7 +182,6 @@ enabled: {str(action.enabled).lower()}
             elif isinstance(enabled_str, bool):
                 action.enabled = enabled_str
 
-            action.name = edited_action.get("name", action.name)
             action.description = edited_action.get("description") or None
             action.command = edited_action.get("command", action.command)
 
@@ -224,7 +220,12 @@ def _interactive_rule_edit(rule, parser, formatter, storage, editor_cmd, fmt):
 #     content_type == 'video'
 #     extra.duration > 600
 #     title matches '.*AI.*'
-#     (source == 'youtube' and type == 'video') or priority == 'high'
+#     (source_plugin == 'youtube' and content_type == 'video')
+#
+# Available fields:
+#   Item: id, title, url, content_type, published_at
+#   Source: source_id, source_plugin, source_origin, source_description, source_metadata.*
+#   Extra: extra.* (plugin-specific fields)
 #
 # Schedule (optional, uncomment one):
 {schedule_yaml}#
@@ -233,9 +234,9 @@ def _interactive_rule_edit(rule, parser, formatter, storage, editor_cmd, fmt):
 #   schedule: interval like "30m", "1h", "2h", "1d"
 #   timezone: e.g., "UTC", "America/New_York"
 
-name: {rule.name}
+id: {rule.id}
 description: {rule.description or ""}
-actions: [{actions_yaml}]
+action_ids: [{actions_yaml}]
 timezone: {rule.timezone}
 conditions: |
   {current_dsl}
@@ -317,7 +318,6 @@ conditions: |
                     input()
                     continue
 
-            rule.name = edited_rule.get("name", rule.name)
             rule.description = edited_rule.get("description") or None
             rule.conditions = new_conditions
             rule.timezone = edited_rule.get("timezone", rule.timezone)
@@ -339,7 +339,7 @@ conditions: |
                 rule.schedule = None
 
             storage.update_rule(rule)
-            click.echo(f"Rule '{rule.name}' updated successfully.")
+            click.echo(f"Rule '{rule.id}' updated successfully.")
             return
 
     finally:
@@ -355,14 +355,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
     plugin_choices = list(plugin_manifests.keys())
 
     @setup_group.command("source-add")
+    @click.option("--id", "custom_id", help="Custom ID (instead of auto-generated)")
     @click.option("--plugin", type=click.Choice(plugin_choices), required=True)
-    @click.option("--identifier", required=True, help="Channel ID, search keywords, or RSS URL")
+    @click.option(
+        "--origin", required=True, help="Channel ID, @handle, RSS URL, or search keywords"
+    )
     @click.option("--description", help="Optional description")
     @click.option(
         "--meta", multiple=True, help="Metadata key=value pairs (can be used multiple times)"
     )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def source_add(plugin, identifier, description, meta, fmt):
+    def source_add(custom_id, plugin, origin, description, meta, fmt):
         """Add a new source to monitor with optional metadata."""
         storage = get_storage()
 
@@ -374,15 +377,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
             metadata[key.strip()] = value.strip()
 
         plugin_class = plugin_manifests[plugin].source_plugin_class
-        temp_config = plugin_class({"identifier": identifier}, {"identifier": identifier})
-        if not temp_config.validate_identifier(identifier):
-            out_formatted({"error": f"Invalid identifier for {plugin} plugin"}, fmt)
+        temp_config = plugin_class({"origin": origin}, {"origin": origin})
+        if not temp_config.validate_identifier(origin):
+            out_formatted({"error": f"Invalid origin for {plugin} plugin"}, fmt)
             return
 
+        source_id = custom_id or str(uuid.uuid4())
+
         source = Source(
-            id=str(uuid.uuid4()),
+            id=source_id,
             plugin=plugin,
-            identifier=identifier,
+            origin=origin,
             description=description,
             metadata=metadata,
             created_at=datetime.now(),
@@ -393,7 +398,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             {
                 "id": source.id,
                 "plugin": source.plugin,
-                "identifier": source.identifier,
+                "origin": source.origin,
                 "description": source.description,
                 "metadata": metadata,
                 "message": "Source added successfully",
@@ -475,9 +480,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         )
 
     @setup_group.command("action-add")
-    @click.option("--id", "custom_id", help="Custom ID (instead of auto-generated)")
+    @click.option("--id", "custom_id", required=True, help="Action ID (required)")
     @click.option("--replace-id", help="Replace existing action with this ID")
-    @click.option("--name", required=True, help="Action name")
     @click.option(
         "--command",
         required=True,
@@ -485,9 +489,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option("--description", help="Optional description")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def action_add(custom_id, replace_id, name, command, description, fmt):
+    def action_add(custom_id, replace_id, command, description, fmt):
         """Add or replace an action."""
         storage = get_storage()
+
+        action_id = custom_id
 
         if replace_id:
             existing = storage.get_action(replace_id)
@@ -495,25 +501,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 out_formatted({"error": f"Action {replace_id} not found"}, fmt)
                 return
 
-            existing.name = name
             existing.command = command
             existing.description = description
             storage.update_action(existing)
             out_formatted({"id": replace_id, "message": "Action replaced"}, fmt)
             return
 
-        action_id = custom_id or str(uuid.uuid4())
-
-        if custom_id and storage.get_action(custom_id):
+        if storage.get_action(action_id):
             out_formatted(
-                {"error": f"Action ID {custom_id} already exists. Use --replace-id to update."},
+                {"error": f"Action ID {action_id} already exists. Use --replace-id to update."},
                 fmt,
             )
             return
 
         action = Action(
             id=action_id,
-            name=name,
             command=command,
             description=description,
             created_at=datetime.now(),
@@ -523,7 +525,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         out_formatted(
             {
                 "id": action.id,
-                "name": action.name,
                 "description": action.description,
                 "message": "Action added successfully",
             },
@@ -540,7 +541,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             [
                 {
                     "id": a.id,
-                    "name": a.name,
                     "description": a.description,
                     "command": a.command,
                     "last_run": a.last_run.isoformat() if a.last_run else None,
@@ -569,20 +569,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Open interactive editor",
     )
-    @click.option("--name", help="New action name")
     @click.option("--command", help="New shell command")
     @click.option("--description", help="New description")
     @click.option("--enable/--disable", default=None, help="Enable or disable action")
     @click.option("--editor", help="Editor to use (default: $EDITOR or nano)")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def action_edit(action_id, interactive, name, command, description, enable, editor, fmt):
+    def action_edit(action_id, interactive, command, description, enable, editor, fmt):
         """Edit an existing action interactively or with options.
 
         Use -i/--interactive to open the editor.
 
         Examples:
             monitor setup action-edit my-action -i  # Interactive editor
-            monitor setup action-edit my-action --name "New name"
             monitor setup action-edit my-action --command 'curl ...'
         """
         storage = get_storage()
@@ -595,13 +593,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
             editor_cmd = editor or os.environ.get("EDITOR", "nano")
             _interactive_action_edit(existing, storage, editor_cmd, fmt)
             return
-        elif name is None and command is None and description is None and enable is None:
+        elif command is None and description is None and enable is None:
             editor_cmd = editor or os.environ.get("EDITOR", "nano")
             _interactive_action_edit(existing, storage, editor_cmd, fmt)
             return
 
-        if name is not None:
-            existing.name = name
         if command is not None:
             existing.command = command
         if description is not None:
@@ -615,9 +611,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         )
 
     @setup_group.command("rule-add")
-    @click.option("--id", "custom_id", help="Custom ID (instead of auto-generated)")
+    @click.option("--id", "custom_id", required=True, help="Rule ID (required)")
     @click.option("--replace-id", help="Replace existing rule with this ID")
-    @click.option("--name", required=True, help="Rule name")
     @click.option(
         "--rule-file",
         type=click.Path(exists=True),
@@ -625,7 +620,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--conditions",
-        help="Condition DSL string (e.g., \"content_type == 'video' and duration > 600\")",
+        help="Condition DSL string (e.g., \"content_type == 'video' and extra.views > 600\")",
     )
     @click.option("--action-ids", required=True, help="Comma-separated action IDs")
     @click.option("--description", help="Optional description")
@@ -636,7 +631,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def rule_add(
         custom_id,
         replace_id,
-        name,
         rule_file,
         conditions,
         action_ids,
@@ -649,18 +643,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Add or replace a rule with DSL conditions and optional schedule.
 
         Examples:
-            monitor setup rule-add --name "Tech Videos" \\
-                --conditions "content_type == 'video' and extra.theme == 'tech'" \\
+            monitor setup rule-add --id tech-videos \\
+                --conditions "content_type == 'video' and extra.views > 1000" \\
                 --action-ids notify
 
-            monitor setup rule-add --name "Hourly Check" \\
+            monitor setup rule-add --id hourly-check \\
                 --conditions "source_metadata.priority == 'high'" \\
                 --cron "0 * * * *" \\
-                --action-ids notify
-
-            monitor setup rule-add --name "Every 5 Minutes" \\
-                --conditions "extra.views > 1000" \\
-                --interval "5m" \\
                 --action-ids notify
         """
         storage = get_storage()
@@ -715,7 +704,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 out_formatted({"error": f"Rule {replace_id} not found"}, fmt)
                 return
 
-            existing.name = name
             existing.conditions = conditions_data
             existing.action_ids = action_id_list
             existing.description = description
@@ -725,18 +713,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
             out_formatted({"id": replace_id, "message": "Rule replaced", "schedule": schedule}, fmt)
             return
 
-        rule_id = custom_id or str(uuid.uuid4())
+        rule_id = custom_id
 
-        if custom_id and storage.get_rule(custom_id):
+        if storage.get_rule(rule_id):
             out_formatted(
-                {"error": f"Rule ID {custom_id} already exists. Use --replace-id to update."},
+                {"error": f"Rule ID {rule_id} already exists. Use --replace-id to update."},
                 fmt,
             )
             return
 
         rule = Rule(
             id=rule_id,
-            name=name,
             conditions=conditions_data,
             action_ids=action_id_list,
             description=description,
@@ -751,7 +738,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         out_formatted(
             {
                 "id": rule.id,
-                "name": rule.name,
                 "conditions_dsl": dsl_conditions,
                 "action_ids": rule.action_ids,
                 "schedule": schedule,
@@ -772,7 +758,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             [
                 {
                     "id": r.id,
-                    "name": r.name,
                     "conditions_dsl": formatter.format(r.conditions),
                     "conditions": r.conditions,
                     "action_ids": r.action_ids,
@@ -806,7 +791,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Open interactive editor with DSL format",
     )
-    @click.option("--name", help="New rule name")
     @click.option(
         "--rule-file",
         type=click.Path(exists=True),
@@ -828,7 +812,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def rule_edit(
         rule_id,
         interactive,
-        name,
         rule_file,
         conditions,
         action_ids,
@@ -847,7 +830,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         Examples:
             monitor setup rule-edit my-rule -i  # Interactive editor
-            monitor setup rule-edit my-rule --name "New Name"
             monitor setup rule-edit my-rule --conditions "content_type == 'video'"
             monitor setup rule-edit my-rule --cron "0 6 * * *"
             monitor setup rule-edit my-rule --no-schedule
@@ -865,8 +847,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             _interactive_rule_edit(existing, parser, formatter, storage, editor_cmd, fmt)
             return
         elif (
-            name is None
-            and not rule_file
+            not rule_file
             and not conditions
             and not action_ids
             and not description
@@ -879,9 +860,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             editor_cmd = editor or os.environ.get("EDITOR", "nano")
             _interactive_rule_edit(existing, parser, formatter, storage, editor_cmd, fmt)
             return
-
-        if name is not None:
-            existing.name = name
 
         if rule_file:
             with open(rule_file) as f:
@@ -937,7 +915,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "message": "Rule updated",
                 "rule": {
                     "id": existing.id,
-                    "name": existing.name,
                     "conditions_dsl": formatter.format(existing.conditions),
                     "action_ids": existing.action_ids,
                     "schedule": existing.schedule,
@@ -991,7 +968,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if format == "json":
             output = {
                 "id": rule.id,
-                "name": rule.name,
                 "conditions": rule.conditions,
                 "conditions_dsl": formatter.format(rule.conditions),
                 "action_ids": rule.action_ids,
@@ -1008,29 +984,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
         elif format == "yaml":
             output = {
                 "id": rule.id,
-                "name": rule.name,
                 "conditions": formatter.format(rule.conditions),
                 "action_ids": rule.action_ids,
                 "schedule": rule.schedule,
                 "timezone": rule.timezone,
                 "enabled": rule.enabled,
                 "description": rule.description,
-                "created_at": rule.created_at.isoformat(),
-                "last_triggered_at": rule.last_triggered_at.isoformat()
-                if rule.last_triggered_at
-                else None,
             }
-            click.echo(yaml.dump(output, default_flow_style=False, sort_keys=False))
+            click.echo(yaml.dump(output, default_flow_style=False))
         else:
-            schedule_str = ""
-            if rule.schedule:
-                if "cron" in rule.schedule:
-                    schedule_str = f"  schedule:\n    cron: {rule.schedule['cron']}"
-                elif "interval" in rule.schedule:
-                    schedule_str = f"  schedule:\n    interval: {rule.schedule['interval']}"
-
             click.echo(f"id: {rule.id}")
-            click.echo(f"name: {rule.name}")
             if rule.description:
                 click.echo(f"description: {rule.description}")
             click.echo(f"enabled: {rule.enabled}")

@@ -11,7 +11,6 @@ from core.rule_engine import evaluate_rule
 def test_youtube_short_rule(sample_rule, sample_item, sample_source):
     rule = Rule(
         id="short-rule",
-        name="Short Videos Rule",
         conditions={
             "all": [
                 {"field": "source_plugin", "operator": "==", "value": "youtube"},
@@ -28,11 +27,11 @@ def test_youtube_short_rule(sample_rule, sample_item, sample_source):
         published_at=datetime.now(timezone.utc),
         content_type="short",
         source_plugin="youtube",
-        source_identifier="UC123",
+        source_id="src1",
         extra={"is_short": True, "duration_seconds": 45},
     )
 
-    source = Source(id="src1", plugin="youtube", identifier="UC123", description="Test Channel")
+    source = Source(id="src1", plugin="youtube", origin="UC123", description="Test Channel")
 
     assert evaluate_rule(rule, short_item, source) is True
 
@@ -40,7 +39,6 @@ def test_youtube_short_rule(sample_rule, sample_item, sample_source):
 def test_long_video_rule_not_matched(sample_rule, sample_item, sample_source):
     rule = Rule(
         id="long-rule",
-        name="Long Videos Rule",
         conditions={
             "all": [
                 {"field": "source_plugin", "operator": "==", "value": "youtube"},
@@ -59,7 +57,7 @@ def test_long_video_rule_not_matched(sample_rule, sample_item, sample_source):
         published_at=datetime.now(timezone.utc),
         content_type="video",
         source_plugin="youtube",
-        source_identifier="UC123",
+        source_id="src1",
         extra={"is_short": False, "duration_seconds": 300},
     )
 
@@ -69,7 +67,6 @@ def test_long_video_rule_not_matched(sample_rule, sample_item, sample_source):
 def test_or_conditions(sample_rule, sample_item, sample_source):
     rule = Rule(
         id="or-rule",
-        name="OR Rule",
         conditions={
             "any": [
                 {"field": "content_type", "operator": "==", "value": "short"},
@@ -86,7 +83,7 @@ def test_or_conditions(sample_rule, sample_item, sample_source):
         published_at=datetime.now(timezone.utc),
         content_type="short",
         source_plugin="youtube",
-        source_identifier="UC123",
+        source_id="src1",
         extra={"is_short": True},
     )
 
@@ -99,7 +96,7 @@ def test_or_conditions(sample_rule, sample_item, sample_source):
         published_at=datetime.now(timezone.utc),
         content_type="video",
         source_plugin="youtube",
-        source_identifier="UC123",
+        source_id="src1",
         extra={"is_short": False},
     )
 
@@ -109,7 +106,6 @@ def test_or_conditions(sample_rule, sample_item, sample_source):
 def test_nested_conditions(sample_rule, sample_item, sample_source):
     rule = Rule(
         id="nested-rule",
-        name="Nested Rule",
         conditions={
             "all": [
                 {"field": "source_plugin", "operator": "==", "value": "youtube"},
@@ -131,7 +127,7 @@ def test_nested_conditions(sample_rule, sample_item, sample_source):
         published_at=datetime.now(timezone.utc),
         content_type="video",
         source_plugin="youtube",
-        source_identifier="UC123",
+        source_id="src1",
         extra={"is_short": False, "channel_name": "Tech Reviews"},
     )
 
@@ -141,7 +137,6 @@ def test_nested_conditions(sample_rule, sample_item, sample_source):
 def test_regex_matching(sample_rule, sample_item, sample_source):
     rule = Rule(
         id="regex-rule",
-        name="Regex Rule",
         conditions={
             "all": [{"field": "title", "operator": "matches", "value": r".*(AI|ML|MLOps).*"}]
         },
@@ -155,7 +150,7 @@ def test_regex_matching(sample_rule, sample_item, sample_source):
         published_at=datetime.now(timezone.utc),
         content_type="video",
         source_plugin="youtube",
-        source_identifier="UC123",
+        source_id="src1",
         extra={},
     )
 
@@ -168,7 +163,7 @@ def test_regex_matching(sample_rule, sample_item, sample_source):
         published_at=datetime.now(timezone.utc),
         content_type="video",
         source_plugin="youtube",
-        source_identifier="UC123",
+        source_id="src1",
         extra={},
     )
 
@@ -178,7 +173,6 @@ def test_regex_matching(sample_rule, sample_item, sample_source):
 def test_inequality_operators(sample_rule, sample_item, sample_source):
     rule = Rule(
         id="neq-rule",
-        name="Not Equal Rule",
         conditions={"all": [{"field": "content_type", "operator": "!=", "value": "short"}]},
         action_ids=["action1"],
     )
@@ -189,7 +183,6 @@ def test_inequality_operators(sample_rule, sample_item, sample_source):
 def test_comparison_operators(sample_rule, sample_item, sample_source):
     rule_gte = Rule(
         id="gte-rule",
-        name="GTE Rule",
         conditions={"all": [{"field": "duration_seconds", "operator": ">=", "value": 600}]},
         action_ids=["action1"],
     )
@@ -198,7 +191,6 @@ def test_comparison_operators(sample_rule, sample_item, sample_source):
 
     rule_lte = Rule(
         id="lte-rule",
-        name="LTE Rule",
         conditions={"all": [{"field": "duration_seconds", "operator": "<=", "value": 600}]},
         action_ids=["action1"],
     )
@@ -210,13 +202,12 @@ def test_rss_article_rule(sample_rule, sample_item, sample_source):
     rss_source = Source(
         id="rss-src",
         plugin="rss",
-        identifier="https://example.com/feed.xml",
+        origin="https://example.com/feed.xml",
         description="Tech Blog",
     )
 
     rule = Rule(
         id="rss-rule",
-        name="RSS Rule",
         conditions={
             "all": [
                 {"field": "source_plugin", "operator": "==", "value": "rss"},
@@ -233,7 +224,7 @@ def test_rss_article_rule(sample_rule, sample_item, sample_source):
         published_at=datetime.now(timezone.utc),
         content_type="article",
         source_plugin="rss",
-        source_identifier="https://example.com/feed.xml",
+        source_id="rss-src",
         extra={"categories": ["technology", "news"], "author": "John Doe", "word_count": 500},
     )
 

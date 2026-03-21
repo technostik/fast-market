@@ -24,7 +24,7 @@ def sample_source():
     return Source(
         id="test-source-1",
         plugin="youtube",
-        identifier="UC123456789",
+        origin="UC123456789",
         description="Test Channel",
         metadata={"theme": "tech", "priority": "high"},
         created_at=datetime.now(),
@@ -38,7 +38,6 @@ def sample_action():
 
     return Action(
         id="test-action-1",
-        name="Test Action",
         command="echo $ITEM_TITLE",
         description="Test description",
         created_at=datetime.now(),
@@ -52,7 +51,6 @@ def sample_rule():
 
     return Rule(
         id="test-rule-1",
-        name="Test Rule",
         conditions={
             "all": [
                 {"field": "source_plugin", "operator": "==", "value": "youtube"},
@@ -60,6 +58,7 @@ def sample_rule():
             ]
         },
         action_ids=["test-action-1"],
+        description="Test Rule",
         created_at=datetime.now(),
     )
 
@@ -76,6 +75,6 @@ def sample_item():
         published_at=datetime.now(timezone.utc),
         content_type="video",
         source_plugin="youtube",
-        source_identifier="UC123456789",
+        source_id="test-source-1",
         extra={"is_short": False, "duration_seconds": 600, "channel_name": "Test Channel"},
     )

@@ -23,7 +23,7 @@ class RSSPlugin(SourcePlugin):
         if not self._should_fetch(force):
             return []
 
-        rss_url = self.source_config["identifier"]
+        rss_url = self.source_config["origin"]
         feed = feedparser.parse(rss_url)
 
         if hasattr(feed, "bozo_exception") and feed.bozo_exception:
@@ -83,8 +83,7 @@ class RSSPlugin(SourcePlugin):
                 published_at=published,
                 content_type="article",
                 source_plugin=self.name,
-                source_identifier=self.source_config["identifier"],
-                raw=entry.__dict__,
+                source_id=self.source_config.get("id", ""),
                 extra={
                     "author": entry.get("author", ""),
                     "categories": categories,

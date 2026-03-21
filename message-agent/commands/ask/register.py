@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import click
 from commands.base import CommandManifest
-from commands.helpers import build_plugin, load_config, out
+from commands.helpers import build_plugin, load_config, out, read_stdin
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     source_choices = list(plugin_manifests.keys())
 
     @click.command("ask")
-    @click.argument("message")
+    @click.argument("message", required=False)
     @click.option(
         "--source",
         type=click.Choice(source_choices),
@@ -23,8 +23,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="text",
         help="Output format",
     )
+    @click.option(
+        "--stdin",
+        "-s",
+        is_flag=True,
+        help="Read message content from stdin (for piping)",
+    )
     @click.pass_context
-    def ask_cmd(ctx, message, source, fmt, **kwargs):
+    def ask_cmd(ctx, message, source, fmt, stdin, **kwargs):
+        if stdin or message == "-":
+            message = read_stdin()
+        elif not message:
+            message = read_stdin()
+
         config = load_config()
         plugin = build_plugin(config, source)
 

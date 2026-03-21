@@ -40,14 +40,16 @@ class OpenAICompatibleProvider(LazyLLMProvider):
             return
 
         api_key_env = provider_config.get("api_key_env", "OPENAI_COMPATIBLE_API_KEY")
-        api_key = os.environ.get(api_key_env)
-        if not api_key:
-            logger.warning(
-                "openai_compatible_provider_not_initialized",
-                reason=f"{api_key_env} environment variable not set",
-            )
-            self._provider = None
-            return
+        api_key = None
+        if api_key_env and api_key_env.upper() not in ("", "NONE"):
+            api_key = os.environ.get(api_key_env)
+            if not api_key:
+                logger.warning(
+                    "openai_compatible_provider_not_initialized",
+                    reason=f"{api_key_env} environment variable not set",
+                )
+                self._provider = None
+                return
 
         default_model = provider_config.get("default_model", "")
         if not isinstance(default_model, str) or not default_model.strip():
@@ -58,7 +60,7 @@ class OpenAICompatibleProvider(LazyLLMProvider):
             self._provider = None
             return
 
-        client = OpenAI(api_key=api_key, base_url=base_url)
+        client = OpenAI(api_key=api_key or "", base_url=base_url)
 
         self._provider = _RealOpenAICompatibleProvider(
             client=client, base_url=base_url, default_model=default_model

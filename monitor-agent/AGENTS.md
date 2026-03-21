@@ -43,7 +43,7 @@ monitor-agent/
 
 ### Action Execution
 - Shell script execution with placeholder substitution
-- Placeholders: `$ITEM_TITLE`, `$ITEM_URL`, `$SOURCE_ID`, `$RULE_NAME`, etc.
+- Placeholders: `$ITEM_TITLE`, `$ITEM_URL`, `$SOURCE_ID`, `$RULE_ID`, `$SOURCE_ORIGIN`, etc.
 - Timeout protection (5 minutes)
 - Output capture and logging
 
@@ -65,8 +65,10 @@ Commands:
   status/ → Storage (statistics)
 
 Core:
-  models.py           → Dataclasses: Source, Action, Rule, ItemMetadata, TriggerLog
-  rule_engine.py      → evaluate_rule() recursive evaluator
+  models.py           → Dataclasses: Source, Action, Rule, ItemMetadata, TriggerLog, RuleEvaluationResult
+  rule_engine.py      → evaluate_rule() recursive evaluator with mismatch logging
+  config_schema.py    → Pydantic models for strict YAML validation with unknown field warnings
+  executor.py         → Placeholder substitution: $RULE_ID, $SOURCE_ID, $SOURCE_ORIGIN
   rule_parser.py      → DSL string to internal format parser
   rule_formatter.py   → Internal format to DSL string formatter
   executor.py         → execute_action() with placeholders
@@ -89,6 +91,8 @@ Core:
 - Test rules with `--force --dry-run` before production
 - Use DSL syntax for human-readable conditions: `content_type == 'video' and duration > 600`
 - Schedule rules with `--cron` or `--interval` options
+- Use `$SOURCE_ID` in conditions to match specific sources
+- Rule/engine provides detailed mismatch logging for debugging failed conditions
 
 ### Plugin Development
 - Implement `fetch_new_items()` as async method
@@ -189,16 +193,24 @@ Core:
 ### Config File (YAML)
 Path: `~/.local/share/fast-market/config/monitor.yaml`
 
-Currently empty — all configuration is via CLI and storage.
+Configuration uses strict YAML validation with Pydantic. Unknown fields generate warnings.
+
+### Identifier Conventions
+- **Sources**: Use `id` for the source identifier, `origin` for the plugin-specific origin (e.g., channel ID for YouTube, URL for RSS)
+- **Actions**: Use only `id` — no separate "name" field
+- **Rules**: Use only `id` — no separate "name" field
+- **Source in conditions**: Use `source_id == 'source-id'` to match items from specific sources
+- **Source origin in conditions**: Use `source_origin == 'UCxxx'` to match by plugin-specific origin
 
 ### Database
 Path: `~/.local/share/fast-market/monitor/monitor.db`
 
 Tables:
-- `sources` — Monitored sources with last_item_id tracking
+- `sources` — Monitored sources with `origin` (was: identifier) and last_item_id tracking
 - `actions` — Shell commands with last_run status
 - `rules` — JSON conditions and action references
 - `trigger_logs` — Execution history for debugging
+- `rule_mismatch_logs` — Detailed condition failure logs for debugging
 
 ## Usage Examples
 
@@ -210,35 +222,35 @@ monitor setup source-add --plugin youtube --identifier UC123456789 \
 # Add an RSS feed source
 monitor setup source-add --plugin rss --identifier https://example.com/feed.xml
 
-# Add an action with custom ID
-monitor setup action-add --id telegram-notify --name notify \
+# Add an action with custom ID (use --description for human-readable description)
+monitor setup action-add --id telegram-notify \
   --command 'curl -X POST https://api.telegram.org/...'
 
 # Replace an existing action
 monitor setup action-add --replace-id telegram-notify --command 'new command'
 
 # Add a rule with custom ID
-monitor setup rule-add --id tech-shorts --name "Tech Shorts" \
+monitor setup rule-add --id tech-shorts \
   --rule-file rule.yaml --action-ids telegram-notify
 
 # Add inline rule with DSL (human-readable)
-monitor setup rule-add --name "Tech Videos" \
+monitor setup rule-add --id "tech-videos" \
   --conditions "source_plugin == 'youtube' and content_type == 'video' and extra.duration > 600" \
   --action-ids <action-id>
 
 # Add rule with DSL OR conditions
-monitor setup rule-add --name "YouTube or RSS" \
+monitor setup rule-add --id "youtube-or-rss" \
   --conditions "source_plugin == 'youtube' or source_plugin == 'rss'" \
   --action-ids <action-id>
 
 # Add rule with cron scheduling (hourly)
-monitor setup rule-add --name "Hourly Check" \
+monitor setup rule-add --id "hourly-check" \
   --conditions "content_type == 'video'" \
   --cron "0 * * * *" \
   --action-ids <action-id>
 
 # Add rule with interval scheduling (every 30 minutes)
-monitor setup rule-add --name "Frequent Check" \
+monitor setup rule-add --id "frequent-check" \
   --conditions "source_metadata.priority == 'high'" \
   --interval "30m" \
   --action-ids <action-id>
@@ -266,6 +278,9 @@ monitor setup show --export yaml > backup.yaml
 
 # View logs with filters
 monitor logs --since 1d --action-id telegram-notify --format yaml
+
+# View mismatch logs (failed condition details)
+monitor logs --mismatch --rule-id tech-shorts --format yaml
 
 # Check status
 monitor status --format json

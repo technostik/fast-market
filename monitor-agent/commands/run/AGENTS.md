@@ -23,14 +23,17 @@ Max items to process per source (default: 50).
 ### --silent
 Suppress replay of command output. Action results are still logged. `--cron` mode already implies silent.
 
+### --ignore-enabled
+Execute disabled actions, rules, and sources (for testing).
+
 ### --format
 Output format: `json`, `yaml`, or `text`.
 
 ## Execution Flow
 
 ```
-1. Load enabled sources from storage
-2. Load enabled rules from storage
+1. Load sources from storage (enabled only, unless --ignore-enabled)
+2. Load rules from storage (enabled only, unless --ignore-enabled)
 3. For each source:
    a. Create plugin instance
    b. Fetch items (respect last_item_id unless --force)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+import click
 
 from common.cli.helpers import out as _out
 from common.core.registry import build_plugins
@@ -25,3 +28,14 @@ def build_plugin(config: dict, plugin_name: str = "telegram"):
 
 def out(data: object, fmt: str) -> None:
     _out(data, fmt)
+
+
+def read_stdin() -> str:
+    if sys.stdin.isatty():
+        raise click.ClickException(
+            "No stdin available (pipe content into this command)"
+        )
+    content = sys.stdin.read().strip()
+    if not content:
+        raise click.ClickException("No input from stdin")
+    return content

@@ -42,7 +42,7 @@ class TestForceMode:
         source = Source(
             id="test-src",
             plugin="youtube",
-            identifier="UC123456789",
+            origin="UC123456789",
             description="Test Channel",
             last_fetched_at=None,
             created_at=datetime.now(),
@@ -51,7 +51,6 @@ class TestForceMode:
 
         rule = Rule(
             id="test-rule",
-            name="Test Rule",
             conditions={"all": [{"field": "source_plugin", "operator": "==", "value": "youtube"}]},
             action_ids=[],
             created_at=datetime.now(),
@@ -66,7 +65,7 @@ class TestForceMode:
                 published_at=datetime.now(timezone.utc),
                 content_type="video",
                 source_plugin="youtube",
-                source_identifier="UC123456789",
+                source_id="test-src",
                 extra={},
             ),
         ]
@@ -116,7 +115,7 @@ class TestForceMode:
         source = Source(
             id="test-src-normal",
             plugin="youtube",
-            identifier="UC123456789",
+            origin="UC123456789",
             description="Test Channel",
             last_fetched_at=last_fetch,
             created_at=datetime.now(),
@@ -125,7 +124,6 @@ class TestForceMode:
 
         rule = Rule(
             id="test-rule-normal",
-            name="Test Rule",
             conditions={"all": [{"field": "source_plugin", "operator": "==", "value": "youtube"}]},
             action_ids=[],
             created_at=datetime.now(),
@@ -171,7 +169,7 @@ class TestForceMode:
         source = Source(
             id="test-src-force",
             plugin="youtube",
-            identifier="UC123456789",
+            origin="UC123456789",
             description="Test Channel",
             last_fetched_at=original_time,
             created_at=datetime.now(),
@@ -180,7 +178,6 @@ class TestForceMode:
 
         rule = Rule(
             id="test-rule-force",
-            name="Test Rule",
             conditions={"all": [{"field": "source_plugin", "operator": "==", "value": "youtube"}]},
             action_ids=[],
             created_at=datetime.now(),
@@ -195,7 +192,7 @@ class TestForceMode:
                 published_at=datetime.now(timezone.utc),
                 content_type="video",
                 source_plugin="youtube",
-                source_identifier="UC123456789",
+                source_id="test-src-force",
                 extra={},
             ),
         ]
@@ -234,7 +231,7 @@ class TestForceMode:
         source = Source(
             id="test-src-limit",
             plugin="youtube",
-            identifier="UC123456789",
+            origin="UC123456789",
             description="Test Channel",
             created_at=datetime.now(),
         )
@@ -242,7 +239,6 @@ class TestForceMode:
 
         rule = Rule(
             id="test-rule-limit",
-            name="Test Rule",
             conditions={"all": [{"field": "source_plugin", "operator": "==", "value": "youtube"}]},
             action_ids=[],
             created_at=datetime.now(),
@@ -275,3 +271,102 @@ class TestForceMode:
             result = runner.invoke(cmd, ["--force", "--limit", "5", "--format", "json"])
 
             assert called_args.get("limit") == 5
+
+
+class TestIgnoreEnabled:
+    """Tests for --ignore-enabled functionality."""
+
+    def test_ignore_enabled_flag_recognized(self):
+        """Test that --ignore-enabled flag is recognized by the CLI."""
+        from cli.main import main
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", "--help"])
+        assert result.exit_code == 0
+        assert "--ignore-enabled" in result.output
+
+    def test_ignore_enabled_includes_disabled_sources(self, tmp_path):
+        """Test that --ignore-enabled includes disabled sources."""
+        from core.storage import MonitorStorage
+        from commands.run.register import register
+
+        db_path = tmp_path / "test.db"
+        storage = MonitorStorage(db_path)
+
+        enabled_source = Source(
+            id="enabled-src",
+            plugin="youtube",
+            origin="UC111111111",
+            description="Enabled Source",
+            created_at=datetime.now(),
+            enabled=True,
+        )
+        storage.add_source(enabled_source)
+
+        disabled_source = Source(
+            id="disabled-src",
+            plugin="youtube",
+            origin="UC222222222",
+            description="Disabled Source",
+            created_at=datetime.now(),
+            enabled=False,
+        )
+        storage.add_source(disabled_source)
+
+        manifest = register({})
+        cmd = manifest.click_command
+
+        def mock_get_storage():
+            return storage
+
+        with patch("commands.run.register.get_storage", mock_get_storage):
+            runner = CliRunner()
+            result = runner.invoke(cmd, ["--ignore-enabled", "--format", "json"])
+            assert "No sources found" not in result.output
+
+    def test_ignore_enabled_includes_disabled_rules(self, tmp_path):
+        """Test that --ignore-enabled includes disabled rules."""
+        from core.storage import MonitorStorage
+        from commands.run.register import register
+
+        db_path = tmp_path / "test.db"
+        storage = MonitorStorage(db_path)
+
+        source = Source(
+            id="test-src",
+            plugin="youtube",
+            origin="UC123456789",
+            description="Test Source",
+            created_at=datetime.now(),
+            enabled=True,
+        )
+        storage.add_source(source)
+
+        enabled_rule = Rule(
+            id="enabled-rule",
+            conditions={"all": [{"field": "source_plugin", "operator": "==", "value": "youtube"}]},
+            action_ids=[],
+            created_at=datetime.now(),
+            enabled=True,
+        )
+        storage.add_rule(enabled_rule)
+
+        disabled_rule = Rule(
+            id="disabled-rule",
+            conditions={"all": [{"field": "source_plugin", "operator": "==", "value": "youtube"}]},
+            action_ids=[],
+            created_at=datetime.now(),
+            enabled=False,
+        )
+        storage.add_rule(disabled_rule)
+
+        manifest = register({})
+        cmd = manifest.click_command
+
+        def mock_get_storage():
+            return storage
+
+        with patch("commands.run.register.get_storage", mock_get_storage):
+            runner = CliRunner()
+            result = runner.invoke(cmd, ["--ignore-enabled", "--format", "json"])
+            assert "No rules found" not in result.output

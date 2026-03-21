@@ -8,7 +8,14 @@ from typing import Generator
 
 import sqlite3
 
-from core.models import Action, Rule, Source, TriggerLog, ItemMetadata, TriggerLogWithMetadata
+from core.models import (
+    Action,
+    Rule,
+    RuleMismatchLog,
+    Source,
+    TriggerLog,
+    TriggerLogWithMetadata,
+)
 
 
 class MonitorStorage:
@@ -22,8 +29,9 @@ class MonitorStorage:
                 CREATE TABLE IF NOT EXISTS sources (
                     id TEXT PRIMARY KEY,
                     plugin TEXT NOT NULL,
-                    identifier TEXT NOT NULL,
+                    origin TEXT NOT NULL,
                     description TEXT,
+                    metadata TEXT DEFAULT '{}',
                     enabled INTEGER DEFAULT 1,
                     last_check TEXT,
                     last_fetched_at TEXT,
@@ -33,7 +41,6 @@ class MonitorStorage:
 
                 CREATE TABLE IF NOT EXISTS actions (
                     id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
                     command TEXT NOT NULL,
                     description TEXT,
                     enabled INTEGER DEFAULT 1,
@@ -45,12 +52,14 @@ class MonitorStorage:
 
                 CREATE TABLE IF NOT EXISTS rules (
                     id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
                     conditions TEXT NOT NULL,
                     action_ids TEXT NOT NULL,
                     enabled INTEGER DEFAULT 1,
                     description TEXT,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    schedule TEXT,
+                    timezone TEXT DEFAULT 'UTC',
+                    last_triggered_at TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS trigger_logs (
@@ -64,9 +73,20 @@ class MonitorStorage:
                     triggered_at TEXT NOT NULL,
                     exit_code INTEGER,
                     output TEXT,
+                    item_extra TEXT,
                     FOREIGN KEY (rule_id) REFERENCES rules(id),
                     FOREIGN KEY (source_id) REFERENCES sources(id),
                     FOREIGN KEY (action_id) REFERENCES actions(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS rule_mismatch_logs (
+                    id TEXT PRIMARY KEY,
+                    rule_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    item_title TEXT NOT NULL,
+                    failed_conditions TEXT NOT NULL,
+                    evaluated_at TEXT NOT NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_trigger_logs_item
@@ -74,49 +94,13 @@ class MonitorStorage:
 
                 CREATE INDEX IF NOT EXISTS idx_trigger_logs_rule
                 ON trigger_logs(rule_id, triggered_at);
+
+                CREATE INDEX IF NOT EXISTS idx_mismatch_logs_rule
+                ON rule_mismatch_logs(rule_id, evaluated_at);
+
+                CREATE INDEX IF NOT EXISTS idx_mismatch_logs_source
+                ON rule_mismatch_logs(source_id, evaluated_at);
             """)
-
-            try:
-                conn.execute("""
-                    ALTER TABLE sources ADD COLUMN last_fetched_at TEXT
-                """)
-            except Exception:
-                pass
-
-            try:
-                conn.execute("""
-                    ALTER TABLE sources ADD COLUMN metadata TEXT DEFAULT '{}'
-                """)
-            except Exception:
-                pass
-
-            try:
-                conn.execute("""
-                    ALTER TABLE trigger_logs ADD COLUMN item_extra TEXT
-                """)
-            except Exception:
-                pass
-
-            try:
-                conn.execute("""
-                    ALTER TABLE rules ADD COLUMN schedule TEXT
-                """)
-            except Exception:
-                pass
-
-            try:
-                conn.execute("""
-                    ALTER TABLE rules ADD COLUMN timezone TEXT DEFAULT 'UTC'
-                """)
-            except Exception:
-                pass
-
-            try:
-                conn.execute("""
-                    ALTER TABLE rules ADD COLUMN last_triggered_at TEXT
-                """)
-            except Exception:
-                pass
 
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
@@ -128,9 +112,12 @@ class MonitorStorage:
         finally:
             conn.close()
 
-    def get_all_sources(self) -> list[Source]:
+    def get_all_sources(self, include_disabled: bool = False) -> list[Source]:
         with self._get_conn() as conn:
-            rows = conn.execute("SELECT * FROM sources WHERE enabled = 1").fetchall()
+            if include_disabled:
+                rows = conn.execute("SELECT * FROM sources").fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM sources WHERE enabled = 1").fetchall()
             return [self._row_to_source(row) for row in rows]
 
     def get_source(self, source_id: str) -> Source | None:
@@ -141,12 +128,12 @@ class MonitorStorage:
     def add_source(self, source: Source) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO sources (id, plugin, identifier, description, metadata, enabled, last_check, last_fetched_at, last_item_id, created_at)
+                """INSERT INTO sources (id, plugin, origin, description, metadata, enabled, last_check, last_fetched_at, last_item_id, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     source.id,
                     source.plugin,
-                    source.identifier,
+                    source.origin,
                     source.description,
                     json.dumps(source.metadata),
                     int(source.enabled),
@@ -160,11 +147,11 @@ class MonitorStorage:
     def update_source(self, source: Source) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """UPDATE sources SET plugin = ?, identifier = ?, description = ?, metadata = ?, enabled = ?,
+                """UPDATE sources SET plugin = ?, origin = ?, description = ?, metadata = ?, enabled = ?,
                    last_check = ?, last_fetched_at = ?, last_item_id = ? WHERE id = ?""",
                 (
                     source.plugin,
-                    source.identifier,
+                    source.origin,
                     source.description,
                     json.dumps(source.metadata),
                     int(source.enabled),
@@ -200,9 +187,12 @@ class MonitorStorage:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
 
-    def get_all_actions(self) -> list[Action]:
+    def get_all_actions(self, include_disabled: bool = False) -> list[Action]:
         with self._get_conn() as conn:
-            rows = conn.execute("SELECT * FROM actions WHERE enabled = 1").fetchall()
+            if include_disabled:
+                rows = conn.execute("SELECT * FROM actions").fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM actions WHERE enabled = 1").fetchall()
             return [self._row_to_action(row) for row in rows]
 
     def get_action(self, action_id: str) -> Action | None:
@@ -213,11 +203,10 @@ class MonitorStorage:
     def add_action(self, action: Action) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO actions (id, name, command, description, enabled, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO actions (id, command, description, enabled, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
                 (
                     action.id,
-                    action.name,
                     action.command,
                     action.description,
                     int(action.enabled),
@@ -228,10 +217,9 @@ class MonitorStorage:
     def update_action(self, action: Action) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """UPDATE actions SET name = ?, command = ?, description = ?, enabled = ?,
+                """UPDATE actions SET command = ?, description = ?, enabled = ?,
                    last_run = ?, last_output = ?, last_exit_code = ? WHERE id = ?""",
                 (
-                    action.name,
                     action.command,
                     action.description,
                     int(action.enabled),
@@ -246,9 +234,12 @@ class MonitorStorage:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM actions WHERE id = ?", (action_id,))
 
-    def get_all_rules(self) -> list[Rule]:
+    def get_all_rules(self, include_disabled: bool = False) -> list[Rule]:
         with self._get_conn() as conn:
-            rows = conn.execute("SELECT * FROM rules WHERE enabled = 1").fetchall()
+            if include_disabled:
+                rows = conn.execute("SELECT * FROM rules").fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM rules WHERE enabled = 1").fetchall()
             return [self._row_to_rule(row) for row in rows]
 
     def get_rule(self, rule_id: str) -> Rule | None:
@@ -259,11 +250,10 @@ class MonitorStorage:
     def add_rule(self, rule: Rule) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO rules (id, name, conditions, action_ids, enabled, description, created_at, schedule, timezone, last_triggered_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO rules (id, conditions, action_ids, enabled, description, created_at, schedule, timezone, last_triggered_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rule.id,
-                    rule.name,
                     json.dumps(rule.conditions),
                     json.dumps(rule.action_ids),
                     int(rule.enabled),
@@ -278,10 +268,9 @@ class MonitorStorage:
     def update_rule(self, rule: Rule) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """UPDATE rules SET name = ?, conditions = ?, action_ids = ?, enabled = ?,
+                """UPDATE rules SET conditions = ?, action_ids = ?, enabled = ?,
                    description = ?, schedule = ?, timezone = ?, last_triggered_at = ? WHERE id = ?""",
                 (
-                    rule.name,
                     json.dumps(rule.conditions),
                     json.dumps(rule.action_ids),
                     int(rule.enabled),
@@ -304,51 +293,9 @@ class MonitorStorage:
                 (last_triggered_at.isoformat(), rule_id),
             )
 
-    def rename_id(self, old_id: str, new_id: str) -> tuple[str | None, str]:
-        """Rename an entity ID across sources, actions, and rules.
-
-        Returns (entity_type, message) where entity_type is 'source', 'action', 'rule', or None.
-        """
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT id FROM sources WHERE id = ?", (old_id,)).fetchone()
-            if row:
-                conn.execute("UPDATE sources SET id = ? WHERE id = ?", (new_id, old_id))
-                conn.execute(
-                    "UPDATE trigger_logs SET source_id = ? WHERE source_id = ?", (new_id, old_id)
-                )
-                return "source", f"Renamed source {old_id} -> {new_id}"
-
-            row = conn.execute("SELECT id FROM actions WHERE id = ?", (old_id,)).fetchone()
-            if row:
-                conn.execute("UPDATE actions SET id = ? WHERE id = ?", (new_id, old_id))
-                conn.execute(
-                    "UPDATE trigger_logs SET action_id = ? WHERE action_id = ?", (new_id, old_id)
-                )
-                rows = conn.execute("SELECT id, action_ids FROM rules").fetchall()
-                for r in rows:
-                    action_ids = json.loads(r["action_ids"])
-                    if old_id in action_ids:
-                        action_ids = [new_id if a == old_id else a for a in action_ids]
-                        conn.execute(
-                            "UPDATE rules SET action_ids = ? WHERE id = ?",
-                            (json.dumps(action_ids), r["id"]),
-                        )
-                return "action", f"Renamed action {old_id} -> {new_id} and updated rule references"
-
-            row = conn.execute("SELECT id FROM rules WHERE id = ?", (old_id,)).fetchone()
-            if row:
-                conn.execute("UPDATE rules SET id = ? WHERE id = ?", (new_id, old_id))
-                conn.execute(
-                    "UPDATE trigger_logs SET rule_id = ? WHERE rule_id = ?", (new_id, old_id)
-                )
-                return "rule", f"Renamed rule {old_id} -> {new_id}"
-
-            return None, f"ID {old_id} not found"
-
     def clean_trigger_logs(
         self, since: datetime | None = None, before: datetime | None = None
     ) -> int:
-        """Delete trigger logs. Returns number of deleted rows."""
         with self._get_conn() as conn:
             query = "DELETE FROM trigger_logs WHERE 1=1"
             params: list = []
@@ -456,6 +403,65 @@ class MonitorStorage:
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_trigger_log_with_metadata(row) for row in rows]
 
+    def log_rule_mismatch(self, log: RuleMismatchLog) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO rule_mismatch_logs
+                   (id, rule_id, source_id, item_id, item_title, failed_conditions, evaluated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    log.id,
+                    log.rule_id,
+                    log.source_id,
+                    log.item_id,
+                    log.item_title,
+                    json.dumps(log.failed_conditions),
+                    log.evaluated_at.isoformat(),
+                ),
+            )
+
+    def get_rule_mismatch_logs(
+        self,
+        since: datetime | None = None,
+        rule_id: str | None = None,
+        source_id: str | None = None,
+        limit: int = 100,
+    ) -> list[RuleMismatchLog]:
+        with self._get_conn() as conn:
+            query = "SELECT * FROM rule_mismatch_logs WHERE 1=1"
+            params: list = []
+
+            if since:
+                query += " AND evaluated_at >= ?"
+                params.append(since.isoformat())
+            if rule_id:
+                query += " AND rule_id = ?"
+                params.append(rule_id)
+            if source_id:
+                query += " AND source_id = ?"
+                params.append(source_id)
+
+            query += " ORDER BY evaluated_at DESC LIMIT ?"
+            params.append(limit)
+
+            rows = conn.execute(query, params).fetchall()
+            return [self._row_to_mismatch_log(row) for row in rows]
+
+    def clean_rule_mismatch_logs(
+        self, since: datetime | None = None, before: datetime | None = None
+    ) -> int:
+        with self._get_conn() as conn:
+            query = "DELETE FROM rule_mismatch_logs WHERE 1=1"
+            params: list = []
+            if since:
+                query += " AND evaluated_at >= ?"
+                params.append(since.isoformat())
+            if before:
+                query += " AND evaluated_at <= ?"
+                params.append(before.isoformat())
+            cur = conn.execute(query, params)
+            return cur.rowcount
+
     def get_stats(self) -> dict:
         with self._get_conn() as conn:
             sources = conn.execute("SELECT COUNT(*) FROM sources WHERE enabled = 1").fetchone()[0]
@@ -485,7 +491,7 @@ class MonitorStorage:
         return Source(
             id=row["id"],
             plugin=row["plugin"],
-            identifier=row["identifier"],
+            origin=row["origin"],
             description=row["description"],
             metadata=json.loads(metadata_val) if metadata_val else {},
             enabled=bool(row["enabled"]),
@@ -500,7 +506,6 @@ class MonitorStorage:
     def _row_to_action(self, row: sqlite3.Row) -> Action:
         return Action(
             id=row["id"],
-            name=row["name"],
             command=row["command"],
             description=row["description"],
             enabled=bool(row["enabled"]),
@@ -517,7 +522,6 @@ class MonitorStorage:
 
         return Rule(
             id=row["id"],
-            name=row["name"],
             conditions=json.loads(row["conditions"]),
             action_ids=json.loads(row["action_ids"]),
             enabled=bool(row["enabled"]),
@@ -563,4 +567,15 @@ class MonitorStorage:
             output=base.output,
             item_extra=base.item_extra,
             source_metadata=metadata,
+        )
+
+    def _row_to_mismatch_log(self, row: sqlite3.Row) -> RuleMismatchLog:
+        return RuleMismatchLog(
+            id=row["id"],
+            rule_id=row["rule_id"],
+            source_id=row["source_id"],
+            item_id=row["item_id"],
+            item_title=row["item_title"],
+            failed_conditions=json.loads(row["failed_conditions"]),
+            evaluated_at=datetime.fromisoformat(row["evaluated_at"]),
         )

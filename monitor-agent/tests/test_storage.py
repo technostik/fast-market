@@ -28,7 +28,6 @@ def test_add_action(tmp_db, sample_action):
     actions = tmp_db.get_all_actions()
     assert len(actions) == 1
     assert actions[0].id == sample_action.id
-    assert actions[0].name == "Test Action"
 
 
 def test_add_rule(tmp_db, sample_rule):
@@ -36,7 +35,6 @@ def test_add_rule(tmp_db, sample_rule):
     rules = tmp_db.get_all_rules()
     assert len(rules) == 1
     assert rules[0].id == sample_rule.id
-    assert rules[0].name == "Test Rule"
 
 
 def test_get_source(tmp_db, sample_source):
