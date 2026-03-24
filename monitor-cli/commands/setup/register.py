@@ -18,7 +18,34 @@ from common.core.paths import get_tool_data_dir
 from core.models import Source, Action, Rule
 from core.rule_parser import RuleParser, RuleParseError
 from core.rule_formatter import RuleFormatter
-from core.time_scheduler import validate_cron_expression, validate_interval_expression
+from core.time_scheduler import (
+    parse_interval,
+    validate_cron_expression,
+    validate_interval_expression,
+)
+
+
+def _parse_check_interval(interval_str: str | None) -> int | None:
+    """Parse check interval string to seconds.
+
+    Args:
+        interval_str: Interval string like '15m', '1h', '120s', '900', or None
+
+    Returns:
+        Interval in seconds, or None if not provided
+    """
+    if interval_str is None:
+        return None
+    try:
+        td = parse_interval(interval_str)
+        return int(td.total_seconds())
+    except (ValueError, TypeError):
+        pass
+    if interval_str.isdigit():
+        return int(interval_str)
+    raise click.BadParameter(
+        f"Invalid interval format: '{interval_str}'. Use format like '15m', '1h', '120s', or '900' (seconds)"
+    )
 
 
 def _interactive_source_edit(source, storage, editor_cmd, fmt):
@@ -408,8 +435,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--meta", multiple=True, help="Metadata key=value pairs (can be used multiple times)"
     )
+    @click.option(
+        "--check-interval",
+        type=str,
+        help="Cooldown interval (e.g., '15m', '1h', '120s', or '900' for seconds)",
+    )
+    @click.option(
+        "--is-new/--no-is-new",
+        "is_new",
+        default=False,
+        help="If true, only trigger on new items (what's new mode)",
+    )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def source_add(custom_id, plugin, origin, description, meta, fmt):
+    def source_add(custom_id, plugin, origin, description, meta, check_interval, is_new, fmt):
         """Add a new source to monitor with optional metadata."""
         storage = get_storage()
 
@@ -419,6 +457,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 raise click.BadParameter(f"Metadata must be key=value format, got: {m}")
             key, value = m.split("=", 1)
             metadata[key.strip()] = value.strip()
+
+        parsed_check_interval = _parse_check_interval(check_interval)
 
         plugin_class = plugin_manifests[plugin].source_plugin_class
         temp_config = plugin_class({"origin": origin}, {"origin": origin})
@@ -434,6 +474,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             origin=origin,
             description=description,
             metadata=metadata,
+            check_interval=parsed_check_interval,
+            is_new=is_new,
             created_at=datetime.now(),
         )
 
@@ -445,6 +487,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "origin": source.origin,
                 "description": source.description,
                 "metadata": metadata,
+                "check_interval": parsed_check_interval,
+                "is_new": is_new,
                 "message": "Source added successfully",
             },
             fmt,
@@ -478,18 +522,31 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option("--description", help="New description")
     @click.option("--meta", multiple=True, help="Metadata key=value pairs (adds/updates)")
+    @click.option(
+        "--check-interval",
+        type=str,
+        help="Cooldown interval (e.g., '15m', '1h', '120s', or '900' for seconds)",
+    )
+    @click.option(
+        "--is-new/--no-is-new",
+        "is_new",
+        default=None,
+        help="If true, only trigger on new items (what's new mode)",
+    )
     @click.option("--enable/--disable", default=None, help="Enable or disable source")
     @click.option("--editor", help="Editor to use (default: $EDITOR or nano)")
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def source_edit(source_id, interactive, description, meta, enable, editor, fmt):
+    def source_edit(
+        source_id, interactive, description, meta, check_interval, is_new, enable, editor, fmt
+    ):
         """Edit an existing source interactively or with options.
-
-        Use -i/--interactive to open the editor.
 
         Examples:
             monitor setup source-edit my-source -i  # Interactive editor
             monitor setup source-edit my-source --description "New desc"
             monitor setup source-edit my-source --meta theme=tech --enable
+            monitor setup source-edit my-source --check-interval 5m
+            monitor setup source-edit my-source --is-new
         """
         storage = get_storage()
         existing = storage.get_source(source_id)
@@ -501,7 +558,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
             editor_cmd = editor or os.environ.get("EDITOR", "nano")
             _interactive_source_edit(existing, storage, editor_cmd, fmt)
             return
-        elif description is None and not meta and enable is None:
+        elif (
+            description is None
+            and not meta
+            and enable is None
+            and check_interval is None
+            and is_new is None
+        ):
             editor_cmd = editor or os.environ.get("EDITOR", "nano")
             _interactive_source_edit(existing, storage, editor_cmd, fmt)
             return
@@ -514,6 +577,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 raise click.BadParameter(f"Metadata must be key=value format, got: {m}")
             key, value = m.split("=", 1)
             existing.metadata[key.strip()] = value.strip()
+
+        if check_interval is not None:
+            existing.check_interval = _parse_check_interval(check_interval)
+
+        if is_new is not None:
+            existing.is_new = is_new
 
         if enable is not None:
             existing.enabled = enable

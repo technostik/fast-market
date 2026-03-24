@@ -63,19 +63,25 @@ All sources have a built-in cooldown to prevent excessive fetching:
 |--------|------------------|--------------|
 | All plugins | `15m` | Yes |
 
-Set `check_interval` in source metadata to control cooldown:
+Use `--check-interval` to control cooldown (supports `15m`, `1h`, `120s`, or plain seconds):
 
 ```bash
-# More frequent checks
+# More frequent checks (5 minutes)
 monitor setup source-add --plugin youtube --identifier UC123456789 \
-  --meta check_interval=5m
+  --check-interval 5m
 
-# Less frequent checks
+# Less frequent checks (1 hour)
 monitor setup source-add --plugin rss --identifier https://example.com/feed.xml \
-  --meta check_interval=1h
+  --check-interval 1h
+
+# Or use plain seconds
+monitor setup source-add --plugin youtube --identifier UC123456789 \
+  --check-interval 900
 ```
 
-If no `check_interval` is set, all sources default to 15 minutes.
+If no `check_interval` is set, all sources default to 15 minutes (900 seconds).
+
+**Note:** For yt-search, you can also use `--meta check_interval=5m` (deprecated, use `--check-interval`).
 
 ## CLI Reference
 
@@ -98,15 +104,33 @@ monitor setup source-add --plugin rss --identifier https://example.com/feed.xml
 monitor setup source-add --plugin yt-search \
   --identifier "AI tutorial machine learning" \
   --meta theme=technology \
-  --meta check_interval=30m \
   --meta min_views=5000 \
   --meta max_results=30
+
+# Add source with custom check interval (in seconds)
+monitor setup source-add --plugin youtube --identifier UC123456789 \
+  --check-interval 300
+
+# Add source in "what's new" mode (default: only trigger on new items)
+monitor setup source-add --plugin youtube --identifier UC123456789 --is-new
+
+# Add source in "all items" mode (trigger on ALL items, like --force)
+monitor setup source-add --plugin youtube --identifier UC123456789 --no-is-new
+```
+
+**Source Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--check-interval` | Cooldown interval in seconds between fetches (e.g., `300` for 5 minutes). Overrides metadata `check_interval`. |
+| `--is-new` | If true (default), only trigger on new items since last check. If false, triggers on all items (like `--force`). |
+| `--meta` | Metadata key=value pairs. For yt-search: `theme`, `min_views`, `max_results` |
 
 **yt-search Metadata Options:**
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `check_interval` | `15m` | Minimum time between searches (e.g., `15m`, `1h`, `30m`) |
+| `check_interval` | `15m` | Minimum time between searches (e.g., `15m`, `1h`, `30m`) - deprecated, use `--check-interval` |
 | `min_views` | `1000` | Minimum view count to include (filters low-view videos) |
 | `max_results` | `50` | Maximum videos to fetch per search |
 | `theme` | - | User-defined theme (used in rules: `source_metadata.theme`) |
@@ -186,6 +210,13 @@ monitor setup source-edit <source-id> \
 
 # Disable a source
 monitor setup source-edit <source-id> --disable
+
+# Update check interval (in seconds)
+monitor setup source-edit <source-id> --check-interval 600
+
+# Toggle "what's new" mode
+monitor setup source-edit <source-id> --is-new      # Only new items trigger
+monitor setup source-edit <source-id> --no-is-new   # All items trigger (like --force)
 ```
 
 #### `monitor setup action-add`
@@ -705,7 +736,7 @@ monitor setup show --export json > backup.json
 Check sources and execute matching rules.
 
 ```bash
-# Normal mode - only new items since last check
+# Normal mode - only new items since last check (respects source's is_new setting)
 monitor run
 
 # Force mode - re-process recent items (for testing)
@@ -738,6 +769,19 @@ monitor run --silent
 | `--silent` | Suppress command output replay |
 | `--source-id` | Run only for specific source |
 | `--format` | Output format: `json`, `yaml`, or `text` |
+
+**What's New Mode (`is_new`):**
+
+Each source has an `is_new` flag that controls whether triggers fire for new items only or all items:
+
+| Source `is_new` | CLI `--force` | Behavior |
+|-----------------|---------------|----------|
+| `true` (default) | No | Only new items trigger |
+| `true` | Yes | Only new items trigger (force bypasses cooldown) |
+| `false` | No | All items trigger (like --force) |
+| `false` | Yes | All items trigger |
+
+Use `--is-new` or `--no-is-new` when adding/editing sources to control this behavior.
 
 **Output Example:**
 

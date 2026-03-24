@@ -23,7 +23,9 @@ class SourcePlugin(ABC):
         self.source_config = source_config
         self.metadata = source_config.get("metadata", {})
         self.last_check = source_config.get("last_check")
-        self.check_interval = self.metadata.get("check_interval", self.DEFAULT_CHECK_INTERVAL)
+        self.check_interval = source_config.get("check_interval") or self.metadata.get(
+            "check_interval", self.DEFAULT_CHECK_INTERVAL
+        )
 
     def _parse_interval(self, interval_str: str | None = None) -> int:
         """Parse interval string to seconds.

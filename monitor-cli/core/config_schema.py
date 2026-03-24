@@ -53,6 +53,8 @@ class SourceConfig(BaseModel):
     description: str | None = None
     enabled: bool = True
     metadata: dict[str, str] = Field(default_factory=dict)
+    check_interval: int | None = None
+    is_new: bool = True
 
 
 class ActionConfig(BaseModel):
@@ -89,7 +91,16 @@ class ConfigValidationError(Exception):
         super().__init__("\n".join(errors))
 
 
-KNOWN_SOURCE_FIELDS = {"id", "plugin", "origin", "description", "enabled", "metadata"}
+KNOWN_SOURCE_FIELDS = {
+    "id",
+    "plugin",
+    "origin",
+    "description",
+    "enabled",
+    "metadata",
+    "check_interval",
+    "is_new",
+}
 KNOWN_ACTION_FIELDS = {"id", "command", "description", "enabled"}
 KNOWN_RULE_FIELDS = {
     "id",
@@ -101,7 +112,7 @@ KNOWN_RULE_FIELDS = {
     "timezone",
 }
 KNOWN_SCHEDULE_FIELDS = {"cron", "interval"}
-KNOWN_META_FIELDS = {"check_interval", "priority", "theme", "min_views", "max_results"}
+KNOWN_META_FIELDS = {"priority", "theme", "min_views", "max_results"}
 
 VALID_CONDITION_FIELDS = get_valid_condition_fields()
 VALID_PLACEHOLDERS = {

@@ -12,7 +12,7 @@ from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
 from common.core.config import load_tool_config
 from core.executor import execute_action
-from core.models import RuleMismatchLog, TriggerLog
+from core.models import ItemMetadata, RuleMismatchLog, TriggerLog
 from core.rule_engine import evaluate_rule_with_details
 from core.time_scheduler import should_run_rule
 
@@ -35,6 +35,22 @@ def _get_global_on_execution_action_ids() -> list[str]:
         return config.get("global_on_execution_action_ids", [])
     except Exception:
         return []
+
+
+def _build_hook_item_metadata(
+    item: ItemMetadata, rule_id: str, rule_msg: str, content_type: str
+) -> ItemMetadata:
+    """Build synthetic ItemMetadata for on_error/on_execution hooks."""
+    return ItemMetadata(
+        id=rule_id,
+        title=rule_msg,
+        url=item.url,
+        published_at=item.published_at,
+        content_type=content_type,
+        source_plugin=item.source_plugin,
+        source_id=item.source_id,
+        extra={},
+    )
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -112,16 +128,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "origin": source.origin,
                     "metadata": source.metadata,
                     "last_check": source.last_check,
+                    "check_interval": source.check_interval,
                 },
             )
 
+            force_mode = force or (not source.is_new)
             cooldown_active = not plugin_instance._should_fetch()
             items = []
             fetch_error = None
 
             try:
                 if cooldown_active:
-                    if force:
+                    if force_mode:
                         if not cron:
                             remaining = _get_cooldown_remaining(plugin_instance)
                             click.echo(
@@ -144,7 +162,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         }
                         continue
 
-                if force:
+                force_mode = force or (not source.is_new)
+                if force_mode:
                     if not cron:
                         click.echo(
                             f"⚡  FORCE: Processing up to {limit} items from '{source_origin_str}'",
@@ -158,7 +177,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 else:
                     items = asyncio.run(
                         plugin_instance.fetch_new_items(
-                            last_item_id=None, limit=limit, last_fetched_at=source.last_fetched_at
+                            last_item_id=source.last_item_id,
+                            limit=limit,
+                            last_fetched_at=source.last_fetched_at,
                         )
                     )
             except Exception as e:
@@ -173,12 +194,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             fetched_count = len(items)
 
-            if items and not force:
+            if items and not force_mode:
                 newest_item = max(items, key=lambda x: x.published_at)
                 source.last_fetched_at = newest_item.published_at
                 storage.update_source_last_fetched_at(source.id, source.last_fetched_at)
 
-            if not force:
+            if not force_mode:
                 now = datetime.now(timezone.utc)
                 source.last_check = now
                 storage.update_source_last_check_time(source.id, now)
@@ -363,9 +384,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                         click.echo(
                                             f"[ON_ERROR/{on_error_action.id}] triggered for rule '{rule.id}'"
                                         )
+                                    hook_item = _build_hook_item_metadata(
+                                        item, rule.id, error_context["rule_msg"], "rule-error"
+                                    )
                                     err_code, err_output, _ = execute_action(
                                         on_error_action,
-                                        item,
+                                        hook_item,
                                         source,
                                         rule.id,
                                         error_context=error_context,
@@ -393,9 +417,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                             click.echo(
                                                 f"[GLOBAL_ON_ERROR/{global_action.id}] triggered for rule '{rule.id}'"
                                             )
+                                        hook_item = _build_hook_item_metadata(
+                                            item, rule.id, error_context["rule_msg"], "rule-error"
+                                        )
                                         err_code, err_output, _ = execute_action(
                                             global_action,
-                                            item,
+                                            hook_item,
                                             source,
                                             rule.id,
                                             error_context=error_context,
@@ -421,9 +448,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                         click.echo(
                                             f"[ON_EXEC/{on_exec_action.id}] triggered for rule '{rule.id}'"
                                         )
+                                    hook_item = _build_hook_item_metadata(
+                                        item, rule.id, error_context["rule_msg"], "rule-execution"
+                                    )
                                     exec_code, exec_output, _ = execute_action(
                                         on_exec_action,
-                                        item,
+                                        hook_item,
                                         source,
                                         rule.id,
                                         error_context=error_context,
@@ -450,9 +480,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                             click.echo(
                                                 f"[GLOBAL_ON_EXEC/{global_action.id}] triggered for rule '{rule.id}'"
                                             )
+                                        hook_item = _build_hook_item_metadata(
+                                            item,
+                                            rule.id,
+                                            error_context["rule_msg"],
+                                            "rule-execution",
+                                        )
                                         exec_code, exec_output, _ = execute_action(
                                             global_action,
-                                            item,
+                                            hook_item,
                                             source,
                                             rule.id,
                                             error_context=error_context,

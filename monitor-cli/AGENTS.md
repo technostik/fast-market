@@ -56,6 +56,17 @@ monitor-agent/
   - Data: `~/.local/share/fast-market/monitor/`
 - Incremental tracking via `last_item_id`
 
+### Source Cooldown
+- Each source has a `check_interval` (in seconds) for cooldown between fetches
+- Default: 900 seconds (15 minutes)
+- Configured via `--check-interval` on source-add/source-edit
+
+### What's New Mode (is_new)
+- Each source has an `is_new` flag controlling trigger behavior:
+  - `is_new=True` (default): Only trigger on new items since last check
+  - `is_new=False`: Trigger on ALL items (like `--force` mode)
+- Allows per-source control over whether to process only new items or all items
+
 ## 🔗 Component Dependencies
 
 ```
@@ -256,7 +267,7 @@ These act as fallback hooks when a rule doesn't define its own `on_error_action_
 Path: `~/.local/share/fast-market/monitor/monitor.db`
 
 Tables:
-- `sources` — Monitored sources with `origin` (was: identifier) and last_item_id tracking
+- `sources` — Monitored sources with `origin`, `last_item_id`, `check_interval`, and `is_new` fields
 - `actions` — Shell commands with last_run status
 - `rules` — JSON conditions, action_ids, on_error_action_ids, on_execution_action_ids
 - `trigger_logs` — Execution history for debugging
@@ -268,6 +279,20 @@ Tables:
 # Add a YouTube channel source with metadata
 monitor setup source-add --plugin youtube --identifier UC123456789 \
   --meta theme=technology --meta priority=high
+
+# Add source with custom check interval (in seconds)
+monitor setup source-add --plugin youtube --identifier UC123456789 \
+  --check-interval 300
+
+# Add source in "what's new" mode (default - only trigger on new items)
+monitor setup source-add --plugin youtube --identifier UC123456789 --is-new
+
+# Add source in "all items" mode (trigger on ALL items, like --force)
+monitor setup source-add --plugin youtube --identifier UC123456789 --no-is-new
+
+# Edit source to change check interval or is_new
+monitor setup source-edit my-source --check-interval 600
+monitor setup source-edit my-source --no-is-new
 
 # Add an RSS feed source
 monitor setup source-add --plugin rss --identifier https://example.com/feed.xml

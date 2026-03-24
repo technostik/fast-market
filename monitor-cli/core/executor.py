@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.models import Action, ItemMetadata, Source
+from common.rt_subprocess import rt_subprocess
 
 
 def _get_source_url(source: Source) -> str:
@@ -100,10 +101,8 @@ def execute_action(
 
         os.chmod(tmp_path, 0o755)
 
-        result = subprocess.run([tmp_path], capture_output=True, text=True, timeout=300)
-        return result.returncode, result.stdout + result.stderr, script_content
-    except subprocess.TimeoutExpired as e:
-        return -1, f"Timeout: {str(e)}", script_content
+        result = rt_subprocess.run([tmp_path], capture_output=True, text=True)
+        return result.returncode, (result.stdout or "") + (result.stderr or ""), script_content
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)

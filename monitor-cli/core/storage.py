@@ -104,6 +104,7 @@ class MonitorStorage:
                 ON rule_mismatch_logs(source_id, evaluated_at);
             """)
             self._migrate_rules_columns(conn)
+            self._migrate_sources_columns(conn)
 
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
@@ -130,6 +131,19 @@ class MonitorStorage:
             except sqlite3.OperationalError:
                 pass
 
+    def _migrate_sources_columns(self, conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute("SELECT check_interval FROM sources LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            try:
+                conn.execute("ALTER TABLE sources ADD COLUMN check_interval INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE sources ADD COLUMN is_new INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+
     def get_all_sources(self, include_disabled: bool = False) -> list[Source]:
         with self._get_conn() as conn:
             if include_disabled:
@@ -146,8 +160,8 @@ class MonitorStorage:
     def add_source(self, source: Source) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO sources (id, plugin, origin, description, metadata, enabled, last_check, last_fetched_at, last_item_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO sources (id, plugin, origin, description, metadata, enabled, last_check, last_fetched_at, last_item_id, check_interval, is_new, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     source.id,
                     source.plugin,
@@ -158,6 +172,8 @@ class MonitorStorage:
                     source.last_check.isoformat() if source.last_check else None,
                     source.last_fetched_at.isoformat() if source.last_fetched_at else None,
                     source.last_item_id,
+                    source.check_interval,
+                    int(source.is_new),
                     source.created_at.isoformat(),
                 ),
             )
@@ -166,7 +182,7 @@ class MonitorStorage:
         with self._get_conn() as conn:
             conn.execute(
                 """UPDATE sources SET plugin = ?, origin = ?, description = ?, metadata = ?, enabled = ?,
-                   last_check = ?, last_fetched_at = ?, last_item_id = ? WHERE id = ?""",
+                   last_check = ?, last_fetched_at = ?, last_item_id = ?, check_interval = ?, is_new = ? WHERE id = ?""",
                 (
                     source.plugin,
                     source.origin,
@@ -176,6 +192,8 @@ class MonitorStorage:
                     source.last_check.isoformat() if source.last_check else None,
                     source.last_fetched_at.isoformat() if source.last_fetched_at else None,
                     source.last_item_id,
+                    source.check_interval,
+                    int(source.is_new),
                     source.id,
                 ),
             )
@@ -510,6 +528,8 @@ class MonitorStorage:
     def _row_to_source(self, row: sqlite3.Row) -> Source:
         last_fetched_at_val = row["last_fetched_at"] if "last_fetched_at" in row.keys() else None
         metadata_val = row["metadata"] if "metadata" in row.keys() else "{}"
+        check_interval_val = row["check_interval"] if "check_interval" in row.keys() else None
+        is_new_val = row["is_new"] if "is_new" in row.keys() else 0
         return Source(
             id=row["id"],
             plugin=row["plugin"],
@@ -522,6 +542,8 @@ class MonitorStorage:
             if last_fetched_at_val
             else None,
             last_item_id=row["last_item_id"],
+            check_interval=check_interval_val,
+            is_new=bool(is_new_val),
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
