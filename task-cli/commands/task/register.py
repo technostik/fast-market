@@ -60,7 +60,7 @@ def _get_task_config(
     task_specific = config.get("apply", {})
     fastmarket_tools = config.get("fastmarket_tools", DEFAULT_FASTMARKET_TOOLS)
     system_commands = config.get("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
-    allowed_commands = config.get("allowed_commands", list(DEFAULT_SYSTEM_COMMANDS))
+    allowed_commands = list(fastmarket_tools.keys()) + system_commands
     return TaskConfig(
         fastmarket_tools=fastmarket_tools,
         system_commands=system_commands,
