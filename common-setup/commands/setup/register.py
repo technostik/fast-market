@@ -43,7 +43,7 @@ _PROVIDERS = {
 
 
 def register():
-    @click.group("global-setup", invoke_without_command=True)
+    @click.group("common-setup", invoke_without_command=True)
     @click.option("--show", "-s", is_flag=True, help="Show current config")
     @click.option("--show-path", "-p", is_flag=True, help="Show config file paths")
     @click.pass_context
@@ -83,7 +83,7 @@ def register():
         providers = config.get("providers", {})
         default = config.get("default_provider", "")
         if not providers:
-            click.echo("No providers configured. Run: global-setup")
+            click.echo("No providers configured. Run: common-setup")
             return
         for name, settings in sorted(providers.items()):
             marker = " (default)" if name == default else ""
@@ -134,7 +134,7 @@ def register():
         providers = config.get("providers", {})
         if provider not in providers:
             click.echo(f"Provider not configured: {provider}", err=True)
-            click.echo(f"Add it first: global-setup llm add {provider}", err=True)
+            click.echo(f"Add it first: common-setup llm add {provider}", err=True)
             sys.exit(1)
         config["default_provider"] = provider
         save_llm_config(config)
@@ -160,7 +160,7 @@ def _show_config():
     common_cfg = load_common_config()
     llm_cfg = load_llm_config()
     if not common_cfg and not llm_cfg:
-        click.echo("No config found. Run: global-setup")
+        click.echo("No config found. Run: common-setup")
         return
     click.echo("=== common/config.yaml ===")
     click.echo(yaml.safe_dump(common_cfg, default_flow_style=False, sort_keys=False))
@@ -192,7 +192,7 @@ def _run_wizard():
     llm_cfg = load_llm_config()
     common_cfg = load_common_config()
 
-    click.echo("=== fast-market global setup ===\n")
+    click.echo("=== fast-market common setup ===\n")
 
     existing = llm_cfg.get("providers", {})
     if existing:
@@ -201,7 +201,7 @@ def _run_wizard():
             marker = " (default)" if name == llm_cfg.get("default_provider") else ""
             click.echo(f"  - {name}{marker}")
         if not click.confirm("\nAdd or reconfigure a provider?", default=False):
-            click.echo("\nSetup complete. Use 'global-setup --show' to review.")
+            click.echo("\nSetup complete. Use 'common-setup --show' to review.")
             return
 
     click.echo("\nAvailable providers:")
@@ -233,4 +233,4 @@ def _run_wizard():
     click.echo(f"  common: {get_common_config_path()}")
     _print_env_reminder(provider, settings)
     click.echo("\nYou can now use: prompt, task, skill")
-    click.echo("Add more providers: global-setup llm add <provider>")
+    click.echo("Add more providers: common-setup llm add <provider>")

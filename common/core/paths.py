@@ -15,14 +15,39 @@ def _xdg_cache_home() -> Path:
     return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
 
 
+def _xdg_common_config_home() -> Path:
+    """~/.config/fast-market/common/"""
+    p = _xdg_config_home() / "fast-market" / "common"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def get_common_config_path() -> Path:
-    """common/config.yaml"""
-    return Path(__file__).parent.parent / "config.yaml"
+    """~/.config/fast-market/common/config.yaml"""
+    p = _xdg_common_config_home() / "config.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def get_llm_config_path() -> Path:
-    """common/llm/config.yaml"""
-    return Path(__file__).parent.parent / "llm" / "config.yaml"
+    """~/.config/fast-market/common/llm/config.yaml"""
+    p = _xdg_common_config_home() / "llm" / "config.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_youtube_config_path() -> Path:
+    """~/.config/fast-market/common/youtube/config.yaml"""
+    p = _xdg_common_config_home() / "youtube" / "config.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_common_subconfig_path(subconfig: str) -> Path:
+    """~/.config/fast-market/common/{subconfig}/config.yaml"""
+    p = _xdg_common_config_home() / subconfig / "config.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def get_aliases_path() -> Path:

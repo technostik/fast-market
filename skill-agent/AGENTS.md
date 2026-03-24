@@ -16,7 +16,7 @@ optional scripts/ subdirectory.
 - common.core.paths (get_skills_dir)
 - common.skill.skill (Skill, discover_skills)
 - NO LLM dependency
-- NO config dependency (works without global-setup)
+- NO config dependency (works without common-setup)
 
 ## Do NOT
 - Add LLM calls here

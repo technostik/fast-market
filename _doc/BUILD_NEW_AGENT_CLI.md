@@ -23,7 +23,7 @@ Shared utilities live at the workspace root and are imported by all tools:
 |------|---------|
 | `common/cli/base.py` | `create_cli_group()` — standard Click group factory |
 | `common/cli/helpers.py` | `out()` — standard output formatting (JSON/text) |
-| `common/core/config.py` | `load_tool_config()` — YAML config loading |
+| `common/core/config.py` | `load_tool_config()` — merges common + tool config |
 | `common/core/paths.py` | XDG-compliant paths (config, data, cache) |
 | `common/core/registry.py` | Plugin/command discovery engine |
 | `common/storage/base.py` | SQLAlchemy engine/session helpers |
@@ -90,16 +90,18 @@ import logging
 from pathlib import Path
 
 from common.cli.base import create_cli_group
-from common.core.config import load_config
+from common.core.config import load_tool_config, requires_common_config
 from common.core.registry import discover_commands, discover_plugins
 
-main = create_cli_group("your-agent")
+requires_common_config("your-tool", ["llm"])  # or [] if no common config needed
+
+main = create_cli_group("your-tool")
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load() -> None:
     logging.basicConfig(level=logging.CRITICAL, force=True)
-    config = load_config()
+    config = load_tool_config("your-tool")
     plugin_manifests = discover_plugins(config, tool_root=_TOOL_ROOT)
     command_manifests = discover_commands(plugin_manifests, tool_root=_TOOL_ROOT)
     for cmd in command_manifests.values():
@@ -114,17 +116,50 @@ if __name__ == "__main__":
 
 ### 2.3 Configuration (core/config.py)
 
-Import from `common.core.config`:
+fast-market uses a two-level XDG config layout under `~/.config/fast-market/`:
 
-```python
-from __future__ import annotations
-
-from common.core.config import load_config
+**The config hierarchy**:
+```
+~/.config/fast-market/common/config.yaml           # workdir (truly global)
+~/.config/fast-market/common/llm/config.yaml       # LLM providers
+~/.config/fast-market/common/youtube/config.yaml  # YouTube OAuth
+~/.config/fast-market/{tool}/config.yaml          # tool-specific
 ```
 
-XDG-compliant config path: `~/.local/share/fast-market/config/your-agent.yaml`
+**Resolution order** (later wins):
+1. Common config (`~/.config/fast-market/common/config.yaml`)
+2. Discovered common sub-configs (`~/.config/fast-market/common/*/config.yaml`)
+3. Tool config (`~/.config/fast-market/{tool}/config.yaml`)
 
-Use `load_tool_config("your-tool-name")` for tool-specific config loading.
+**How to load config in a new agent:**
+
+```python
+from common.core.config import load_tool_config, requires_common_config, ConfigError
+
+# Declare required common sub-configs BEFORE loading
+requires_common_config("your-tool", ["llm"])  # or ["llm", "youtube"] or []
+
+# In your entry point or command:
+config = load_tool_config("your-tool")
+# config contains: merged common + tool-specific keys
+# Access LLM config: config["llm"]
+# Access YouTube config: config["youtube"]
+```
+
+**ConfigError handling:**
+```python
+try:
+    config = load_tool_config("your-tool")
+except ConfigError as exc:
+    click.echo(f"Error: {exc}", err=True)
+    click.echo("Run: common-setup", err=True)
+    sys.exit(1)
+```
+
+**First-time setup:**
+```
+Run: common-setup    # configure LLM providers, workdir, etc.
+```
 
 ### 2.4 Registry (core/registry.py)
 
@@ -171,6 +206,61 @@ Functions from `common.storage.base`:
 | `create_sqlite_engine(tool_name)` | Create persistent SQLite engine |
 | `create_memory_engine()` | Create in-memory engine for testing |
 | `session_scope(factory)` | Context manager for transactions |
+
+---
+
+## Config Layout Reference
+
+fast-market uses a two-level XDG config layout under `~/.config/fast-market/`:
+
+### Common config (shared across tools)
+Managed by `common-setup`. Lives under `~/.config/fast-market/common/`.
+
+| File | Contains | Used by |
+|------|----------|---------|
+| `common/config.yaml` | workdir | all tools |
+| `common/llm/config.yaml` | LLM providers, default model | prompt, task, corpus, ... |
+| `common/youtube/config.yaml` | YouTube OAuth credentials | youtube, corpus |
+
+### Tool config (private to one tool)
+Lives under `~/.config/fast-market/{tool}/config.yaml`.
+Contains only keys specific to that tool (allowed commands, templates, etc.).
+
+### Resolution order
+1. Common config (`~/.config/fast-market/common/config.yaml`) - workdir
+2. Discovered common sub-configs (`~/.config/fast-market/common/*/config.yaml`)
+3. Tool config (`~/.config/fast-market/{tool}/config.yaml`)
+
+All common sub-configs are auto-discovered by scanning the `common/` directory.
+Tools declare which sub-configs they require via `requires_common_config()`.
+If a required subconfig is missing, `load_tool_config()` raises `ConfigError`.
+
+### Setting up
+```bash
+common-setup          # interactive wizard
+common-setup --show   # show current common config
+common-setup --show-path   # show config file paths
+```
+
+### In your agent code
+```python
+from common.core.config import load_tool_config, requires_common_config
+
+# Declare required common sub-configs
+requires_common_config("your-tool", ["llm"])  # or ["llm", "youtube"]
+
+# Load config (merges common + tool-specific)
+config = load_tool_config("your-tool")
+
+# Access LLM config:
+llm = config.get("llm", {})
+
+# Access YouTube config:
+youtube = config.get("youtube", {})
+
+# Access workdir:
+workdir = config.get("workdir")
+```
 
 ---
 
@@ -708,8 +798,8 @@ for cmd in discover_commands().values():
 |-----------|------|---------|
 | CLI Group | `common/cli/base.py` | `create_cli_group()` — Click group factory |
 | Output | `common/cli/helpers.py` | `out()` — JSON/text formatting |
-| Config | `common/core/config.py` | `load_tool_config()` — YAML loading |
-| Paths | `common/core/paths.py` | XDG-compliant paths |
+| Config | `common/core/config.py` | `load_tool_config()` — merges common/ + tool config |
+| Paths | `common/core/paths.py` | XDG paths under ~/.config/fast-market/ |
 | Discovery | `common/core/registry.py` | `discover_plugins/commands()` |
 | Storage | `common/storage/base.py` | SQLAlchemy engine/session helpers |
 
@@ -726,6 +816,8 @@ for cmd in discover_commands().values():
 
 **Key Rules**:
 - `[project.scripts]` **must** point to `your_entry:main` — NOT `cli.main:main`
+- Call `requires_common_config("your-tool", ["llm", ...])` before loading config
+- Use `load_tool_config("your-tool")` — not `load_config()`
 - Never hardcode plugin names — use manifests
 - Never modify cli/main.py when adding plugins/commands
 - Use `**kwargs` to absorb plugin-injected options

@@ -11,9 +11,11 @@ for p in [str(_ROOT), str(_COMMON_PARENT)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from common.core.config import load_tool_config, ConfigError
+from common.core.config import load_tool_config, ConfigError, requires_common_config
 from common.llm.registry import discover_providers
 from common.cli.base import create_cli_group
+
+requires_common_config("task", ["llm"])
 
 
 def _load():
@@ -27,7 +29,7 @@ def _load():
         plugin_manifests = discover_providers(config)
     except ConfigError as exc:
         click.echo(f"Error: {exc}", err=True)
-        click.echo("Run: global-setup", err=True)
+        click.echo("Run: common-setup", err=True)
         sys.exit(1)
 
     from commands.task.register import register as task_register

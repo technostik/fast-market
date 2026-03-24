@@ -10,6 +10,9 @@ for p in [str(_ROOT), str(_COMMON_PARENT)]:
         sys.path.insert(0, p)
 
 from common.cli.base import create_cli_group
+from common.core.config import requires_common_config
+
+requires_common_config("skill", [])
 
 main = create_cli_group("skill")
 

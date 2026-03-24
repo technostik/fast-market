@@ -4,8 +4,10 @@ import logging
 from pathlib import Path
 
 from common.cli.base import create_cli_group
-from common.core.config import load_tool_config
+from common.core.config import load_tool_config, requires_common_config
 from common.core.registry import discover_commands, discover_plugins
+
+requires_common_config("monitor", [])
 
 main = create_cli_group("monitor")
 _TOOL_ROOT = Path(__file__).resolve().parents[1]

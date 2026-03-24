@@ -1,11 +1,11 @@
-# global-setup
+# common-setup
 
 ## Purpose
-Standalone CLI to configure LLM providers and global settings for all fast-market commands.
+Standalone CLI to configure common settings and LLM providers for all fast-market commands.
 
 ## What it manages
-- LLM providers (add, remove, set-default) → `common/llm/config.yaml`
-- Global default working directory → `common/config.yaml`
+- LLM providers (add, remove, set-default) → `~/.config/fast-market/common/llm/config.yaml`
+- Common default working directory → `~/.config/fast-market/common/config.yaml`
 
 ## What it does NOT manage
 - Task-specific config (allowed commands, iterations) → use `prompt setup task`
@@ -14,8 +14,8 @@ Standalone CLI to configure LLM providers and global settings for all fast-marke
 
 ## Key files
 - `commands/setup/register.py` — all logic
-- LLM config: `common/llm/config.yaml` (via common.core.config)
-- Common config: `common/config.yaml` (via common.core.config)
+- LLM config: `~/.config/fast-market/common/llm/config.yaml` (via common.core.config)
+- Common config: `~/.config/fast-market/common/config.yaml` (via common.core.config)
 
 ## Dependencies
 - common.core.config (load/save common and llm config)

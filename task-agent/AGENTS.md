@@ -9,7 +9,7 @@ Agentic task execution CLI for fast-market. Executes whitelisted CLI commands it
 - Max iterations, timeouts, workdir
 
 ## What it does NOT manage
-- LLM configuration → use `global-setup`
+- LLM configuration → use `common-setup`
 - Skills → use `skill` (Phase 6)
 
 ## Dependencies
@@ -21,4 +21,4 @@ Agentic task execution CLI for fast-market. Executes whitelisted CLI commands it
 
 ## Do NOT
 - Do not add LLM config management here
-- Do not re-implement what global-setup does
+- Do not re-implement what common-setup does

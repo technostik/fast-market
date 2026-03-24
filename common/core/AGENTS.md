@@ -10,16 +10,19 @@ XDG-compliant paths under `fast-market` namespace for user-specific data:
 - `XDG_DATA_HOME` (default: `~/.local/share`)
 - `XDG_CACHE_HOME` (default: `~/.cache`)
 
-Project-level config files (in `common/` directory):
+Common config files (in `~/.config/fast-market/common/` directory):
 - `common/config.yaml` - workdir and other common settings
 - `common/llm/config.yaml` - LLM providers configuration
+- `common/youtube/config.yaml` - YouTube OAuth credentials
 
 ### Available Functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `get_common_config_path()` | `Path` | `common/config.yaml` |
-| `get_llm_config_path()` | `Path` | `common/llm/config.yaml` |
+| `get_common_config_path()` | `Path` | `~/.config/fast-market/common/config.yaml` |
+| `get_llm_config_path()` | `Path` | `~/.config/fast-market/common/llm/config.yaml` |
+| `get_youtube_config_path()` | `Path` | `~/.config/fast-market/common/youtube/config.yaml` |
+| `get_common_subconfig_path(subconfig)` | `Path` | `~/.config/fast-market/common/{subconfig}/config.yaml` |
 | `get_aliases_path()` | `Path` | `~/.config/fast-market/aliases.yaml` |
 | `get_tool_config_path(tool_name)` | `Path` | `~/.config/fast-market/{tool}/config.yaml` |
 | `get_prompts_dir()` | `Path` | `~/.local/share/fast-market/prompts/` |
@@ -40,15 +43,16 @@ All path functions automatically create their parent directories on first call (
 Exception raised when required configuration is missing or invalid:
 - Config file exists but contains invalid YAML
 - Config file exists but is not a YAML mapping
+- Required common sub-config is missing (when tool declares requirement via `requires_common_config()`)
 - No LLM configuration found when required
 - No default LLM provider set when required
 
-### Common Config (common/config.yaml)
+### Common Config (~/.config/fast-market/common/config.yaml)
 ```yaml
 workdir: null    # optional global default working directory
 ```
 
-### LLM Config (common/llm/config.yaml)
+### LLM Config (~/.config/fast-market/common/llm/config.yaml)
 ```yaml
 default_provider: anthropic        # required for LLM commands
 providers:
@@ -67,6 +71,13 @@ providers:
     api_key_env: OPENAI_COMPATIBLE_API_KEY
 ```
 
+### YouTube Config (~/.config/fast-market/common/youtube/config.yaml)
+```yaml
+client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json
+channel_id: UC...
+quota_limit: 10000
+```
+
 ### Tool Config (~/.config/fast-market/{tool}/config.yaml)
 ```yaml
 llm:
@@ -76,20 +87,47 @@ llm:
 
 **Important:** Tool config can only override `llm.default_provider`, never the providers list. The `providers` section always comes from LLM config.
 
+### Config Resolution
+
+This section describes how `load_tool_config()` works.
+
+**Declaration:** Tools must declare which common sub-configs they require via `requires_common_config()`:
+
+```python
+# In your tool's cli/main.py, BEFORE loading config
+from common.core.config import requires_common_config
+
+# Declare required common sub-configs
+requires_common_config("task", ["llm"])          # Task needs LLM
+requires_common_config("youtube", ["llm", "youtube"])  # YouTube needs both
+requires_common_config("image", [])               # No common config needed
+```
+
+**Discovery:** All common sub-configs are auto-discovered by scanning `~/.config/fast-market/common/` for directories containing `config.yaml`.
+
+**Resolution order** (later wins):
+1. Common config (`~/.config/fast-market/common/config.yaml`)
+2. Discovered common sub-configs (`~/.config/fast-market/common/*/config.yaml`)
+3. Tool config (`~/.config/fast-market/{tool}/config.yaml`)
+
+**Required vs Optional:**
+- If a tool declares `requires_common_config("tool", ["llm"])`, and `llm/config.yaml` doesn't exist, `load_tool_config()` raises `ConfigError`
+- Sub-configs not in the required list are optional — if they exist, they're merged; if not, they're silently skipped
+
+**Merge strategy:** Deep merge. Tool config wins on conflicts.
+
 ### Config Loading Functions
 
+- `requires_common_config(tool_name, required_subconfigs)` - Register tool's common config requirements
 - `load_common_config()` - Load common/config.yaml
 - `save_common_config(config)` - Save to common/config.yaml
 - `load_llm_config()` - Load common/llm/config.yaml
 - `save_llm_config(config)` - Save to common/llm/config.yaml
+- `load_youtube_config()` - Load common/youtube/config.yaml
+- `save_youtube_config(config)` - Save to common/youtube/config.yaml
 - `load_tool_config(tool_name, path=None)` - Load effective config for a tool
 - `resolve_llm_config(tool_name)` - Get LLM config for a tool
 - `_deep_merge(base, override)` - Internal helper for config merging
-
-**Resolution order (later wins):**
-1. Common config (common/config.yaml)
-2. LLM config (common/llm/config.yaml)
-3. Tool config (~/.config/fast-market/{tool}/config.yaml)
 
 ## Registry
 
@@ -109,6 +147,7 @@ llm:
 ## Do's
 - Always use path functions from this module instead of hardcoding paths
 - Respect XDG conventions for all file storage
+- Use `requires_common_config()` before calling `load_tool_config()`
 - Use `load_tool_config()` for any tool that needs configuration
 - Use `resolve_llm_config()` when you need LLM settings specifically
 
@@ -116,3 +155,4 @@ llm:
 - Never hardcode `~/.config`, `~/.local/share`, or `~/.cache` for project configs
 - Never create paths outside the `fast-market` namespace for user data
 - Never write `llm.providers` to tool-specific config (it will be stripped)
+- Never call `load_tool_config()` without first calling `requires_common_config()`

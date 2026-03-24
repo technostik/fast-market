@@ -8,7 +8,9 @@ import yaml
 from common.core.paths import (
     get_common_config_path,
     get_llm_config_path,
+    get_youtube_config_path,
     get_tool_config_path,
+    get_common_subconfig_path,
 )
 
 
@@ -16,6 +18,46 @@ class ConfigError(Exception):
     """Raised when required configuration is missing or invalid."""
 
     pass
+
+
+_tool_common_requirements: dict[str, list[str]] = {}
+
+
+def requires_common_config(tool_name: str, required_subconfigs: list[str]) -> None:
+    """Register which common sub-configs a tool requires.
+
+    Call this in your tool's entry point before loading config:
+        requires_common_config("task", ["llm"])
+        requires_common_config("youtube", ["llm", "youtube"])
+
+    If a required subconfig is missing, load_tool_config() will raise ConfigError.
+    """
+    _tool_common_requirements[tool_name] = required_subconfigs
+
+
+def _get_tool_requirements(tool_name: str) -> list[str]:
+    """Get required subconfigs for a tool, or empty list if not declared."""
+    return _tool_common_requirements.get(tool_name, [])
+
+
+def _discover_common_subconfigs() -> dict[str, dict]:
+    """Discover all common sub-configs by scanning ~/.config/fast-market/common/.
+
+    Returns {subconfig_name: config_dict} for each subdirectory containing config.yaml.
+    """
+    common_dir = get_common_config_path().parent
+    if not common_dir.exists():
+        return {}
+
+    subconfigs = {}
+    for subdir in common_dir.iterdir():
+        if not subdir.is_dir():
+            continue
+        config_file = subdir / "config.yaml"
+        if config_file.exists():
+            subconfigs[subdir.name] = _load_yaml(config_file)
+
+    return subconfigs
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -56,7 +98,7 @@ def _save_yaml(path: Path, config: dict) -> None:
 
 
 def load_common_config() -> dict:
-    """Load common/config.yaml.
+    """Load ~/.config/fast-market/common/config.yaml.
 
     Returns empty dict if file does not exist.
     """
@@ -64,12 +106,12 @@ def load_common_config() -> dict:
 
 
 def save_common_config(config: dict) -> None:
-    """Save to common/config.yaml."""
+    """Save to ~/.config/fast-market/common/config.yaml."""
     _save_yaml(get_common_config_path(), config)
 
 
 def load_llm_config() -> dict:
-    """Load common/llm/config.yaml.
+    """Load ~/.config/fast-market/common/llm/config.yaml.
 
     Returns empty dict if file does not exist.
     """
@@ -77,24 +119,51 @@ def load_llm_config() -> dict:
 
 
 def save_llm_config(config: dict) -> None:
-    """Save to common/llm/config.yaml."""
+    """Save to ~/.config/fast-market/common/llm/config.yaml."""
     _save_yaml(get_llm_config_path(), config)
+
+
+def load_youtube_config() -> dict:
+    """Load ~/.config/fast-market/common/youtube/config.yaml.
+
+    Returns empty dict if file does not exist.
+    """
+    return _load_yaml(get_youtube_config_path())
+
+
+def save_youtube_config(config: dict) -> None:
+    """Save to ~/.config/fast-market/common/youtube/config.yaml."""
+    _save_yaml(get_youtube_config_path(), config)
 
 
 def load_tool_config(tool_name: str, path: str | None = None) -> dict:
     """Load effective config for a tool.
 
     Resolution order (later wins):
-    1. Common config (common/config.yaml) - contains workdir
-    2. LLM config (common/llm/config.yaml) - contains llm section
+    1. Common config (~/.config/fast-market/common/config.yaml) - workdir
+    2. Discovered common sub-configs (~/.config/fast-market/common/*/config.yaml)
     3. Tool config (~/.config/fast-market/{tool}/config.yaml)
 
-    The 'llm' section from LLM config is always the base.
-    Tool config can override 'llm.default_provider' only - never providers list.
-    Tool-specific keys (not 'llm') are passed through as-is.
+    Before loading, the tool must declare its common config requirements via
+    requires_common_config(). If a required subconfig is missing, ConfigError is raised.
+
+    Sub-configs are discovered by scanning the common/ directory. All discovered
+    sub-configs are merged (tool can override specific keys). The tool's config
+    can override 'llm.default_provider' only - never providers list.
     """
+    required_subconfigs = _get_tool_requirements(tool_name)
+    discovered_subconfigs = _discover_common_subconfigs()
+
+    for subconfig in required_subconfigs:
+        if subconfig not in discovered_subconfigs:
+            raise ConfigError(
+                f"Required common config '{subconfig}' not found. Run: common-setup"
+            )
+
     common_cfg = load_common_config()
-    llm_cfg = load_llm_config()
+    discovered_cfg = {}
+    for subconfig_name, subconfig_data in discovered_subconfigs.items():
+        discovered_cfg[subconfig_name] = subconfig_data
 
     if path is not None:
         tool_path = Path(path).expanduser()
@@ -130,7 +199,7 @@ def load_tool_config(tool_name: str, path: str | None = None) -> dict:
                 f"{tool_path} must be a YAML mapping, got {type(tool_data).__name__}"
             )
 
-    base = {**common_cfg, **llm_cfg}
+    base = {**common_cfg, **discovered_cfg}
     return _deep_merge(base, tool_data)
 
 
@@ -159,16 +228,16 @@ def resolve_llm_config(tool_name: str) -> dict:
     if "providers" in cfg:
         default_provider = cfg.get("default_provider", "")
         if not default_provider:
-            raise ConfigError("No default LLM provider set. Run: global-setup")
+            raise ConfigError("No default LLM provider set. Run: common-setup")
         return {
             "providers": cfg.get("providers", {}),
             "default_provider": default_provider,
         }
     llm = cfg.get("llm", {})
     if not llm:
-        raise ConfigError("No LLM configured. Run: global-setup")
+        raise ConfigError("No LLM configured. Run: common-setup")
     if not llm.get("default_provider"):
-        raise ConfigError("No default LLM provider set. Run: global-setup")
+        raise ConfigError("No default LLM provider set. Run: common-setup")
     return llm
 
 
@@ -199,10 +268,10 @@ def load_config(path: str | None = None) -> dict:
     return load_tool_config("corpus", path)
 
 
-# Common config schema (common/config.yaml):
+# Common config schema (~/.config/fast-market/common/config.yaml):
 #   workdir: null    # optional global default working directory
 #
-# LLM config schema (common/llm/config.yaml):
+# LLM config schema (~/.config/fast-market/common/llm/config.yaml):
 #   default_provider: anthropic        # required for LLM commands
 #   providers:
 #     anthropic:
@@ -218,6 +287,11 @@ def load_config(path: str | None = None) -> dict:
 #       model: gpt-4o-mini
 #       base_url: https://api.openai.com/v1
 #       api_key_env: OPENAI_COMPATIBLE_API_KEY
+#
+# YouTube config schema (~/.config/fast-market/common/youtube/config.yaml):
+#   client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json
+#   channel_id: UC...
+#   quota_limit: 10000
 #
 # Tool config schema (~/.config/fast-market/{tool}/config.yaml):
 #   llm:
