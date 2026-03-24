@@ -67,6 +67,20 @@ def timecode_to_seconds(timecode: str) -> float:
         return seconds + milliseconds / 1000
 
 
+def extract_video_id(url: str) -> str | None:
+    """Extract video ID from various YouTube URL formats."""
+    patterns = [
+        r"youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})",
+        r"youtu\.be/([a-zA-Z0-9_-]{11})",
+        r"youtube\.com/shorts/([a-zA-Z0-9_-]{11})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
+
 def parse_srt(srt_content: str) -> str:
     """Parse SRT caption content into plain text."""
     lines = srt_content.splitlines()
