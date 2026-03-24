@@ -309,6 +309,13 @@ def register(plugin_manifests: dict):
                     err=True,
                 )
 
+            if offset and len(matching) >= offset:
+                if debug:
+                    click.echo(
+                        f"DEBUG: found {offset} matches, stopping early", err=True
+                    )
+                break
+
         if debug:
             click.echo(f"DEBUG: total matching: {len(matching)}", err=True)
 
