@@ -149,10 +149,36 @@ def execute_command(
             exit_code=126,
         )
 
+    success, tokens, parse_error = _parse_command_tokens(cmd_str)
+    if not success:
+        return CommandResult(
+            command=cmd_str,
+            stdout="",
+            stderr=f"Command syntax error: {parse_error}",
+            exit_code=126,
+        )
+
+    if not tokens:
+        return CommandResult(
+            command=cmd_str,
+            stdout="",
+            stderr="Empty command",
+            exit_code=126,
+        )
+
+    use_shell = _needs_shell(cmd_str)
+    logger.debug(
+        "executing command",
+        command=cmd_str,
+        workdir=str(workdir),
+        shell=use_shell,
+        timeout=timeout,
+    )
+
     try:
         result = rt_subprocess.run(
-            cmd_str,
-            shell=True,
+            cmd_str if use_shell else tokens,
+            shell=use_shell,
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -175,161 +201,6 @@ def execute_command(
     except Exception as exc:
         return CommandResult(
             command=cmd_str,
-            stdout="",
-            stderr=str(exc),
-            exit_code=1,
-        )
-
-
-def execute_dry_run(cmd_str: str, workdir: Path, allowed: set[str]) -> dict:
-    """Simulate execution for dry-run mode."""
-    if cmd_str.startswith("skill:"):
-        from common.core.paths import get_skills_dir
-
-        skill_ref = cmd_str[6:]
-        skill_path_part, _, args_part = skill_ref.partition(" ")
-        if not skill_path_part or "/" not in skill_path_part:
-            return {
-                "command": cmd_str,
-                "resolved_command": cmd_str,
-                "alias_used": None,
-                "allowed": False,
-                "would_execute": False,
-                "reason": "Invalid skill format. Use: skill:name/script [args]",
-            }
-        skill_name, script_name = skill_path_part.split("/", 1)
-        script_path = get_skills_dir() / skill_name / "scripts" / script_name
-        if not script_path.exists():
-            return {
-                "command": cmd_str,
-                "resolved_command": cmd_str,
-                "alias_used": None,
-                "allowed": False,
-                "would_execute": False,
-                "reason": f"Skill script not found: {skill_name}/{script_name}",
-            }
-        return {
-            "command": cmd_str,
-            "resolved_command": f"{script_path} {args_part}".strip(),
-            "alias_used": None,
-            "allowed": True,
-            "would_execute": True,
-            "workdir": str(workdir),
-        }
-
-    resolved_cmd, alias_used = _resolve_alias(cmd_str)
-
-    is_allowed, error_msg = is_command_allowed(resolved_cmd, allowed)
-    if not is_allowed:
-        return {
-            "command": cmd_str,
-            "resolved_command": resolved_cmd,
-            "alias_used": alias_used,
-            "allowed": False,
-            "would_execute": False,
-            "reason": error_msg,
-        }
-    has_abs, abs_error = reject_absolute_paths(resolved_cmd)
-    if has_abs:
-        return {
-            "command": cmd_str,
-            "resolved_command": resolved_cmd,
-            "alias_used": alias_used,
-            "allowed": True,
-            "would_execute": False,
-            "reason": abs_error,
-        }
-    return {
-        "command": cmd_str,
-        "resolved_command": resolved_cmd,
-        "alias_used": alias_used,
-        "allowed": True,
-        "would_execute": True,
-        "workdir": str(workdir),
-    }
-
-
-def _resolve_alias(cmd_str: str) -> tuple[str, str | None]:
-    """Resolve an alias in the command string.
-
-    Returns (resolved_command, alias_name_or_none).
-    """
-    try:
-        from common.core.aliases import resolve_alias
-
-        return resolve_alias(cmd_str)
-    except Exception:
-        return cmd_str, None
-
-
-def execute_skill_command(
-    skill_ref: str,
-    workdir: Path,
-    timeout: int,
-) -> CommandResult:
-    """Execute a skill script.
-
-    Format: skill_name/script_name [args]
-    """
-    from common.core.paths import get_skills_dir
-
-    skill_path_part, _, args_part = skill_ref.partition(" ")
-    if not skill_path_part or "/" not in skill_path_part:
-        return CommandResult(
-            command=f"skill:{skill_ref}",
-            stdout="",
-            stderr="Invalid skill format. Use: skill:name/script [args]",
-            exit_code=1,
-        )
-
-    skill_name, script_name = skill_path_part.split("/", 1)
-    script_path = get_skills_dir() / skill_name / "scripts" / script_name
-
-    if not script_path.exists():
-        return CommandResult(
-            command=f"skill:{skill_ref}",
-            stdout="",
-            stderr=f"Skill script not found: {skill_name}/{script_name}",
-            exit_code=1,
-        )
-
-    if not script_path.is_file():
-        return CommandResult(
-            command=f"skill:{skill_ref}",
-            stdout="",
-            stderr=f"Not a file: {skill_name}/{script_name}",
-            exit_code=1,
-        )
-
-    try:
-        cmd_line = str(script_path)
-        if args_part:
-            cmd_line += " " + args_part
-        result = rt_subprocess.run(
-            cmd_line,
-            shell=True,
-            cwd=workdir,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        return CommandResult(
-            command=f"skill:{skill_ref}",
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.returncode,
-        )
-    except subprocess.TimeoutExpired:
-        return CommandResult(
-            command=f"skill:{skill_ref}",
-            stdout="",
-            stderr=f"Skill script timed out after {timeout} seconds",
-            exit_code=124,
-            timed_out=True,
-        )
-    except Exception as exc:
-        return CommandResult(
-            command=f"skill:{skill_ref}",
             stdout="",
             stderr=str(exc),
             exit_code=1,
@@ -372,6 +243,25 @@ def resolve_and_execute_command(
     return result
 
 
+def _needs_shell(cmd_str: str) -> bool:
+    """Check if command requires shell features (redirection, pipes, heredocs, etc.)."""
+    shell_chars = {">", "<", "|", "&", ";", "$", "`", "$(", "&&", "||", "<<"}
+    return any(c in cmd_str for c in shell_chars)
+
+
+def _resolve_alias(cmd_str: str) -> tuple[str, str | None]:
+    """Resolve an alias in the command string.
+
+    Returns (resolved_command, alias_name_or_none).
+    """
+    try:
+        from common.core.aliases import resolve_alias
+
+        return resolve_alias(cmd_str)
+    except Exception:
+        return cmd_str, None
+
+
 def _execute_whitelisted_command(
     cmd_str: str,
     workdir: Path,
@@ -397,10 +287,36 @@ def _execute_whitelisted_command(
             exit_code=126,
         )
 
+    success, tokens, parse_error = _parse_command_tokens(cmd_str)
+    if not success:
+        return CommandResult(
+            command=cmd_str,
+            stdout="",
+            stderr=f"Command syntax error: {parse_error}",
+            exit_code=126,
+        )
+
+    if not tokens:
+        return CommandResult(
+            command=cmd_str,
+            stdout="",
+            stderr="Empty command",
+            exit_code=126,
+        )
+
+    use_shell = _needs_shell(cmd_str)
+    logger.debug(
+        "executing whitelisted command",
+        command=cmd_str,
+        workdir=str(workdir),
+        shell=use_shell,
+        timeout=timeout,
+    )
+
     try:
         result = rt_subprocess.run(
-            cmd_str,
-            shell=True,
+            cmd_str if use_shell else tokens,
+            shell=use_shell,
             cwd=workdir,
             capture_output=True,
             text=True,
