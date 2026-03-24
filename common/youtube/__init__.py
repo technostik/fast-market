@@ -4,6 +4,7 @@ from common.youtube.auth import YouTubeOAuth
 from common.youtube.client import YouTubeClient
 from common.youtube.models import ChannelInfo, Comment, QuotaUsage, ReplyResult, Video
 from common.youtube.quota import QuotaState, QuotaTracker
+from common.youtube.transport import RSSPlaylistTransport, Transport
 from common.youtube.utils import (
     format_count,
     format_duration,
@@ -29,4 +30,6 @@ __all__ = [
     "is_short_video",
     "parse_srt",
     "timecode_to_seconds",
+    "Transport",
+    "RSSPlaylistTransport",
 ]
