@@ -15,6 +15,7 @@ from commands.setup.task_commands import create_task_commands_group
 from commands.setup.task import create_task_group
 from commands.setup.task_prompts import create_task_prompts_group
 from commands.setup.tools_doc_prompts import create_tools_doc_prompts_group
+from commands.setup.task_edit import edit_task_config
 from commands.task.prompts import build_command_documentation
 
 
@@ -66,6 +67,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         run_interactive_wizard(config_path_val, config)
+
+    @setup_cmd.command("edit")
+    def edit_cmd():
+        """Edit the full configuration file in the default editor."""
+        edit_task_config()
 
     setup_cmd.add_command(providers)
     setup_cmd.add_command(task_commands)
