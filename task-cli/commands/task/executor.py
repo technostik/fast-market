@@ -4,6 +4,8 @@ import json
 import shlex
 import subprocess
 import sys
+
+from common.rt_subprocess import rt_subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -148,7 +150,7 @@ def execute_command(
         )
 
     try:
-        result = subprocess.run(
+        result = rt_subprocess.run(
             cmd_str,
             shell=True,
             cwd=workdir,
@@ -303,7 +305,7 @@ def execute_skill_command(
         cmd_line = str(script_path)
         if args_part:
             cmd_line += " " + args_part
-        result = subprocess.run(
+        result = rt_subprocess.run(
             cmd_line,
             shell=True,
             cwd=workdir,
@@ -396,7 +398,7 @@ def _execute_whitelisted_command(
         )
 
     try:
-        result = subprocess.run(
+        result = rt_subprocess.run(
             cmd_str,
             shell=True,
             cwd=workdir,

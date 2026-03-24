@@ -16,6 +16,7 @@ from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted, to_dict
 from common.cli.helpers import get_editor
 from common.core.paths import get_tool_data_dir
+from common.rt_subprocess import rt_subprocess
 from core.models import Source, Action, Rule
 from core.rule_parser import RuleParser, RuleParseError
 from core.rule_formatter import RuleFormatter
@@ -84,7 +85,7 @@ enabled: {str(source.enabled).lower()}
                 )
                 return
 
-            result = subprocess.run(
+            result = rt_subprocess.run(
                 [editor_cmd, str(tmp_path)],
                 check=False,
             )
@@ -173,7 +174,7 @@ enabled: {str(action.enabled).lower()}
                 )
                 return
 
-            result = subprocess.run(
+            result = rt_subprocess.run(
                 [editor_cmd, str(tmp_path)],
                 check=False,
             )
@@ -303,7 +304,7 @@ conditions: |
                 )
                 return
 
-            result = subprocess.run(
+            result = rt_subprocess.run(
                 [editor_cmd, str(tmp_path)],
                 check=False,
             )
