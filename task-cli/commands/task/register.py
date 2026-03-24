@@ -57,7 +57,7 @@ def _get_task_config(
 ) -> TaskConfig:
     from commands.setup import DEFAULT_SYSTEM_COMMANDS, DEFAULT_FASTMARKET_TOOLS
 
-    task_specific = config.get("task", {})
+    task_specific = config.get("apply", {})
     fastmarket_tools = config.get("fastmarket_tools", DEFAULT_FASTMARKET_TOOLS)
     system_commands = config.get("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
     allowed_commands = config.get("allowed_commands", list(DEFAULT_SYSTEM_COMMANDS))
@@ -160,7 +160,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if debug and debug not in ("normal", "full"):
             raise click.BadParameter("--debug must be 'normal' or 'full'")
 
-        config = load_tool_config("task")
+        config = load_tool_config("apply")
         task_config = _get_task_config(config, max_iterations, timeout)
         resolved_workdir = workdir or config.get("default_workdir", ".")
         workdir_path = _resolve_workdir(resolved_workdir)
@@ -249,7 +249,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Error: {exc}", err=True)
             sys.exit(1)
 
-    return CommandManifest(name="task", click_command=task_cmd)
+    return CommandManifest(name="apply", click_command=task_cmd)
 
 
 def _resolve_workdir(path: str) -> Path:

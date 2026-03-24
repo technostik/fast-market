@@ -15,12 +15,12 @@ from common.core.config import load_tool_config, ConfigError, requires_common_co
 from common.llm.registry import discover_providers
 from common.cli.base import create_cli_group
 
-requires_common_config("task", ["llm"])
+requires_common_config("apply", ["llm"])
 
 
 def _load():
     try:
-        config = load_tool_config("task")
+        config = load_tool_config("apply")
     except ConfigError as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
@@ -35,7 +35,7 @@ def _load():
     from commands.task.register import register as task_register
     from commands.setup.register import register as setup_register
 
-    main = create_cli_group("task", default_command="task")
+    main = create_cli_group("apply", default_command="apply")
     main.add_command(task_register(plugin_manifests).click_command)
     main.add_command(setup_register())
 

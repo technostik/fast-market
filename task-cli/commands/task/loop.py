@@ -122,7 +122,7 @@ class TaskLoop:
         from common.llm.registry import discover_providers
         from commands.task.prompts import build_system_prompt
 
-        config = load_tool_config("task")
+        config = load_tool_config("apply")
         providers = discover_providers(config)
 
         if self.provider not in providers:
