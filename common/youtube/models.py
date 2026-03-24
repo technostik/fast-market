@@ -21,6 +21,7 @@ class Video(BaseModel):
     relevance_score: float = 0.0
     language: str = ""
     days_old: int = 0
+    duration: str = ""  # ISO 8601 duration (e.g., "PT5M34S")
 
     @classmethod
     def from_search_result(cls, item: dict, details: Optional[dict] = None) -> "Video":

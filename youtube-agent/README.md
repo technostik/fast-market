@@ -75,6 +75,52 @@ youtube search "test"
 
 ## CLI Reference
 
+### get-last
+
+Get the last video from your channel with optional filtering by type.
+
+```bash
+youtube get-last [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--short` | Filter to YouTube Shorts only (duration <= 3min) | False |
+| `--normal` | Filter to normal videos only (duration > 3min) | False |
+| `-n, --offset` | Get the Nth from last (1=last, 2=2nd from last, etc.) | 1 |
+| `-c, --channel-id` | Override channel ID (defaults to authenticated user's channel) | mine |
+| `--short-threshold` | Duration threshold in seconds for short detection | 180 (3min) |
+| `--debug` | Show debug information | False |
+
+**Examples:**
+```bash
+# Get the last video (most recent)
+youtube get-last
+
+# Get the last Short (≤3min)
+youtube get-last --short
+
+# Get the last normal video (>3min)
+youtube get-last --normal
+
+# Get the 2nd last short
+youtube get-last --short -n 2
+
+# Get the 3rd last video overall
+youtube get-last -n 3
+
+# Use custom threshold (1 minute for older shorts)
+youtube get-last --short --short-threshold 60
+
+# Specify a different channel
+youtube get-last --channel-id UCxxxxxxx
+
+# Debug output to see what's happening
+youtube get-last --short --debug
+```
+
+**Output:** Two lines - video title and URL.
+
 ### setup
 
 Manage configuration and authentication.
@@ -263,6 +309,8 @@ youtube-agent/
 │   │   └── register.py  # Comments implementation
 │   ├── reply/
 │   │   └── register.py  # Reply implementation
+│   ├── get_last/
+│   │   └── register.py  # Get last video implementation
 │   └── setup/
 │       └── register.py  # Setup command
 └── common/              # Shared utilities (symlink)

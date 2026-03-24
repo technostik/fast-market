@@ -382,10 +382,7 @@ class YouTubeClient:
                         if "resourceId" not in item["snippet"]:
                             continue
                         video_id = item["snippet"]["resourceId"]["videoId"]
-                        duration = duration_map.get(video_id, "N/A")
-                        is_short = (
-                            is_short_video(duration) if duration != "N/A" else False
-                        )
+                        duration = duration_map.get(video_id, "")
 
                         video = Video(
                             video_id=video_id,
@@ -395,6 +392,7 @@ class YouTubeClient:
                             channel_title=item["snippet"].get("channelTitle", ""),
                             published_at=item["snippet"].get("publishedAt", ""),
                             url=f"https://www.youtube.com/watch?v={video_id}",
+                            duration=duration,
                         )
                         videos.append(video)
 
