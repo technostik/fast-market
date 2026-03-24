@@ -77,8 +77,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Execute disabled actions and rules (for testing)",
     )
     @click.option("--format", "fmt", type=click.Choice(["json", "text", "yaml"]), default="text")
+    @click.option(
+        "--workdir",
+        "-w",
+        default=None,
+        help="Working directory for action execution (default: from config)",
+    )
     @click.pass_context
-    def run_cmd(ctx, cron, source_id, dry_run, force, limit, silent, ignore_enabled, fmt):
+    def run_cmd(ctx, cron, source_id, dry_run, force, limit, silent, ignore_enabled, fmt, workdir):
         storage = get_storage()
 
         sources = storage.get_all_sources(include_disabled=ignore_enabled)
@@ -94,6 +100,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         config = {}
+        resolved_workdir = None
+        if workdir:
+            resolved_workdir = Path(workdir).expanduser().resolve()
+        else:
+            try:
+                common_config = load_tool_config("monitor")
+                workdir_path = common_config.get("workdir")
+                if workdir_path:
+                    resolved_workdir = Path(workdir_path).expanduser().resolve()
+            except Exception:
+                pass
 
         rules = storage.get_all_rules(include_disabled=ignore_enabled)
         if not rules:
@@ -297,7 +314,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     if action and (ignore_enabled or action.enabled):
                         try:
                             code, output, script_content = execute_action(
-                                action, item, source, rule.id
+                                action, item, source, rule.id, workdir=resolved_workdir
                             )
 
                             action_results.append(
@@ -393,6 +410,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                         source,
                                         rule.id,
                                         error_context=error_context,
+                                        workdir=resolved_workdir,
                                     )
                                     on_error_executed = True
                                     if not silent and not cron:
@@ -426,6 +444,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                             source,
                                             rule.id,
                                             error_context=error_context,
+                                            workdir=resolved_workdir,
                                         )
                                         if not silent and not cron:
                                             click.echo(
@@ -457,6 +476,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                         source,
                                         rule.id,
                                         error_context=error_context,
+                                        workdir=resolved_workdir,
                                     )
                                     on_exec_executed = True
                                     if not silent and not cron:
@@ -492,6 +512,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                             source,
                                             rule.id,
                                             error_context=error_context,
+                                            workdir=resolved_workdir,
                                         )
                                         if not silent and not cron:
                                             click.echo(

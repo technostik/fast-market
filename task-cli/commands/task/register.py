@@ -162,7 +162,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         config = load_tool_config("apply")
         task_config = _get_task_config(config, max_iterations, timeout)
-        resolved_workdir = workdir or config.get("default_workdir", ".")
+        resolved_workdir = (
+            workdir or config.get("workdir") or config.get("default_workdir") or "."
+        )
         workdir_path = _resolve_workdir(resolved_workdir)
         if save_session is not None:
             save_path = Path(save_session)

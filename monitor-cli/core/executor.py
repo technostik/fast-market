@@ -39,6 +39,7 @@ def execute_action(
     source: Source,
     rule_id: str,
     error_context: dict[str, Any] | None = None,
+    workdir: Path | None = None,
 ) -> tuple[int, str, str]:
     """Execute action with placeholders replaced.
 
@@ -101,7 +102,7 @@ def execute_action(
 
         os.chmod(tmp_path, 0o755)
 
-        result = rt_subprocess.run([tmp_path], capture_output=True, text=True)
+        result = rt_subprocess.run([tmp_path], capture_output=True, text=True, cwd=workdir)
         return result.returncode, (result.stdout or "") + (result.stderr or ""), script_content
     finally:
         if tmp_path and os.path.exists(tmp_path):
