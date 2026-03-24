@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import click
+from auto_click_auto import enable_click_shell_completion
 
 
 def create_cli_group(tool_name: str, default_command: str | None = None) -> click.Group:
@@ -20,6 +21,7 @@ def create_cli_group(tool_name: str, default_command: str | None = None) -> clic
         ctx.ensure_object(dict)
         ctx.obj["verbose"] = verbose
         ctx.obj["tool_name"] = tool_name
+        enable_click_shell_completion(program_name=tool_name)
 
         if default_command and ctx.invoked_subcommand is None:
             cmd = ctx.command.get_command(ctx, default_command)

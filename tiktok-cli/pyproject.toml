@@ -9,6 +9,7 @@ description = "TikTok CLI tool for uploading YouTube Shorts"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
+    "auto-click-auto>=0.1.0",
     "pyyaml>=6.0",
 ]
 

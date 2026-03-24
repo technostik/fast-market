@@ -9,6 +9,7 @@ description = "AI image generation CLI tool with FLUX.2 support"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
+    "auto-click-auto>=0.1.0",
     "pyyaml>=6.0",
     "fastapi>=0.115",
     "uvicorn>=0.30",
