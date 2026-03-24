@@ -73,7 +73,7 @@ def _get_task_config(
 def register(plugin_manifests: dict) -> CommandManifest:
     provider_choices = list(plugin_manifests.keys()) if plugin_manifests else []
 
-    @click.command()
+    @click.command(name="apply")
     @click.argument("task_description")
     @click.option(
         "--from-file",
@@ -134,7 +134,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Save session to YAML file (relative path uses workdir, default: workdir/.last-session.yaml)",
     )
     @click.pass_context
-    def task_cmd(
+    def apply_cmd(
         ctx,
         task_description,
         from_file,
@@ -249,7 +249,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Error: {exc}", err=True)
             sys.exit(1)
 
-    return CommandManifest(name="apply", click_command=task_cmd)
+    return CommandManifest(name="apply", click_command=apply_cmd)
 
 
 def _resolve_workdir(path: str) -> Path:
