@@ -210,6 +210,10 @@ def _interactive_rule_edit(rule, parser, formatter, storage, editor_cmd, fmt):
         schedule_yaml = '# schedule:\n#   cron: "0 * * * *"  # uncomment to add cron schedule\n#   interval: "1h"  # uncomment to add interval schedule\n'
 
     actions_yaml = ", ".join(rule.action_ids)
+    on_error_actions_yaml = ", ".join(rule.on_error_action_ids) if rule.on_error_action_ids else ""
+    on_execution_actions_yaml = (
+        ", ".join(rule.on_execution_action_ids) if rule.on_execution_action_ids else ""
+    )
 
     template = f"""# Edit rule: {rule.id}
 # Lines starting with # are comments and will be ignored.
@@ -234,10 +238,25 @@ def _interactive_rule_edit(rule, parser, formatter, storage, editor_cmd, fmt):
 #   schedule: cron expression like "0 * * * *" (minute hour day month weekday)
 #   schedule: interval like "30m", "1h", "2h", "1d"
 #   timezone: e.g., "UTC", "America/New_York"
+#
+# Actions:
+#   action_ids: Main actions to run when rule matches
+#   on_error_action_ids: Actions to run when main action fails
+#   on_execution_action_ids: Actions to run after successful main action
+#
+# Placeholders for on_error/on_execution:
+#   $RULE_ERROR - Error message if action failed
+#   $RULE_RESULT - Exit code and output
+#   $RULE_MSG - "Error: ..." or "Result: ..."
+#   $RULE_TIME - ISO timestamp
+#   $RULE_ID - Rule ID
+#   Plus all standard placeholders: $ITEM_*, $SOURCE_*, $EXTRA_*
 
 id: {rule.id}
 description: {rule.description or ""}
 action_ids: [{actions_yaml}]
+on_error_action_ids: [{on_error_actions_yaml}]
+on_execution_action_ids: [{on_execution_actions_yaml}]
 timezone: {rule.timezone}
 conditions: |
   {current_dsl}
@@ -332,6 +351,30 @@ conditions: |
                 ]
             elif isinstance(actions_str, list):
                 rule.action_ids = [str(a).strip() for a in actions_str if a]
+
+            on_error_str = edited_rule.get("on_error_action_ids", "")
+            if isinstance(on_error_str, str):
+                rule.on_error_action_ids = [
+                    a.strip()
+                    for a in on_error_str.replace("[", "").replace("]", "").split(",")
+                    if a.strip()
+                ]
+            elif isinstance(on_error_str, list):
+                rule.on_error_action_ids = [str(a).strip() for a in on_error_str if a]
+            else:
+                rule.on_error_action_ids = []
+
+            on_exec_str = edited_rule.get("on_execution_action_ids", "")
+            if isinstance(on_exec_str, str):
+                rule.on_execution_action_ids = [
+                    a.strip()
+                    for a in on_exec_str.replace("[", "").replace("]", "").split(",")
+                    if a.strip()
+                ]
+            elif isinstance(on_exec_str, list):
+                rule.on_execution_action_ids = [str(a).strip() for a in on_exec_str if a]
+            else:
+                rule.on_execution_action_ids = []
 
             if edited_rule.get("schedule"):
                 sched = edited_rule["schedule"]
@@ -624,6 +667,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Condition DSL string (e.g., \"content_type == 'video' and extra.views > 600\")",
     )
     @click.option("--action-ids", required=True, help="Comma-separated action IDs")
+    @click.option(
+        "--on-error-action-ids", help="Comma-separated action IDs to run when main action fails"
+    )
+    @click.option(
+        "--on-execution-action-ids",
+        help="Comma-separated action IDs to run after successful main action",
+    )
     @click.option("--description", help="Optional description")
     @click.option("--cron", help="Cron schedule (e.g., '0 * * * *' for hourly)")
     @click.option("--interval", help="Interval schedule (e.g., '1h', '30m', '1d')")
@@ -635,6 +685,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         rule_file,
         conditions,
         action_ids,
+        on_error_action_ids,
+        on_execution_action_ids,
         description,
         cron,
         interval,
@@ -698,6 +750,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
             schedule = {"interval": interval}
 
         action_id_list = [aid.strip() for aid in action_ids.split(",")]
+        on_error_action_ids_list = (
+            [aid.strip() for aid in on_error_action_ids.split(",")] if on_error_action_ids else []
+        )
+        on_execution_action_ids_list = (
+            [aid.strip() for aid in on_execution_action_ids.split(",")]
+            if on_execution_action_ids
+            else []
+        )
 
         if replace_id:
             existing = storage.get_rule(replace_id)
@@ -707,6 +767,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             existing.conditions = conditions_data
             existing.action_ids = action_id_list
+            existing.on_error_action_ids = on_error_action_ids_list
+            existing.on_execution_action_ids = on_execution_action_ids_list
             existing.description = description
             existing.schedule = schedule
             existing.timezone = timezone
@@ -727,6 +789,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             id=rule_id,
             conditions=conditions_data,
             action_ids=action_id_list,
+            on_error_action_ids=on_error_action_ids_list,
+            on_execution_action_ids=on_execution_action_ids_list,
             description=description,
             created_at=datetime.now(),
             schedule=schedule,
@@ -741,6 +805,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "id": rule.id,
                 "conditions_dsl": dsl_conditions,
                 "action_ids": rule.action_ids,
+                "on_error_action_ids": rule.on_error_action_ids,
+                "on_execution_action_ids": rule.on_execution_action_ids,
                 "schedule": schedule,
                 "timezone": timezone,
                 "message": "Rule added successfully",
@@ -762,6 +828,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "conditions_dsl": formatter.format(r.conditions),
                     "conditions": r.conditions,
                     "action_ids": r.action_ids,
+                    "on_error_action_ids": r.on_error_action_ids,
+                    "on_execution_action_ids": r.on_execution_action_ids,
                     "schedule": r.schedule,
                     "timezone": r.timezone,
                     "description": r.description,
@@ -802,6 +870,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="DSL condition string (e.g., \"content_type == 'video' and duration > 600\")",
     )
     @click.option("--action-ids", help="Comma-separated action IDs")
+    @click.option(
+        "--on-error-action-ids", help="Comma-separated action IDs to run when main action fails"
+    )
+    @click.option(
+        "--on-execution-action-ids",
+        help="Comma-separated action IDs to run after successful main action",
+    )
+    @click.option("--clear-on-error-action-ids", is_flag=True, help="Clear on_error_action_ids")
+    @click.option(
+        "--clear-on-execution-action-ids", is_flag=True, help="Clear on_execution_action_ids"
+    )
     @click.option("--description", help="New description")
     @click.option("--enable/--disable", default=None, help="Enable or disable rule")
     @click.option("--cron", help="Cron schedule (e.g., '0 * * * *' for hourly)")
@@ -816,6 +895,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         rule_file,
         conditions,
         action_ids,
+        on_error_action_ids,
+        on_execution_action_ids,
+        clear_on_error_action_ids,
+        clear_on_execution_action_ids,
         description,
         enable,
         cron,
@@ -886,6 +969,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if action_ids is not None:
             existing.action_ids = [aid.strip() for aid in action_ids.split(",")]
 
+        if on_error_action_ids is not None:
+            existing.on_error_action_ids = [aid.strip() for aid in on_error_action_ids.split(",")]
+        elif clear_on_error_action_ids:
+            existing.on_error_action_ids = []
+
+        if on_execution_action_ids is not None:
+            existing.on_execution_action_ids = [
+                aid.strip() for aid in on_execution_action_ids.split(",")
+            ]
+        elif clear_on_execution_action_ids:
+            existing.on_execution_action_ids = []
+
         if description is not None:
             existing.description = description
 
@@ -918,6 +1013,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "id": existing.id,
                     "conditions_dsl": formatter.format(existing.conditions),
                     "action_ids": existing.action_ids,
+                    "on_error_action_ids": existing.on_error_action_ids,
+                    "on_execution_action_ids": existing.on_execution_action_ids,
                     "schedule": existing.schedule,
                     "timezone": existing.timezone,
                     "description": existing.description,

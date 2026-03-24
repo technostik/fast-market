@@ -48,6 +48,8 @@ class Rule:
     id: str
     conditions: dict
     action_ids: list[str]
+    on_error_action_ids: list[str] = field(default_factory=list)
+    on_execution_action_ids: list[str] = field(default_factory=list)
     description: str | None = None
     enabled: bool = True
     created_at: datetime = field(default_factory=datetime.now)

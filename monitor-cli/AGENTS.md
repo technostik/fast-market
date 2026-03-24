@@ -46,6 +46,8 @@ monitor-agent/
 - Placeholders: `$ITEM_TITLE`, `$ITEM_URL`, `$SOURCE_ID`, `$RULE_ID`, `$SOURCE_ORIGIN`, etc.
 - Timeout protection (5 minutes)
 - Output capture and logging
+- **Error Handling**: Optional `on_error_action_ids` and `on_execution_action_ids` per rule
+- **Global Fallbacks**: Optional `global_on_error_action_ids` and `global_on_execution_action_ids` in config
 
 ### Data Persistence
 - SQLite database for sources, actions, rules, and trigger logs
@@ -158,6 +160,39 @@ Core:
 2. Follow naming convention: uppercase with underscores
 3. Update tests to cover new placeholders
 
+### Available Placeholders
+
+#### Standard Placeholders (all actions)
+| Placeholder | Description |
+|-------------|-------------|
+| `$ITEM_ID` | Item unique ID |
+| `$ITEM_TITLE` | Item title |
+| `$ITEM_URL` | Item URL |
+| `$ITEM_CONTENT_TYPE` | video, short, article |
+| `$ITEM_PUBLISHED` | ISO timestamp |
+| `$SOURCE_ID` | Source UUID |
+| `$SOURCE_PLUGIN` | youtube, rss |
+| `$SOURCE_URL` | Channel/feed URL |
+| `$SOURCE_DESC` | Source description |
+| `$SOURCE_ORIGIN` | Channel ID or RSS URL |
+| `$RULE_ID` | Rule identifier |
+| `$EXTRA_<KEY>` | Any field from item.extra dict |
+
+#### Error/Execution Context Placeholders (on_error / on_execution actions only)
+| Placeholder | Description |
+|-------------|-------------|
+| `$RULE_ERROR` | Error message if main action failed (e.g., "Action 'notify' failed with exit code 127") |
+| `$RULE_RESULT` | Exit code of main action (e.g., "exit=0") |
+| `$RULE_MSG` | Formatted message: "Error: ..." or "Result: ..." |
+| `$RULE_TIME` | ISO timestamp when the hook was triggered |
+
+### Add on_error / on_execution Actions
+1. Add `on_error_action_ids` and `on_execution_action_ids` to `Rule` model in `core/models.py`
+2. Add corresponding columns to `rules` table in `core/storage.py`
+3. Add CLI options in `commands/setup/register.py` for `--on-error-action-ids` and `--on-execution-action-ids`
+4. Implement execution logic in `commands/run/register.py`
+5. Add global config support via `load_tool_config()`
+
 ## 📚 Related Documentation
 
 - `GOLDEN_RULES.md` — Core principles: DRY, KISS, CODE IS LAW, FAIL LOUDLY
@@ -197,6 +232,19 @@ Path: `~/.config/fast-market/monitor/monitor.yaml`
 
 Configuration uses strict YAML validation with Pydantic. Unknown fields generate warnings.
 
+#### Global Action Hooks
+```yaml
+# Global actions triggered when any rule's action fails
+global_on_error_action_ids:
+  - error-handler-action
+
+# Global actions triggered when any rule's action succeeds
+global_on_execution_action_ids:
+  - success-logger-action
+```
+
+These act as fallback hooks when a rule doesn't define its own `on_error_action_ids` or `on_execution_action_ids`.
+
 ### Identifier Conventions
 - **Sources**: Use `id` for the source identifier, `origin` for the plugin-specific origin (e.g., channel ID for YouTube, URL for RSS)
 - **Actions**: Use only `id` — no separate "name" field
@@ -210,7 +258,7 @@ Path: `~/.local/share/fast-market/monitor/monitor.db`
 Tables:
 - `sources` — Monitored sources with `origin` (was: identifier) and last_item_id tracking
 - `actions` — Shell commands with last_run status
-- `rules` — JSON conditions and action references
+- `rules` — JSON conditions, action_ids, on_error_action_ids, on_execution_action_ids
 - `trigger_logs` — Execution history for debugging
 - `rule_mismatch_logs` — Detailed condition failure logs for debugging
 
@@ -256,6 +304,29 @@ monitor setup rule-add --id "frequent-check" \
   --conditions "source_metadata.priority == 'high'" \
   --interval "30m" \
   --action-ids <action-id>
+
+# Add rule with on_error action (triggers when main action fails)
+monitor setup rule-add --id "notify-with-error-handler" \
+  --conditions "content_type == 'video'" \
+  --action-ids telegram-notify \
+  --on-error-action-ids error-alert
+
+# Add rule with on_execution action (triggers after successful action)
+monitor setup rule-add --id "notify-with-success-logger" \
+  --conditions "content_type == 'video'" \
+  --action-ids telegram-notify \
+  --on-execution-action-ids log-success
+
+# Add rule with both hooks
+monitor setup rule-add --id "notify-with-hooks" \
+  --conditions "content_type == 'video'" \
+  --action-ids telegram-notify \
+  --on-error-action-ids error-alert \
+  --on-execution-action-ids log-success
+
+# Edit rule to add/clear hooks
+monitor setup rule-edit my-rule --on-error-action-ids new-error-handler
+monitor setup rule-edit my-rule --clear-on-error-action-ids
 
 # Validate DSL condition without saving
 monitor setup rule-validate "title matches '.*AI.*' and duration > 300"

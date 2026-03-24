@@ -4,17 +4,37 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
+from common.core.config import load_tool_config
 from core.executor import execute_action
 from core.models import RuleMismatchLog, TriggerLog
 from core.rule_engine import evaluate_rule_with_details
 from core.time_scheduler import should_run_rule
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _get_global_on_error_action_ids() -> list[str]:
+    """Get global on_error_action_ids from monitor config."""
+    try:
+        config = load_tool_config("monitor")
+        return config.get("global_on_error_action_ids", [])
+    except Exception:
+        return []
+
+
+def _get_global_on_execution_action_ids() -> list[str]:
+    """Get global on_execution_action_ids from monitor config."""
+    try:
+        config = load_tool_config("monitor")
+        return config.get("global_on_execution_action_ids", [])
+    except Exception:
+        return []
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -249,12 +269,22 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             triggered_at = datetime.now(timezone.utc)
             if not dry_run:
+                action_results = []
+
                 for action_id in rule.action_ids:
                     action = storage.get_action(action_id)
                     if action and (ignore_enabled or action.enabled):
                         try:
                             code, output, script_content = execute_action(
                                 action, item, source, rule.id
+                            )
+
+                            action_results.append(
+                                {
+                                    "action_id": action_id,
+                                    "exit_code": code,
+                                    "output": output,
+                                }
                             )
 
                             if not silent and not cron:
@@ -293,6 +323,150 @@ def register(plugin_manifests: dict) -> CommandManifest:
                             error_msg = f"Action execution error for '{action.id}': {str(e)}"
                             errors.append(error_msg)
                             click.echo(f"[ERROR] {error_msg}", err=True)
+                            action_results.append(
+                                {
+                                    "action_id": action_id,
+                                    "exit_code": -1,
+                                    "output": str(e),
+                                }
+                            )
+
+                global_on_error_action_ids = _get_global_on_error_action_ids()
+                global_on_execution_action_ids = _get_global_on_execution_action_ids()
+
+                for action_result in action_results:
+                    code = action_result["exit_code"]
+                    rule_error_msg = (
+                        f"Action '{action_result['action_id']}' failed with exit code {code}"
+                        if code != 0
+                        else ""
+                    )
+                    error_context: dict[str, Any] = {
+                        "rule_error": rule_error_msg,
+                        "rule_result": f"exit={code}",
+                        "rule_msg": f"Error: {rule_error_msg}"
+                        if code != 0
+                        else f"Result: exit={code}",
+                    }
+
+                    rule_time = datetime.now(timezone.utc).isoformat()
+                    error_context["rule_time"] = rule_time
+
+                    if code != 0:
+                        on_error_executed = False
+
+                        for on_error_action_id in rule.on_error_action_ids:
+                            on_error_action = storage.get_action(on_error_action_id)
+                            if on_error_action and (ignore_enabled or on_error_action.enabled):
+                                try:
+                                    if not silent and not cron:
+                                        click.echo(
+                                            f"[ON_ERROR/{on_error_action.id}] triggered for rule '{rule.id}'"
+                                        )
+                                    err_code, err_output, _ = execute_action(
+                                        on_error_action,
+                                        item,
+                                        source,
+                                        rule.id,
+                                        error_context=error_context,
+                                    )
+                                    on_error_executed = True
+                                    if not silent and not cron:
+                                        click.echo(
+                                            f"[ON_ERROR/{on_error_action.id}] exit={err_code}"
+                                        )
+                                        if err_output:
+                                            click.echo(err_output)
+                                except Exception as e:
+                                    error_msg = (
+                                        f"ON_ERROR action '{on_error_action_id}' failed: {str(e)}"
+                                    )
+                                    errors.append(error_msg)
+                                    click.echo(f"[ERROR] {error_msg}", err=True)
+
+                        if not on_error_executed or not rule.on_error_action_ids:
+                            for global_on_error_action_id in global_on_error_action_ids:
+                                global_action = storage.get_action(global_on_error_action_id)
+                                if global_action and (ignore_enabled or global_action.enabled):
+                                    try:
+                                        if not silent and not cron:
+                                            click.echo(
+                                                f"[GLOBAL_ON_ERROR/{global_action.id}] triggered for rule '{rule.id}'"
+                                            )
+                                        err_code, err_output, _ = execute_action(
+                                            global_action,
+                                            item,
+                                            source,
+                                            rule.id,
+                                            error_context=error_context,
+                                        )
+                                        if not silent and not cron:
+                                            click.echo(
+                                                f"[GLOBAL_ON_ERROR/{global_action.id}] exit={err_code}"
+                                            )
+                                            if err_output:
+                                                click.echo(err_output)
+                                    except Exception as e:
+                                        error_msg = f"GLOBAL_ON_ERROR action '{global_on_error_action_id}' failed: {str(e)}"
+                                        errors.append(error_msg)
+                                        click.echo(f"[ERROR] {error_msg}", err=True)
+                    else:
+                        on_exec_executed = False
+
+                        for on_exec_action_id in rule.on_execution_action_ids:
+                            on_exec_action = storage.get_action(on_exec_action_id)
+                            if on_exec_action and (ignore_enabled or on_exec_action.enabled):
+                                try:
+                                    if not silent and not cron:
+                                        click.echo(
+                                            f"[ON_EXEC/{on_exec_action.id}] triggered for rule '{rule.id}'"
+                                        )
+                                    exec_code, exec_output, _ = execute_action(
+                                        on_exec_action,
+                                        item,
+                                        source,
+                                        rule.id,
+                                        error_context=error_context,
+                                    )
+                                    on_exec_executed = True
+                                    if not silent and not cron:
+                                        click.echo(
+                                            f"[ON_EXEC/{on_exec_action.id}] exit={exec_code}"
+                                        )
+                                        if exec_output:
+                                            click.echo(exec_output)
+                                except Exception as e:
+                                    error_msg = (
+                                        f"ON_EXEC action '{on_exec_action_id}' failed: {str(e)}"
+                                    )
+                                    errors.append(error_msg)
+
+                        if not on_exec_executed or not rule.on_execution_action_ids:
+                            for global_on_exec_action_id in global_on_execution_action_ids:
+                                global_action = storage.get_action(global_on_exec_action_id)
+                                if global_action and (ignore_enabled or global_action.enabled):
+                                    try:
+                                        if not silent and not cron:
+                                            click.echo(
+                                                f"[GLOBAL_ON_EXEC/{global_action.id}] triggered for rule '{rule.id}'"
+                                            )
+                                        exec_code, exec_output, _ = execute_action(
+                                            global_action,
+                                            item,
+                                            source,
+                                            rule.id,
+                                            error_context=error_context,
+                                        )
+                                        if not silent and not cron:
+                                            click.echo(
+                                                f"[GLOBAL_ON_EXEC/{global_action.id}] exit={exec_code}"
+                                            )
+                                            if exec_output:
+                                                click.echo(exec_output)
+                                    except Exception as e:
+                                        error_msg = f"GLOBAL_ON_EXEC action '{global_on_exec_action_id}' failed: {str(e)}"
+                                        errors.append(error_msg)
+                                    click.echo(f"[ERROR] {error_msg}", err=True)
 
         if not cron:
             result = {

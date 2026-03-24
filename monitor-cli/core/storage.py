@@ -54,6 +54,8 @@ class MonitorStorage:
                     id TEXT PRIMARY KEY,
                     conditions TEXT NOT NULL,
                     action_ids TEXT NOT NULL,
+                    on_error_action_ids TEXT DEFAULT '[]',
+                    on_execution_action_ids TEXT DEFAULT '[]',
                     enabled INTEGER DEFAULT 1,
                     description TEXT,
                     created_at TEXT NOT NULL,
@@ -101,6 +103,7 @@ class MonitorStorage:
                 CREATE INDEX IF NOT EXISTS idx_mismatch_logs_source
                 ON rule_mismatch_logs(source_id, evaluated_at);
             """)
+            self._migrate_rules_columns(conn)
 
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
@@ -111,6 +114,21 @@ class MonitorStorage:
             conn.commit()
         finally:
             conn.close()
+
+    def _migrate_rules_columns(self, conn: sqlite3.Connection) -> None:
+        try:
+            result = conn.execute("SELECT on_error_action_ids FROM rules LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            try:
+                conn.execute("ALTER TABLE rules ADD COLUMN on_error_action_ids TEXT DEFAULT '[]'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute(
+                    "ALTER TABLE rules ADD COLUMN on_execution_action_ids TEXT DEFAULT '[]'"
+                )
+            except sqlite3.OperationalError:
+                pass
 
     def get_all_sources(self, include_disabled: bool = False) -> list[Source]:
         with self._get_conn() as conn:
@@ -250,12 +268,14 @@ class MonitorStorage:
     def add_rule(self, rule: Rule) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO rules (id, conditions, action_ids, enabled, description, created_at, schedule, timezone, last_triggered_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO rules (id, conditions, action_ids, on_error_action_ids, on_execution_action_ids, enabled, description, created_at, schedule, timezone, last_triggered_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rule.id,
                     json.dumps(rule.conditions),
                     json.dumps(rule.action_ids),
+                    json.dumps(rule.on_error_action_ids),
+                    json.dumps(rule.on_execution_action_ids),
                     int(rule.enabled),
                     rule.description,
                     rule.created_at.isoformat(),
@@ -268,11 +288,13 @@ class MonitorStorage:
     def update_rule(self, rule: Rule) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """UPDATE rules SET conditions = ?, action_ids = ?, enabled = ?,
+                """UPDATE rules SET conditions = ?, action_ids = ?, on_error_action_ids = ?, on_execution_action_ids = ?, enabled = ?,
                    description = ?, schedule = ?, timezone = ?, last_triggered_at = ? WHERE id = ?""",
                 (
                     json.dumps(rule.conditions),
                     json.dumps(rule.action_ids),
+                    json.dumps(rule.on_error_action_ids),
+                    json.dumps(rule.on_execution_action_ids),
                     int(rule.enabled),
                     rule.description,
                     json.dumps(rule.schedule) if rule.schedule else None,
@@ -519,11 +541,17 @@ class MonitorStorage:
         schedule_val = row["schedule"] if "schedule" in row.keys() else None
         timezone_val = row["timezone"] if "timezone" in row.keys() else "UTC"
         last_triggered_val = row["last_triggered_at"] if "last_triggered_at" in row.keys() else None
+        on_error_val = row["on_error_action_ids"] if "on_error_action_ids" in row.keys() else "[]"
+        on_execution_val = (
+            row["on_execution_action_ids"] if "on_execution_action_ids" in row.keys() else "[]"
+        )
 
         return Rule(
             id=row["id"],
             conditions=json.loads(row["conditions"]),
             action_ids=json.loads(row["action_ids"]),
+            on_error_action_ids=json.loads(on_error_val) if on_error_val else [],
+            on_execution_action_ids=json.loads(on_execution_val) if on_execution_val else [],
             enabled=bool(row["enabled"]),
             description=row["description"],
             created_at=datetime.fromisoformat(row["created_at"]),

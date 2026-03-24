@@ -9,6 +9,7 @@ Rule-based content monitoring agent that watches web sources and triggers action
 - **DSL Conditions**: Human-readable condition syntax (e.g., `content_type == 'video' and duration > 600`)
 - **Time-Based Scheduling**: Schedule rules with cron expressions or intervals
 - **Action Execution**: Run shell scripts with content placeholders
+- **Error Handling**: Optional `on_error` and `on_execution` hooks per rule or globally
 - **Incremental Tracking**: Avoid processing the same content twice
 - **Force Mode**: Test rules without affecting tracking state
 - **Cron Compatible**: Designed for minute-by-minute execution
@@ -37,6 +38,22 @@ Monitor stores data in XDG-compliant directories:
 - **Database**: `~/.local/share/fast-market/monitor/monitor.db`
 
 No YAML configuration file required — all settings are stored in the SQLite database.
+
+### Global Action Hooks (Optional)
+
+Add to `~/.config/fast-market/monitor/monitor.yaml`:
+
+```yaml
+# Global actions triggered when any rule's action fails
+global_on_error_action_ids:
+  - error-handler-action
+
+# Global actions triggered when any rule's action succeeds
+global_on_execution_action_ids:
+  - success-logger-action
+```
+
+These act as fallback hooks when a rule doesn't define its own `on_error_action_ids` or `on_execution_action_ids`.
 
 ## Source Cooldown
 
@@ -220,8 +237,18 @@ monitor setup action-edit telegram-notify \
 | `$SOURCE_PLUGIN` | youtube, rss |
 | `$SOURCE_URL` | Channel/feed URL (e.g., `https://youtube.com/channel/UC...`) |
 | `$SOURCE_DESC` | Source description |
-| `$RULE_NAME` | Matching rule name |
+| `$SOURCE_ORIGIN` | Channel ID or RSS URL |
+| `$RULE_ID` | Rule identifier |
 | `$EXTRA_*` | Any field from item metadata |
+
+**Error/Execution Context Placeholders** (available in `on_error` and `on_execution` actions only):
+
+| Placeholder | Description |
+|------------|-------------|
+| `$RULE_ERROR` | Error message if main action failed (e.g., "Action 'notify' failed with exit code 127") |
+| `$RULE_RESULT` | Exit code of main action (e.g., "exit=0") |
+| `$RULE_MSG` | Formatted message: "Error: ..." or "Result: ..." |
+| `$RULE_TIME` | ISO timestamp when the hook was triggered | |
 
 #### `monitor setup rule-add`
 
@@ -251,6 +278,25 @@ monitor setup rule-add --name "YouTube Shorts" \
 # Replace an existing rule
 monitor setup rule-add --replace-id tech-shorts --name "Tech Shorts" \
   --rule-file new-shorts.yaml --action-ids telegram-notify
+
+# With on_error action (triggers when main action fails)
+monitor setup rule-add --name "Notify with Error Handler" \
+  --conditions "content_type == 'video'" \
+  --action-ids telegram-notify \
+  --on-error-action-ids error-alert
+
+# With on_execution action (triggers after successful action)
+monitor setup rule-add --name "Notify with Success Logger" \
+  --conditions "content_type == 'video'" \
+  --action-ids telegram-notify \
+  --on-execution-action-ids log-success
+
+# With both hooks
+monitor setup rule-add --name "Full Hooks" \
+  --conditions "content_type == 'video'" \
+  --action-ids telegram-notify \
+  --on-error-action-ids error-alert \
+  --on-execution-action-ids log-success
 ```
 
 ### DSL Condition Syntax
@@ -434,6 +480,39 @@ monitor setup rule-add --name "Every 2 Hours" \
 
 Rules without `--cron` or `--interval` will run every time `monitor run` is executed (default behavior).
 
+### on_error and on_execution Actions
+
+Rules can define optional hooks that trigger based on action results:
+
+- **`on_error_action_ids`**: Triggered when a main action fails (non-zero exit code)
+- **`on_execution_action_ids`**: Triggered after a main action succeeds
+
+These hooks receive additional context placeholders:
+
+```bash
+# Example: notify with error handling
+monitor setup action-add --id telegram-notify \
+  --command 'curl -X POST ...'
+
+monitor setup action-add --id error-alert \
+  --command 'echo "ERROR on $RULE_ID: $RULE_ERROR" | mail admin@example.com'
+
+monitor setup action-add --id log-success \
+  --command 'echo "[$(date)] Rule $RULE_ID succeeded: $RULE_RESULT" >> /var/log/monitor.log'
+
+monitor setup rule-add --name "Video Alert" \
+  --conditions "content_type == 'video'" \
+  --action-ids telegram-notify \
+  --on-error-action-ids error-alert \
+  --on-execution-action-ids log-success
+```
+
+**Execution Order:**
+
+1. Main actions in `action_ids` execute
+2. If any fails: per-rule `on_error_action_ids` runs → then global `global_on_error_action_ids`
+3. If all succeed: per-rule `on_execution_action_ids` runs → then global `global_on_execution_action_ids`
+
 **Example Rule Files:**
 
 ```yaml
@@ -520,6 +599,18 @@ monitor setup rule-edit tech-shorts --rule-file new-conditions.yaml
 
 # Update action references
 monitor setup rule-edit tech-shorts --action-ids new-action-id
+
+# Add on_error action
+monitor setup rule-edit tech-shorts --on-error-action-ids error-handler
+
+# Add on_execution action
+monitor setup rule-edit tech-shorts --on-execution-action-ids success-logger
+
+# Clear on_error actions
+monitor setup rule-edit tech-shorts --clear-on-error-action-ids
+
+# Clear on_execution actions
+monitor setup rule-edit tech-shorts --clear-on-execution-action-ids
 
 # Disable a rule
 monitor setup rule-edit tech-shorts --disable
