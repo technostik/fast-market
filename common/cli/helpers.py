@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+from pathlib import Path
 
 import click
 import yaml
@@ -33,3 +36,23 @@ def _print_text(data: object) -> None:
             click.echo(f"  {key}: {value}")
     else:
         click.echo(str(data))
+
+
+def get_editor() -> str:
+    """Get the default editor from environment variables."""
+    editor = (
+        subprocess.run(
+            ["git", "var", "GIT_EDITOR"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        or os.environ.get("EDITOR")
+        or "nano"
+    )
+    return editor
+
+
+def open_editor(file_path: Path) -> None:
+    """Open a file in the default editor."""
+    editor = get_editor()
+    subprocess.run([editor, str(file_path)], check=True)

@@ -13,6 +13,7 @@ from ruamel.yaml.scalarstring import FoldedScalarString
 
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
+from common.cli.helpers import get_editor
 from common.core.paths import get_tool_config
 from core.models import Action, Rule, Source
 from core.rule_formatter import RuleFormatter
@@ -495,7 +496,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("Run 'monitor config export' first to create it.")
             return
 
-        editor_cmd = editor or os.environ.get("EDITOR", "nano")
+        editor_cmd = editor or get_editor()
         editor_path = shutil.which(editor_cmd)
 
         if not editor_path:

@@ -39,7 +39,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         edit,
     ):
         """Update a prompt template."""
-        from commands.setup import run_default_editor
+        from common.cli.helpers import open_editor
         from storage.store import PromptStore
 
         store = PromptStore()
@@ -49,7 +49,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if not file_path or not file_path.exists():
                 click.echo(f"Prompt not found: {name}", err=True)
                 sys.exit(1)
-            run_default_editor(file_path)
+            open_editor(file_path)
             click.echo(f"✓ Edited prompt: {name}")
             return
 

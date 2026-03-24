@@ -14,6 +14,7 @@ import yaml
 
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted, to_dict
+from common.cli.helpers import get_editor
 from common.core.paths import get_tool_data_dir
 from core.models import Source, Action, Rule
 from core.rule_parser import RuleParser, RuleParseError
@@ -555,7 +556,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         if interactive:
-            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            editor_cmd = editor or get_editor()
             _interactive_source_edit(existing, storage, editor_cmd, fmt)
             return
         elif (
@@ -565,7 +566,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             and check_interval is None
             and is_new is None
         ):
-            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            editor_cmd = editor or get_editor()
             _interactive_source_edit(existing, storage, editor_cmd, fmt)
             return
 
@@ -703,11 +704,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         if interactive:
-            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            editor_cmd = editor or get_editor()
             _interactive_action_edit(existing, storage, editor_cmd, fmt)
             return
         elif command is None and description is None and enable is None:
-            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            editor_cmd = editor or get_editor()
             _interactive_action_edit(existing, storage, editor_cmd, fmt)
             return
 
@@ -996,7 +997,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         if interactive:
-            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            editor_cmd = editor or get_editor()
             _interactive_rule_edit(existing, parser, formatter, storage, editor_cmd, fmt)
             return
         elif (
@@ -1010,7 +1011,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             and not timezone
             and not no_schedule
         ):
-            editor_cmd = editor or os.environ.get("EDITOR", "nano")
+            editor_cmd = editor or get_editor()
             _interactive_rule_edit(existing, parser, formatter, storage, editor_cmd, fmt)
             return
 

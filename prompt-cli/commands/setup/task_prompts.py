@@ -13,7 +13,7 @@ from commands.setup import (
     save_config,
     init_task_config,
 )
-from commands.setup.task_edit import _get_editor
+from common.cli.helpers import get_editor
 from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
 
 
@@ -122,7 +122,7 @@ def create_task_prompts_group() -> click.Group:
 
         import subprocess
 
-        editor = _get_editor()
+        editor = get_editor()
 
         yaml_content = yaml.safe_dump(templates[name], default_flow_style=False)
         with tempfile.NamedTemporaryFile(

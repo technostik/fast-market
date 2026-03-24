@@ -9,22 +9,7 @@ import yaml
 from common.core.config import _resolve_config_path, load_tool_config
 from commands.setup import load_config, save_config, init_task_config
 
-
-def _get_editor() -> str:
-    editor = (
-        subprocess.run(
-            ["git", "var", "GIT_EDITOR"],
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        or subprocess.run(
-            ["sed", "-n", "s/^.*EDITOR.//p", "/etc/environment"],
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        or "nano"
-    )
-    return editor
+from common.cli.helpers import get_editor
 
 
 def edit_task_config() -> bool:
@@ -44,7 +29,7 @@ def edit_task_config() -> bool:
         temp_path = Path(f.name)
 
     try:
-        editor = _get_editor()
+        editor = get_editor()
         subprocess.run([editor, str(temp_path)], check=True)
 
         new_content = temp_path.read_text()
