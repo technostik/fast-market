@@ -132,6 +132,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if result.returncode != 0:
             raise click.ClickException("Upload failed")
 
+        videos_dir_path = uploader_path / "VideosDirPath"
+        preprocessed_file = videos_dir_path / "pre-processed.mp4"
+        if preprocessed_file.exists():
+            preprocessed_file.unlink()
+            click.echo(f"Cleaned up {preprocessed_file}")
+
     return CommandManifest(
         name="upload-yt-short",
         click_command=upload_yt_short_cmd,
