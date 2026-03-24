@@ -52,24 +52,6 @@ def _default_system_commands():
     }
 
 
-def _get_task_config(
-    config: dict, max_iterations: int | None, timeout: int | None
-) -> TaskConfig:
-    from commands.setup import DEFAULT_SYSTEM_COMMANDS, DEFAULT_FASTMARKET_TOOLS
-
-    task_specific = config.get("apply", {})
-    fastmarket_tools = config.get("fastmarket_tools", DEFAULT_FASTMARKET_TOOLS)
-    system_commands = config.get("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
-    allowed_commands = list(fastmarket_tools.keys()) + system_commands
-    return TaskConfig(
-        fastmarket_tools=fastmarket_tools,
-        system_commands=system_commands,
-        allowed_commands=allowed_commands,
-        max_iterations=max_iterations or config.get("max_iterations", 20),
-        default_timeout=timeout or config.get("default_timeout", 60),
-    )
-
-
 def register(plugin_manifests: dict) -> CommandManifest:
     provider_choices = list(plugin_manifests.keys()) if plugin_manifests else []
 
@@ -160,10 +142,28 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if debug and debug not in ("normal", "full"):
             raise click.BadParameter("--debug must be 'normal' or 'full'")
 
-        config = load_tool_config("apply")
-        task_config = _get_task_config(config, max_iterations, timeout)
+        common_config = load_tool_config("apply")
+        from commands.setup import init_task_config, load_task_config
+
+        task_file_config = load_task_config()
+        task_config_dict = init_task_config(task_file_config)
+
+        fastmarket_tools = task_config_dict.get("fastmarket_tools", {})
+        system_commands = task_config_dict.get("system_commands", [])
+        allowed_commands = list(fastmarket_tools.keys()) + system_commands
+        task_config = TaskConfig(
+            fastmarket_tools=fastmarket_tools,
+            system_commands=system_commands,
+            allowed_commands=allowed_commands,
+            max_iterations=max_iterations or task_config_dict.get("max_iterations", 20),
+            default_timeout=timeout or task_config_dict.get("default_timeout", 60),
+        )
+
         resolved_workdir = (
-            workdir or config.get("workdir") or config.get("default_workdir") or "."
+            workdir
+            or common_config.get("workdir")
+            or task_config_dict.get("default_workdir")
+            or "."
         )
         workdir_path = _resolve_workdir(resolved_workdir)
         if save_session is not None:

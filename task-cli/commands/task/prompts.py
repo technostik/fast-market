@@ -410,10 +410,9 @@ def _build_skills_section() -> str:
 
 def get_active_tools_doc_prompt_config() -> dict:
     """Get the active tools doc prompt configuration from task config."""
-    from common.core.config import load_tool_config
-    from commands.setup import init_task_config
+    from commands.setup import init_task_config, load_task_config
 
-    config = load_tool_config("apply")
+    config = load_task_config()
     task = init_task_config(config)
     tools_doc = task.get("tools_doc", {})
     active_name = tools_doc.get("active", "minimal")
@@ -429,10 +428,9 @@ def get_active_tools_doc_prompt_config() -> dict:
 
 def get_active_agent_prompt_config() -> dict:
     """Get the active agent prompt configuration from task config."""
-    from common.core.config import load_tool_config
-    from commands.setup import init_task_config
+    from commands.setup import init_task_config, load_task_config
 
-    config = load_tool_config("apply")
+    config = load_task_config()
     task = init_task_config(config)
     agent_prompt = task.get("agent_prompt", {})
     active_name = agent_prompt.get("active", "default")

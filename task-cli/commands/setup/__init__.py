@@ -5,7 +5,37 @@ from pathlib import Path
 import click
 import yaml
 
-from common.core.config import load_tool_config, save_tool_config
+from common.core.config import _resolve_config_path, load_tool_config, save_tool_config
+
+
+def load_task_config() -> dict:
+    """Load task config from file, returning dict with task key.
+
+    Handles both formats:
+    - Root-level: {fastmarket_tools: ..., system_commands: ...}
+    - Wrapped: {task: {fastmarket_tools: ..., system_commands: ...}}
+    """
+    config_path = _resolve_config_path("task")
+    if config_path.exists():
+        with open(config_path) as f:
+            data = yaml.safe_load(f) or {}
+        if "task" in data:
+            return data
+        return {"task": data}
+    return {}
+
+
+def save_task_config(config: dict) -> None:
+    """Save task config to file.
+
+    Expects config to have 'task' key, saves it at root level for cleaner YAML.
+    """
+    config_path = _resolve_config_path("task")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    task_data = config.get("task", config)
+    with open(config_path, "w") as f:
+        yaml.safe_dump(task_data, f, default_flow_style=False, sort_keys=False)
 
 
 DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
@@ -92,8 +122,17 @@ DEFAULT_SYSTEM_COMMANDS = [
 ]
 
 
-def init_task_config(config: dict) -> dict:
-    """Initialize task config with defaults if not present."""
+def init_task_config(config: dict | None = None) -> dict:
+    """Initialize task config with defaults if not present.
+
+    Loads from file first, then applies defaults for any missing keys.
+    """
+    if config is None:
+        config = load_task_config()
+    else:
+        file_config = load_task_config()
+        config = {**file_config, **config}
+
     task = config.setdefault("task", {})
     if not isinstance(task, dict):
         raise ValueError("task config must be a mapping")
