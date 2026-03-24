@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy import delete, select
 
 from common import structlog
+from common.core.paths import get_data_dir
 from common.storage.base import (
     create_memory_engine,
     create_session_factory,
@@ -25,15 +26,7 @@ class PromptStore:
         self._file_store = FilePromptStore(prompts_dir=prompts_dir)
 
         if path is None:
-            path = str(
-                Path.home()
-                / ".local"
-                / "share"
-                / "fast-market"
-                / "data"
-                / "prompt"
-                / "prompts.db"
-            )
+            path = str(get_data_dir() / "prompt" / "prompts.db")
         self._db_path = path
         if path == ":memory:":
             self.engine = create_memory_engine()

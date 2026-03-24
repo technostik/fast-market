@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "task-agent"
+version = "0.1.0"
+description = "Agentic task execution CLI for fast-market"
+requires-python = ">=3.11"
+dependencies = [
+  "click>=8.1",
+  "pyyaml>=6.0",
+  "prompt-agent>=0.1.0",
+]
+
+[project.scripts]
+task = "task_entry:main"
+
+[tool.setuptools]
+packages = [
+  "task_entry",
+  "commands",
+  "commands.task",
+  "commands.setup",
+]

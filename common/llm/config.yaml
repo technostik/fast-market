@@ -1,0 +1,12 @@
+default_provider: ollama
+providers:
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+    default_model: claude-sonnet-4-20250514
+  openai-compatible:
+    api_key_env: NONE
+    base_url: http://localhost:5005/v1
+    default_model: deepseek-chat
+  ollama:
+    base_url: http://localhost:11434
+    default_model: qwen3.5

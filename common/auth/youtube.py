@@ -9,10 +9,22 @@ from common.auth.base import AuthProvider
 logger = structlog.get_logger(__name__)
 
 
+def get_youtube_auth_dir() -> Path:
+    """Get the shared YouTube auth directory (~/.config/fast-market/common/youtube/)."""
+    return Path.home() / ".config" / "fast-market" / "common" / "youtube"
+
+
+def get_client_secret_path() -> str:
+    """Get the default client_secret.json path."""
+    return str(get_youtube_auth_dir() / "client_secret.json")
+
+
 class YouTubeOAuth(AuthProvider):
     """Shared YouTube OAuth client builder for fast-market tools."""
 
-    def __init__(self, client_secret_path: str):
+    def __init__(self, client_secret_path: str | None = None):
+        if client_secret_path is None:
+            client_secret_path = get_client_secret_path()
         self.client_secret_path = client_secret_path
         self.token_path = Path(client_secret_path).expanduser().parent / "token.json"
 

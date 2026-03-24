@@ -13,7 +13,7 @@ _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 def _load() -> None:
     logging.basicConfig(level=logging.CRITICAL, force=True)
-    config = load_tool_config("youtube-agent")
+    config = load_tool_config("youtube")
     command_manifests = discover_commands(None, tool_root=_TOOL_ROOT)
     for cmd in command_manifests.values():
         main.add_command(cmd.click_command)

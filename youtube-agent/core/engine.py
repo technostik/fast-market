@@ -4,9 +4,8 @@ from pathlib import Path
 from typing import Optional
 
 from common import structlog
-from common.auth.youtube import YouTubeOAuth
+from common.auth.youtube import YouTubeOAuth, get_client_secret_path
 from common.core.config import load_tool_config
-from common.core.paths import get_tool_config
 from common.youtube import YouTubeClient
 
 logger = structlog.get_logger(__name__)
@@ -21,8 +20,7 @@ def build_youtube_client(config: Optional[dict] = None) -> YouTubeClient:
     client_secret = youtube_config.get("client_secret_path")
 
     if not client_secret:
-        tool_cfg = get_tool_config("youtube")
-        client_secret = str(tool_cfg.parent / "client_secret.json")
+        client_secret = get_client_secret_path()
         if not Path(client_secret).exists():
             raise FileNotFoundError(
                 f"client_secret.json not found at {client_secret}. "

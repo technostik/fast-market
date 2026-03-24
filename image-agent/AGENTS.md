@@ -66,7 +66,7 @@ image-agent/
 - Plugins can inject CLI options into commands
 
 ### Configuration
-- XDG-compliant config path: `~/.local/share/fast-market/config/image.yaml`
+- XDG-compliant config path: `~/.config/fast-market/image/config.yaml`
 - Interactive setup wizard for configuration
 - Engine-specific settings (model paths, dtype)
 - Default generation parameters (size, steps, guidance)
@@ -79,7 +79,7 @@ image-agent/
 ## Configuration Schema
 
 ```yaml
-# ~/.local/share/fast-market/config/image.yaml
+# ~/.config/fast-market/image/config.yaml
 
 default_engine: flux2
 

@@ -14,6 +14,7 @@ import yaml
 
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted, to_dict
+from common.core.paths import get_tool_data_dir
 from core.models import Source, Action, Rule
 from core.rule_parser import RuleParser, RuleParseError
 from core.rule_formatter import RuleFormatter
@@ -1026,13 +1027,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
     def show_config(export, fmt):
         """Show configuration files and optionally export all configs."""
+        from common.core.paths import get_tool_config_path
+
         storage = get_storage()
 
         db_path = Path(storage.db_path)
+        config_path = get_tool_config_path("monitor").parent / "monitor.yaml"
         config_paths = {
             "database": str(db_path),
-            "config_dir": str(db_path.parent),
-            "log_dir": str(Path.home() / ".local" / "state" / "fast-market" / "monitor" / "logs"),
+            "config": str(config_path),
+            "log_dir": str(get_tool_data_dir("monitor") / "logs"),
         }
 
         if export:

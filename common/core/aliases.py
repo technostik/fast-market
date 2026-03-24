@@ -97,9 +97,9 @@ def save_aliases(aliases: dict[str, dict]) -> None:
 
 def _get_aliases_path() -> Path:
     """Get the aliases config file path."""
-    from common.core.paths import get_prompt_aliases_path
+    from common.core.paths import get_aliases_path
 
-    return get_prompt_aliases_path()
+    return get_aliases_path()
 
 
 def get_all_aliases() -> dict[str, dict]:

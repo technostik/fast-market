@@ -62,7 +62,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         from commands.helpers import build_engine, get_default_provider
         from core.models import PromptExecution
         from core.substitution import resolve_arguments
-        from plugins.base import LLMRequest
+        from common.llm.base import LLMRequest
         from storage.store import PromptStore
 
         # Determine if this is a direct prompt or a saved prompt

@@ -9,22 +9,21 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - `commands/apply/register.py` — Core execution engine with three input modes (saved/direct/stdin)
 - `commands/task/register.py` — Agentic task execution with LLM-driven CLI loop
 - `commands/alias/register.py` — Command alias management with description support
-- `commands/skill/register.py` — Skill management for agentic task execution
 - `commands/setup/register.py` — Configuration wizard for provider, task prompts, and task management
 - `core/substitution.py` — Placeholder resolution with file/stdin injection
 - `core/models.py` — Domain models (Prompt, PromptExecution)
 - `core/session.py` — Task session tracking and serialization
-- `core/skill.py` — Skill model and discovery (Anthropic skill format)
 - `core/task_prompt.py` — Task prompt configuration (TaskPromptConfig)
 - `common/core/aliases.py` — Alias resolution with caching and nested alias support
 - `common/core/paths.py` — XDG-compliant paths including skills directory
-- `plugins/base.py` — Provider interfaces (LLMProvider, LazyLLMProvider)
+- `common/llm/base.py` — Provider interfaces (LLMProvider, LazyLLMProvider, LLMRequest, LLMResponse)
+- `common/llm/registry.py` — Provider discovery and instantiation
+- `common/llm/anthropic/` — Anthropic provider
+- `common/llm/openai/` — OpenAI provider
+- `common/llm/openai_compatible/` — Generic OpenAI-compatible endpoints
+- `common/llm/ollama/` — Local Ollama provider
 - `storage/store.py` — PromptStore with flat-file storage for prompts and SQLite for executions
 - `storage/file_store.py` — FilePromptStore for managing prompts as Markdown files
-- `plugins/anthropic/plugin.py` — Anthropic provider implementation
-- `plugins/openai/plugin.py` — OpenAI provider implementation
-- `plugins/openai_compatible/plugin.py` — Generic OpenAI-compatible endpoints
-- `plugins/ollama/plugin.py` — Local Ollama provider
 
 ## 📋 Core Responsibilities
 
@@ -109,14 +108,13 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 7. Default template uses placeholders: `{aliases}`, `{fastmarket_tools}`, `{system_commands}`, `{other_commands}`, `{skills}`
 
 **To manage skills:**
-1. Skills are stored in `~/.config/prompt-agent/skills/`
-2. Each skill is a directory containing `SKILL.md` (with YAML frontmatter)
-3. Optional `scripts/` subdirectory for executable scripts
-4. Use `prompt skill list` to see available skills
-5. Use `prompt skill create <name>` to scaffold a new skill
-6. Use `prompt skill show <name>` to view skill details
-7. Use `prompt skill delete <name>` to remove a skill
-8. Execute skill scripts with `skill:name/script [args]` in task execution
+1. Skills are now managed by the standalone `skill-agent` CLI
+2. Skills are stored in `~/.local/share/fast-market/skills/`
+3. Use `skill list` to see available skills
+4. Use `skill create <name>` to scaffold a new skill
+5. Use `skill show <name>` to view skill details
+6. Use `skill delete <name>` to remove a skill
+7. Execute skill scripts with `skill:name/script [args]` in task execution
 
 ## 📚 Related Documentation
 

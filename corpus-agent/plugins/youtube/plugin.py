@@ -37,6 +37,7 @@ def _format_duration(seconds: int) -> str:
 # Transport abstraction (injectable for tests)
 # ---------------------------------------------------------------------------
 
+
 class Transport:
     def get_uploads_playlist(self, channel_id: str) -> str:
         """Return the uploads playlist ID for the channel. Raises on failure."""
@@ -59,7 +60,7 @@ class Transport:
 
 @dataclass
 class YouTubeTransport(Transport):
-    client_secret_path: str
+    client_secret_path: str | None = None
 
     def _get_client(self):
         from common.auth.youtube import YouTubeOAuth
@@ -81,10 +82,16 @@ class YouTubeTransport(Transport):
         youtube = self._get_client()
         page_token = None
         while True:
-            resp = youtube.playlistItems().list(
-                part="snippet", playlistId=playlist_id,
-                maxResults=50, pageToken=page_token,
-            ).execute()
+            resp = (
+                youtube.playlistItems()
+                .list(
+                    part="snippet",
+                    playlistId=playlist_id,
+                    maxResults=50,
+                    pageToken=page_token,
+                )
+                .execute()
+            )
             page = resp.get("items", [])
             if not page:
                 return
@@ -97,10 +104,14 @@ class YouTubeTransport(Transport):
         youtube = self._get_client()
         out: dict[str, dict] = {}
         for i in range(0, len(video_ids), 50):
-            resp = youtube.videos().list(
-                part="contentDetails,snippet,status",
-                id=",".join(video_ids[i:i + 50]),
-            ).execute()
+            resp = (
+                youtube.videos()
+                .list(
+                    part="contentDetails,snippet,status",
+                    id=",".join(video_ids[i : i + 50]),
+                )
+                .execute()
+            )
             for v in resp.get("items", []):
                 out[v["id"]] = v
         return out
@@ -127,10 +138,14 @@ class YouTubeTransport(Transport):
             logger.info("no_transcript", video_id=video_id, reason=str(exc))
             return None
         except OSError as exc:
-            raise NetworkError(f"Network error while fetching transcript for {video_id}") from exc
+            raise NetworkError(
+                f"Network error while fetching transcript for {video_id}"
+            ) from exc
         except Exception as exc:
             if "rate" in str(exc).lower() or "429" in str(exc):
-                raise APIRateLimitError(f"YouTube transcript rate limit for {video_id}") from exc
+                raise APIRateLimitError(
+                    f"YouTube transcript rate limit for {video_id}"
+                ) from exc
             raise
 
     def download_audio(self, video_id: str, cookies: str | None) -> Path | None:
@@ -170,6 +185,7 @@ class YouTubeTransport(Transport):
 # Whisper fallback
 # ---------------------------------------------------------------------------
 
+
 def transcribe_audio(audio_path: Path, model_size: str = "base") -> str:
     try:
         import whisper
@@ -193,16 +209,25 @@ def transcribe_audio(audio_path: Path, model_size: str = "base") -> str:
 # Plugin
 # ---------------------------------------------------------------------------
 
+
 class YouTubePlugin(SourcePlugin):
     name = "youtube"
 
-    def __init__(self, config: dict[str, object], transport: Transport | None = None) -> None:
+    def __init__(
+        self, config: dict[str, object], transport: Transport | None = None
+    ) -> None:
+        from common.auth.youtube import get_client_secret_path
+
         try:
             yt_cfg = config["youtube"]  # type: ignore[index]
             self.channel_id = str(yt_cfg["channel_id"])  # type: ignore[index]
             self.cookies: str | None = yt_cfg.get("cookies")  # type: ignore[union-attr]
-            self.whisper_model: str = str((config.get("whisper") or {}).get("model", "base"))  # type: ignore[union-attr]
-            client_secret_path = str(yt_cfg.get("client_secret_path", ""))  # type: ignore[union-attr]
+            self.whisper_model: str = str(
+                (config.get("whisper") or {}).get("model", "base")
+            )  # type: ignore[union-attr]
+            client_secret_path = yt_cfg.get("client_secret_path")  # type: ignore[union-attr]
+            if not client_secret_path:
+                client_secret_path = get_client_secret_path()
             # When False (default), non-public videos are skipped during sync.
             # Set youtube.index_non_public: true in config.yaml to override.
             # privacy_status is always stored on the document regardless.
@@ -210,7 +235,9 @@ class YouTubePlugin(SourcePlugin):
         except Exception as exc:
             raise ValueError("Missing youtube.channel_id in config") from exc
 
-        self.transport = transport or YouTubeTransport(client_secret_path=client_secret_path)
+        self.transport = transport or YouTubeTransport(
+            client_secret_path=client_secret_path
+        )
 
     def list_items(
         self,
@@ -253,7 +280,11 @@ class YouTubePlugin(SourcePlugin):
                 privacy = detail.get("status", {}).get("privacyStatus", "unknown")
 
                 if not self.index_non_public and privacy not in _PUBLIC_STATUSES:
-                    logger.info("video_skipped_privacy", video_id=video_id, privacy_status=privacy)
+                    logger.info(
+                        "video_skipped_privacy",
+                        video_id=video_id,
+                        privacy_status=privacy,
+                    )
                     skipped_privacy += 1
                     continue
 
@@ -262,7 +293,9 @@ class YouTubePlugin(SourcePlugin):
                 )
                 description = detail.get("snippet", {}).get("description", "")
                 published_at = snippet.get("publishedAt", "1970-01-01T00:00:00Z")
-                updated = datetime.fromisoformat(published_at.replace("Z", "+00:00")).replace(tzinfo=None)
+                updated = datetime.fromisoformat(
+                    published_at.replace("Z", "+00:00")
+                ).replace(tzinfo=None)
 
                 logger.info(
                     "video_listed",
@@ -271,19 +304,21 @@ class YouTubePlugin(SourcePlugin):
                     duration=_format_duration(duration),
                     privacy_status=privacy,
                 )
-                out.append(ItemMeta(
-                    source_id=video_id,
-                    updated_at=updated,
-                    metadata={
-                        "id": video_id,
-                        "title": snippet.get("title", video_id),
-                        "description": description,
-                        "published_at": published_at,
-                        "url": f"https://www.youtube.com/watch?v={video_id}",
-                        "duration_seconds": duration,
-                        "privacy_status": privacy,
-                    },
-                ))
+                out.append(
+                    ItemMeta(
+                        source_id=video_id,
+                        updated_at=updated,
+                        metadata={
+                            "id": video_id,
+                            "title": snippet.get("title", video_id),
+                            "description": description,
+                            "published_at": published_at,
+                            "url": f"https://www.youtube.com/watch?v={video_id}",
+                            "duration_seconds": duration,
+                            "privacy_status": privacy,
+                        },
+                    )
+                )
 
         if skipped_privacy:
             logger.info("videos_skipped_non_public", count=skipped_privacy)
@@ -315,9 +350,13 @@ class YouTubePlugin(SourcePlugin):
             try:
                 transcript = transcribe_audio(audio, self.whisper_model)
             except OSError as exc:
-                raise NetworkError(f"Network error while transcribing {video_id}") from exc
+                raise NetworkError(
+                    f"Network error while transcribing {video_id}"
+                ) from exc
 
-        raw_text = f"{description}\n\n{transcript}".strip() if description else transcript
+        raw_text = (
+            f"{description}\n\n{transcript}".strip() if description else transcript
+        )
 
         return Document(
             source_plugin=self.name,

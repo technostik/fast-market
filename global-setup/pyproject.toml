@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "global-setup"
+version = "0.1.0"
+description = "Global configuration CLI for fast-market"
+requires-python = ">=3.11"
+dependencies = [
+  "click>=8.1",
+  "pyyaml>=6.0",
+  "prompt-agent>=0.1.0",
+]
+
+[project.scripts]
+global-setup = "setup_entry:main"
+
+[tool.setuptools]
+packages = [
+  "setup_entry",
+  "commands",
+  "commands.setup",
+]

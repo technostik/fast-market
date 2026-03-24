@@ -49,7 +49,9 @@ monitor-agent/
 
 ### Data Persistence
 - SQLite database for sources, actions, rules, and trigger logs
-- XDG-compliant paths (`~/.local/share/fast-market/monitor/`)
+- XDG-compliant paths:
+  - Config: `~/.config/fast-market/monitor/monitor.yaml`
+  - Data: `~/.local/share/fast-market/monitor/`
 - Incremental tracking via `last_item_id`
 
 ## 🔗 Component Dependencies
@@ -80,7 +82,7 @@ Core:
 ## ✅ System-Wide Do's
 
 ### Architecture & Design
-- **Use XDG paths**: Data in `~/.local/share/fast-market/monitor/`
+- **Use XDG paths**: Config in `~/.config/fast-market/monitor/`, data in `~/.local/share/fast-market/monitor/`
 - **Use dataclasses with slots** for memory efficiency
 - **Return structured data** from commands, format via `out()`
 - **Fail loudly**: Validate identifiers, log errors, don't swallow exceptions
@@ -191,7 +193,7 @@ Core:
 ## Configuration
 
 ### Config File (YAML)
-Path: `~/.local/share/fast-market/config/monitor.yaml`
+Path: `~/.config/fast-market/monitor/monitor.yaml`
 
 Configuration uses strict YAML validation with Pydantic. Unknown fields generate warnings.
 

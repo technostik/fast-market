@@ -63,7 +63,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 def _get_config_path() -> Path:
     from common.core.paths import get_tool_config
 
-    path = get_tool_config("message-agent")
+    path = get_tool_config("message")
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

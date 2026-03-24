@@ -4,7 +4,7 @@ from common.core.config import load_tool_config
 
 __all__ = ["load_config"]
 
-_TOOL_NAME = "message-agent"
+_TOOL_NAME = "message"
 
 
 def load_config() -> dict[str, object]:

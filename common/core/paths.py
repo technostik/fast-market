@@ -1,73 +1,91 @@
 from __future__ import annotations
-
 import os
 from pathlib import Path
 
 
-def get_fastmarket_dir() -> Path:
-    """Return the base directory for all fast-market data."""
-    raw_data_home = os.environ.get("XDG_DATA_HOME")
-    data_home = (
-        Path(raw_data_home).expanduser()
-        if raw_data_home
-        else (Path.home() / ".local" / "share")
-    )
-    return data_home / "fast-market"
+def _xdg_config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 
 
-def get_tool_config(tool_name: str) -> Path:
-    """Return path to a tool-specific YAML config file."""
-    return get_fastmarket_dir() / "config" / f"{tool_name}.yaml"
+def _xdg_data_home() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
 
 
-def get_tool_data_dir(tool_name: str) -> Path:
-    """Return and create a tool-specific data directory."""
-    path = get_fastmarket_dir() / "data" / tool_name
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def _xdg_cache_home() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
 
 
-def get_tool_cache_dir(tool_name: str) -> Path:
-    """Return and create a tool-specific cache directory."""
-    raw_cache_home = os.environ.get("XDG_CACHE_HOME")
-    cache_home = (
-        Path(raw_cache_home).expanduser()
-        if raw_cache_home
-        else (Path.home() / ".cache")
-    )
-    path = cache_home / "fast-market" / tool_name
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def get_common_config_path() -> Path:
+    """common/config.yaml"""
+    return Path(__file__).parent.parent / "config.yaml"
 
 
-def get_prompt_aliases_path() -> Path:
-    """Return path to prompt-agent aliases config file."""
-    raw_config_home = os.environ.get("XDG_CONFIG_HOME")
-    config_home = (
-        Path(raw_config_home).expanduser()
-        if raw_config_home
-        else (Path.home() / ".config")
-    )
-    path = config_home / "prompt-agent" / "aliases.yaml"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+def get_llm_config_path() -> Path:
+    """common/llm/config.yaml"""
+    return Path(__file__).parent.parent / "llm" / "config.yaml"
 
 
-def get_skills_dir() -> Path:
-    """Return XDG-compliant skills directory for prompt-agent."""
-    raw_config_home = os.environ.get("XDG_CONFIG_HOME")
-    config_home = (
-        Path(raw_config_home).expanduser()
-        if raw_config_home
-        else (Path.home() / ".config")
-    )
-    path = config_home / "prompt-agent" / "skills"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def get_aliases_path() -> Path:
+    """~/.config/fast-market/aliases.yaml"""
+    p = _xdg_config_home() / "fast-market" / "aliases.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_tool_config_path(tool_name: str) -> Path:
+    """~/.config/fast-market/{tool}/config.yaml"""
+    p = _xdg_config_home() / "fast-market" / tool_name / "config.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def get_prompts_dir() -> Path:
-    """Return and create prompts directory for flat-file storage."""
-    path = get_fastmarket_dir() / "prompts"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """~/.local/share/fast-market/prompts/"""
+    p = _xdg_data_home() / "fast-market" / "prompts"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_skills_dir() -> Path:
+    """~/.local/share/fast-market/skills/"""
+    p = _xdg_data_home() / "fast-market" / "skills"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_data_dir() -> Path:
+    """~/.local/share/fast-market/data/"""
+    p = _xdg_data_home() / "fast-market" / "data"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_cache_dir() -> Path:
+    """~/.cache/fast-market/"""
+    p = _xdg_cache_home() / "fast-market"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_tool_data_dir(tool_name: str) -> Path:
+    """~/.local/share/fast-market/{tool}/"""
+    p = _xdg_data_home() / "fast-market" / tool_name
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_tool_cache_dir(tool_name: str) -> Path:
+    """~/.cache/fast-market/{tool}/"""
+    p = _xdg_cache_home() / "fast-market" / tool_name
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_tool_config(tool_name: str) -> Path:
+    """~/.config/fast-market/{tool}/config.yaml"""
+    return get_tool_config_path(tool_name)
+
+
+def get_fastmarket_dir() -> Path:
+    """~/.local/share/fast-market/"""
+    return get_data_dir()
