@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tiktok-agent"
+version = "0.1.0"
+description = "TikTok CLI tool for uploading YouTube Shorts"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+tiktok = "tiktok_entry:main"
+
+[tool.setuptools]
+packages = [
+    "cli",
+    "core",
+    "commands",
+    "commands.setup",
+    "commands.upload_yt_short",
+    "tiktok_entry",
+]
