@@ -49,12 +49,18 @@ class YouTubeClient:
         self.quota.reset()
 
     def get_channel_info(self, channel_id: str) -> Optional[ChannelInfo]:
-        """Get channel information."""
+        """Get channel information. Use 'mine' to get authenticated user's channel."""
         try:
-            request = self.youtube.channels().list(
-                part="snippet,statistics",
-                id=channel_id,
-            )
+            if channel_id == "mine":
+                request = self.youtube.channels().list(
+                    part="snippet,statistics",
+                    mine=True,
+                )
+            else:
+                request = self.youtube.channels().list(
+                    part="snippet,statistics",
+                    id=channel_id,
+                )
             response = request.execute()
             self._track_quota(1)
 
@@ -63,7 +69,7 @@ class YouTubeClient:
                 return None
 
             item = response["items"][0]
-            return ChannelInfo.from_api_response(item, channel_id)
+            return ChannelInfo.from_api_response(item, item["id"])
         except HttpError as e:
             logger.error("api_error", operation="get_channel_info", error=str(e))
             raise
