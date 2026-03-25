@@ -7,7 +7,9 @@ from pathlib import Path
 import click
 
 from commands.base import CommandManifest
+from common.core.config import load_tool_config
 from common.core.paths import get_skills_dir
+from common.llm.registry import get_default_provider_name
 from common.skill.skill import Skill, discover_skills
 
 
@@ -309,18 +311,60 @@ Include examples of how to use this skill.
                     click.echo(json.dumps({"exit_code": 0, "stdout": "", "stderr": ""}))
                     return
                 click.echo("[DRY RUN] Mode: prompt (via task apply)")
+                try:
+                    llm_cfg = load_tool_config("apply")
+                except Exception:
+                    llm_cfg = {}
+                provider_name = provider
+                if not provider_name:
+                    try:
+                        provider_name = get_default_provider_name(llm_cfg)
+                    except Exception:
+                        provider_name = None
+                model_name = model
+                if not model_name and provider_name:
+                    providers_cfg = llm_cfg.get("providers")
+                    if not isinstance(providers_cfg, dict):
+                        providers_cfg = llm_cfg.get("llm", {}).get("providers", {})
+                    provider_settings = providers_cfg.get(provider_name, {})
+                    if isinstance(provider_settings, dict):
+                        model_name = provider_settings.get("default_model")
+                if provider_name:
+                    click.echo(f"[DRY RUN] Provider: {provider_name}")
+                if model_name:
+                    click.echo(f"[DRY RUN] Model: {model_name}")
                 click.echo("[DRY RUN] Task description:")
                 preview = body[:200] + ("..." if len(body) > 200 else "")
                 click.echo(f"  {preview}")
                 return
+
+            try:
+                llm_cfg = load_tool_config("apply")
+            except Exception:
+                llm_cfg = {}
+            provider_name = provider
+            if not provider_name:
+                try:
+                    provider_name = get_default_provider_name(llm_cfg)
+                except Exception:
+                    provider_name = None
+
+            model_name = model
+            if not model_name and provider_name:
+                providers_cfg = llm_cfg.get("providers")
+                if not isinstance(providers_cfg, dict):
+                    providers_cfg = llm_cfg.get("llm", {}).get("providers", {})
+                provider_settings = providers_cfg.get(provider_name, {})
+                if isinstance(provider_settings, dict):
+                    model_name = provider_settings.get("default_model")
 
             result = execute_skill_prompt(
                 skill=skill,
                 workdir=workdir,
                 params=provided_params or None,
                 timeout=timeout,
-                provider=provider,
-                model=model,
+                provider=provider_name,
+                model=model_name,
             )
 
         if fmt == "json":
