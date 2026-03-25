@@ -249,10 +249,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
             loop.run(task_description, execute_fn, task_params=task_params)
 
             if auto_learn and loop.session:
-                inferred_skill = learn_skill or _infer_skill_name(task_description)
+                inferred_skill = learn_skill or _infer_skill_name(
+                    task_description,
+                    session=loop.session,
+                )
                 if not inferred_skill and not silent:
                     click.echo(
-                        "[AUTO-LEARN] Warning: could not infer skill name from task description.",
+                        "[AUTO-LEARN] Warning: could not infer skill name from task/session for skill apply/run.",
                         err=True,
                     )
                     click.echo(
@@ -342,12 +345,43 @@ def _resolve_params(params: tuple[str, ...], workdir: Path) -> dict[str, str]:
     return result
 
 
-def _infer_skill_name(task_description: str) -> str | None:
-    """Try to extract skill name from 'skill apply <name> ...' task descriptions."""
+def _infer_skill_name(task_description: str, session=None) -> str | None:
+    """Try to extract skill name from skill apply/run tasks and session tool calls."""
     import re
 
-    m = re.match(r"skill\s+apply\s+([a-zA-Z0-9_-]+)", task_description.strip())
-    return m.group(1) if m else None
+    desc = task_description.strip()
+    m = re.match(r"skill\s+apply\s+([a-zA-Z0-9_-]+)", desc)
+    if m:
+        return m.group(1)
+
+    if re.match(r"skill\s+run\b", desc) and session:
+        return _infer_skill_name_from_session(session)
+
+    return None
+
+
+def _infer_skill_name_from_session(session) -> str | None:
+    """Infer skill name by scanning executed commands and routing output."""
+    import re
+
+    for turn in reversed(session.turns):
+        for tc in reversed(turn.tool_calls):
+            command = (tc.arguments or {}).get("command", "").strip()
+
+            m = re.match(r"skill:([a-zA-Z0-9_-]+)", command)
+            if m:
+                return m.group(1)
+
+            m = re.match(r"skill\s+apply\s+([a-zA-Z0-9_-]+)", command)
+            if m:
+                return m.group(1)
+
+            route_text = f"{tc.stdout or ''}\n{tc.stderr or ''}"
+            m = re.search(r"Matched:\s+'([a-zA-Z0-9_-]+)'", route_text)
+            if m:
+                return m.group(1)
+
+    return None
 
 
 def _run_auto_learn(session, skill_name, provider_instance, model, config, silent):
