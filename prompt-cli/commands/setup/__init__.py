@@ -7,6 +7,37 @@ import yaml
 
 from common.core.config import _resolve_config_path
 
+
+def load_task_config() -> dict:
+    """Load task config from file, returning dict with task key.
+
+    Handles both formats:
+    - Root-level: {fastmarket_tools: ..., system_commands: ...}
+    - Wrapped: {task: {fastmarket_tools: ..., system_commands: ...}}
+    """
+    config_path = _resolve_config_path("task")
+    if config_path.exists():
+        with open(config_path) as f:
+            data = yaml.safe_load(f) or {}
+        if "task" in data:
+            return data
+        return {"task": data}
+    return {}
+
+
+def save_task_config(config: dict) -> None:
+    """Save task config to file.
+
+    Expects config to have 'task' key, saves it at root level for cleaner YAML.
+    """
+    config_path = _resolve_config_path("task")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    task_data = config.get("task", config)
+    with open(config_path, "w") as f:
+        yaml.safe_dump(task_data, f, default_flow_style=False, sort_keys=False)
+
+
 _SUPPORTED_PROVIDERS = {"anthropic", "openai", "openai-compatible", "ollama"}
 
 DEFAULT_FASTMARKET_TOOLS = {
