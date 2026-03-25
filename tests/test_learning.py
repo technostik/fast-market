@@ -13,18 +13,14 @@ import pytest
 pytestmark = pytest.mark.llm
 
 TRICKY_INPUT = Path(__file__).parent / "fixtures" / "data" / "test-tricky-input.txt"
-TRICKY_VALIDATOR = (
-    Path(__file__).parent
-    / "fixtures"
-    / "data"
-    / "fast-market"
-    / "skills"
-    / "test-tricky"
-    / "scripts"
-    / "validate.sh"
-)
 EXPECTED_UNIQUE_WORDS = 8
-assert TRICKY_VALIDATOR.exists()
+
+
+def _reset_learn(skills_dir: Path, skill_name: str) -> Path:
+    learn_path = skills_dir / skill_name / "LEARN.md"
+    if learn_path.exists():
+        learn_path.unlink()
+    return learn_path
 
 
 def get_llm_provider():
@@ -42,6 +38,8 @@ def test_auto_learn_creates_learn_md(workdir, skills_dir, isolate_xdg):
     """After task apply --auto-learn on test-echo, LEARN.md exists and is non-empty."""
     import subprocess
 
+    learn_path = _reset_learn(skills_dir, "test-echo")
+
     result = subprocess.run(
         [
             "task",
@@ -57,7 +55,6 @@ def test_auto_learn_creates_learn_md(workdir, skills_dir, isolate_xdg):
     )
     assert result.returncode == 0
 
-    learn_path = skills_dir / "test-echo" / "LEARN.md"
     assert learn_path.exists(), "LEARN.md was not created"
     content = learn_path.read_text(encoding="utf-8")
     assert len(content.strip()) > 20, "LEARN.md is empty or trivial"
@@ -67,6 +64,8 @@ def test_auto_learn_creates_learn_md(workdir, skills_dir, isolate_xdg):
 def test_auto_learn_content_is_markdown(workdir, skills_dir):
     """LEARN.md produced by auto-learn is markdown with expected sections."""
     import subprocess
+
+    learn_path = _reset_learn(skills_dir, "test-echo")
 
     result = subprocess.run(
         [
@@ -83,7 +82,6 @@ def test_auto_learn_content_is_markdown(workdir, skills_dir):
     )
     assert result.returncode == 0
 
-    learn_path = skills_dir / "test-echo" / "LEARN.md"
     assert learn_path.exists()
     content = learn_path.read_text(encoding="utf-8")
     assert any(line.startswith("#") for line in content.splitlines())
@@ -116,6 +114,7 @@ Then on a new line, one sentence explanation.
 def test_learn_md_contains_correct_lesson(workdir, skills_dir, tmp_path):
     import subprocess
 
+    learn_path = _reset_learn(skills_dir, "test-tricky")
     shutil.copy(TRICKY_INPUT, workdir / "input.txt")
 
     result = subprocess.run(
@@ -125,7 +124,6 @@ def test_learn_md_contains_correct_lesson(workdir, skills_dir, tmp_path):
             (
                 "Count unique words in input.txt using shell commands only "
                 "(do NOT call skill apply). "
-                f"Validate your final number with: {TRICKY_VALIDATOR} input.txt <number>. "
                 "Use command pipelines and verify exactness."
             ),
             "--auto-learn",
@@ -140,7 +138,6 @@ def test_learn_md_contains_correct_lesson(workdir, skills_dir, tmp_path):
     )
     assert result.returncode == 0
 
-    learn_path = skills_dir / "test-tricky" / "LEARN.md"
     assert learn_path.exists(), "LEARN.md was not created after tricky task"
 
     learn_content = learn_path.read_text(encoding="utf-8")
@@ -174,9 +171,7 @@ def test_learning_reduces_failures(workdir, skills_dir, tmp_path):
     session_1 = workdir / "session-1.yaml"
     session_2 = workdir / "session-2.yaml"
 
-    learn_path = skills_dir / "test-tricky" / "LEARN.md"
-    if learn_path.exists():
-        learn_path.unlink()
+    learn_path = _reset_learn(skills_dir, "test-tricky")
 
     result_1 = subprocess.run(
         [
@@ -184,8 +179,7 @@ def test_learning_reduces_failures(workdir, skills_dir, tmp_path):
             "apply",
             (
                 "Count unique words in input.txt using shell commands only "
-                "(do NOT call skill apply). "
-                f"Validate with {TRICKY_VALIDATOR} input.txt <number>."
+                "(do NOT call skill apply)."
             ),
             "--auto-learn",
             "--learn-skill",
@@ -208,8 +202,7 @@ def test_learning_reduces_failures(workdir, skills_dir, tmp_path):
             "apply",
             (
                 "Count unique words in input.txt using shell commands only "
-                "(do NOT call skill apply). "
-                f"Validate with {TRICKY_VALIDATOR} input.txt <number>."
+                "(do NOT call skill apply)."
             ),
             "--auto-learn",
             "--learn-skill",
