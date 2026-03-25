@@ -38,6 +38,13 @@ _TERMINATION_PATTERNS = (
 )
 
 
+def _infer_skill_name_from_task(task_description: str) -> str | None:
+    import re
+
+    m = re.match(r"skill\s+apply\s+([a-zA-Z0-9_-]+)", task_description.strip())
+    return m.group(1) if m else None
+
+
 def is_termination_message(content: str) -> bool:
     """Check if the message indicates task completion."""
     content_lower = content.lower()
@@ -120,7 +127,7 @@ class TaskLoop:
         """Run the agentic loop until completion or max iterations."""
         from common.core.config import load_tool_config
         from common.llm.registry import discover_providers
-        from commands.task.prompts import build_system_prompt
+        from commands.task.prompts import build_system_prompt, _load_skill_learn_content
 
         config = load_tool_config("apply")
         providers = discover_providers(config)
@@ -155,12 +162,22 @@ class TaskLoop:
         if not self.silent:
             self._print_session_header()
 
+        skill_learn = None
+        skill_name = _infer_skill_name_from_task(task_description)
+        if skill_name:
+            skill_learn = _load_skill_learn_content(skill_name)
+            if skill_learn and self._debug_enabled:
+                self._debug(
+                    f"Loaded LEARN.md for skill '{skill_name}' ({len(skill_learn)} chars)"
+                )
+
         system_prompt = build_system_prompt(
             task_description=task_description,
             fastmarket_tools_config=self.config.fastmarket_tools,
             system_commands=self.config.system_commands,
             workdir=self.workdir,
             task_params=task_params,
+            skill_learn_content=skill_learn,
         )
 
         messages = [
