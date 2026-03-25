@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -194,6 +195,7 @@ def _apply_skill_impl(
     fmt: str = "text",
     provider: str | None = None,
     model: str | None = None,
+    auto_learn: bool = False,
 ) -> None:
     """Core logic of skill apply, callable from both apply and run commands."""
     from common.skill.runner import (
@@ -337,6 +339,41 @@ def _apply_skill_impl(
             )
         )
         return
+
+    if auto_learn and not dry_run:
+        try:
+            skill_name = skill_ref.split("/", 1)[0]
+            learn_path = get_skills_dir() / skill_name / "LEARN.md"
+            learn_path.parent.mkdir(parents=True, exist_ok=True)
+            if result.exit_code == 0:
+                learn_md = (
+                    f"# Lessons Learned for {skill_name}\n\n"
+                    "## What Works\n"
+                    f"- Skill mode execution succeeded (exit 0) for `{skill_ref}`.\n"
+                )
+            else:
+                err_preview = (result.stderr or "").strip().splitlines()
+                err_line = err_preview[0] if err_preview else f"exit {result.exit_code}"
+                learn_md = (
+                    f"# Lessons Learned for {skill_name}\n\n"
+                    "## What to Avoid\n"
+                    f"- `{skill_ref}` failed — causes `{err_line}`.\n\n"
+                    "## Common Errors and Fixes\n"
+                    f"- Error: `{err_line}` → Fix: inspect command output and retry with corrected params.\n"
+                )
+            if learn_path.exists():
+                existing = learn_path.read_text(encoding="utf-8").rstrip()
+                merged = (
+                    f"{existing}\n\n---\n"
+                    f"<!-- run: {datetime.utcnow().isoformat()} -->\n\n"
+                    f"{learn_md}\n"
+                )
+                learn_path.write_text(merged, encoding="utf-8")
+            else:
+                learn_path.write_text(learn_md + "\n", encoding="utf-8")
+            click.echo(f"[AUTO-LEARN] LEARN.md updated: {learn_path}", err=True)
+        except Exception as exc:
+            click.echo(f"[AUTO-LEARN] Failed: {exc}", err=True)
 
     if result.stdout:
         click.echo(result.stdout, nl=False)
@@ -580,7 +617,23 @@ Include examples of how to use this skill.
         default=None,
         help="LLM model (for prompt mode skills)",
     )
-    def apply_skill(skill_ref, params, workdir, timeout, dry_run, fmt, provider, model):
+    @click.option(
+        "--auto-learn",
+        "-L",
+        is_flag=True,
+        help="After execution, update LEARN.md for this skill",
+    )
+    def apply_skill(
+        skill_ref,
+        params,
+        workdir,
+        timeout,
+        dry_run,
+        fmt,
+        provider,
+        model,
+        auto_learn,
+    ):
         """Apply (execute) a skill by name.
 
         SKILL_REF is the skill name or 'skillname/scriptname'.
@@ -595,6 +648,7 @@ Include examples of how to use this skill.
             fmt=fmt,
             provider=provider,
             model=model,
+            auto_learn=auto_learn,
         )
 
     @skill_group.command("run")
@@ -698,6 +752,7 @@ Include examples of how to use this skill.
             fmt="text",
             provider=provider_name,
             model=model,
+            auto_learn=False,
         )
 
     return CommandManifest(name="skill", click_command=skill_group)
