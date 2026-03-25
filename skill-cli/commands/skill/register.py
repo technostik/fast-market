@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 
 from commands.base import CommandManifest
+from common.cli.helpers import open_editor
 from common.core.config import ConfigError, load_tool_config, requires_common_config
 from common.core.paths import get_skills_dir
 from common.llm.registry import discover_providers, get_default_provider_name
@@ -429,6 +430,57 @@ Include examples of how to use this skill.
 
         shutil.rmtree(skill_path)
         click.echo(f"Deleted skill: {name}")
+
+    @skill_group.command("edit")
+    @click.argument("skill_name")
+    @click.argument("file", required=False, default=None)
+    @click.option(
+        "--create",
+        "-c",
+        is_flag=True,
+        help="Create FILE if it does not exist",
+    )
+    def edit_skill(skill_name, file, create):
+        """Edit a skill file in the default editor."""
+        skills_dir = get_skills_dir()
+        skill_dir = skills_dir / skill_name
+
+        if not skill_dir.exists():
+            click.echo(f"Error: Skill '{skill_name}' not found", err=True)
+            sys.exit(1)
+
+        if file is None:
+            target = skill_dir / "SKILL.md"
+        else:
+            target = skill_dir / file
+
+        skill_dir_resolved = skill_dir.resolve()
+        target_resolved = target.resolve()
+        if not str(target_resolved).startswith(str(skill_dir_resolved)):
+            click.echo("Error: path must be within skill directory", err=True)
+            sys.exit(1)
+
+        if not target_resolved.exists():
+            if not create:
+                click.echo(
+                    f"Error: '{file}' not found in skill '{skill_name}'.\n"
+                    "Hint: use --create to create it",
+                    err=True,
+                )
+                sys.exit(1)
+
+            target_resolved.parent.mkdir(parents=True, exist_ok=True)
+            if target_resolved.suffix == ".sh":
+                target_resolved.write_text(
+                    "#!/usr/bin/env bash\nset -euo pipefail\n\n",
+                    encoding="utf-8",
+                )
+                target_resolved.chmod(target_resolved.stat().st_mode | 0o111)
+            else:
+                target_resolved.touch()
+            click.echo(f"Created: {target_resolved}")
+
+        open_editor(target_resolved)
 
     @skill_group.command("apply")
     @click.argument("skill_ref", type=SkillRefType())
