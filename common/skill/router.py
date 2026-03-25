@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,7 @@ import yaml
 from common import structlog
 from common.core.paths import get_cache_dir, get_skills_dir
 from common.llm.base import LLMRequest
+from common.rt_subprocess import rt_subprocess
 from common.skill.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
@@ -157,7 +159,12 @@ def _execute_skill(
     if workdir and workdir != ".":
         cmd += ["--workdir", workdir]
 
-    result = subprocess.run(cmd, timeout=timeout)
+    debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {"1", "true", "TRUE"}
+    if debug_enabled:
+        result = rt_subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
+        print(f"[router][exec] command={' '.join(cmd)} exit={result.returncode}")
+    else:
+        result = subprocess.run(cmd, timeout=timeout)
     return result.returncode
 
 
@@ -195,6 +202,18 @@ def _call_plan(state: RouterState, provider, model: str | None, skills: list[Ski
     req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=500)
     response = provider.complete(req)
     raw = (response.content or "").strip()
+    debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {"1", "true", "TRUE"}
+    if debug_enabled:
+        print("[router][plan] model:", model or "(provider default)")
+        print("[router][plan] prompt:\n", prompt[:4000])
+        print("[router][plan] raw response:\n", raw if raw else "(empty)")
+
+    if not raw:
+        raise ValueError(
+            "Planner returned empty response. "
+            "Enable SKILL_ROUTER_DEBUG_LLM=1 to print prompt/response details."
+        )
+
     try:
         data = json.loads(raw)
     except Exception:
@@ -242,6 +261,12 @@ def _call_distill(
     req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=500)
     response = provider.complete(req)
     distilled = (response.content or "").strip()
+    debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {"1", "true", "TRUE"}
+    if debug_enabled:
+        print(f"[router][distill] skill={skill_name} params={params}")
+        print("[router][distill] prompt:\n", prompt[:3000])
+        print("[router][distill] raw response:\n", distilled if distilled else "(empty)")
+
     if distilled:
         return distilled
     # Fallback for unstable/empty LLM responses: preserve actionable session facts.
@@ -280,17 +305,12 @@ def run_router(
         try:
             plan = _call_plan(state, provider, model, skills)
         except Exception as exc:
-            successful_attempts = [a for a in state.attempts if a.success]
-            if successful_attempts and state.attempts and state.attempts[-1].success:
-                state.done = True
-                state.final_result = (
-                    "Completed with fallback: planner returned invalid/empty output "
-                    f"after successful execution steps. Last error: {exc}"
-                )
-                break
             state.failed = True
             state.failure_reason = f"Planner failed: {exc}"
             break
+
+        if os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {"1", "true", "TRUE"}:
+            print(f"[router][plan] parsed action: {plan}")
 
         action = plan.get("action")
         if action == "done":
@@ -338,6 +358,9 @@ def run_router(
         session_file = _make_session_path(workdir, state.iteration)
         exit_code = _execute_skill(skill_name, params, workdir, skill_timeout, session_file)
         session_output = _read_session(session_file)
+        if os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {"1", "true", "TRUE"}:
+            print(f"[router][session] file={session_file}")
+            print("[router][session] summary:\n", session_output[:3000])
 
         try:
             distilled = _call_distill(skill_name, params, session_output, provider, model)
