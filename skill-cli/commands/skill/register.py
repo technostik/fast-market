@@ -7,13 +7,45 @@ from datetime import datetime
 from pathlib import Path
 
 import click
+import yaml
 
 from commands.base import CommandManifest
 from common.cli.helpers import open_editor
-from common.core.config import ConfigError, load_tool_config, requires_common_config
+from common.core.config import (
+    ConfigError,
+    get_tool_config_path,
+    load_tool_config,
+    requires_common_config,
+    save_tool_config,
+)
 from common.core.paths import get_skills_dir
 from common.llm.registry import discover_providers, get_default_provider_name
 from common.skill.skill import Skill, discover_skills
+
+
+DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE = """# Lessons Learned for {skill_name}
+
+## What Works
+- Skill execution `{skill_ref}` exited with code `{exit_code}`.
+- Key stdout signal: `{stdout_preview}`
+
+## What to Avoid
+- Pattern leading to failure: `{stderr_preview}`
+
+## Common Errors and Fixes
+- Error: `{stderr_preview}` → Fix: adjust params/inputs and retry.
+"""
+
+
+def _get_skill_auto_learn_prompt_template() -> str:
+    config = load_tool_config("skill")
+    template = config.get("auto_learn_prompt")
+    if isinstance(template, str) and template.strip():
+        return template
+
+    config["auto_learn_prompt"] = DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE
+    save_tool_config("skill", config)
+    return DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE
 
 
 class SkillRefType(click.ParamType):
@@ -345,22 +377,19 @@ def _apply_skill_impl(
             skill_name = skill_ref.split("/", 1)[0]
             learn_path = get_skills_dir() / skill_name / "LEARN.md"
             learn_path.parent.mkdir(parents=True, exist_ok=True)
-            if result.exit_code == 0:
-                learn_md = (
-                    f"# Lessons Learned for {skill_name}\n\n"
-                    "## What Works\n"
-                    f"- Skill mode execution succeeded (exit 0) for `{skill_ref}`.\n"
-                )
-            else:
-                err_preview = (result.stderr or "").strip().splitlines()
-                err_line = err_preview[0] if err_preview else f"exit {result.exit_code}"
-                learn_md = (
-                    f"# Lessons Learned for {skill_name}\n\n"
-                    "## What to Avoid\n"
-                    f"- `{skill_ref}` failed — causes `{err_line}`.\n\n"
-                    "## Common Errors and Fixes\n"
-                    f"- Error: `{err_line}` → Fix: inspect command output and retry with corrected params.\n"
-                )
+            stdout_preview = (result.stdout or "").strip().splitlines()
+            stderr_preview = (result.stderr or "").strip().splitlines()
+            stdout_line = stdout_preview[0] if stdout_preview else "no stdout"
+            stderr_line = stderr_preview[0] if stderr_preview else "no stderr"
+            template = _get_skill_auto_learn_prompt_template()
+            learn_md = template.format(
+                skill_name=skill_name,
+                skill_ref=skill_ref,
+                exit_code=result.exit_code,
+                stdout_preview=stdout_line,
+                stderr_preview=stderr_line,
+                timestamp=datetime.utcnow().isoformat(),
+            )
             if learn_path.exists():
                 existing = learn_path.read_text(encoding="utf-8").rstrip()
                 merged = (
@@ -754,6 +783,42 @@ Include examples of how to use this skill.
             model=model,
             auto_learn=False,
         )
+
+    @skill_group.group("auto-learn")
+    def auto_learn_group():
+        """Manage skill auto-learn prompt template."""
+        pass
+
+    @auto_learn_group.command("path")
+    def auto_learn_path():
+        """Show config path for skill auto-learn prompt."""
+        _get_skill_auto_learn_prompt_template()
+        click.echo(get_tool_config_path("skill"))
+
+    @auto_learn_group.command("show")
+    def auto_learn_show():
+        """Show current skill auto-learn prompt template."""
+        click.echo(_get_skill_auto_learn_prompt_template())
+
+    @auto_learn_group.command("edit")
+    def auto_learn_edit():
+        """Edit skill auto-learn prompt template."""
+        _get_skill_auto_learn_prompt_template()
+        path = get_tool_config_path("skill")
+        if not path.exists():
+            save_tool_config(
+                "skill",
+                {"auto_learn_prompt": DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE},
+            )
+        else:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if "auto_learn_prompt" not in data:
+                data["auto_learn_prompt"] = DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE
+                path.write_text(
+                    yaml.safe_dump(data, default_flow_style=False, sort_keys=False),
+                    encoding="utf-8",
+                )
+        open_editor(path)
 
     return CommandManifest(name="skill", click_command=skill_group)
 
