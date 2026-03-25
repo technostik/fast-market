@@ -1,4 +1,9 @@
-from common.skill.router import RouterMatch, build_skills_list, route
+from common.skill.router import (
+    RouterState,
+    SkillAttempt,
+    build_skills_list,
+    run_router,
+)
 from common.skill.runner import (
     SkillResult,
     execute_skill_prompt,
@@ -12,9 +17,10 @@ __all__ = [
     "Skill",
     "discover_skills",
     "SkillResult",
-    "RouterMatch",
+    "RouterState",
+    "SkillAttempt",
     "build_skills_list",
-    "route",
+    "run_router",
     "execute_skill_run",
     "execute_skill_prompt",
     "execute_skill_script",

@@ -228,6 +228,7 @@ def _apply_skill_impl(
     provider: str | None = None,
     model: str | None = None,
     auto_learn: bool = False,
+    save_session: str | None = None,
 ) -> None:
     """Core logic of skill apply, callable from both apply and run commands."""
     from common.skill.runner import (
@@ -358,6 +359,7 @@ def _apply_skill_impl(
             timeout=timeout,
             provider=provider_name,
             model=model_name,
+            save_session=Path(save_session).expanduser().resolve() if save_session else None,
         )
 
     if fmt == "json":
@@ -647,6 +649,12 @@ Include examples of how to use this skill.
         help="LLM model (for prompt mode skills)",
     )
     @click.option(
+        "--save-session",
+        default=None,
+        type=click.Path(),
+        help="Save task session to this file (forwarded to task apply)",
+    )
+    @click.option(
         "--auto-learn",
         "-L",
         is_flag=True,
@@ -661,6 +669,7 @@ Include examples of how to use this skill.
         fmt,
         provider,
         model,
+        save_session,
         auto_learn,
     ):
         """Apply (execute) a skill by name.
@@ -678,6 +687,7 @@ Include examples of how to use this skill.
             provider=provider,
             model=model,
             auto_learn=auto_learn,
+            save_session=save_session,
         )
 
     @skill_group.command("run")
@@ -695,28 +705,34 @@ Include examples of how to use this skill.
         help="LLM model for routing",
     )
     @click.option(
-        "--threshold",
-        "-t",
-        type=float,
-        default=0.5,
-        help="Minimum confidence score to accept a match (default: 0.5)",
-    )
-    @click.option(
-        "--dry-run",
-        "-n",
-        is_flag=True,
-        help="Show matched skill and params without executing",
-    )
-    @click.option(
         "--workdir",
         "-w",
         default=".",
         type=click.Path(),
         help="Working directory for execution",
     )
-    def run_skill(task, provider, model, threshold, dry_run, workdir):
-        """Auto-discover and run the best skill for a task description."""
-        from common.skill.router import route
+    @click.option(
+        "--max-iterations",
+        "-i",
+        type=int,
+        default=10,
+        help="Max number of skill executions",
+    )
+    @click.option(
+        "--verbose",
+        "-v",
+        is_flag=True,
+        help="Print each skill attempt and distilled result",
+    )
+    @click.option(
+        "--retry-limit",
+        type=int,
+        default=2,
+        help="Max retries per failed skill",
+    )
+    def run_skill(task, provider, model, workdir, max_iterations, verbose, retry_limit):
+        """Orchestrate multiple skills to accomplish a complex task."""
+        from common.skill.router import run_router
 
         requires_common_config("skill", ["llm"])
         try:
@@ -732,57 +748,30 @@ Include examples of how to use this skill.
             click.echo(f"Error: provider '{provider_name}' not available.", err=True)
             sys.exit(1)
 
-        click.echo(f"Routing: '{task}'...", err=True)
+        click.echo(f"Router started: '{task}'", err=True)
 
-        match = route(
-            task,
+        state = run_router(
+            goal=task,
             provider=llm,
             model=model,
-            confidence_threshold=threshold,
+            workdir=workdir,
+            max_iterations=max_iterations,
+            skill_timeout=300,
+            retry_limit=retry_limit,
+            verbose=verbose,
         )
-
-        if match.skill is None:
-            click.echo(
-                f"No matching skill found (confidence: {match.confidence:.2f})",
-                err=True,
-            )
-            click.echo(f"Reason: {match.reason}", err=True)
-            click.echo("\nAvailable skills:", err=True)
-            for s in discover_skills(get_skills_dir()):
-                click.echo(f"  {s.name} — {s.description}", err=True)
+        click.echo("\n" + "=" * 50, err=True)
+        if state.done:
+            click.echo(f"✓ Done: {state.final_result}", err=True)
+            return
+        if state.failed:
+            click.echo(f"✗ Failed: {state.failure_reason}", err=True)
             sys.exit(1)
-
         click.echo(
-            f"Matched: '{match.skill.name}' "
-            f"(confidence: {match.confidence:.0%}, {match.reason})",
+            f"✗ Max iterations ({max_iterations}) reached without completion",
             err=True,
         )
-
-        if match.params:
-            click.echo(f"Extracted params: {match.params}", err=True)
-
-        params_args = tuple(f"{k}={v}" for k, v in match.params.items())
-
-        if dry_run:
-            click.echo(
-                f"\n[DRY RUN] Would execute: skill apply {match.skill.name}",
-                err=True,
-            )
-            for k, v in match.params.items():
-                click.echo(f"  {k}={v}", err=True)
-            return
-
-        _apply_skill_impl(
-            skill_ref=match.skill.name,
-            params=params_args,
-            workdir=workdir,
-            timeout=300,
-            dry_run=False,
-            fmt="text",
-            provider=provider_name,
-            model=model,
-            auto_learn=False,
-        )
+        sys.exit(1)
 
     @skill_group.group("auto-learn")
     def auto_learn_group():

@@ -227,6 +227,7 @@ def execute_skill_prompt(
     timeout: int = 300,
     provider: str | None = None,
     model: str | None = None,
+    save_session: Path | None = None,
 ) -> SkillResult:
     """
     Execute skill body as a task description via `task apply`.
@@ -249,6 +250,8 @@ def execute_skill_prompt(
         cmd += ["--param", f"{key}={value}"]
     if workdir and str(workdir) != ".":
         cmd += ["--workdir", str(workdir)]
+    if save_session:
+        cmd += ["--save-session", str(save_session)]
 
     logger.debug("executing_skill_prompt", skill=skill.name, cmd=cmd)
 
