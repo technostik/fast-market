@@ -380,6 +380,18 @@ monitor logs --since 1d --action-id telegram-notify --format yaml
 # View mismatch logs (failed condition details)
 monitor logs --mismatch --rule-id tech-shorts --format yaml
 
+# Follow logs in real-time
+monitor logs -f
+
+# Follow logs with custom interval
+monitor logs -f --interval 500ms
+
+# Follow logs for specific source
+monitor logs -f --source-id youtube_johannoriel
+
+# Follow rule mismatch logs
+monitor logs -f --mismatch
+
 # Check status
 monitor status --format json
 monitor logs --since 1d --format json

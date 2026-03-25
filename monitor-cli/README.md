@@ -844,6 +844,18 @@ monitor logs --since 30d --clean
 
 # Clean logs before a date
 monitor logs --before 7d --clean
+
+# Follow logs in real-time
+monitor logs -f
+
+# Follow with custom interval
+monitor logs -f --interval 500ms
+
+# Follow specific source
+monitor logs -f --source-id <uuid>
+
+# Follow rule mismatch logs
+monitor logs -f --mismatch
 ```
 
 **Options:**
@@ -859,6 +871,9 @@ monitor logs --before 7d --clean
 | `--meta-filter` | Filter by source metadata (key=value) |
 | `--limit` | Max logs (default: 100) |
 | `--format` | Output format: `json`, `yaml`, or `text` |
+| `-f`, `--follow` | Follow logs in real-time (like tail -f) |
+| `--interval` | Polling interval for --follow (e.g., 1s, 500ms, 2s) |
+| `--mismatch` | Show rule mismatch logs instead of trigger logs |
 
 **Log Entry Fields:**
 

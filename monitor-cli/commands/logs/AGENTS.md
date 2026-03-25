@@ -34,6 +34,15 @@ Delete matching logs instead of showing. Use with `--since` or `--before`.
 ### --before
 Delete logs before timestamp (e.g., `--before 7d`).
 
+### --follow, -f
+Follow logs in real-time (like `tail -f`). Polls for new logs at the specified interval.
+
+### --interval
+Polling interval for `--follow` (e.g., `1s`, `500ms`, `2s`). Default: `1s`.
+
+### --mismatch
+Show rule mismatch logs instead of trigger logs. These are logs where rules evaluated but conditions failed.
+
 ## Log Entry Fields
 
 ```json
@@ -74,7 +83,39 @@ monitor logs --since 30d --clean
 
 # Limit to 10 most recent
 monitor logs --limit 10
+
+# Follow logs in real-time
+monitor logs -f
+
+# Follow logs with custom interval
+monitor logs -f --interval 500ms
+
+# Follow logs for specific rule
+monitor logs -f --rule-id my-rule
+
+# Follow logs for specific source
+monitor logs -f --source-id youtube_johannoriel
+
+# Follow logs for specific action
+monitor logs -f --action-id notify
+
+# Follow rule mismatch logs (condition failures)
+monitor logs -f --mismatch
 ```
+
+## Output Format
+
+### Text Format (default)
+```
+2026-03-24 20:44:50 | rule=check_youtube | source=youtube_johannoriel | action=notify | exit=0 | Video Title
+2026-03-24 19:55:59 | rule=check_youtube | source=youtube_johannoriel | action=notify | exit=2 | Video Title
+2026-03-24 18:10:51 | rule=check_youtube | source=youtube_johannoriel | MISMATCH | Video Title
+```
+
+### Color Scheme
+- **Green** (`\033[92m`): exit code 0 (success)
+- **Red** (`\033[91m`): non-zero exit code (failure)
+- **Yellow** (`\033[93m`): mismatch logs (rule conditions failed)
 
 ## 🔗 Dependencies
 - Imports from: `core.storage`, `click`
