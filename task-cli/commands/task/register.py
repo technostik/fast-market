@@ -284,6 +284,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if loop.session:
                 loop.session.exit_code = 1
                 loop.session.error = str(exc)
+                loop.session.end_reason = f"internal failure: {exc}"
                 if save_session:
                     loop.session.save(Path(save_session))
             click.echo(f"Error: {exc}", err=True)

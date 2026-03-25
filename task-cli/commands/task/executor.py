@@ -277,11 +277,19 @@ def execute_skill_command(
 
     merged_params = {**(params or {}), **inline_params}
     result = execute_skill_script(ref, workdir, params=merged_params or None, timeout=timeout)
+    reason = result.stderr
+    if not reason:
+        if result.timed_out:
+            reason = "Skill command ended: timeout"
+        elif result.exit_code == 0:
+            reason = "Skill command ended: success"
+        else:
+            reason = f"Skill command ended: failure (exit {result.exit_code})"
 
     return CommandResult(
         command=f"skill:{skill_ref}",
         stdout=result.stdout,
-        stderr=result.stderr,
+        stderr=reason,
         exit_code=result.exit_code,
         timed_out=result.timed_out,
     )

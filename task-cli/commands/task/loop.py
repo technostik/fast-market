@@ -248,6 +248,7 @@ class TaskLoop:
                     break
             elif is_termination_message(response.content):
                 self.session.end_time = datetime.utcnow()
+                self.session.end_reason = "success: model signaled task completion"
                 self._log("\n=== TASK COMPLETE ===")
                 if not self.silent:
                     print(response.content)
@@ -255,11 +256,13 @@ class TaskLoop:
             else:
                 self._debug(f">>> No tool_calls, final response")
                 messages.append({"role": "assistant", "content": response.content})
+                self.session.end_reason = "success: assistant returned final response"
                 if not self.silent:
                     print(response.content)
                 break
         else:
             self.session.end_time = datetime.utcnow()
+            self.session.end_reason = "round limit reached"
             if not self.silent:
                 print(
                     f"\nMax iterations ({max_iter}) reached. Task may not be complete."
@@ -267,6 +270,8 @@ class TaskLoop:
 
         if self.session and not self.session.end_time:
             self.session.end_time = datetime.utcnow()
+        if self.session and not self.session.end_reason:
+            self.session.end_reason = "stopped: loop exited"
 
     def _handle_tool_calls(
         self,
