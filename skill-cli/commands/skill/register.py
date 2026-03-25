@@ -232,6 +232,13 @@ def _write_local_session_file(
     session_path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = {
+        "metrics": {
+            "total_tool_calls": 1,
+            "error_count": 0 if result.exit_code == 0 else 1,
+            "guess_count": 0,
+            "success_rate": 1.0 if result.exit_code == 0 else 0.0,
+            "iterations_used": 1,
+        },
         "turns": [
             {
                 "role": "assistant",

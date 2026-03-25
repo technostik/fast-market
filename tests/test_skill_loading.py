@@ -6,6 +6,7 @@ def test_discover_finds_test_skills(skills_dir):
     assert "test-echo" in names
     assert "test-fail" in names
     assert "test-prompt" in names
+    assert "test-tricky" in names
 
 
 def test_skill_loads_name_and_description(test_echo_skill):

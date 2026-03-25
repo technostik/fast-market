@@ -1,9 +1,18 @@
 import json
+import sys
+from pathlib import Path
 
 from click.testing import CliRunner
 
 
 def get_cli():
+    repo_root = Path(__file__).resolve().parents[1]
+    skill_cli_path = str(repo_root / "skill-cli")
+    if skill_cli_path in sys.path:
+        sys.path.remove(skill_cli_path)
+    sys.path.insert(0, skill_cli_path)
+    sys.modules.pop("commands", None)
+    sys.modules.pop("commands.skill", None)
     from skill_entry import main
 
     return main

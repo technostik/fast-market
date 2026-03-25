@@ -1,5 +1,7 @@
 import pytest
 from click.testing import CliRunner
+import sys
+from pathlib import Path
 
 pytestmark = pytest.mark.llm  # run with: pytest -m llm
 
@@ -46,6 +48,13 @@ def get_llm_provider():
 
 
 def get_cli():
+    repo_root = Path(__file__).resolve().parents[1]
+    skill_cli_path = str(repo_root / "skill-cli")
+    if skill_cli_path in sys.path:
+        sys.path.remove(skill_cli_path)
+    sys.path.insert(0, skill_cli_path)
+    sys.modules.pop("commands", None)
+    sys.modules.pop("commands.skill", None)
     from skill_entry import main
 
     return main
@@ -188,3 +197,52 @@ def test_distilled_result_not_raw_session(workdir):
     for attempt in state.attempts:
         assert "tool_calls:" not in attempt.distilled_result, _state_debug_dump(state)
         assert len(attempt.distilled_result) < 1000, _state_debug_dump(state)
+
+
+def test_session_metrics_written(workdir, skills_dir):
+    """Session files produced by router contain metrics."""
+    from common.core.paths import get_cache_dir
+    from common.skill.router import run_router
+    from tests.helpers import get_session_metrics
+
+    provider = get_llm_provider()
+
+    run_router(
+        goal="echo the message 'metrics-test'",
+        provider=provider,
+        workdir=str(workdir),
+        max_iterations=3,
+    )
+
+    cache = get_cache_dir() / "skill-router"
+    session_files = sorted(cache.glob("session-*.yaml"))
+    assert len(session_files) >= 1
+
+    metrics = get_session_metrics(session_files[0])
+    assert "error_count" in metrics
+    assert "guess_count" in metrics
+    assert "total_tool_calls" in metrics
+    assert "success_rate" in metrics
+
+
+def test_successful_skill_has_zero_errors(workdir):
+    """A skill that works first try should have zero errors in session."""
+    import subprocess
+
+    from tests.helpers import count_session_errors
+
+    session_file = workdir / "session.yaml"
+    subprocess.run(
+        [
+            "skill",
+            "apply",
+            "test-echo",
+            "message=zero-errors",
+            "--save-session",
+            str(session_file),
+        ],
+        timeout=60,
+        check=True,
+    )
+
+    assert count_session_errors(session_file) == 0

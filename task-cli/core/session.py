@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -74,6 +74,51 @@ class Session:
     def add_turn(self, turn: Turn) -> None:
         self.turns.append(turn)
 
+    @property
+    def error_count(self) -> int:
+        """Number of tool calls with non-zero exit code."""
+        count = 0
+        for turn in self.turns:
+            for tc in turn.tool_calls:
+                if tc.exit_code is not None and tc.exit_code != 0:
+                    count += 1
+        return count
+
+    @property
+    def guess_count(self) -> int:
+        """
+        Number of 'guess' tool calls.
+
+        A guess is any tool call that immediately follows a failed tool call.
+        """
+        count = 0
+        all_tool_calls = [tc for turn in self.turns for tc in turn.tool_calls]
+        for i in range(1, len(all_tool_calls)):
+            prev = all_tool_calls[i - 1]
+            if prev.exit_code is not None and prev.exit_code != 0:
+                count += 1
+        return count
+
+    @property
+    def total_tool_calls(self) -> int:
+        return sum(len(turn.tool_calls) for turn in self.turns)
+
+    @property
+    def success_rate(self) -> float:
+        if self.total_tool_calls == 0:
+            return 1.0
+        return 1.0 - (self.error_count / self.total_tool_calls)
+
+    def metrics_dict(self) -> dict[str, Any]:
+        """Return session metrics as a serializable dict."""
+        return {
+            "total_tool_calls": self.total_tool_calls,
+            "error_count": self.error_count,
+            "guess_count": self.guess_count,
+            "success_rate": round(self.success_rate, 3),
+            "iterations_used": len([t for t in self.turns if t.role == "assistant"]),
+        }
+
     def to_yaml(self) -> str:
         data = {
             "task_description": self.task_description,
@@ -88,6 +133,7 @@ class Session:
             "end_reason": self.end_reason,
             "exit_code": self.exit_code,
             "error": self.error,
+            "metrics": self.metrics_dict(),
         }
         return yaml.dump(data, default_flow_style=False, sort_keys=False)
 
