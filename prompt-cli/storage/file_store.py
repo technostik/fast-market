@@ -51,7 +51,7 @@ class FilePromptStore:
             return file_path
         return None
 
-    def _load_prompt_from_file(self, file_path: Path) -> Prompt | None:
+    def _load_prompt_from_file(self, file_path: Path) -> Prompt:
         try:
             content = file_path.read_text(encoding="utf-8")
             post = frontmatter.loads(content)
@@ -73,8 +73,9 @@ class FilePromptStore:
                 else None,
             )
         except Exception as e:
-            logger.warning("failed_to_load_prompt", path=str(file_path), error=str(e))
-            return None
+            raise ValueError(
+                f"FAIL LOUDLY: Failed to load prompt from {file_path}: {e}"
+            )
 
     def _save_prompt_to_file(self, prompt: Prompt, file_path: Path) -> None:
         metadata = {
@@ -119,8 +120,7 @@ class FilePromptStore:
         prompts = []
         for file_path in sorted(self._prompts_dir.glob("*.md")):
             prompt = self._load_prompt_from_file(file_path)
-            if prompt is not None:
-                prompts.append(prompt)
+            prompts.append(prompt)
         return prompts
 
     def update_prompt(self, name: str, **updates) -> bool:
@@ -129,8 +129,6 @@ class FilePromptStore:
             return False
 
         prompt = self._load_prompt_from_file(file_path)
-        if prompt is None:
-            return False
 
         allowed = {
             "content",
@@ -161,3 +159,19 @@ class FilePromptStore:
 
     def get_file_path(self, name: str) -> Path | None:
         return self._find_by_name(name)
+
+    def validate_prompt(self, name: str) -> Prompt:
+        file_path = self._find_by_name(name)
+        if file_path is None:
+            raise FileNotFoundError(f"FAIL LOUDLY: Prompt not found: {name}")
+        return self._load_prompt_from_file(file_path)
+
+    def validate_all_prompts(self) -> dict:
+        result = {"valid": [], "errors": []}
+        for file_path in sorted(self._prompts_dir.glob("*.md")):
+            try:
+                prompt = self._load_prompt_from_file(file_path)
+                result["valid"].append(prompt.name)
+            except ValueError as e:
+                result["errors"].append({"file": str(file_path), "error": str(e)})
+        return result

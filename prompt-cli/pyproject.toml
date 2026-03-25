@@ -49,5 +49,6 @@ packages = [
     "commands.providers",
     "commands.logs",
     "commands.edit",
+    "commands.validate",
     "prompt_entry",
 ]

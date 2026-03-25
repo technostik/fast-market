@@ -24,6 +24,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
             sys.exit(1)
 
         open_editor(file_path)
+
+        try:
+            store.validate_prompt(name)
+        except ValueError as e:
+            click.echo(f"✗ Prompt file is corrupted after edit: {e}", err=True)
+            sys.exit(1)
+
         click.echo(f"✓ Edited prompt: {name}")
 
     return CommandManifest(name="edit", click_command=edit_cmd)

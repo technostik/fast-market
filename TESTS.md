@@ -8,3 +8,7 @@ monitor run --limit 1 --force
 image generate "a yewllow glowing cat"
 youtube get-last --short | xargs -d '\n' -n2 sh -c 'tiktok upload-yt-short -t "$0" -u "$1"'
 youtube get-transcript https://www.youtube.com/watch?v=kLRPpEMKoHg | prompt apply summarize content=-
+
+skill apply yt-summarize url=https://www.youtube.com/watch?v=kLRPpEMKoHg
+
+skill run "make a test of the skill system"
