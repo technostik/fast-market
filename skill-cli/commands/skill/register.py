@@ -183,13 +183,30 @@ Include examples of how to use this skill.
         default="text",
         help="Output format",
     )
-    def apply_skill(skill_ref, params, workdir, timeout, dry_run, fmt):
+    @click.option(
+        "--provider",
+        "-P",
+        default=None,
+        help="LLM provider (for prompt mode skills)",
+    )
+    @click.option(
+        "--model",
+        "-m",
+        default=None,
+        help="LLM model (for prompt mode skills)",
+    )
+    def apply_skill(skill_ref, params, workdir, timeout, dry_run, fmt, provider, model):
         """Apply (execute) a skill by name.
 
         SKILL_REF is the skill name or 'skillname/scriptname'.
         PARAMS are KEY=VALUE pairs passed as SKILL_KEY environment variables.
         """
-        from common.skill.runner import execute_skill_script, resolve_skill_script
+        from common.skill.runner import (
+            execute_skill_prompt,
+            execute_skill_run,
+            execute_skill_script,
+            resolve_skill_script,
+        )
 
         provided_params: dict[str, str] = {}
         invalid_params: list[str] = []
@@ -214,13 +231,6 @@ Include examples of how to use this skill.
             click.echo(f"Skill '{skill_name}' not found", err=True)
             sys.exit(1)
 
-        if not skill.has_scripts:
-            click.echo(
-                f"Skill '{skill_name}' has no scripts/. Prompt mode not yet implemented.",
-                err=True,
-            )
-            sys.exit(1)
-
         for p in skill.parameters:
             if p.get("required") and p["name"] not in provided_params and "default" not in p:
                 click.echo(
@@ -241,28 +251,8 @@ Include examples of how to use this skill.
             click.echo(f"Skill '{skill_name}' not found", err=True)
             sys.exit(1)
 
-        if not script_path:
-            click.echo(
-                f"Skill '{resolved_skill.name}' has no scripts/. Prompt mode not yet implemented.",
-                err=True,
-            )
-            sys.exit(1)
-
-        if dry_run:
-            if fmt == "json":
-                click.echo(
-                    json.dumps(
-                        {
-                            "exit_code": 0,
-                            "stdout": "",
-                            "stderr": "",
-                        }
-                    )
-                )
-                return
-
+        if dry_run and fmt != "json":
             click.echo(f"[DRY RUN] Skill: {resolved_skill.name}")
-            click.echo(f"[DRY RUN] Script: {script_path}")
             click.echo(f"[DRY RUN] Workdir: {workdir.resolve()}")
             click.echo("[DRY RUN] Parameters:")
             for key in sorted(provided_params):
@@ -271,14 +261,67 @@ Include examples of how to use this skill.
             click.echo("[DRY RUN] Environment variables that would be set:")
             for key in sorted(provided_params):
                 click.echo(f"  SKILL_{key.upper()}={provided_params[key]}")
-            return
 
-        result = execute_skill_script(
-            skill_ref=skill_ref,
-            workdir=workdir,
-            params=provided_params or None,
-            timeout=timeout,
-        )
+        if skill.has_scripts:
+            if dry_run:
+                if fmt == "json":
+                    click.echo(json.dumps({"exit_code": 0, "stdout": "", "stderr": ""}))
+                    return
+                click.echo(f"[DRY RUN] Mode: script")
+                click.echo(f"[DRY RUN] Script: {script_path if script_path else '(unresolved)'}")
+                return
+
+            result = execute_skill_script(
+                skill_ref=skill_ref,
+                workdir=workdir,
+                params=provided_params or None,
+                timeout=timeout,
+            )
+        elif skill.run:
+            if dry_run:
+                cmd_preview = skill.run
+                for key, value in provided_params.items():
+                    cmd_preview = cmd_preview.replace(f"{{{key}}}", value)
+                if fmt == "json":
+                    click.echo(json.dumps({"exit_code": 0, "stdout": "", "stderr": ""}))
+                    return
+                click.echo("[DRY RUN] Mode: run: (inline command)")
+                click.echo(f"[DRY RUN] Command: {cmd_preview}")
+                return
+
+            result = execute_skill_run(
+                skill=skill,
+                workdir=workdir,
+                params=provided_params or None,
+                timeout=timeout,
+            )
+        else:
+            body = skill.get_body()
+            if not body:
+                click.echo(
+                    f"Error: Skill '{skill.name}' has no scripts/, no run: command, and no body content.",
+                    err=True,
+                )
+                sys.exit(1)
+
+            if dry_run:
+                if fmt == "json":
+                    click.echo(json.dumps({"exit_code": 0, "stdout": "", "stderr": ""}))
+                    return
+                click.echo("[DRY RUN] Mode: prompt (via task apply)")
+                click.echo("[DRY RUN] Task description:")
+                preview = body[:200] + ("..." if len(body) > 200 else "")
+                click.echo(f"  {preview}")
+                return
+
+            result = execute_skill_prompt(
+                skill=skill,
+                workdir=workdir,
+                params=provided_params or None,
+                timeout=timeout,
+                provider=provider,
+                model=model,
+            )
 
         if fmt == "json":
             click.echo(

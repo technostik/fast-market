@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -149,4 +150,135 @@ def execute_skill_script(
             stderr=(exc.stderr or "") or f"Skill script timed out after {timeout} seconds",
             exit_code=124,
             timed_out=True,
+        )
+
+
+def execute_skill_run(
+    skill: Skill,
+    workdir: Path,
+    params: dict[str, str] | None = None,
+    timeout: int = 60,
+) -> SkillResult:
+    """
+    Execute the skill's run: frontmatter command.
+
+    Supports {param} substitution and SKILL_* environment variables.
+    """
+    cmd = skill.run
+    for key, value in (params or {}).items():
+        cmd = cmd.replace(f"{{{key}}}", str(value))
+
+    unresolved = sorted(set(re.findall(r"\{(\w+)\}", cmd)))
+    if unresolved:
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="run:",
+            stdout="",
+            stderr=(
+                f"Unresolved parameters: {', '.join(unresolved)}. "
+                "Pass them as KEY=VALUE arguments."
+            ),
+            exit_code=1,
+        )
+
+    env = os.environ.copy()
+    for key, value in (params or {}).items():
+        env[f"SKILL_{str(key).upper()}"] = str(value)
+
+    logger.debug(
+        "executing skill run command",
+        skill=skill.name,
+        command=cmd,
+        workdir=str(workdir),
+        timeout=timeout,
+    )
+
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=workdir,
+            env=env,
+            capture_output=False,
+            timeout=timeout,
+        )
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="run:",
+            stdout="",
+            stderr="",
+            exit_code=result.returncode,
+        )
+    except subprocess.TimeoutExpired:
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="run:",
+            stdout="",
+            stderr=f"Command timed out after {timeout}s",
+            exit_code=124,
+            timed_out=True,
+        )
+
+
+def execute_skill_prompt(
+    skill: Skill,
+    workdir: Path,
+    params: dict[str, str] | None = None,
+    timeout: int = 300,
+    provider: str | None = None,
+    model: str | None = None,
+) -> SkillResult:
+    """
+    Execute skill body as a task description via `task apply`.
+    """
+    body = skill.get_body()
+    for key, value in (params or {}).items():
+        body = body.replace(f"{{{key}}}", str(value))
+
+    learn_path = skill.path / "LEARN.md"
+    if learn_path.exists():
+        learn_content = learn_path.read_text(encoding="utf-8")
+        body = f"{body}\n\n---\n## Lessons from previous runs\n{learn_content}"
+
+    cmd = ["task", "apply", body]
+    if provider:
+        cmd += ["-P", provider]
+    if model:
+        cmd += ["-m", model]
+    for key, value in (params or {}).items():
+        cmd += ["--param", f"{key}={value}"]
+    if workdir and str(workdir) != ".":
+        cmd += ["--workdir", str(workdir)]
+
+    logger.debug("executing_skill_prompt", skill=skill.name, cmd=cmd)
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=workdir,
+            timeout=timeout,
+        )
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="prompt:",
+            stdout="",
+            stderr="",
+            exit_code=result.returncode,
+        )
+    except subprocess.TimeoutExpired:
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="prompt:",
+            stdout="",
+            stderr=f"Task timed out after {timeout}s",
+            exit_code=124,
+            timed_out=True,
+        )
+    except FileNotFoundError:
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="prompt:",
+            stdout="",
+            stderr="'task' command not found. Is task-cli installed?",
+            exit_code=127,
         )
