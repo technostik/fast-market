@@ -5,12 +5,13 @@ import sys
 import click
 
 from commands.base import CommandManifest
+from commands.completion import PromptNameParamType
 from core.substitution import extract_placeholders
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("get")
-    @click.argument("name")
+    @click.argument("name", type=PromptNameParamType())
     @click.option(
         "--format", "fmt", type=click.Choice(["text", "json"]), default="text"
     )

@@ -6,6 +6,7 @@ from datetime import datetime
 import click
 
 from commands.base import CommandManifest
+from commands.completion import PromptNameParamType
 from common.cli.helpers import out
 
 
@@ -13,7 +14,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     provider_choices = list(plugin_manifests.keys()) if plugin_manifests else []
 
     @click.command("apply")
-    @click.argument("prompt_name_or_content")
+    @click.argument("prompt_name_or_content", type=PromptNameParamType())
     @click.option(
         "--provider",
         "-P",

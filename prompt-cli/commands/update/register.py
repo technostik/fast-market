@@ -6,11 +6,12 @@ from pathlib import Path
 import click
 
 from commands.base import CommandManifest
+from commands.completion import PromptNameParamType
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("update")
-    @click.argument("name")
+    @click.argument("name", type=PromptNameParamType())
     @click.option("--content", "-c", default=None, help="New prompt template content")
     @click.option(
         "--from-file",

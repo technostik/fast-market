@@ -5,12 +5,15 @@ import sys
 import click
 
 from commands.base import CommandManifest
+from commands.completion import PromptNameParamType
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("delete")
-    @click.argument("name")
-    @click.option("--yes", is_flag=True, default=False, help="Delete without confirmation")
+    @click.argument("name", type=PromptNameParamType())
+    @click.option(
+        "--yes", is_flag=True, default=False, help="Delete without confirmation"
+    )
     @click.pass_context
     def delete_cmd(ctx, name, yes):
         """Delete a prompt."""
