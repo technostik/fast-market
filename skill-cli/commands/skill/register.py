@@ -152,4 +152,150 @@ Include examples of how to use this skill.
         shutil.rmtree(skill_path)
         click.echo(f"Deleted skill: {name}")
 
+    @skill_group.command("apply")
+    @click.argument("skill_ref")
+    @click.argument("params", nargs=-1)
+    @click.option(
+        "--workdir",
+        "-w",
+        default=".",
+        type=click.Path(path_type=Path),
+        help="Working directory (default: current dir)",
+    )
+    @click.option(
+        "--timeout",
+        "-t",
+        type=int,
+        default=60,
+        help="Execution timeout in seconds",
+    )
+    @click.option(
+        "--dry-run",
+        "-n",
+        is_flag=True,
+        help="Show what would be executed without running",
+    )
+    @click.option(
+        "--format",
+        "-F",
+        "fmt",
+        type=click.Choice(["text", "json"]),
+        default="text",
+        help="Output format",
+    )
+    def apply_skill(skill_ref, params, workdir, timeout, dry_run, fmt):
+        """Apply (execute) a skill by name.
+
+        SKILL_REF is the skill name or 'skillname/scriptname'.
+        PARAMS are KEY=VALUE pairs passed as SKILL_KEY environment variables.
+        """
+        from common.skill.runner import execute_skill_script, resolve_skill_script
+
+        provided_params: dict[str, str] = {}
+        invalid_params: list[str] = []
+        for param in params:
+            if "=" not in param:
+                invalid_params.append(param)
+                continue
+            key, value = param.split("=", 1)
+            provided_params[key] = value
+
+        if invalid_params:
+            click.echo(
+                f"Error: invalid parameter(s), expected KEY=VALUE: {', '.join(invalid_params)}",
+                err=True,
+            )
+            sys.exit(1)
+
+        skill_name = skill_ref.split("/", 1)[0]
+        skill_path = get_skills_dir() / skill_name
+        skill = Skill.from_path(skill_path)
+        if not skill:
+            click.echo(f"Skill '{skill_name}' not found", err=True)
+            sys.exit(1)
+
+        if not skill.has_scripts:
+            click.echo(
+                f"Skill '{skill_name}' has no scripts/. Prompt mode not yet implemented.",
+                err=True,
+            )
+            sys.exit(1)
+
+        for p in skill.parameters:
+            if p.get("required") and p["name"] not in provided_params and "default" not in p:
+                click.echo(
+                    f"Error: required parameter '{p['name']}' not provided",
+                    err=True,
+                )
+                click.echo(f"  Description: {p.get('description', '')}", err=True)
+                sys.exit(1)
+
+        defaults_applied: set[str] = set()
+        for p in skill.parameters:
+            if p["name"] not in provided_params and "default" in p:
+                provided_params[p["name"]] = str(p["default"])
+                defaults_applied.add(p["name"])
+
+        resolved_skill, script_path = resolve_skill_script(skill_ref)
+        if not resolved_skill:
+            click.echo(f"Skill '{skill_name}' not found", err=True)
+            sys.exit(1)
+
+        if not script_path:
+            click.echo(
+                f"Skill '{resolved_skill.name}' has no scripts/. Prompt mode not yet implemented.",
+                err=True,
+            )
+            sys.exit(1)
+
+        if dry_run:
+            if fmt == "json":
+                click.echo(
+                    json.dumps(
+                        {
+                            "exit_code": 0,
+                            "stdout": "",
+                            "stderr": "",
+                        }
+                    )
+                )
+                return
+
+            click.echo(f"[DRY RUN] Skill: {resolved_skill.name}")
+            click.echo(f"[DRY RUN] Script: {script_path}")
+            click.echo(f"[DRY RUN] Workdir: {workdir.resolve()}")
+            click.echo("[DRY RUN] Parameters:")
+            for key in sorted(provided_params):
+                suffix = " (default)" if key in defaults_applied else ""
+                click.echo(f"  {key} = {provided_params[key]}{suffix}")
+            click.echo("[DRY RUN] Environment variables that would be set:")
+            for key in sorted(provided_params):
+                click.echo(f"  SKILL_{key.upper()}={provided_params[key]}")
+            return
+
+        result = execute_skill_script(
+            skill_ref=skill_ref,
+            workdir=workdir,
+            params=provided_params or None,
+            timeout=timeout,
+        )
+
+        if fmt == "json":
+            click.echo(
+                json.dumps(
+                    {
+                        "exit_code": result.exit_code,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                    }
+                )
+            )
+            return
+
+        if result.stdout:
+            click.echo(result.stdout, nl=False)
+        if result.stderr:
+            click.echo(result.stderr, nl=False, err=True)
+        sys.exit(result.exit_code)
+
     return CommandManifest(name="skill", click_command=skill_group)
