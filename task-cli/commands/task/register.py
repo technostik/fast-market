@@ -8,6 +8,7 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from commands.completion import ProviderParamType
 from commands.task.executor import (
     resolve_and_execute_command,
     validate_workdir,
@@ -53,8 +54,6 @@ def _default_system_commands():
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    provider_choices = list(plugin_manifests.keys()) if plugin_manifests else []
-
     @click.command(name="apply")
     @click.argument("task_description")
     @click.option(
@@ -78,7 +77,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--provider",
         "-P",
-        type=click.Choice(provider_choices) if provider_choices else str,
+        type=ProviderParamType(),
         default=None,
         help="LLM provider to use",
     )
