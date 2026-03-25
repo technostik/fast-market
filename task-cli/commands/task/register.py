@@ -180,7 +180,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         task_params = _resolve_params(param, workdir_path)
 
         try:
-            provider_name = provider or get_default_provider_name(config)
+            provider_name = provider or get_default_provider_name(common_config)
         except ConfigError:
             click.echo("Error: No default LLM provider configured.", err=True)
             click.echo("Run: common-setup", err=True)
