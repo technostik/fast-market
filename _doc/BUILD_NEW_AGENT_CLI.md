@@ -585,6 +585,131 @@ def register(plugin_manifests: dict) -> CommandManifest:
 @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
 ```
 
+#### 4.5 Tab Completion for Arguments and Options
+
+To enable tab completion for CLI arguments or options (e.g., `your-agent apply [TAB]` suggests prompt IDs, `your-agent --provider [TAB]` suggests providers), create a custom `ParamType` class.
+
+**1. Create completion helper (commands/completion.py):**
+
+```python
+from __future__ import annotations
+
+import click
+from click.shell_completion import CompletionItem
+
+
+class PromptNameParamType(click.ParamType):
+    name = "prompt_name"
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> list[CompletionItem]:
+        from storage.store import PromptStore
+
+        store = PromptStore()
+        prompts = store.list_prompts()
+
+        completions = []
+        for prompt in prompts:
+            if incomplete.lower() in prompt.name.lower():
+                desc = f" - {prompt.description}" if prompt.description else ""
+                completions.append(CompletionItem(prompt.name, help=desc))
+
+        return completions
+```
+
+**2. Use for arguments:**
+
+```python
+# commands/apply/register.py
+from commands.completion import PromptNameParamType
+
+def register(plugin_manifests: dict) -> CommandManifest:
+    provider_choices = list(plugin_manifests.keys()) if plugin_manifests else []
+
+    @click.command("apply")
+    @click.argument("prompt_name_or_content", type=PromptNameParamType())
+    def apply_cmd(prompt_name_or_content, ...):
+        ...
+    return CommandManifest(name="apply", click_command=apply_cmd)
+```
+
+**3. Use for options:**
+
+```python
+# Complete provider names in options
+from common.llm.registry import discover_plugins
+
+class ProviderParamType(click.ParamType):
+    name = "provider"
+
+    def shell_complete(self, ctx, param, incomplete):
+        plugins = discover_plugins()
+        return [
+            CompletionItem(name, help=f"Provider: {name}")
+            for name in plugins.keys()
+            if incomplete.lower() in name.lower()
+        ]
+
+def register(plugin_manifests: dict) -> CommandManifest:
+    @click.command("my-command")
+    @click.option("--provider", "-P", type=ProviderParamType())
+    def my_cmd(provider, ...):
+        ...
+    return CommandManifest(name="my-command", click_command=my_cmd)
+```
+
+**4. Dynamic completion (from API/remote sources):**
+
+```python
+class RemoteResourceParamType(click.ParamType):
+    name = "remote_resource"
+
+    def shell_complete(self, ctx, param, incomplete):
+        # Fetch from API (with timeout for responsiveness)
+        import urllib.request
+        import json
+        
+        try:
+            url = f"https://api.example.com/resources?search={incomplete}"
+            with urllib.request.urlopen(url, timeout=2) as response:
+                data = json.loads(response.read())
+                return [
+                    CompletionItem(item["name"], help=item.get("description", ""))
+                    for item in data
+                ]
+        except Exception:
+            return []  # Fail silently, user can still type manually
+```
+
+**5. Lazy loading (for slow sources):**
+
+```python
+class LazyCompletionParamType(click.ParamType):
+    name = "lazy_completion"
+    _cache = None
+
+    def shell_complete(self, ctx, param, incomplete):
+        if self._cache is None:
+            # Only load when user hits tab (not at startup)
+            self._cache = self._load_items()
+        
+        return [
+            CompletionItem(item.name, help=item.description)
+            for item in self._cache
+            if incomplete.lower() in item.name.lower()
+        ]
+    
+    def _load_items(self):
+        # Expensive operation here
+        return self._fetch_from_db()
+```
+
+**CompletionItem options:**
+- `CompletionItem(name)` - basic completion
+- `CompletionItem(name, help=description)` - with description shown in completions
+- Set `shell_complete` return type to `list[CompletionItem]`
+
 ---
 
 ## Step 5: Setup pyproject.toml
