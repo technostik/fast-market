@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +15,8 @@ class Skill:
     path: Path
     description: str = ""
     has_scripts: bool = False
+    parameters: list[dict] = field(default_factory=list)
+    run: str = ""
 
     @classmethod
     def from_path(cls, path: Path) -> Optional[Skill]:
@@ -34,11 +36,22 @@ class Skill:
                         path=path,
                         description=frontmatter.get("description", ""),
                         has_scripts=(path / "scripts").exists(),
+                        parameters=frontmatter.get("parameters", []),
+                        run=frontmatter.get("run", ""),
                     )
                 except Exception:
                     pass
 
         return cls(name=path.name, path=path, description="")
+
+    def get_body(self) -> str:
+        """Return SKILL.md content after the frontmatter block."""
+        content = (self.path / "SKILL.md").read_text(encoding="utf-8")
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                return parts[2].strip()
+        return content.strip()
 
 
 def discover_skills(skills_dir: Path) -> list[Skill]:

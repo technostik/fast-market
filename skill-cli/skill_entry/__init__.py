@@ -18,12 +18,16 @@ main = create_cli_group("skill")
 
 
 def _load():
-    from commands.skill.register import register as skill_register
+    from commands.skill.register import (
+        register as skill_register,
+        register_completion,
+    )
 
     manifest = skill_register({})
     skill_group = manifest.click_command
     for cmd_name, cmd in skill_group.commands.items():
         main.add_command(cmd, name=cmd_name)
+    register_completion(main)
 
 
 _load()

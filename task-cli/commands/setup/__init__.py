@@ -52,6 +52,7 @@ You can read and write files in this directory. Relative paths are resolved from
 ---
 
 {command_docs}
+{learn_section}
 
 ---
 
@@ -164,5 +165,10 @@ def init_task_config(config: dict | None = None) -> dict:
                 },
             },
         }
+
+    if "learn_prompt" not in task:
+        from commands.task.learner import LEARN_PROMPT_TEMPLATE
+
+        task["learn_prompt"] = LEARN_PROMPT_TEMPLATE
 
     return task

@@ -108,6 +108,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option("--silent", "-s", is_flag=True, help="Suppress session output")
     @click.option(
+        "--auto-learn",
+        "-L",
+        is_flag=True,
+        help="After task completion, analyze session and update LEARN.md for the skill",
+    )
+    @click.option(
+        "--learn-skill",
+        default=None,
+        help="Skill name to write LEARN.md to (required if --auto-learn and task is not 'skill apply ...')",
+    )
+    @click.option(
         "--save-session",
         "-o",
         type=click.Path(),
@@ -129,6 +140,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         debug,
         fmt,
         silent,
+        auto_learn,
+        learn_skill,
         save_session,
     ):
         """Execute a task with LLM-driven CLI command loop.
@@ -180,7 +193,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         task_params = _resolve_params(param, workdir_path)
 
         try:
-            provider_name = provider or get_default_provider_name(config)
+            provider_name = provider or get_default_provider_name(common_config)
         except ConfigError:
             click.echo("Error: No default LLM provider configured.", err=True)
             click.echo("Run: common-setup", err=True)
@@ -207,6 +220,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
             )
             return
 
+        if learn_skill and not auto_learn:
+            click.echo(
+                "[AUTO-LEARN] Warning: --learn-skill has no effect without --auto-learn.",
+                err=True,
+            )
+
         loop = TaskLoop(
             config=task_config,
             workdir=workdir_path,
@@ -229,6 +248,29 @@ def register(plugin_manifests: dict) -> CommandManifest:
         try:
             loop.run(task_description, execute_fn, task_params=task_params)
 
+            if auto_learn and loop.session:
+                inferred_skill = learn_skill or _infer_skill_name(
+                    task_description,
+                    session=loop.session,
+                )
+                if not inferred_skill and not silent:
+                    click.echo(
+                        "[AUTO-LEARN] Warning: could not infer skill name from task/session for skill apply/run.",
+                        err=True,
+                    )
+                    click.echo(
+                        "[AUTO-LEARN] Use --learn-skill <name> to specify the skill.",
+                        err=True,
+                    )
+                _run_auto_learn(
+                    session=loop.session,
+                    skill_name=inferred_skill,
+                    provider_instance=provider_instance,
+                    model=model,
+                    config=task_config_dict,
+                    silent=silent,
+                )
+
             if save_session and loop.session:
                 session_path = Path(save_session)
                 loop.session.end_time = datetime.utcnow()
@@ -245,6 +287,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if loop.session:
                 loop.session.exit_code = 1
                 loop.session.error = str(exc)
+                loop.session.end_reason = f"internal failure: {exc}"
                 if save_session:
                     loop.session.save(Path(save_session))
             click.echo(f"Error: {exc}", err=True)
@@ -300,3 +343,77 @@ def _resolve_params(params: tuple[str, ...], workdir: Path) -> dict[str, str]:
             result[key] = value
 
     return result
+
+
+def _infer_skill_name(task_description: str, session=None) -> str | None:
+    """Try to extract skill name from skill apply/run tasks and session tool calls."""
+    import re
+
+    desc = task_description.strip()
+    m = re.match(r"skill\s+apply\s+([a-zA-Z0-9_-]+)", desc)
+    if m:
+        return m.group(1)
+
+    if re.match(r"skill\s+run\b", desc) and session:
+        return _infer_skill_name_from_session(session)
+
+    return None
+
+
+def _infer_skill_name_from_session(session) -> str | None:
+    """Infer skill name by scanning executed commands and routing output."""
+    import re
+
+    for turn in reversed(session.turns):
+        for tc in reversed(turn.tool_calls):
+            command = (tc.arguments or {}).get("command", "").strip()
+
+            m = re.match(r"skill:([a-zA-Z0-9_-]+)", command)
+            if m:
+                return m.group(1)
+
+            m = re.match(r"skill\s+apply\s+([a-zA-Z0-9_-]+)", command)
+            if m:
+                return m.group(1)
+
+            route_text = f"{tc.stdout or ''}\n{tc.stderr or ''}"
+            m = re.search(r"Matched:\s+'([a-zA-Z0-9_-]+)'", route_text)
+            if m:
+                return m.group(1)
+
+    return None
+
+
+def _run_auto_learn(session, skill_name, provider_instance, model, config, silent):
+    if not skill_name:
+        if not silent:
+            click.echo("[AUTO-LEARN] Skipped: no skill name", err=True)
+        return
+
+    from commands.task.learner import analyze_session, update_learn_file
+
+    if not silent:
+        click.echo(
+            f"\n[AUTO-LEARN] Analyzing session for skill '{skill_name}'...",
+            err=True,
+        )
+
+    try:
+        learn_prompt = config.get("learn_prompt", None)
+        content = analyze_session(
+            session,
+            skill_name,
+            provider_instance,
+            model,
+            learn_prompt,
+        )
+        path = update_learn_file(
+            skill_name,
+            content,
+            provider=provider_instance,
+            model=model,
+        )
+        if not silent:
+            click.echo(f"[AUTO-LEARN] LEARN.md updated: {path}", err=True)
+    except Exception as exc:
+        click.echo(f"[AUTO-LEARN] Failed: {exc}", err=True)

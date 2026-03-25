@@ -556,12 +556,21 @@ def render_command_documentation(
     return prompt_config["template"].format(**placeholders)
 
 
+def _load_skill_learn_content(skill_name: str) -> str | None:
+    """Load LEARN.md for a skill if it exists. Returns None if not found."""
+    learn_path = get_skills_dir() / skill_name / "LEARN.md"
+    if learn_path.exists():
+        return learn_path.read_text(encoding="utf-8")
+    return None
+
+
 def build_system_prompt(
     task_description: str,
     fastmarket_tools_config: dict,
     system_commands: list[str],
     workdir: Path,
     task_params: dict[str, str] | None = None,
+    skill_learn_content: str | None = None,
 ) -> str:
     """Build system prompt for task execution agent."""
     from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
@@ -578,10 +587,18 @@ def build_system_prompt(
             display_value = value if len(value) < 200 else value[:197] + "..."
             params_section += f"- **{key}**: {display_value}\n"
 
+    learn_section = ""
+    if skill_learn_content:
+        learn_section = (
+            "\n---\n\n## Skill-Specific Lessons (auto-learned)\n\n"
+            f"{skill_learn_content}\n\n---\n"
+        )
+
     template = prompt_config.get("template", DEFAULT_AGENT_PROMPT_TEMPLATE)
     return template.format(
         task_description=task_description,
         params_section=params_section,
         workdir=str(workdir),
         command_docs=command_docs,
+        learn_section=learn_section,
     )

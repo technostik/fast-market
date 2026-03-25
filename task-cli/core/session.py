@@ -67,6 +67,7 @@ class Session:
     turns: list[Turn] = field(default_factory=list)
     start_time: datetime = field(default_factory=datetime.utcnow)
     end_time: Optional[datetime] = None
+    end_reason: str = ""
     exit_code: int = 0
     error: Optional[str] = None
 
@@ -84,6 +85,7 @@ class Session:
             "turns": [turn.to_dict() for turn in self.turns],
             "start_time": self.start_time.isoformat(),
             "end_time": self.end_time.isoformat() if self.end_time else None,
+            "end_reason": self.end_reason,
             "exit_code": self.exit_code,
             "error": self.error,
         }

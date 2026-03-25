@@ -54,6 +54,12 @@ class PromptStore:
     def get_prompt_file_path(self, name: str) -> Path | None:
         return self._file_store.get_file_path(name)
 
+    def validate_prompt(self, name: str) -> Prompt:
+        return self._file_store.validate_prompt(name)
+
+    def validate_all_prompts(self) -> dict:
+        return self._file_store.validate_all_prompts()
+
     def record_execution(self, execution: PromptExecution) -> None:
         with session_scope(self.session_factory) as session:
             session.add(
