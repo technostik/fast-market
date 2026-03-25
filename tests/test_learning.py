@@ -13,7 +13,18 @@ import pytest
 pytestmark = pytest.mark.llm
 
 TRICKY_INPUT = Path(__file__).parent / "fixtures" / "data" / "test-tricky-input.txt"
+TRICKY_VALIDATOR = (
+    Path(__file__).parent
+    / "fixtures"
+    / "data"
+    / "fast-market"
+    / "skills"
+    / "test-tricky"
+    / "scripts"
+    / "validate.sh"
+)
 EXPECTED_UNIQUE_WORDS = 8
+assert TRICKY_VALIDATOR.exists()
 
 
 def get_llm_provider():
@@ -111,7 +122,12 @@ def test_learn_md_contains_correct_lesson(workdir, skills_dir, tmp_path):
         [
             "task",
             "apply",
-            "Count unique words in input.txt using the test-tricky skill. filepath=input.txt",
+            (
+                "Count unique words in input.txt using shell commands only "
+                "(do NOT call skill apply). "
+                f"Validate your final number with: {TRICKY_VALIDATOR} input.txt <number>. "
+                "Use command pipelines and verify exactness."
+            ),
             "--auto-learn",
             "--learn-skill",
             "test-tricky",
@@ -166,7 +182,11 @@ def test_learning_reduces_failures(workdir, skills_dir, tmp_path):
         [
             "task",
             "apply",
-            "Count unique words in input.txt. Use test-tricky skill. filepath=input.txt",
+            (
+                "Count unique words in input.txt using shell commands only "
+                "(do NOT call skill apply). "
+                f"Validate with {TRICKY_VALIDATOR} input.txt <number>."
+            ),
             "--auto-learn",
             "--learn-skill",
             "test-tricky",
@@ -186,7 +206,11 @@ def test_learning_reduces_failures(workdir, skills_dir, tmp_path):
         [
             "task",
             "apply",
-            "Count unique words in input.txt. Use test-tricky skill. filepath=input.txt",
+            (
+                "Count unique words in input.txt using shell commands only "
+                "(do NOT call skill apply). "
+                f"Validate with {TRICKY_VALIDATOR} input.txt <number>."
+            ),
             "--auto-learn",
             "--learn-skill",
             "test-tricky",
