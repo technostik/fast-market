@@ -1,3 +1,4 @@
+import shutil
 import socket
 
 import pytest
@@ -5,8 +6,11 @@ import pytest
 pytestmark = pytest.mark.llm  # skip with: pytest -m "not llm"
 
 
-def _require_ollama() -> None:
-    """Skip if the local Ollama endpoint is unavailable."""
+def _require_router_runtime() -> None:
+    """Skip when required runtime deps for router integration tests are unavailable."""
+    if shutil.which("skill") is None:
+        pytest.skip("'skill' command is not on PATH for router subprocess execution")
+
     try:
         with socket.create_connection(("localhost", 11434), timeout=1):
             return
@@ -15,16 +19,34 @@ def _require_ollama() -> None:
 
 
 def get_llm_provider():
-    """Load the test LLM provider from fixture config."""
+    """Load and validate the test LLM provider from fixture config."""
     from common.core.config import load_tool_config, requires_common_config
+    from common.llm.base import LLMRequest
     from common.llm.registry import discover_providers, get_default_provider_name
 
-    _require_ollama()
+    _require_router_runtime()
     requires_common_config("skill", ["llm"])
     config = load_tool_config("skill")
     providers = discover_providers(config)
     name = get_default_provider_name(config)
-    return providers[name]
+    provider = providers[name]
+
+    # Preflight: skip if configured model does not exist or endpoint is incompatible.
+    try:
+        provider.complete(
+            LLMRequest(
+                prompt="Return exactly: OK",
+                temperature=0,
+                max_tokens=8,
+            )
+        )
+    except Exception as exc:  # pragma: no cover - exercised by environment failures
+        msg = str(exc).lower()
+        if "404" in msg or "model" in msg or "not found" in msg:
+            pytest.skip(f"ollama model unavailable for tests: {exc}")
+        raise
+
+    return provider
 
 
 def test_router_picks_correct_skill(workdir):
