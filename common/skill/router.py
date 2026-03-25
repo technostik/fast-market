@@ -241,7 +241,12 @@ def _call_distill(
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=500)
     response = provider.complete(req)
-    return (response.content or "").strip()
+    distilled = (response.content or "").strip()
+    if distilled:
+        return distilled
+    # Fallback for unstable/empty LLM responses: preserve actionable session facts.
+    fallback = (session_output or "").strip()
+    return fallback[:1000] if fallback else "(no distilled output)"
 
 
 def _print_attempt(attempt: SkillAttempt) -> None:
@@ -275,6 +280,14 @@ def run_router(
         try:
             plan = _call_plan(state, provider, model, skills)
         except Exception as exc:
+            successful_attempts = [a for a in state.attempts if a.success]
+            if successful_attempts and state.attempts and state.attempts[-1].success:
+                state.done = True
+                state.final_result = (
+                    "Completed with fallback: planner returned invalid/empty output "
+                    f"after successful execution steps. Last error: {exc}"
+                )
+                break
             state.failed = True
             state.failure_reason = f"Planner failed: {exc}"
             break
