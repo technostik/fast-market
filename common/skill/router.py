@@ -194,7 +194,32 @@ def _call_plan(state: RouterState, provider, model: str | None, skills: list[Ski
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=500)
     response = provider.complete(req)
-    data = json.loads((response.content or "").strip())
+    raw = (response.content or "").strip()
+    try:
+        data = json.loads(raw)
+    except Exception:
+        cleaned = raw
+        if "```" in cleaned:
+            cleaned = cleaned.replace("```json", "```")
+            parts = [p.strip() for p in cleaned.split("```") if p.strip()]
+            json_candidates = [p for p in parts if p.startswith("{") and p.endswith("}")]
+            if json_candidates:
+                cleaned = json_candidates[0]
+
+        if not (cleaned.startswith("{") and cleaned.endswith("}")):
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start : end + 1]
+
+        try:
+            data = json.loads(cleaned)
+        except Exception as exc:
+            raise ValueError(
+                "Planner returned invalid JSON. "
+                f"Raw response: {raw[:300]!r}. Parse error: {exc}"
+            ) from exc
+
     if not isinstance(data, dict):
         raise ValueError("Planner returned non-object JSON")
     return data

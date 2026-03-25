@@ -75,3 +75,28 @@ def test_apply_explicit_script(workdir):
     result = runner.invoke(get_cli(), ["apply", "test-echo/run.sh", "message=explicit"])
     assert result.exit_code == 0
     assert "explicit" in result.output
+
+
+def test_apply_save_session_writes_file_for_script_mode(workdir):
+    from pathlib import Path
+
+    import yaml
+
+    session_file = Path(workdir) / "session.yaml"
+    runner = CliRunner()
+    result = runner.invoke(
+        get_cli(),
+        [
+            "apply",
+            "test-echo",
+            "message=session-check",
+            "--save-session",
+            str(session_file),
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert session_file.exists()
+    data = yaml.safe_load(session_file.read_text(encoding="utf-8")) or {}
+    turns = data.get("turns", [])
+    assert len(turns) >= 1

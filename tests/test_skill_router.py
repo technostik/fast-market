@@ -4,6 +4,35 @@ from click.testing import CliRunner
 pytestmark = pytest.mark.llm  # run with: pytest -m llm
 
 
+def _state_debug_dump(state) -> str:
+    attempts = []
+    for attempt in getattr(state, "attempts", []):
+        attempts.append(
+            (
+                f"iter={attempt.iteration} skill={attempt.skill_name} "
+                f"success={attempt.success} exit={attempt.exit_code} "
+                f"params={attempt.params} "
+                f"distilled={attempt.distilled_result[:240]!r}"
+            )
+        )
+    attempts_blob = "\n".join(attempts) if attempts else "(none)"
+    return (
+        f"goal={getattr(state, 'goal', '')!r}\n"
+        f"done={getattr(state, 'done', None)} failed={getattr(state, 'failed', None)} "
+        f"iteration={getattr(state, 'iteration', None)} max_iterations={getattr(state, 'max_iterations', None)}\n"
+        f"final_result={getattr(state, 'final_result', '')!r}\n"
+        f"failure_reason={getattr(state, 'failure_reason', '')!r}\n"
+        f"attempts:\n{attempts_blob}"
+    )
+
+
+def _assert_router_progress(state, *, expected_done: bool = True) -> None:
+    debug = _state_debug_dump(state)
+    if expected_done:
+        assert state.done is True, f"Router did not finish successfully.\n{debug}"
+    assert len(state.attempts) >= 1, f"Router produced no attempts.\n{debug}"
+
+
 def get_llm_provider():
     """Load the test LLM provider from fixture config."""
     from common.core.config import load_tool_config, requires_common_config
@@ -39,8 +68,12 @@ def test_skill_run_command_executes_router(workdir):
         ],
         catch_exceptions=False,
     )
-    assert result.exit_code == 0
-    assert "Done:" in result.output
+    assert result.exit_code == 0, (
+        "skill run command failed.\n"
+        f"exit_code={result.exit_code}\n"
+        f"output:\n{result.output}"
+    )
+    assert "Done:" in result.output, f"Expected completion output, got:\n{result.output}"
 
 
 def test_router_picks_correct_skill(workdir):
@@ -53,9 +86,8 @@ def test_router_picks_correct_skill(workdir):
         workdir=str(workdir),
         max_iterations=3,
     )
-    assert state.done is True
-    assert len(state.attempts) >= 1
-    assert state.attempts[0].skill_name == "test-echo"
+    _assert_router_progress(state)
+    assert state.attempts[0].skill_name == "test-echo", _state_debug_dump(state)
 
 
 def test_router_extracts_params(workdir):
@@ -68,9 +100,9 @@ def test_router_extracts_params(workdir):
         workdir=str(workdir),
         max_iterations=3,
     )
-    assert state.done is True
-    assert "message" in state.attempts[0].params
-    assert state.attempts[0].params["message"] == "extracted-param"
+    _assert_router_progress(state)
+    assert "message" in state.attempts[0].params, _state_debug_dump(state)
+    assert state.attempts[0].params["message"] == "extracted-param", _state_debug_dump(state)
 
 
 def test_router_retries_on_failure(workdir):
@@ -85,7 +117,7 @@ def test_router_retries_on_failure(workdir):
         retry_limit=1,
     )
     failed = [a for a in state.attempts if not a.success]
-    assert len(failed) >= 1
+    assert len(failed) >= 1, f"Expected at least one failed attempt.\n{_state_debug_dump(state)}"
 
 
 def test_router_chains_two_skills(workdir):
@@ -101,11 +133,11 @@ def test_router_chains_two_skills(workdir):
         workdir=str(workdir),
         max_iterations=5,
     )
-    assert state.done is True
+    _assert_router_progress(state)
     names = [a.skill_name for a in state.attempts]
-    assert "test-chain-a" in names
-    assert "test-chain-b" in names
-    assert names.index("test-chain-b") > names.index("test-chain-a")
+    assert "test-chain-a" in names, _state_debug_dump(state)
+    assert "test-chain-b" in names, _state_debug_dump(state)
+    assert names.index("test-chain-b") > names.index("test-chain-a"), _state_debug_dump(state)
 
 
 def test_router_declares_fail_on_impossible_goal(workdir):
@@ -119,7 +151,7 @@ def test_router_declares_fail_on_impossible_goal(workdir):
         max_iterations=3,
         retry_limit=1,
     )
-    assert state.failed is True or state.done is False
+    assert state.failed is True or state.done is False, _state_debug_dump(state)
 
 
 def test_router_sessions_written_to_cache(workdir, isolate_xdg):
@@ -135,7 +167,11 @@ def test_router_sessions_written_to_cache(workdir, isolate_xdg):
     )
     cache = get_cache_dir() / "skill-router"
     session_files = list(cache.glob("session-*.yaml"))
-    assert len(session_files) >= 1
+    assert len(session_files) >= 1, (
+        "Expected at least one router session file in cache.\n"
+        f"cache_dir={cache}\n"
+        f"found_files={[str(p) for p in session_files]}"
+    )
 
 
 def test_distilled_result_not_raw_session(workdir):
@@ -148,7 +184,7 @@ def test_distilled_result_not_raw_session(workdir):
         workdir=str(workdir),
         max_iterations=3,
     )
-    assert state.done is True
+    _assert_router_progress(state)
     for attempt in state.attempts:
-        assert "tool_calls:" not in attempt.distilled_result
-        assert len(attempt.distilled_result) < 1000
+        assert "tool_calls:" not in attempt.distilled_result, _state_debug_dump(state)
+        assert len(attempt.distilled_result) < 1000, _state_debug_dump(state)

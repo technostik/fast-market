@@ -218,6 +218,47 @@ def _resolve_prompt_provider_model(
     return provider_name, model_name
 
 
+def _write_local_session_file(
+    save_session: str | None,
+    skill_ref: str,
+    result,
+    provided_params: dict[str, str],
+) -> None:
+    """Persist a minimal session artifact for non-prompt skill executions."""
+    if not save_session:
+        return
+
+    session_path = Path(save_session).expanduser().resolve()
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "turns": [
+            {
+                "role": "assistant",
+                "content": (
+                    f"Skill execution summary: skill_ref={skill_ref}, "
+                    f"exit_code={result.exit_code}, params={provided_params}"
+                ),
+                "tool_calls": [
+                    {
+                        "arguments": {
+                            "command": f"skill apply {skill_ref}",
+                            "params": provided_params,
+                        },
+                        "stdout": result.stdout or "",
+                        "stderr": result.stderr or "",
+                        "exit_code": result.exit_code,
+                    }
+                ],
+            }
+        ]
+    }
+    session_path.write_text(
+        yaml.safe_dump(payload, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
 def _apply_skill_impl(
     skill_ref: str,
     params: tuple[str, ...],
@@ -309,6 +350,7 @@ def _apply_skill_impl(
             params=provided_params or None,
             timeout=timeout,
         )
+        _write_local_session_file(save_session, skill_ref, result, provided_params)
     elif skill.run:
         if dry_run:
             cmd_preview = skill.run
@@ -327,6 +369,7 @@ def _apply_skill_impl(
             params=provided_params or None,
             timeout=timeout,
         )
+        _write_local_session_file(save_session, skill_ref, result, provided_params)
     else:
         body = skill.get_body()
         if not body:
