@@ -243,6 +243,49 @@ def resolve_and_execute_command(
     return result
 
 
+
+
+def execute_skill_command(
+    skill_ref: str,
+    workdir: Path,
+    timeout: int = 60,
+    params: dict[str, str] | None = None,
+) -> CommandResult:
+    """
+    Execute a skill script and adapt the result to CommandResult.
+
+    Also parse inline params from skill_ref:
+    'skillname/script key=val key=val' -> skill_ref='skillname/script', params={key: val}
+    """
+    from common.skill.runner import execute_skill_script
+
+    parts = skill_ref.split()
+    if not parts:
+        return CommandResult(
+            command="skill:",
+            stdout="",
+            stderr="Empty skill reference",
+            exit_code=126,
+        )
+
+    ref = parts[0]
+    inline_params = {}
+    for p in parts[1:]:
+        if "=" in p:
+            k, v = p.split("=", 1)
+            inline_params[k] = v
+
+    merged_params = {**(params or {}), **inline_params}
+    result = execute_skill_script(ref, workdir, params=merged_params or None, timeout=timeout)
+
+    return CommandResult(
+        command=f"skill:{skill_ref}",
+        stdout=result.stdout,
+        stderr=result.stderr,
+        exit_code=result.exit_code,
+        timed_out=result.timed_out,
+    )
+
 def _needs_shell(cmd_str: str) -> bool:
     """Check if command requires shell features (redirection, pipes, heredocs, etc.)."""
     shell_chars = {">", "<", "|", "&", ";", "$", "`", "$(", "&&", "||", "<<"}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +15,7 @@ class Skill:
     path: Path
     description: str = ""
     has_scripts: bool = False
+    parameters: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_path(cls, path: Path) -> Optional[Skill]:
@@ -34,6 +35,7 @@ class Skill:
                         path=path,
                         description=frontmatter.get("description", ""),
                         has_scripts=(path / "scripts").exists(),
+                        parameters=frontmatter.get("parameters", []),
                     )
                 except Exception:
                     pass
