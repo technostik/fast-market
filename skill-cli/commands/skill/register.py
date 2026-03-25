@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -11,6 +12,91 @@ from common.core.config import ConfigError, load_tool_config, requires_common_co
 from common.core.paths import get_skills_dir
 from common.llm.registry import discover_providers, get_default_provider_name
 from common.skill.skill import Skill, discover_skills
+
+
+class SkillRefType(click.ParamType):
+    name = "SKILL_REF"
+
+    def shell_complete(self, ctx, param, incomplete):
+        from click.shell_completion import CompletionItem
+
+        try:
+            skills_dir = get_skills_dir()
+            skills = discover_skills(skills_dir)
+        except Exception:
+            return []
+
+        items = []
+        for skill in skills:
+            if skill.name.startswith(incomplete):
+                items.append(CompletionItem(skill.name, help=skill.description or ""))
+
+            if "/" in incomplete and incomplete.startswith(skill.name + "/"):
+                script_prefix = incomplete[len(skill.name) + 1 :]
+                if skill.has_scripts:
+                    scripts_dir = skill.path / "scripts"
+                    if not scripts_dir.exists():
+                        continue
+                    for script in sorted(scripts_dir.iterdir()):
+                        if script.is_file() and not script.name.startswith("."):
+                            if script.name.startswith(script_prefix):
+                                items.append(
+                                    CompletionItem(
+                                        f"{skill.name}/{script.name}",
+                                        help=f"Script in {skill.name}",
+                                    )
+                                )
+        return items
+
+    def convert(self, value, param, ctx):
+        return value
+
+
+class SkillParamType(click.ParamType):
+    name = "KEY=VALUE"
+
+    def shell_complete(self, ctx, param, incomplete):
+        from click.shell_completion import CompletionItem
+
+        skill_ref = ctx.params.get("skill_ref", "")
+        if not skill_ref:
+            return []
+
+        try:
+            skill_name = str(skill_ref).split("/", 1)[0]
+            skill_path = get_skills_dir() / skill_name
+            skill = Skill.from_path(skill_path)
+        except Exception:
+            return []
+
+        if not skill or not skill.parameters:
+            return []
+
+        already = set()
+        for val in (ctx.params.get("params") or []):
+            if "=" in val:
+                already.add(val.split("=")[0])
+
+        required_items = []
+        optional_items = []
+        for p in skill.parameters:
+            name = p.get("name")
+            if not name or name in already:
+                continue
+            key = f"{name}="
+            if not key.startswith(incomplete):
+                continue
+            desc = p.get("description", "")
+            if p.get("required", False):
+                desc = f"[required] {desc}".strip()
+                required_items.append(CompletionItem(key, help=desc))
+            else:
+                optional_items.append(CompletionItem(key, help=desc))
+
+        return required_items + optional_items
+
+    def convert(self, value, param, ctx):
+        return value
 
 
 def _resolve_prompt_provider_model(
@@ -345,8 +431,8 @@ Include examples of how to use this skill.
         click.echo(f"Deleted skill: {name}")
 
     @skill_group.command("apply")
-    @click.argument("skill_ref")
-    @click.argument("params", nargs=-1)
+    @click.argument("skill_ref", type=SkillRefType())
+    @click.argument("params", nargs=-1, type=SkillParamType())
     @click.option(
         "--workdir",
         "-w",
@@ -508,3 +594,37 @@ Include examples of how to use this skill.
         )
 
     return CommandManifest(name="skill", click_command=skill_group)
+
+
+def register_completion(cli_group):
+    """Register the 'completion' command on the top-level CLI group."""
+
+    @cli_group.command("completion")
+    @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]), required=False)
+    def completion_cmd(shell):
+        """Print shell completion activation instructions."""
+        target_shell = shell
+        if not target_shell:
+            env_shell = os.environ.get("SHELL", "")
+            if env_shell.endswith("bash"):
+                target_shell = "bash"
+            elif env_shell.endswith("zsh"):
+                target_shell = "zsh"
+            elif env_shell.endswith("fish"):
+                target_shell = "fish"
+
+        snippets = {
+            "bash": '# Add to ~/.bashrc:\neval "$(_SKILL_COMPLETE=bash_source skill)"',
+            "zsh": '# Add to ~/.zshrc:\neval "$(_SKILL_COMPLETE=zsh_source skill)"',
+            "fish": "# Add to ~/.config/fish/completions/skill.fish:\n_SKILL_COMPLETE=fish_source skill | source",
+        }
+
+        if target_shell:
+            click.echo(snippets[target_shell])
+            return
+
+        click.echo(snippets["bash"])
+        click.echo()
+        click.echo(snippets["zsh"])
+        click.echo()
+        click.echo(snippets["fish"])
