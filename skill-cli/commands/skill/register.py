@@ -53,6 +53,61 @@ class SkillRefType(click.ParamType):
         return value
 
 
+class SkillNameType(click.ParamType):
+    name = "SKILL_NAME"
+
+    def shell_complete(self, ctx, param, incomplete):
+        from click.shell_completion import CompletionItem
+
+        try:
+            skills = discover_skills(get_skills_dir())
+        except Exception:
+            return []
+
+        return [
+            CompletionItem(skill.name, help=skill.description or "")
+            for skill in skills
+            if skill.name.startswith(incomplete)
+        ]
+
+    def convert(self, value, param, ctx):
+        return value
+
+
+class SkillFileType(click.ParamType):
+    name = "FILE"
+
+    def shell_complete(self, ctx, param, incomplete):
+        from click.shell_completion import CompletionItem
+
+        skill_name = ctx.params.get("skill_name", "")
+        if not skill_name:
+            return []
+
+        try:
+            skill_dir = (get_skills_dir() / str(skill_name)).resolve()
+        except Exception:
+            return []
+
+        if not skill_dir.exists() or not skill_dir.is_dir():
+            return []
+
+        items = []
+        for path in sorted(skill_dir.rglob("*")):
+            if path.name.startswith(".") or path.is_dir():
+                continue
+            try:
+                rel = path.relative_to(skill_dir).as_posix()
+            except Exception:
+                continue
+            if rel.startswith(incomplete):
+                items.append(CompletionItem(rel))
+        return items
+
+    def convert(self, value, param, ctx):
+        return value
+
+
 class SkillParamType(click.ParamType):
     name = "KEY=VALUE"
 
@@ -432,8 +487,8 @@ Include examples of how to use this skill.
         click.echo(f"Deleted skill: {name}")
 
     @skill_group.command("edit")
-    @click.argument("skill_name")
-    @click.argument("file", required=False, default=None)
+    @click.argument("skill_name", type=SkillNameType())
+    @click.argument("file", required=False, default=None, type=SkillFileType())
     @click.option(
         "--create",
         "-c",
