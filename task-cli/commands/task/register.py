@@ -284,6 +284,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 click.echo(
                     "\n── Session Metrics ──────────────────────────\n"
                     f"  Tool calls : {m['total_tool_calls']}\n"
+                    f"  Rounds     : {m['iterations_used']}\n"
                     f"  Errors     : {m['error_count']}\n"
                     f"  Guesses    : {m['guess_count']}\n"
                     f"  Success    : {m['success_rate']:.0%}\n"

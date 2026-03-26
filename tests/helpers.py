@@ -49,6 +49,22 @@ def count_total_steps(session_file: Path) -> int:
     return count
 
 
+def count_total_rounds(session_file: Path) -> int:
+    """Count total number of rounds (assistant turns) in a session."""
+    if not session_file.exists():
+        return 0
+    data = yaml.safe_load(session_file.read_text(encoding="utf-8")) or {}
+    metrics = data.get("metrics", {})
+    if "iterations_used" in metrics:
+        return int(metrics["iterations_used"])
+
+    count = 0
+    for turn in data.get("turns", []):
+        if turn.get("role") == "assistant":
+            count += 1
+    return count
+
+
 def count_exploratory_commands(session_file: Path) -> int:
     """Count exploratory commands (--help, -h, etc.) that indicate learning/guessing."""
     if not session_file.exists():
