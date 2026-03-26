@@ -316,7 +316,6 @@ class YouTubePlugin(SourcePlugin):
         self,
         last_item_id: str | None = None,
         limit: int = 50,
-        last_fetched_at: datetime | None = None,
         force: bool = False,
     ) -> list[ItemMetadata]:
         """Fetch new videos from YouTube channel with RSS fallback to yt-dlp"""
@@ -351,9 +350,6 @@ class YouTubePlugin(SourcePlugin):
                     continue
 
                 if last_item_id and parsed["id"] == last_item_id:
-                    break
-
-                if last_fetched_at and parsed["published"] <= last_fetched_at:
                     break
 
                 # Get detailed info with yt-dlp

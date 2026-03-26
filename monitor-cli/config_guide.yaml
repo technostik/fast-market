@@ -1,0 +1,204 @@
+# =============================================================================
+# MONITOR CONFIGURATION GUIDE
+# =============================================================================
+#
+# This file configures the monitor agent for content monitoring and alerting.
+#
+# -----------------------------------------------------------------------------
+# SOURCES
+# -----------------------------------------------------------------------------
+# Sources define what content to monitor (YouTube channels, RSS feeds, etc.)
+#
+# Example:
+#   sources:
+#     - id: my_youtube_channel
+#       plugin: youtube
+#       origin: UCxxxxxxxxxxxx  # YouTube channel ID
+#       description: "My channel"
+#       enabled: true
+#       is_new: true                    # Only trigger on NEW items (vs all items)
+#       metadata:
+#         theme: technology            # Optional: for your reference
+#         priority: high               # Optional: for your reference
+#       # check_interval: 15m          # Optional: cooldown between checks (no default)
+#
+# Source Fields:
+#   - id:          Unique identifier for this source
+#   - plugin:      Plugin type: youtube, rss, yt-search
+#   - origin:      Plugin-specific identifier (channel ID, URL, keywords)
+#   - description: Human-readable description
+#   - enabled:     Whether to monitor this source
+#   - is_new:      If true, only trigger on items newer than last check
+#   - metadata:   Custom key-value pairs for your reference
+#   - check_interval: Cooldown between fetches (e.g., "5m", "1h"). Default: no cooldown
+#
+# -----------------------------------------------------------------------------
+# ACTIONS
+# -----------------------------------------------------------------------------
+# Actions are shell commands executed when a rule matches.
+#
+# Example:
+#   actions:
+#     - id: notify_telegram
+#       command: 'message alert "New video: $ITEM_TITLE at $ITEM_URL"'
+#       description: Send notification to Telegram
+#       enabled: true
+#
+# Action Fields:
+#   - id:          Unique identifier for this action
+#   - command:     Shell command to execute (supports placeholders)
+#   - description: Human-readable description
+#   - enabled:     Whether to run this action
+#
+# -----------------------------------------------------------------------------
+# PLACEHOLDERS
+# -----------------------------------------------------------------------------
+# Use these placeholders in your action commands:
+#
+# Item Placeholders:
+#   $ITEM_ID            - Unique ID of the item (video ID, article URL, etc.)
+#   $ITEM_TITLE        - Title of the item
+#   $ITEM_URL          - URL to the item
+#   $ITEM_CONTENT_TYPE - Type: video, short, medium_video, long_video, article
+#   $ITEM_PUBLISHED    - ISO timestamp when item was published
+#
+# Source Placeholders:
+#   $SOURCE_ID         - Source identifier (e.g., youtube_johannoriel)
+#   $SOURCE_PLUGIN     - Plugin type: youtube, rss, yt-search
+#   $SOURCE_ORIGIN    - Plugin-specific origin (channel ID, feed URL)
+#   $SOURCE_URL       - URL to the source (channel page, feed URL)
+#   $SOURCE_DESC      - Source description
+#
+# Rule Placeholders:
+#   $RULE_ID           - Rule identifier that matched
+#
+# Extra Placeholders:
+#   $EXTRA_*           - Any field from item.extra (e.g., $EXTRA_VIEWS, $EXTRA_CHANNEL_NAME)
+#
+# Error/Execution Context (for on_error/on_execution actions):
+#   $RULE_ERROR        - Error message if main action failed
+#   $RULE_RESULT      - Exit code of main action (e.g., "exit=0")
+#   $RULE_MSG         - Formatted message: "Error: ..." or "Result: ..."
+#   $RULE_TIME        - ISO timestamp when the hook was triggered
+#
+# -----------------------------------------------------------------------------
+# RULES
+# -----------------------------------------------------------------------------
+# Rules define conditions that trigger actions when content matches.
+#
+# Example:
+#   rules:
+#     - id: notify_shorts
+#       description: Notify when new YouTube Short is published
+#       enabled: true
+#       conditions: "content_type == 'short'"
+#       action_ids:
+#         - notify_telegram
+#
+# Rule Fields:
+#   - id:                 Unique identifier for this rule
+#   - description:        Human-readable description
+#   - enabled:            Whether this rule is active
+#   - conditions:        DSL condition string (see below)
+#   - action_ids:         List of action IDs to execute when matched
+#   - schedule:           Optional: cron expression or interval
+#   - on_error_action_ids:  Optional: actions to run if main action fails
+#   - on_execution_action_ids: Optional: actions to run after main action succeeds
+#
+# -----------------------------------------------------------------------------
+# CONDITION SYNTAX (DSL)
+# -----------------------------------------------------------------------------
+# Rules use a simple DSL for conditions:
+#
+# Comparisons:
+#   content_type == 'short'      # Equal
+#   content_type != 'video'     # Not equal
+#   extra.views > 10000          # Greater than
+#   extra.duration >= 600       # Greater or equal
+#   extra.likes < 100            # Less than
+#
+# String matching:
+#   title contains 'AI'              # Substring check
+#   title matches '.*Python.*'       # Regex match
+#
+# Field paths (dot notation):
+#   source_plugin == 'youtube'              # Source plugin
+#   source_origin == 'UCxxx'               # Source origin (channel ID)
+#   extra.channel_name == 'My Channel'     # Extra field
+#   extra.categories contains 'Technology' # List contains
+#
+# Logical operators:
+#   content_type == 'video' and extra.views > 1000
+#   source_plugin == 'youtube' or source_plugin == 'rss'
+#   (content_type == 'short') and (extra.views > 500)
+#
+# -----------------------------------------------------------------------------
+# SCHEDULING
+# -----------------------------------------------------------------------------
+# Rules can be scheduled using cron or interval:
+#
+# Cron (every hour):
+#   schedule:
+#     cron: "0 * * * *"
+#   timezone: "UTC"
+#
+# Interval (every 30 minutes):
+#   schedule:
+#     interval: "30m"
+#
+# -----------------------------------------------------------------------------
+# GLOBAL SETTINGS
+# -----------------------------------------------------------------------------
+# Optional global settings:
+#
+#   default_check_interval: "15m"    # Default cooldown for all sources (if not set per source)
+#   global_on_error_action_ids:      # Actions to run when ANY rule's action fails
+#     - error_handler
+#   global_on_execution_action_ids:  # Actions to run when ANY rule's action succeeds
+#     - success_logger
+#
+# -----------------------------------------------------------------------------
+# COMPLETE EXAMPLE
+# -----------------------------------------------------------------------------
+#
+# default_check_interval: "5m"
+#
+# sources:
+#   - id: my_youtube
+#     plugin: youtube
+#     origin: UCxxxxxxxxxxxx
+#     description: "My YouTube channel"
+#     enabled: true
+#     is_new: true
+#     metadata:
+#       theme: technology
+#
+# actions:
+#   - id: echo_action
+#     command: 'echo "New: $ITEM_TITLE"'
+#     description: Print to console
+#     enabled: false
+#
+#   - id: telegram_notify
+#     command: 'message alert "New video: $ITEM_TITLE at $ITEM_URL"'
+#     description: Send Telegram notification
+#     enabled: true
+#
+# rules:
+#   - id: short_notifications
+#     description: Notify on YouTube Shorts
+#     enabled: true
+#     conditions: "content_type == 'short'"
+#     action_ids:
+#       - telegram_notify
+#
+#   - id: popular_videos
+#     description: Notify on popular videos (>10k views)
+#     enabled: false
+#     conditions: "content_type == 'video' and extra.views > 10000"
+#     action_ids:
+#       - telegram_notify
+#     on_error_action_ids:
+#       - echo_action
+#
+# =============================================================================

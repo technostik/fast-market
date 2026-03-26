@@ -12,17 +12,17 @@ from plugins.yt_search.plugin import YouTubeSearchPlugin
 class TestSourcePluginCooldown:
     """Test cooldown functionality in base SourcePlugin class."""
 
-    def test_default_check_interval(self):
+    def test_no_default_check_interval(self):
         plugin = YouTubePlugin({}, {"origin": "UCabcdef123456ghijklmnop"})
-        assert plugin.check_interval == "15m"
+        assert plugin.check_interval is None
 
-    def test_default_check_interval_rss(self):
+    def test_no_default_check_interval_rss(self):
         plugin = RSSPlugin({}, {"origin": "https://example.com/feed.xml"})
-        assert plugin.check_interval == "15m"
+        assert plugin.check_interval is None
 
-    def test_default_check_interval_yt_search(self):
+    def test_no_default_check_interval_yt_search(self):
         plugin = YouTubeSearchPlugin({}, {"origin": "python tutorial"})
-        assert plugin.check_interval == "15m"
+        assert plugin.check_interval is None
 
     def test_parse_interval_seconds(self):
         plugin = YouTubePlugin({}, {"origin": "UCabcdef123456ghijklmnop"})
@@ -40,10 +40,10 @@ class TestSourcePluginCooldown:
         plugin = YouTubePlugin({}, {"origin": "UCabcdef123456ghijklmnop"})
         assert plugin._parse_interval("2d") == 172800
 
-    def test_parse_interval_invalid_defaults(self):
+    def test_parse_interval_invalid_returns_none(self):
         plugin = YouTubePlugin({}, {"origin": "UCabcdef123456ghijklmnop"})
-        assert plugin._parse_interval("invalid") == 900
-        assert plugin._parse_interval("") == 900
+        assert plugin._parse_interval("invalid") is None
+        assert plugin._parse_interval("") is None
 
     def test_parse_interval_with_custom_interval_arg(self):
         plugin = YouTubePlugin({}, {"origin": "UCabcdef123456ghijklmnop"})
@@ -65,7 +65,7 @@ class TestSourcePluginCooldown:
             {
                 "origin": "UCabcdef123456ghijklmnop",
                 "last_check": recent.isoformat(),
-                "metadata": {"check_interval": "15m"},
+                "check_interval": "15m",
             },
         )
         assert plugin._should_fetch() is False
@@ -77,7 +77,7 @@ class TestSourcePluginCooldown:
             {
                 "origin": "UCabcdef123456ghijklmnop",
                 "last_check": old.isoformat(),
-                "metadata": {"check_interval": "15m"},
+                "check_interval": "15m",
             },
         )
         assert plugin._should_fetch() is True
@@ -89,7 +89,7 @@ class TestSourcePluginCooldown:
             {
                 "origin": "UCabcdef123456ghijklmnop",
                 "last_check": old.isoformat(),
-                "metadata": {"check_interval": "1h"},
+                "check_interval": "1h",
             },
         )
         assert plugin._should_fetch() is False
@@ -101,7 +101,7 @@ class TestSourcePluginCooldown:
             {
                 "origin": "UCabcdef123456ghijklmnop",
                 "last_check": recent,
-                "metadata": {"check_interval": "15m"},
+                "check_interval": "15m",
             },
         )
         assert plugin._should_fetch() is False
@@ -251,7 +251,7 @@ class TestYouTubeSearchPlugin:
         plugin = YouTubeSearchPlugin({}, {"origin": "python tutorial"})
         assert plugin.min_views == 1000
         assert plugin.max_results == 50
-        assert plugin.check_interval == "15m"
+        assert plugin.check_interval is None
 
     def test_custom_metadata(self):
         plugin = YouTubeSearchPlugin(
@@ -261,8 +261,8 @@ class TestYouTubeSearchPlugin:
                 "metadata": {
                     "min_views": "5000",
                     "max_results": "30",
-                    "check_interval": "1h",
                 },
+                "check_interval": "1h",
             },
         )
         assert plugin.min_views == 5000

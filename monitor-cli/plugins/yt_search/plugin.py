@@ -114,7 +114,6 @@ class YouTubeSearchPlugin(SourcePlugin):
         self,
         last_item_id: str | None = None,
         limit: int = 50,
-        last_fetched_at: datetime | None = None,
         force: bool = False,
     ) -> list[ItemMetadata]:
         if not self._should_fetch(force):
@@ -138,9 +137,6 @@ class YouTubeSearchPlugin(SourcePlugin):
         items = []
         for video in videos:
             if last_item_id and video["id"] == last_item_id:
-                break
-
-            if last_fetched_at and video["published"] <= last_fetched_at:
                 break
 
             extra = {

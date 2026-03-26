@@ -44,7 +44,7 @@ class TelegramPlugin(MessagePlugin):
                     self._app = Application.builder().token(self.bot_token).build()
         return self._app
 
-    def send_message(self, text: str, parse_mode: str = "Markdown") -> int:
+    def send_message(self, text: str, parse_mode: str = "HTML") -> int:
         if not self.allowed_chat_id:
             raise RuntimeError(
                 "No allowed_chat_id configured. Run 'message setup --plugin telegram' first."

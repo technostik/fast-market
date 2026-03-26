@@ -219,6 +219,13 @@ class MonitorStorage:
                 (last_fetched_at.isoformat(), source_id),
             )
 
+    def update_source_last_item_id(self, source_id: str, last_item_id: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sources SET last_item_id = ? WHERE id = ?",
+                (last_item_id, source_id),
+            )
+
     def delete_source(self, source_id: str) -> None:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))

@@ -104,6 +104,14 @@ def _sync_config_logic(
 
         if src_id in existing_sources:
             existing_source = existing_sources[src_id]
+            check_interval_val = src.get("check_interval")
+            if isinstance(check_interval_val, str):
+                from core.time_scheduler import parse_interval
+
+                try:
+                    check_interval_val = int(parse_interval(check_interval_val).total_seconds())
+                except (ValueError, TypeError):
+                    check_interval_val = None
             new_source = Source(
                 id=src_id,
                 plugin=plugin,
@@ -115,11 +123,20 @@ def _sync_config_logic(
                 last_check=existing_source.last_check,
                 last_fetched_at=existing_source.last_fetched_at,
                 last_item_id=existing_source.last_item_id,
+                check_interval=check_interval_val,
             )
             changes["updated"]["sources"].append(src_id)
             sources_to_update.append(new_source)
         elif key in existing_sources_by_key:
             existing_source = existing_sources_by_key[key]
+            check_interval_val = src.get("check_interval")
+            if isinstance(check_interval_val, str):
+                from core.time_scheduler import parse_interval
+
+                try:
+                    check_interval_val = int(parse_interval(check_interval_val).total_seconds())
+                except (ValueError, TypeError):
+                    check_interval_val = None
             new_source = Source(
                 id=src_id,
                 plugin=plugin,
@@ -131,10 +148,19 @@ def _sync_config_logic(
                 last_check=existing_source.last_check,
                 last_fetched_at=existing_source.last_fetched_at,
                 last_item_id=existing_source.last_item_id,
+                check_interval=check_interval_val,
             )
             changes["updated"]["sources"].append(src_id)
             sources_to_update.append(new_source)
         else:
+            check_interval_val = src.get("check_interval")
+            if isinstance(check_interval_val, str):
+                from core.time_scheduler import parse_interval
+
+                try:
+                    check_interval_val = int(parse_interval(check_interval_val).total_seconds())
+                except (ValueError, TypeError):
+                    check_interval_val = None
             new_source = Source(
                 id=src_id,
                 plugin=plugin,
@@ -143,6 +169,7 @@ def _sync_config_logic(
                 metadata=src.get("metadata", {}),
                 enabled=src.get("enabled", True),
                 created_at=datetime.now(),
+                check_interval=check_interval_val,
             )
             changes["added"]["sources"].append(src_id)
             sources_to_add.append(new_source)

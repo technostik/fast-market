@@ -79,6 +79,7 @@ class RuleConfig(BaseModel):
 
 
 class MonitorConfig(BaseModel):
+    default_check_interval: str | None = None
     sources: list[SourceConfig] = Field(default_factory=list)
     actions: list[ActionConfig] = Field(default_factory=list)
     rules: list[RuleConfig] = Field(default_factory=list)
