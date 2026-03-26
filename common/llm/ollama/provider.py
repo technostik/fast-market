@@ -155,11 +155,13 @@ class _RealOllamaProvider(LLMProvider):
             metadata={
                 "total_duration": data.get("total_duration"),
                 "load_duration": data.get("load_duration"),
+                "finish_reason": data.get("done"),
             },
             tool_calls=tool_calls,
         )
 
         if self._debug:
+            print(f"\n[ollama] raw response:\n{raw[:2000]}", file=sys.stderr)
             print("\n" + _format_debug_response(response), file=sys.stderr)
 
         return response

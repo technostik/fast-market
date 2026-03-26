@@ -1,5 +1,9 @@
-default_provider: ollama
+default_provider: openai-compatible
 providers:
   ollama:
     base_url: http://localhost:11434
-    default_model: qwen2.5:3b
+    default_model: qwen3.5:4b
+  openai-compatible:
+    default_model: deepseek-chat
+    base_url: http://localhost:5005/v1
+    api_key_env: NONE

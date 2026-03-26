@@ -5,6 +5,7 @@ All tests run against versioned fixture config and skills.
 Real user config (~/.config/fast-market) and skills (~/.local/share/fast-market)
 are never touched.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -19,6 +20,7 @@ REPO_ROOT = TESTS_DIR.parent
 FIXTURES_DIR = TESTS_DIR / "fixtures"
 FIXTURE_CONFIG = FIXTURES_DIR / "config"
 FIXTURE_DATA = FIXTURES_DIR / "data"
+FIXTURE_BIN = FIXTURES_DIR / "bin"
 
 # Ensure local CLI entry packages are importable in tests.
 for path in (REPO_ROOT, REPO_ROOT / "skill-cli", REPO_ROOT / "task-cli"):
@@ -38,6 +40,9 @@ def isolate_xdg(tmp_path_factory):
     """
     tmp_cache = tmp_path_factory.mktemp("cache")
 
+    original_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = str(FIXTURE_BIN) + os.pathsep + original_path
+
     env_overrides = {
         "XDG_CONFIG_HOME": str(FIXTURE_CONFIG),
         "XDG_DATA_HOME": str(FIXTURE_DATA),
@@ -49,7 +54,6 @@ def isolate_xdg(tmp_path_factory):
     for k, v in env_overrides.items():
         os.environ[k] = v
 
-    # force re-import of paths module so cached paths are recomputed
     import common.core.paths as paths_mod
 
     importlib.reload(paths_mod)
@@ -58,9 +62,10 @@ def isolate_xdg(tmp_path_factory):
         "config": FIXTURE_CONFIG,
         "data": FIXTURE_DATA,
         "cache": tmp_cache,
+        "bin": FIXTURE_BIN,
     }
 
-    # restore
+    os.environ["PATH"] = original_path
     for k, v in original.items():
         if v is None:
             os.environ.pop(k, None)

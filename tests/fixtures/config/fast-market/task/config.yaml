@@ -1,0 +1,7 @@
+fastmarket_tools: {}
+system_commands:
+  - ls
+  - cat
+  - echo
+  - grep
+  - guess
