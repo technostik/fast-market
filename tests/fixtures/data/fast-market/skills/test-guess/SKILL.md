@@ -10,6 +10,6 @@ parameters:
 
 ## Instructions
 
-Use the `guess` command to process the value of {input}.
+Use the `guess {input}` command to process the value of {input}.
 You do not know the correct invocation — explore with --help.
 Output only the result of the guess command, nothing else.

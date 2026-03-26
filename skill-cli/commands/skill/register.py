@@ -162,7 +162,7 @@ class SkillParamType(click.ParamType):
             return []
 
         already = set()
-        for val in (ctx.params.get("params") or []):
+        for val in ctx.params.get("params") or []:
             if "=" in val:
                 already.add(val.split("=")[0])
 
@@ -223,15 +223,32 @@ def _write_local_session_file(
     skill_ref: str,
     result,
     provided_params: dict[str, str],
+    workdir_path: Path | None = None,
+    provider_name: str | None = None,
+    model_name: str | None = None,
 ) -> None:
-    """Persist a minimal session artifact for non-prompt skill executions."""
+    """Persist a session artifact compatible with Session class for auto-learn analysis."""
     if not save_session:
         return
+
+    from datetime import datetime
 
     session_path = Path(save_session).expanduser().resolve()
     session_path.parent.mkdir(parents=True, exist_ok=True)
 
+    skill_name = skill_ref.split("/", 1)[0]
+
     payload = {
+        "task_description": f"skill apply {skill_ref}",
+        "workdir": str(workdir_path) if workdir_path else ".",
+        "provider": provider_name or "default",
+        "model": model_name or "default",
+        "max_iterations": 1,
+        "task_params": provided_params,
+        "exit_code": result.exit_code,
+        "start_time": datetime.utcnow().isoformat(),
+        "end_time": datetime.utcnow().isoformat(),
+        "end_reason": "completed" if result.exit_code == 0 else "failed",
         "metrics": {
             "total_tool_calls": 1,
             "error_count": 0 if result.exit_code == 0 else 1,
@@ -242,23 +259,23 @@ def _write_local_session_file(
         "turns": [
             {
                 "role": "assistant",
-                "content": (
-                    f"Skill execution summary: skill_ref={skill_ref}, "
-                    f"exit_code={result.exit_code}, params={provided_params}"
-                ),
+                "content": f"Executing skill: {skill_ref}",
+                "timestamp": datetime.utcnow().isoformat(),
                 "tool_calls": [
                     {
+                        "tool_call_id": "skill-exec-1",
+                        "tool_name": "skill_execute",
                         "arguments": {
-                            "command": f"skill apply {skill_ref}",
+                            "skill_ref": skill_ref,
                             "params": provided_params,
                         },
+                        "exit_code": result.exit_code,
                         "stdout": result.stdout or "",
                         "stderr": result.stderr or "",
-                        "exit_code": result.exit_code,
                     }
                 ],
             }
-        ]
+        ],
     }
     session_path.write_text(
         yaml.safe_dump(payload, default_flow_style=False, sort_keys=False),
@@ -312,7 +329,11 @@ def _apply_skill_impl(
         sys.exit(1)
 
     for p in skill.parameters:
-        if p.get("required") and p["name"] not in provided_params and "default" not in p:
+        if (
+            p.get("required")
+            and p["name"] not in provided_params
+            and "default" not in p
+        ):
             click.echo(
                 f"Error: required parameter '{p['name']}' not provided",
                 err=True,
@@ -348,7 +369,9 @@ def _apply_skill_impl(
                 click.echo(json.dumps({"exit_code": 0, "stdout": "", "stderr": ""}))
                 return
             click.echo("[DRY RUN] Mode: script")
-            click.echo(f"[DRY RUN] Script: {script_path if script_path else '(unresolved)'}")
+            click.echo(
+                f"[DRY RUN] Script: {script_path if script_path else '(unresolved)'}"
+            )
             return
 
         result = execute_skill_script(
@@ -357,7 +380,15 @@ def _apply_skill_impl(
             params=provided_params or None,
             timeout=timeout,
         )
-        _write_local_session_file(save_session, skill_ref, result, provided_params)
+        _write_local_session_file(
+            save_session,
+            skill_ref,
+            result,
+            provided_params,
+            workdir_path=workdir_path,
+            provider_name=None,
+            model_name=None,
+        )
     elif skill.run:
         if dry_run:
             cmd_preview = skill.run
@@ -376,7 +407,15 @@ def _apply_skill_impl(
             params=provided_params or None,
             timeout=timeout,
         )
-        _write_local_session_file(save_session, skill_ref, result, provided_params)
+        _write_local_session_file(
+            save_session,
+            skill_ref,
+            result,
+            provided_params,
+            workdir_path=workdir_path,
+            provider_name=None,
+            model_name=None,
+        )
     else:
         body = skill.get_body()
         if not body:
@@ -409,7 +448,9 @@ def _apply_skill_impl(
             timeout=timeout,
             provider=provider_name,
             model=model_name,
-            save_session=Path(save_session).expanduser().resolve() if save_session else None,
+            save_session=Path(save_session).expanduser().resolve()
+            if save_session
+            else None,
         )
 
     if fmt == "json":
@@ -429,30 +470,76 @@ def _apply_skill_impl(
             skill_name = skill_ref.split("/", 1)[0]
             learn_path = get_skills_dir() / skill_name / "LEARN.md"
             learn_path.parent.mkdir(parents=True, exist_ok=True)
-            stdout_preview = (result.stdout or "").strip().splitlines()
-            stderr_preview = (result.stderr or "").strip().splitlines()
-            stdout_line = stdout_preview[0] if stdout_preview else "no stdout"
-            stderr_line = stderr_preview[0] if stderr_preview else "no stderr"
-            template = _get_skill_auto_learn_prompt_template()
-            learn_md = template.format(
-                skill_name=skill_name,
-                skill_ref=skill_ref,
-                exit_code=result.exit_code,
-                stdout_preview=stdout_line,
-                stderr_preview=stderr_line,
-                timestamp=datetime.utcnow().isoformat(),
-            )
-            if learn_path.exists():
-                existing = learn_path.read_text(encoding="utf-8").rstrip()
-                merged = (
-                    f"{existing}\n\n---\n"
-                    f"<!-- run: {datetime.utcnow().isoformat()} -->\n\n"
-                    f"{learn_md}\n"
+
+            session_file = save_session
+            if not session_file:
+                import time
+
+                session_file = str(
+                    workdir_path / f".skill-session-{int(time.time())}.yaml"
                 )
-                learn_path.write_text(merged, encoding="utf-8")
+
+            if Path(session_file).exists():
+                from core.session import Session, Turn, ToolCallEvent
+                from commands.task.learner import analyze_session, update_learn_file
+
+                session_data = yaml.safe_load(
+                    Path(session_file).read_text(encoding="utf-8")
+                )
+
+                turns = []
+                for turn_data in session_data.get("turns", []):
+                    tool_calls = []
+                    for tc_data in turn_data.get("tool_calls", []):
+                        tc = ToolCallEvent(
+                            tool_call_id=tc_data.get("tool_call_id", ""),
+                            tool_name=tc_data.get("tool_name", ""),
+                            arguments=tc_data.get("arguments", {}),
+                            exit_code=tc_data.get("exit_code"),
+                            stdout=tc_data.get("stdout", ""),
+                            stderr=tc_data.get("stderr", ""),
+                        )
+                        tool_calls.append(tc)
+                    turn = Turn(
+                        role=turn_data.get("role", "assistant"),
+                        content=turn_data.get("content", ""),
+                        tool_calls=tool_calls,
+                    )
+                    turns.append(turn)
+
+                session_data["turns"] = turns
+                session_data.pop("metrics", None)
+                session = Session(**session_data)
+
+                config = load_tool_config("skill")
+                learn_prompt = config.get("learn_prompt", None)
+
+                from common.llm.registry import (
+                    discover_providers,
+                    get_default_provider_name,
+                )
+
+                providers = discover_providers(config)
+                provider_name = get_default_provider_name(config)
+                provider = providers.get(provider_name)
+
+                learn_content = analyze_session(
+                    session=session,
+                    skill_name=skill_name,
+                    provider=provider,
+                    model=model,
+                    learn_prompt_template=learn_prompt,
+                )
+
+                update_learn_file(
+                    skill_name, learn_content, provider=provider, model=model
+                )
+                click.echo(f"[AUTO-LEARN] LEARN.md updated: {learn_path}", err=True)
             else:
-                learn_path.write_text(learn_md + "\n", encoding="utf-8")
-            click.echo(f"[AUTO-LEARN] LEARN.md updated: {learn_path}", err=True)
+                click.echo(
+                    "[AUTO-LEARN] No session file found, skipping analysis", err=True
+                )
+
         except Exception as exc:
             click.echo(f"[AUTO-LEARN] Failed: {exc}", err=True)
 

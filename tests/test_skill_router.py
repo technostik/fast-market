@@ -3,6 +3,9 @@ from click.testing import CliRunner
 import sys
 from pathlib import Path
 
+TESTS_DIR = Path(__file__).parent
+sys.path.insert(0, str(TESTS_DIR))
+
 pytestmark = pytest.mark.llm  # run with: pytest -m llm
 
 
@@ -82,7 +85,9 @@ def test_skill_run_command_executes_router(workdir):
         f"exit_code={result.exit_code}\n"
         f"output:\n{result.output}"
     )
-    assert "Done:" in result.output, f"Expected completion output, got:\n{result.output}"
+    assert "Done:" in result.output, (
+        f"Expected completion output, got:\n{result.output}"
+    )
 
 
 def test_router_picks_correct_skill(workdir):
@@ -111,7 +116,9 @@ def test_router_extracts_params(workdir):
     )
     _assert_router_progress(state)
     assert "message" in state.attempts[0].params, _state_debug_dump(state)
-    assert state.attempts[0].params["message"] == "extracted-param", _state_debug_dump(state)
+    assert state.attempts[0].params["message"] == "extracted-param", _state_debug_dump(
+        state
+    )
 
 
 def test_router_retries_on_failure(workdir):
@@ -126,7 +133,9 @@ def test_router_retries_on_failure(workdir):
         retry_limit=1,
     )
     failed = [a for a in state.attempts if not a.success]
-    assert len(failed) >= 1, f"Expected at least one failed attempt.\n{_state_debug_dump(state)}"
+    assert len(failed) >= 1, (
+        f"Expected at least one failed attempt.\n{_state_debug_dump(state)}"
+    )
 
 
 def test_router_chains_two_skills(workdir):
@@ -146,7 +155,9 @@ def test_router_chains_two_skills(workdir):
     names = [a.skill_name for a in state.attempts]
     assert "test-chain-a" in names, _state_debug_dump(state)
     assert "test-chain-b" in names, _state_debug_dump(state)
-    assert names.index("test-chain-b") > names.index("test-chain-a"), _state_debug_dump(state)
+    assert names.index("test-chain-b") > names.index("test-chain-a"), _state_debug_dump(
+        state
+    )
 
 
 def test_router_declares_fail_on_impossible_goal(workdir):
@@ -203,7 +214,7 @@ def test_session_metrics_written(workdir, skills_dir):
     """Session files produced by router contain metrics."""
     from common.core.paths import get_cache_dir
     from common.skill.router import run_router
-    from tests.helpers import get_session_metrics
+    from helpers import get_session_metrics
 
     provider = get_llm_provider()
 
@@ -229,7 +240,7 @@ def test_successful_skill_has_zero_errors(workdir):
     """A skill that works first try should have zero errors in session."""
     import subprocess
 
-    from tests.helpers import count_session_errors
+    from helpers import count_session_errors
 
     session_file = workdir / "session.yaml"
     subprocess.run(

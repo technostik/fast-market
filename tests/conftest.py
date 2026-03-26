@@ -23,7 +23,7 @@ FIXTURE_DATA = FIXTURES_DIR / "data"
 FIXTURE_BIN = FIXTURES_DIR / "bin"
 
 # Ensure local CLI entry packages are importable in tests.
-for path in (REPO_ROOT, REPO_ROOT / "skill-cli", REPO_ROOT / "task-cli"):
+for path in (TESTS_DIR, REPO_ROOT, REPO_ROOT / "skill-cli", REPO_ROOT / "task-cli"):
     path_str = str(path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
@@ -102,3 +102,15 @@ def test_fail_skill(skills_dir):
     from common.skill.skill import Skill
 
     return Skill.from_path(skills_dir / "test-fail")
+
+
+@pytest.fixture(autouse=True)
+def cleanup_session_cache():
+    """Clear session cache before each test to ensure clean state."""
+    from common.core.paths import get_cache_dir
+
+    cache_dir = get_cache_dir() / "skill-router"
+    if cache_dir.exists():
+        for f in cache_dir.glob("session-*.yaml"):
+            f.unlink()
+    yield

@@ -1,4 +1,5 @@
 """Test helper functions for session analysis."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,6 +32,37 @@ def count_session_guesses(session_file: Path) -> int:
     data = yaml.safe_load(session_file.read_text(encoding="utf-8")) or {}
     metrics = data.get("metrics", {})
     return int(metrics.get("guess_count", 0))
+
+
+def count_total_steps(session_file: Path) -> int:
+    """Count total number of skill executions (tool calls) in a session."""
+    if not session_file.exists():
+        return 0
+    data = yaml.safe_load(session_file.read_text(encoding="utf-8")) or {}
+    metrics = data.get("metrics", {})
+    if "total_tool_calls" in metrics:
+        return int(metrics["total_tool_calls"])
+
+    count = 0
+    for turn in data.get("turns", []):
+        count += len(turn.get("tool_calls", []))
+    return count
+
+
+def count_exploratory_commands(session_file: Path) -> int:
+    """Count exploratory commands (--help, -h, etc.) that indicate learning/guessing."""
+    if not session_file.exists():
+        return 0
+    data = yaml.safe_load(session_file.read_text(encoding="utf-8")) or {}
+
+    count = 0
+    for turn in data.get("turns", []):
+        for tc in turn.get("tool_calls", []):
+            arguments = tc.get("arguments", {})
+            command = arguments.get("command", "")
+            if "--help" in command or " -h " in command or command.endswith(" -h"):
+                count += 1
+    return count
 
 
 def get_session_metrics(session_file: Path) -> dict:

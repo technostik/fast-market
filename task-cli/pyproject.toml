@@ -23,4 +23,5 @@ packages = [
   "commands",
   "commands.task",
   "commands.setup",
+  "core",
 ]

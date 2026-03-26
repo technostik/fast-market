@@ -21,6 +21,17 @@ logger = structlog.get_logger(__name__)
 class OpenAICompatibleProvider(LazyLLMProvider):
     name = "openai-compatible"
 
+    def complete(self, request: LLMRequest) -> LLMResponse:
+        self._ensure_initialized()
+        if self._provider is None:
+            raise RuntimeError(
+                f"OpenAI-compatible provider not initialized. "
+                f"Check base_url and API key configuration. "
+                f"base_url: {getattr(self, 'base_url', 'not set')}, "
+                f"model: {getattr(self, 'default_model', 'not set')}"
+            )
+        return self._provider.complete(request)
+
     def _initialize(self):
         try:
             from openai import OpenAI
@@ -134,7 +145,11 @@ class _RealOpenAICompatibleProvider(LLMProvider):
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
             },
-            metadata={"id": response.id, "base_url": self.base_url},
+            metadata={
+                "id": response.id,
+                "base_url": self.base_url,
+                "finish_reason": response.choices[0].finish_reason,
+            },
             tool_calls=tool_calls,
         )
 
