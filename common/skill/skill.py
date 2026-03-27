@@ -17,6 +17,9 @@ class Skill:
     has_scripts: bool = False
     parameters: list[dict] = field(default_factory=list)
     run: str = ""
+    max_iterations: int | None = None
+    timeout: int | None = None
+    llm_timeout: int | None = None
 
     @classmethod
     def from_path(cls, path: Path) -> Optional[Skill]:
@@ -38,6 +41,9 @@ class Skill:
                         has_scripts=(path / "scripts").exists(),
                         parameters=frontmatter.get("parameters", []),
                         run=frontmatter.get("run", ""),
+                        max_iterations=frontmatter.get("max_iterations"),
+                        timeout=frontmatter.get("timeout"),
+                        llm_timeout=frontmatter.get("llm_timeout"),
                     )
                 except Exception:
                     pass

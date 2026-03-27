@@ -97,6 +97,8 @@ class _RealAnthropicProvider(LLMProvider):
             kwargs["system"] = request.system
         if request.tools:
             kwargs["tools"] = _convert_tools_to_anthropic(request.tools)
+        if request.timeout > 0:
+            kwargs["timeout"] = request.timeout
 
         try:
             response = self.client.messages.create(**kwargs)

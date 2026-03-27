@@ -18,7 +18,8 @@ skill = "skill_entry:main"
 
 [tool.setuptools]
 packages = [
+  "cli",
+  "core",
   "skill_entry",
   "commands",
-  "commands.skill",
 ]

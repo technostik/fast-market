@@ -114,6 +114,8 @@ class _RealOpenAICompatibleProvider(LLMProvider):
         if request.tools:
             kwargs["tools"] = request.tools
             kwargs["tool_choice"] = "auto"
+        if request.timeout > 0:
+            kwargs["timeout"] = request.timeout
 
         try:
             response = self.client.chat.completions.create(**kwargs)

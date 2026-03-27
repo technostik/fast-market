@@ -94,6 +94,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--timeout", "-t", type=int, default=None, help="Timeout per command (seconds)"
     )
     @click.option(
+        "--llm-timeout",
+        type=int,
+        default=0,
+        help="Timeout per LLM call (seconds, 0=no limit)",
+    )
+    @click.option(
         "--dry-run", "-n", is_flag=True, help="Show commands without executing"
     )
     @click.option(
@@ -137,6 +143,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         model,
         max_iterations,
         timeout,
+        llm_timeout,
         dry_run,
         debug,
         fmt,
@@ -170,6 +177,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             allowed_commands=allowed_commands,
             max_iterations=max_iterations or task_config_dict.get("max_iterations", 20),
             default_timeout=timeout or task_config_dict.get("default_timeout", 60),
+            llm_timeout=llm_timeout,
         )
 
         resolved_workdir = (

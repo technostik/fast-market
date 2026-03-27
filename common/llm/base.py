@@ -25,6 +25,7 @@ class LLMRequest:
     max_tokens: int = 2048
     system: str | None = None
     tools: list[dict] | None = None
+    timeout: int = 0  # 0 = no limit
 
 
 @dataclass
