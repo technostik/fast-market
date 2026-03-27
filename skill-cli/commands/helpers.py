@@ -9,10 +9,35 @@ from typing import Any
 import click
 import yaml
 
-from common.core.config import load_tool_config
+from common.core.config import load_tool_config, save_tool_config
 from common.core.paths import get_skills_dir
 from common.llm.registry import get_default_provider_name
 from common.skill.skill import Skill
+
+
+DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE = """# Lessons Learned for {skill_name}
+
+## What Works
+- Skill execution `{skill_ref}` exited with code `{exit_code}`.
+- Key stdout signal: `{stdout_preview}`
+
+## What to Avoid
+- Pattern leading to failure: `{stderr_preview}`
+
+## Common Errors and Fixes
+- Error: `{stderr_preview}` → Fix: adjust params/inputs and retry.
+"""
+
+
+def _get_skill_auto_learn_prompt_template() -> str:
+    config = load_tool_config("skill")
+    template = config.get("auto_learn_prompt")
+    if isinstance(template, str) and template.strip():
+        return template
+
+    config["auto_learn_prompt"] = DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE
+    save_tool_config("skill", config)
+    return DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE
 
 
 def _resolve_prompt_provider_model(
@@ -277,6 +302,38 @@ def apply_skill_impl(
             if save_session
             else None,
         )
+
+    if auto_learn and not dry_run:
+        try:
+            skill_name = skill_ref.split("/", 1)[0]
+            learn_path = get_skills_dir() / skill_name / "LEARN.md"
+            learn_path.parent.mkdir(parents=True, exist_ok=True)
+            stdout_preview = (result.stdout or "").strip().splitlines()
+            stderr_preview = (result.stderr or "").strip().splitlines()
+            stdout_line = stdout_preview[0] if stdout_preview else "no stdout"
+            stderr_line = stderr_preview[0] if stderr_preview else "no stderr"
+            template = _get_skill_auto_learn_prompt_template()
+            learn_md = template.format(
+                skill_name=skill_name,
+                skill_ref=skill_ref,
+                exit_code=result.exit_code,
+                stdout_preview=stdout_line,
+                stderr_preview=stderr_line,
+                timestamp=datetime.utcnow().isoformat(),
+            )
+            if learn_path.exists():
+                existing = learn_path.read_text(encoding="utf-8").rstrip()
+                merged = (
+                    f"{existing}\n\n---\n"
+                    f"<!-- run: {datetime.utcnow().isoformat()} -->\n\n"
+                    f"{learn_md}\n"
+                )
+                learn_path.write_text(merged, encoding="utf-8")
+            else:
+                learn_path.write_text(learn_md + "\n", encoding="utf-8")
+            click.echo(f"[AUTO-LEARN] LEARN.md updated: {learn_path}", err=True)
+        except Exception as exc:
+            click.echo(f"[AUTO-LEARN] Failed: {exc}", err=True)
 
     if fmt == "json":
         click.echo(
