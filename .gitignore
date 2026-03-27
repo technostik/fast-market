@@ -3,6 +3,7 @@
 client_secret.json
 token.json
 NOTES.md
+tests/fixtures/data/fast-market/skills/test-guess/LEARN.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

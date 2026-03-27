@@ -278,6 +278,7 @@ def execute_skill_prompt(
     timeout: int | None = None,
     max_iterations: int | None = None,
     llm_timeout: int | None = None,
+    auto_learn: bool = False,
     provider: str | None = None,
     model: str | None = None,
     save_session: Path | None = None,
@@ -317,6 +318,8 @@ def execute_skill_prompt(
         cmd += ["--max-iterations", str(effective_max_iterations)]
     if effective_llm_timeout > 0:
         cmd += ["--llm-timeout", str(effective_llm_timeout)]
+    if auto_learn:
+        cmd += ["--auto-learn", "--learn-skill", skill.name]
     for key, value in (params or {}).items():
         cmd += ["--param", f"{key}={value}"]
     if workdir and str(workdir) != ".":

@@ -296,44 +296,13 @@ def apply_skill_impl(
             timeout=timeout,
             max_iterations=max_iterations,
             llm_timeout=llm_timeout,
+            auto_learn=auto_learn,
             provider=provider_name,
             model=model_name,
             save_session=Path(save_session).expanduser().resolve()
             if save_session
             else None,
         )
-
-    if auto_learn and not dry_run:
-        try:
-            skill_name = skill_ref.split("/", 1)[0]
-            learn_path = get_skills_dir() / skill_name / "LEARN.md"
-            learn_path.parent.mkdir(parents=True, exist_ok=True)
-            stdout_preview = (result.stdout or "").strip().splitlines()
-            stderr_preview = (result.stderr or "").strip().splitlines()
-            stdout_line = stdout_preview[0] if stdout_preview else "no stdout"
-            stderr_line = stderr_preview[0] if stderr_preview else "no stderr"
-            template = _get_skill_auto_learn_prompt_template()
-            learn_md = template.format(
-                skill_name=skill_name,
-                skill_ref=skill_ref,
-                exit_code=result.exit_code,
-                stdout_preview=stdout_line,
-                stderr_preview=stderr_line,
-                timestamp=datetime.utcnow().isoformat(),
-            )
-            if learn_path.exists():
-                existing = learn_path.read_text(encoding="utf-8").rstrip()
-                merged = (
-                    f"{existing}\n\n---\n"
-                    f"<!-- run: {datetime.utcnow().isoformat()} -->\n\n"
-                    f"{learn_md}\n"
-                )
-                learn_path.write_text(merged, encoding="utf-8")
-            else:
-                learn_path.write_text(learn_md + "\n", encoding="utf-8")
-            click.echo(f"[AUTO-LEARN] LEARN.md updated: {learn_path}", err=True)
-        except Exception as exc:
-            click.echo(f"[AUTO-LEARN] Failed: {exc}", err=True)
 
     if fmt == "json":
         click.echo(
