@@ -10,12 +10,14 @@ class Document:
     source_id: str
     title: str
     raw_text: str
-    handle: str = ""                    # stable slug handle, e.g. yt-my-video-a3f2
+    handle: str = ""  # stable slug handle, e.g. yt-my-video-a3f2
     url: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    duration_seconds: int | None = None # YouTube: video duration; Obsidian: None
-    privacy_status: str | None = None   # YouTube: "public" | "private" | "unlisted"; Obsidian: None
+    duration_seconds: int | None = None  # YouTube: video duration; Obsidian: None
+    privacy_status: str | None = (
+        None  # YouTube: "public" | "private" | "unlisted"; Obsidian: None
+    )
     metadata: dict[str, object] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
     links: list[str] = field(default_factory=list)
@@ -45,6 +47,7 @@ class SyncResult:
     indexed: int
     skipped: int
     failures: list[SyncFailure] = field(default_factory=list)
+    warning: str | None = None
 
 
 @dataclass(slots=True)
@@ -63,4 +66,6 @@ class SearchResult:
     excerpt: str
     score: float
     duration_seconds: int | None = None
-    privacy_status: str | None = None   # YouTube: "public" | "private" | "unlisted"; Obsidian: None
+    privacy_status: str | None = (
+        None  # YouTube: "public" | "private" | "unlisted"; Obsidian: None
+    )

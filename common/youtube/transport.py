@@ -9,6 +9,7 @@ from typing import Iterator
 import feedparser
 
 from common import structlog
+from core.sync_errors import TranscriptUnavailableError, VideoBlockedError
 
 logger = structlog.get_logger(__name__)
 
@@ -194,8 +195,19 @@ class RSSPlaylistTransport(Transport):
         except OSError:
             raise
         except Exception as exc:
-            if "rate" in str(exc).lower() or "429" in str(exc):
+            error_msg = str(exc).lower()
+            if "rate" in error_msg or "429" in error_msg:
                 raise
+            if "members" in error_msg or "join this channel" in error_msg:
+                logger.info("video_members_only", video_id=video_id)
+                raise TranscriptUnavailableError(
+                    f"Video {video_id} requires channel membership"
+                ) from exc
+            if "blocking" in error_msg or "ip" in error_msg or "blocked" in error_msg:
+                logger.info("video_blocked", video_id=video_id, reason=str(exc)[:100])
+                raise VideoBlockedError(
+                    f"Video {video_id} blocked by YouTube (IP blocked)"
+                ) from exc
             raise
 
     def download_audio(self, video_id: str, cookies: str | None) -> Path | None:

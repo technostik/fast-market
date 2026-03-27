@@ -23,12 +23,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Also retry permanent failures",
     )
+    @click.option(
+        "--include-blocked",
+        is_flag=True,
+        default=False,
+        help="Also retry blocked videos (IP blocked by YouTube)",
+    )
     @click.option("--limit", "-l", type=int, default=None)
     @click.option(
         "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
     )
     @click.pass_context
-    def retry_failures_cmd(ctx, source, clear_permanent, limit, fmt):
+    def retry_failures_cmd(ctx, source, clear_permanent, include_blocked, limit, fmt):
         from common.core.config import load_config
 
         engine, plugins, store = build_engine(ctx.obj["verbose"])
@@ -37,7 +43,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         targets = list(plugins.keys()) if source == "all" else [source]
         results = []
         for name in targets:
-            removed = store.clear_failures(name, include_permanent=clear_permanent)
+            removed = store.clear_failures(
+                name, include_permanent=clear_permanent, include_blocked=include_blocked
+            )
             effective_limit = (
                 limit
                 if limit is not None
