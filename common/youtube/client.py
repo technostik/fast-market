@@ -393,6 +393,9 @@ class YouTubeClient:
                             published_at=item["snippet"].get("publishedAt", ""),
                             url=f"https://www.youtube.com/watch?v={video_id}",
                             duration=duration,
+                            privacy_status=item.get("status", {}).get(
+                                "privacyStatus", "public"
+                            ),
                         )
                         videos.append(video)
 
