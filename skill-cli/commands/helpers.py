@@ -9,7 +9,7 @@ from typing import Any
 import click
 import yaml
 
-from common.core.config import load_tool_config, save_tool_config
+from common.core.config import load_common_config, load_tool_config, save_tool_config
 from common.core.paths import get_skills_dir
 from common.llm.registry import get_default_provider_name
 from common.skill.skill import Skill
@@ -135,7 +135,7 @@ def _write_local_session_file(
 def apply_skill_impl(
     skill_ref: str,
     params: tuple[str, ...],
-    workdir: str = ".",
+    workdir: str | None = None,
     timeout: int | None = None,
     max_iterations: int | None = None,
     llm_timeout: int | None = None,
@@ -152,6 +152,10 @@ def apply_skill_impl(
         execute_skill_script,
         resolve_skill_script,
     )
+
+    if workdir is None:
+        common_config = load_common_config()
+        workdir = common_config.get("workdir") or "."
 
     workdir_path = Path(workdir).expanduser().resolve()
 
@@ -296,13 +300,29 @@ def apply_skill_impl(
             timeout=timeout,
             max_iterations=max_iterations,
             llm_timeout=llm_timeout,
-            auto_learn=auto_learn,
+            auto_learn=False,
             provider=provider_name,
             model=model_name,
             save_session=Path(save_session).expanduser().resolve()
             if save_session
             else None,
         )
+
+        if auto_learn and result.timed_out:
+            from common.skill.runner import _run_auto_learn_from_skill
+
+            timed_out_seconds = timeout if timeout is not None else skill.timeout
+            if timed_out_seconds is None:
+                timed_out_seconds = 300
+            timed_out_seconds = int(str(timed_out_seconds).rstrip("s"))
+
+            _run_auto_learn_from_skill(
+                skill=skill,
+                params=provided_params,
+                workdir=workdir_path,
+                timed_out=True,
+                timed_out_seconds=timed_out_seconds,
+            )
 
     if fmt == "json":
         click.echo(

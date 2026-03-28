@@ -5,7 +5,12 @@ import sys
 import click
 
 from commands.base import CommandManifest
-from common.core.config import ConfigError, load_tool_config, requires_common_config
+from common.core.config import (
+    ConfigError,
+    load_common_config,
+    load_tool_config,
+    requires_common_config,
+)
 from common.llm.registry import discover_providers, get_default_provider_name
 from common.skill.router import run_router
 
@@ -28,9 +33,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--workdir",
         "-w",
-        default=".",
+        default=None,
         type=click.Path(),
-        help="Working directory for execution",
+        help="Working directory (default: common config workdir or current dir)",
     )
     @click.option(
         "--max-iterations",
@@ -53,6 +58,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     def run_cmd(task, provider, model, workdir, max_iterations, verbose, retry_limit):
         """Orchestrate multiple skills to accomplish a complex task."""
+        if workdir is None:
+            common_config = load_common_config()
+            workdir = common_config.get("workdir") or "."
+
         requires_common_config("skill", ["llm"])
         try:
             config = load_tool_config("skill")

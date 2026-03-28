@@ -14,9 +14,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--workdir",
         "-w",
-        default=".",
+        default=None,
         type=click.Path(),
-        help="Working directory (default: current dir)",
+        help="Working directory (default: common config workdir or current dir)",
     )
     @click.option(
         "--timeout",

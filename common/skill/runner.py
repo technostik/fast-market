@@ -124,7 +124,10 @@ def execute_skill_script(
 
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
-        effective_timeout = 60  # default
+        effective_timeout = 60
+    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    if effective_timeout == 0:
+        effective_timeout = None  # 0 means no timeout
 
     logger.debug(
         "executing skill script",
@@ -141,7 +144,7 @@ def execute_skill_script(
             env=env,
             capture_output=True,
             text=True,
-            timeout=effective_timeout,
+            timeout=effective_timeout if effective_timeout else None,
         )
         return SkillResult(
             skill_name=skill.name,
@@ -196,7 +199,10 @@ def execute_skill_run(
 
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
-        effective_timeout = 60  # default
+        effective_timeout = 60
+    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    if effective_timeout == 0:
+        effective_timeout = None  # 0 means no timeout
 
     logger.debug(
         "executing skill run command",
@@ -213,7 +219,7 @@ def execute_skill_run(
             cwd=workdir,
             env=env,
             capture_output=False,
-            timeout=effective_timeout,
+            timeout=effective_timeout if effective_timeout else None,
         )
         return SkillResult(
             skill_name=skill.name,
@@ -297,7 +303,10 @@ def execute_skill_prompt(
 
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
-        effective_timeout = 300  # default
+        effective_timeout = 300
+    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    if effective_timeout == 0:
+        effective_timeout = None  # 0 means no timeout
 
     effective_max_iterations = (
         max_iterations if max_iterations is not None else skill.max_iterations
@@ -333,7 +342,7 @@ def execute_skill_prompt(
         result = subprocess.run(
             cmd,
             cwd=workdir,
-            timeout=effective_timeout,
+            timeout=effective_timeout if effective_timeout else None,
         )
         return SkillResult(
             skill_name=skill.name,
@@ -358,4 +367,39 @@ def execute_skill_prompt(
             stdout="",
             stderr="'task' command not found. Is task-cli installed?",
             exit_code=127,
+        )
+
+
+def _run_auto_learn_from_skill(
+    skill: Skill,
+    params: dict[str, str] | None,
+    workdir: Path,
+    timed_out: bool = False,
+    timed_out_seconds: int = 300,
+) -> None:
+    """Run auto-learn for a skill, handling timeout case."""
+    from datetime import datetime
+
+    learn_path = skill.path / "LEARN.md"
+
+    if timed_out:
+        timestamp = datetime.utcnow().isoformat()
+        content = f"""# Lessons Learned for {skill.name}
+
+## What to Avoid
+- Task timed out after {timed_out_seconds}s — consider increasing timeout or simplifying the task
+
+## Common Errors and Fixes
+- Error: Task timeout → Fix: Increase --timeout value or reduce task complexity
+"""
+        existing = ""
+        if learn_path.exists():
+            existing = learn_path.read_text(encoding="utf-8")
+
+        stamped = f"---\n<!-- auto-learn: {timestamp} (timeout) -->\n\n{content}"
+        merged = (existing.rstrip() + "\n\n" + stamped).strip() + "\n"
+
+        learn_path.write_text(merged, encoding="utf-8")
+        logger.info(
+            "auto_learn_timeout", skill=skill.name, timeout_seconds=timed_out_seconds
         )

@@ -10,7 +10,13 @@ from common.skill.skill import Skill
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("show")
     @click.argument("name")
-    def show_cmd(name):
+    @click.option(
+        "--learned",
+        "-l",
+        is_flag=True,
+        help="Show LEARN.md instead of SKILL.md",
+    )
+    def show_cmd(name, learned):
         """Show skill details."""
         skill_path = get_skills_dir() / name
         if not skill_path.exists():
@@ -27,14 +33,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if skill.description:
             click.echo(f"    Description: {skill.description}")
 
-        click.echo("\n  --- SKILL.md ---")
-        content = (skill_path / "SKILL.md").read_text(encoding="utf-8")
-        click.echo(content[:500] + ("..." if len(content) > 500 else ""))
+        if learned:
+            learned_path = skill_path / "LEARN.md"
+            if not learned_path.exists():
+                click.echo(f"Error: LEARN.md not found in skill '{name}'", err=True)
+                return
+            click.echo("\n  --- LEARN.md ---")
+            content = learned_path.read_text(encoding="utf-8")
+            click.echo(content[:500] + ("..." if len(content) > 500 else ""))
+        else:
+            click.echo("\n  --- SKILL.md ---")
+            content = (skill_path / "SKILL.md").read_text(encoding="utf-8")
+            click.echo(content[:500] + ("..." if len(content) > 500 else ""))
 
-        if skill.has_scripts:
-            click.echo("\n  Scripts:")
-            for script in (skill_path / "scripts").iterdir():
-                if script.is_file() and not script.name.startswith("."):
-                    click.echo(f"    - {script.name}")
+            if skill.has_scripts:
+                click.echo("\n  Scripts:")
+                for script in (skill_path / "scripts").iterdir():
+                    if script.is_file() and not script.name.startswith("."):
+                        click.echo(f"    - {script.name}")
 
     return CommandManifest(name="show", click_command=show_cmd)

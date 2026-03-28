@@ -20,7 +20,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Create FILE if it does not exist",
     )
-    def edit_cmd(skill_name, file, create):
+    @click.option(
+        "--learned",
+        "-l",
+        is_flag=True,
+        help="Edit LEARN.md file instead of SKILL.md or FILE",
+    )
+    def edit_cmd(skill_name, file, create, learned):
         """Edit a skill file in the default editor."""
         skills_dir = get_skills_dir()
         skill_dir = skills_dir / skill_name
@@ -29,7 +35,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Error: Skill '{skill_name}' not found", err=True)
             sys.exit(1)
 
-        if file is None:
+        if learned:
+            target = skill_dir / "LEARN.md"
+        elif file is None:
             target = skill_dir / "SKILL.md"
         else:
             target = skill_dir / file
@@ -43,7 +51,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not target_resolved.exists():
             if not create:
                 click.echo(
-                    f"Error: '{file}' not found in skill '{skill_name}'.\n"
+                    f"Error: '{target.name}' not found in skill '{skill_name}'.\n"
                     "Hint: use --create to create it",
                     err=True,
                 )
