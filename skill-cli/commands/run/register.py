@@ -56,7 +56,29 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=2,
         help="Max retries per failed skill",
     )
-    def run_cmd(task, provider, model, workdir, max_iterations, verbose, retry_limit):
+    @click.option(
+        "--auto-learn",
+        "-L",
+        is_flag=True,
+        help="After each skill execution, update LEARN.md for that skill",
+    )
+    @click.option(
+        "--compact",
+        "-C",
+        is_flag=True,
+        help="Use compacting prompt to consolidate multiple learnings",
+    )
+    def run_cmd(
+        task,
+        provider,
+        model,
+        workdir,
+        max_iterations,
+        verbose,
+        retry_limit,
+        auto_learn,
+        compact,
+    ):
         """Orchestrate multiple skills to accomplish a complex task."""
         if workdir is None:
             common_config = load_common_config()
@@ -87,6 +109,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             skill_timeout=300,
             retry_limit=retry_limit,
             verbose=verbose,
+            auto_learn=auto_learn,
+            compact=compact,
         )
         click.echo("\n" + "=" * 50, err=True)
         if state.done:

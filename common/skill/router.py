@@ -151,6 +151,8 @@ def _execute_skill(
     workdir: str,
     timeout: int,
     session_file: Path,
+    auto_learn: bool = False,
+    compact: bool = False,
 ) -> int:
     cmd = ["skill", "apply", skill_name]
     for k, v in params.items():
@@ -158,6 +160,10 @@ def _execute_skill(
     cmd += ["--save-session", str(session_file)]
     if workdir and workdir != ".":
         cmd += ["--workdir", workdir]
+    if auto_learn:
+        cmd.append("--auto-learn")
+    if compact:
+        cmd.append("--compact")
 
     debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
         "1",
@@ -315,6 +321,8 @@ def run_router(
     skill_timeout: int = 300,
     retry_limit: int = 2,
     verbose: bool = False,
+    auto_learn: bool = False,
+    compact: bool = False,
 ) -> RouterState:
     state = RouterState(
         goal=goal, attempts=[], iteration=0, max_iterations=max_iterations
@@ -390,7 +398,13 @@ def run_router(
 
         session_file = _make_session_path(workdir, state.iteration)
         exit_code = _execute_skill(
-            skill_name, params, workdir, skill_timeout, session_file
+            skill_name,
+            params,
+            workdir,
+            skill_timeout,
+            session_file,
+            auto_learn=auto_learn,
+            compact=compact,
         )
         session_output = _read_session(session_file)
         if os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
