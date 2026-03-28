@@ -332,7 +332,7 @@ class SQLAlchemyStore:
                     LIMIT :limit
                     """
                     ),
-                    {"query": query, "limit": limit * 5},
+                    {"query": f'"{query}"', "limit": limit * 5},
                 )
                 .mappings()
                 .all()
