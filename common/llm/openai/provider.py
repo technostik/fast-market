@@ -76,10 +76,32 @@ class _RealOpenAIProvider(LLMProvider):
             kwargs["tools"] = request.tools
             kwargs["tool_choice"] = "auto"
 
-        try:
-            response = self.client.chat.completions.create(**kwargs)
-        except Exception as exc:
-            raise RuntimeError(f"OpenAI API call failed: {exc}") from exc
+        for attempt in range(3):
+            try:
+                response = self.client.chat.completions.create(**kwargs)
+                break
+            except Exception as exc:
+                if attempt == 2:
+                    import warnings
+
+                    warnings.warn(f"OpenAI API call failed after 3 retries: {exc}")
+                    break
+                if not (
+                    isinstance(exc, ConnectionError)
+                    or (hasattr(exc, "status_code") and exc.status_code == 500)
+                    or (
+                        hasattr(exc, "response")
+                        and hasattr(exc.response, "status_code")
+                        and exc.response.status_code == 500
+                    )
+                ):
+                    import warnings
+
+                    warnings.warn(f"OpenAI API call failed: {exc}")
+                    break
+                import time
+
+                time.sleep(1)
         message = response.choices[0].message
         content = message.content or ""
 
