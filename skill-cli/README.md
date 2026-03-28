@@ -191,33 +191,27 @@ skill completion fish     # Fish only
 Manage auto-learn prompt templates.
 
 ```bash
-skill auto-learn path              # Show config path
-skill auto-learn show             # Show learn_analysis_prompt (how to analyze sessions)
-skill auto-learn show --result    # Show learn_result_template (expected LEARN.md format)
-skill auto-learn show --compact   # Show learn_compacting_prompt (how to consolidate learnings)
-skill auto-learn edit            # Edit learn_analysis_prompt
-skill auto-learn edit --result   # Edit learn_result_template
-skill auto-learn edit --compact   # Edit learn_compacting_prompt
-skill auto-learn compact <skill>  # Compact LEARN.md using LLM
-skill auto-learn compact <skill> -n 20  # Compact to 20 lines
+skill auto-learn path                    # Show config path
+skill auto-learn show                    # Show learn_analysis_prompt (how to analyze sessions)
+skill auto-learn show --result           # Show learn_result_template (expected LEARN.md format)
+skill auto-learn show --compact          # Show learn_compacting_prompt
+skill auto-learn edit                   # Edit learn_analysis_prompt
+skill auto-learn edit --result          # Edit learn_result_template
+skill auto-learn edit --compact         # Edit learn_compacting_prompt
+skill auto-learn compact <skill>          # Compact LEARN.md using LLM
+skill auto-learn compact <skill> -n 30   # Compact to 30 lines
 ```
 
 ## Auto-Learn Templates
 
-The auto-learn system uses three configurable templates:
+The auto-learn system uses three configurable templates stored in `~/.config/fast-market/skill/config.yaml`:
 
 1. **learn_analysis_prompt** — How the LLM should analyze sessions to extract lessons
 2. **learn_result_template** — The expected format/structure of LEARN.md output
 3. **learn_compacting_prompt** — How to consolidate multiple learnings into one
 
-Templates are stored in `~/.config/fast-market/skill/config.yaml` and support placeholders:
+**Template placeholders:**
 - `{task_description}`, `{skill_name}`, `{outcome}`, `{iterations_used}`, `{max_iterations}`, `{params_summary}`, `{session_log}`, `{learn_result_template}`, `{max_lines}`
-
-**Compacting:**
-```bash
-skill auto-learn compact myskill     # Compact to default (80 lines)
-skill auto-learn compact myskill -n 30  # Compact to 30 lines
-```
 
 ## Features
 

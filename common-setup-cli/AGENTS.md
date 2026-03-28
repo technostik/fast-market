@@ -6,6 +6,7 @@ Standalone CLI to configure common settings and LLM providers for all fast-marke
 ## What it manages
 - LLM providers (add, remove, set-default) → `~/.config/fast-market/common/llm/config.yaml`
 - Common default working directory → `~/.config/fast-market/common/config.yaml`
+- Clean working directory
 
 ## What it does NOT manage
 - Task-specific config (allowed commands, iterations) → use `prompt setup task`
@@ -21,6 +22,17 @@ Standalone CLI to configure common settings and LLM providers for all fast-marke
 - common.core.config (load/save common and llm config)
 - common.core.paths (config path resolution)
 - NO dependency on any other agent
+
+## Commands
+- `common-setup` — Run interactive wizard
+- `common-setup --show` — Show current config
+- `common-setup --show-path` — Show config file paths
+- `common-setup workdir [path]` — Get or set workdir
+- `common-setup clean-workdir` — Clean workdir files
+- `common-setup llm list` — List providers
+- `common-setup llm add <provider>` — Add provider
+- `common-setup llm remove <provider>` — Remove provider
+- `common-setup llm set-default <provider>` — Set default provider
 
 ## Do NOT
 - Do not manage per-tool config here

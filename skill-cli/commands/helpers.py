@@ -18,6 +18,19 @@ from common.skill.skill import Skill
 logger = structlog.get_logger(__name__)
 
 
+def _resolve_save_session_path(save_session: str | None, workdir: Path) -> Path | None:
+    """Resolve save_session path relative to workdir if it's a relative path."""
+    if not save_session:
+        return None
+
+    session_path = Path(save_session).expanduser()
+
+    if session_path.is_absolute():
+        return session_path.resolve()
+
+    return (workdir / session_path).resolve()
+
+
 def _resolve_prompt_provider_model(
     provider: str | None,
     model: str | None,
@@ -60,7 +73,13 @@ def _write_local_session_file(
     if not save_session:
         return
 
-    session_path = Path(save_session).expanduser().resolve()
+    if workdir_path is None:
+        workdir_path = Path(".")
+
+    session_path = _resolve_save_session_path(save_session, workdir_path)
+    if session_path is None:
+        return
+
     session_path.parent.mkdir(parents=True, exist_ok=True)
 
     skill_name = skill_ref.split("/", 1)[0]
@@ -298,8 +317,8 @@ def apply_skill_impl(
 
             session = None
             if save_session:
-                session_path = Path(save_session).expanduser().resolve()
-                if session_path.exists():
+                session_path = _resolve_save_session_path(save_session, workdir_path)
+                if session_path and session_path.exists():
                     import yaml
 
                     session_data = yaml.safe_load(session_path.read_text())
