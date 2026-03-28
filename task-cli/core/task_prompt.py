@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from common.core.yaml_utils import dump_yaml
 
 
 DEFAULT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
@@ -81,7 +82,7 @@ class TaskPromptConfig:
         }
         if self.variables:
             data["variables"] = self.variables
-        return yaml.dump(data, default_flow_style=False, sort_keys=False)
+        return dump_yaml(data, sort_keys=False)
 
     def save(self, path: Path) -> None:
         """Save prompt configuration to a YAML file."""

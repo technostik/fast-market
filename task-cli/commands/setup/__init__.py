@@ -6,6 +6,7 @@ import click
 import yaml
 
 from common.core.config import _resolve_config_path, load_tool_config, save_tool_config
+from common.core.yaml_utils import dump_yaml
 
 
 def load_task_config() -> dict:
@@ -35,7 +36,7 @@ def save_task_config(config: dict) -> None:
 
     task_data = config.get("task", config)
     with open(config_path, "w") as f:
-        yaml.safe_dump(task_data, f, default_flow_style=False, sort_keys=False)
+        f.write(dump_yaml(task_data, sort_keys=False))
 
 
 DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.

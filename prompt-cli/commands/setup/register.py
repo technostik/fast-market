@@ -4,6 +4,7 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from common.core.yaml_utils import dump_yaml
 from common.core.config import _resolve_config_path
 from commands.setup import (
     load_config,
@@ -50,9 +51,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         ctx.obj["config_path"] = config_path_val
 
         if show_config:
-            click.echo(
-                yaml.safe_dump(config, default_flow_style=False, sort_keys=False)
-            )
+            click.echo(dump_yaml(config, sort_keys=False))
             return
 
         if config_path:

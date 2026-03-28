@@ -8,6 +8,7 @@ import click
 import yaml
 
 from common.core.config import _resolve_config_path
+from common.core.yaml_utils import dump_yaml
 from commands.setup import (
     load_config,
     save_config,
@@ -126,7 +127,7 @@ def create_tools_doc_prompts_group() -> click.Group:
 
         editor = get_editor()
 
-        yaml_content = yaml.safe_dump(templates[name], default_flow_style=False)
+        yaml_content = dump_yaml(templates[name])
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".yaml",

@@ -5,6 +5,8 @@ import click
 import yaml
 from pathlib import Path
 
+from common.core.yaml_utils import dump_yaml
+
 from common.core.config import (
     load_common_config,
     load_llm_config,
@@ -236,9 +238,9 @@ def _show_config():
         click.echo("No config found. Run: common-setup")
         return
     click.echo("=== common/config.yaml ===")
-    click.echo(yaml.safe_dump(common_cfg, default_flow_style=False, sort_keys=False))
+    click.echo(dump_yaml(common_cfg, sort_keys=False))
     click.echo("=== common/llm/config.yaml ===")
-    click.echo(yaml.safe_dump(llm_cfg, default_flow_style=False, sort_keys=False))
+    click.echo(dump_yaml(llm_cfg, sort_keys=False))
 
 
 def _prompt_provider_settings(provider: str) -> dict:

@@ -8,6 +8,7 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from common.core.yaml_utils import dump_yaml
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -137,7 +138,7 @@ def _list_all_aliases(fmt: str) -> None:
 
     if fmt == "yaml":
         data = {"aliases": aliases}
-        click.echo(yaml.dump(data, default_flow_style=False, sort_keys=False))
+        click.echo(dump_yaml(data, sort_keys=False))
         return
 
     if not aliases:
@@ -185,7 +186,7 @@ def _show_alias(name: str, fmt: str) -> None:
         )
     elif fmt == "yaml":
         data = {"aliases": {name: {"command": actual_cmd, "description": desc}}}
-        click.echo(yaml.dump(data, default_flow_style=False, sort_keys=False))
+        click.echo(dump_yaml(data, sort_keys=False))
     else:
         if desc:
             click.echo(f"{name}: {actual_cmd}")

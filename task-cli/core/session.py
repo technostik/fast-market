@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
+from common.core.yaml_utils import dump_yaml
 
 
 @dataclass
@@ -135,7 +135,7 @@ class Session:
             "error": self.error,
             "metrics": self.metrics_dict(),
         }
-        return yaml.dump(data, default_flow_style=False, sort_keys=False)
+        return dump_yaml(data, sort_keys=False)
 
     def save(self, path: Path) -> None:
         path.write_text(self.to_yaml(), encoding="utf-8")

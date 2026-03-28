@@ -8,6 +8,7 @@ import yaml
 
 from commands.base import CommandManifest
 from common.cli.helpers import out
+from common.core.yaml_utils import dump_yaml
 from common.youtube.transport import RSSPlaylistTransport
 from common.youtube.utils import extract_video_id
 
@@ -64,7 +65,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             content = (
                 json.dumps(result, ensure_ascii=False, indent=2)
                 if fmt == "json"
-                else yaml.dump(result, allow_unicode=True, default_flow_style=False)
+                else dump_yaml(result)
                 if fmt == "yaml"
                 else transcript
             )

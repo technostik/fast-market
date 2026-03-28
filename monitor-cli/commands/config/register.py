@@ -15,6 +15,7 @@ from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
 from common.cli.helpers import get_editor
 from common.core.paths import get_tool_config
+from common.core.yaml_utils import dump_yaml
 from core.models import Action, Rule, Source
 from core.rule_formatter import RuleFormatter
 from core.rule_parser import RuleParseError, RuleParser
@@ -396,7 +397,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             click.echo(f"Configuration exported to: {cfg_path}")
         else:
-            click.echo(yaml.dump(yaml_data, default_flow_style=False, sort_keys=False))
+            click.echo(dump_yaml(yaml_data, sort_keys=False))
 
     @config_group.command("sync")
     @click.option("--dry-run", is_flag=True, help="Show changes without applying")

@@ -12,6 +12,7 @@ from common.core.paths import (
     get_tool_config_path,
     get_common_subconfig_path,
 )
+from common.core.yaml_utils import dump_yaml
 
 
 class ConfigError(Exception):
@@ -92,7 +93,7 @@ def _save_yaml(path: Path, config: dict) -> None:
     """Save config to YAML file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        yaml.safe_dump(config, default_flow_style=False, sort_keys=False),
+        dump_yaml(config, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -212,7 +213,7 @@ def save_tool_config(tool_name: str, config: dict) -> None:
         if not safe["llm"]:
             del safe["llm"]
     path.write_text(
-        yaml.safe_dump(safe, default_flow_style=False, sort_keys=False),
+        dump_yaml(safe, sort_keys=False),
         encoding="utf-8",
     )
 

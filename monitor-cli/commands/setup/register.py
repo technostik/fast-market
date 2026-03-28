@@ -13,6 +13,7 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from common.core.yaml_utils import dump_yaml
 from commands.helpers import get_storage, out_formatted, to_dict
 from common.cli.helpers import get_editor
 from common.core.paths import get_tool_data_dir
@@ -1160,7 +1161,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "enabled": rule.enabled,
                 "description": rule.description,
             }
-            click.echo(yaml.dump(output, default_flow_style=False))
+            click.echo(dump_yaml(output))
         else:
             click.echo(f"id: {rule.id}")
             if rule.description:
@@ -1219,11 +1220,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             }
 
             if export == "yaml":
-                click.echo(
-                    yaml.dump(
-                        all_configs, allow_unicode=True, default_flow_style=False, sort_keys=False
-                    )
-                )
+                click.echo(dump_yaml(all_configs, sort_keys=False))
             else:
                 click.echo(json.dumps(all_configs, indent=2, default=str))
         else:

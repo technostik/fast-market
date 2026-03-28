@@ -7,10 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import click
-import yaml
-
 from common import structlog
 from common.core.config import load_common_config, load_tool_config, save_tool_config
+from common.core.yaml_utils import dump_yaml
 from common.core.paths import get_skills_dir
 from common.llm.registry import get_default_provider_name
 from common.skill.skill import Skill
@@ -124,7 +123,7 @@ def _write_local_session_file(
         ],
     }
     session_path.write_text(
-        yaml.safe_dump(payload, default_flow_style=False, sort_keys=False),
+        dump_yaml(payload, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -301,9 +300,7 @@ def apply_skill_impl(
             auto_learn=auto_learn,
             provider=provider_name,
             model=model_name,
-            save_session=Path(save_session).expanduser().resolve()
-            if save_session
-            else None,
+            save_session=_resolve_save_session_path(save_session, workdir_path),
             compact=compact,
         )
 

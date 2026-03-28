@@ -6,6 +6,7 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from common.core.yaml_utils import dump_yaml
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -46,7 +47,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         if format == "yaml":
-            click.echo(yaml.dump(entries, default_flow_style=False, sort_keys=False))
+            click.echo(dump_yaml(entries, sort_keys=False))
             return
 
         if not entries:

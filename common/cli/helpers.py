@@ -8,17 +8,15 @@ from pathlib import Path
 import click
 import yaml
 
+from common.core.yaml_utils import dump_yaml
+
 
 def out(data: object, fmt: str) -> None:
     """Standard output formatting for fast-market tools."""
     if fmt == "json":
         click.echo(json.dumps(data, ensure_ascii=False, default=str))
     elif fmt == "yaml":
-        click.echo(
-            yaml.dump(
-                data, allow_unicode=True, default_flow_style=False, sort_keys=False
-            )
-        )
+        click.echo(dump_yaml(data, sort_keys=False))
     else:
         _print_text(data)
 
