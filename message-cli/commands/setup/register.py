@@ -180,7 +180,7 @@ async def _test_and_capture(bot_token, telegram_config, config_path, new_config)
 
     if chat_id_captured["id"]:
         new_config["telegram"]["allowed_chat_id"] = chat_id_captured["id"]
-    config_path.write_text(dump_yaml(new_config))
+        config_path.write_text(dump_yaml(new_config))
         click.echo(f"\nChat ID saved: {chat_id_captured['id']}")
         click.echo("Your bot is now configured and ready!")
     elif not telegram_config.get("allowed_chat_id"):
