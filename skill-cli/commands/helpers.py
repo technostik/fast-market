@@ -9,35 +9,13 @@ from typing import Any
 import click
 import yaml
 
+from common import structlog
 from common.core.config import load_common_config, load_tool_config, save_tool_config
 from common.core.paths import get_skills_dir
 from common.llm.registry import get_default_provider_name
 from common.skill.skill import Skill
 
-
-DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE = """# Lessons Learned for {skill_name}
-
-## What Works
-- Skill execution `{skill_ref}` exited with code `{exit_code}`.
-- Key stdout signal: `{stdout_preview}`
-
-## What to Avoid
-- Pattern leading to failure: `{stderr_preview}`
-
-## Common Errors and Fixes
-- Error: `{stderr_preview}` → Fix: adjust params/inputs and retry.
-"""
-
-
-def _get_skill_auto_learn_prompt_template() -> str:
-    config = load_tool_config("skill")
-    template = config.get("auto_learn_prompt")
-    if isinstance(template, str) and template.strip():
-        return template
-
-    config["auto_learn_prompt"] = DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE
-    save_tool_config("skill", config)
-    return DEFAULT_SKILL_AUTO_LEARN_PROMPT_TEMPLATE
+logger = structlog.get_logger(__name__)
 
 
 def _resolve_prompt_provider_model(
@@ -145,6 +123,7 @@ def apply_skill_impl(
     model: str | None = None,
     auto_learn: bool = False,
     save_session: str | None = None,
+    compact: bool = False,
 ) -> None:
     from common.skill.runner import (
         execute_skill_prompt,
@@ -300,12 +279,13 @@ def apply_skill_impl(
             timeout=timeout,
             max_iterations=max_iterations,
             llm_timeout=llm_timeout,
-            auto_learn=False,
+            auto_learn=auto_learn,
             provider=provider_name,
             model=model_name,
             save_session=Path(save_session).expanduser().resolve()
             if save_session
             else None,
+            compact=compact,
         )
 
         if auto_learn and result.timed_out:
@@ -316,12 +296,46 @@ def apply_skill_impl(
                 timed_out_seconds = 300
             timed_out_seconds = int(str(timed_out_seconds).rstrip("s"))
 
+            session = None
+            if save_session:
+                session_path = Path(save_session).expanduser().resolve()
+                if session_path.exists():
+                    import yaml
+
+                    session_data = yaml.safe_load(session_path.read_text())
+                    if session_data:
+                        from core.session import Session
+
+                        session = Session.from_dict(session_data)
+
+            llm_provider = None
+            if provider_name:
+                try:
+                    from common.core.config import (
+                        requires_common_config,
+                        load_tool_config,
+                    )
+                    from common.llm.registry import (
+                        discover_providers,
+                        get_default_provider_name,
+                    )
+
+                    requires_common_config("skill", ["llm"])
+                    config = load_tool_config("skill")
+                    providers = discover_providers(config)
+                    llm_provider = providers.get(provider_name)
+                except Exception as e:
+                    logger.warning("auto_learn_llm_provider_failed", error=str(e))
+
             _run_auto_learn_from_skill(
                 skill=skill,
                 params=provided_params,
                 workdir=workdir_path,
                 timed_out=True,
                 timed_out_seconds=timed_out_seconds,
+                provider=llm_provider,
+                model=model_name,
+                session=session,
             )
 
     if fmt == "json":

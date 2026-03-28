@@ -126,6 +126,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Skill name to write LEARN.md to (required if --auto-learn and task is not 'skill apply ...')",
     )
     @click.option(
+        "--compact",
+        "-C",
+        is_flag=True,
+        help="Use compacting prompt to consolidate multiple learnings",
+    )
+    @click.option(
+        "--autocompact-lines",
+        type=int,
+        default=None,
+        help="Auto-compact LEARN.md when it exceeds this many lines",
+    )
+    @click.option(
         "--save-session",
         "-o",
         type=click.Path(),
@@ -150,6 +162,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         silent,
         auto_learn,
         learn_skill,
+        compact,
+        autocompact_lines,
         save_session,
     ):
         """Execute a task with LLM-driven CLI command loop.
@@ -278,6 +292,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     model=model,
                     config=task_config_dict,
                     silent=silent,
+                    compact=compact,
+                    autocompact_lines=autocompact_lines,
                 )
 
             if save_session and loop.session:
@@ -457,13 +473,22 @@ def _infer_skill_name_from_session(session) -> str | None:
     return None
 
 
-def _run_auto_learn(session, skill_name, provider_instance, model, config, silent):
+def _run_auto_learn(
+    session,
+    skill_name,
+    provider_instance,
+    model,
+    config,
+    silent,
+    compact=False,
+    autocompact_lines=None,
+):
     if not skill_name:
         if not silent:
             click.echo("[AUTO-LEARN] Skipped: no skill name", err=True)
         return
 
-    from commands.task.learner import analyze_session, update_learn_file
+    from common.learn import analyze_session, update_learn_file
 
     if not silent:
         click.echo(
@@ -472,19 +497,23 @@ def _run_auto_learn(session, skill_name, provider_instance, model, config, silen
         )
 
     try:
-        learn_prompt = config.get("learn_prompt", None)
+        learn_analysis_prompt = config.get("learn_analysis_prompt", None)
+        learn_result_template = config.get("learn_result_template", None)
         content = analyze_session(
             session,
             skill_name,
             provider_instance,
             model,
-            learn_prompt,
+            learn_analysis_prompt=learn_analysis_prompt,
+            learn_result_template=learn_result_template,
         )
         path = update_learn_file(
             skill_name,
             content,
             provider=provider_instance,
             model=model,
+            autocompact_lines=autocompact_lines,
+            use_compacting=compact,
         )
         if not silent:
             click.echo(f"[AUTO-LEARN] LEARN.md updated: {path}", err=True)

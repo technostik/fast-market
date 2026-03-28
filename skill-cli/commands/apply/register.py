@@ -76,6 +76,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="After execution, update LEARN.md for this skill",
     )
+    @click.option(
+        "--compact",
+        "-C",
+        is_flag=True,
+        help="Use compacting prompt to consolidate multiple learnings",
+    )
     def apply_cmd(
         skill_ref,
         params,
@@ -89,6 +95,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         model,
         save_session,
         auto_learn,
+        compact,
     ):
         """Apply (execute) a skill by name.
 
@@ -108,6 +115,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             model=model,
             auto_learn=auto_learn,
             save_session=save_session,
+            compact=compact,
         )
 
     return CommandManifest(name="apply", click_command=apply_cmd)

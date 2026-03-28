@@ -288,6 +288,7 @@ def execute_skill_prompt(
     provider: str | None = None,
     model: str | None = None,
     save_session: Path | None = None,
+    compact: bool = False,
 ) -> SkillResult:
     """
     Execute skill body as a task description via `task apply`.
@@ -329,6 +330,10 @@ def execute_skill_prompt(
         cmd += ["--llm-timeout", str(effective_llm_timeout)]
     if auto_learn:
         cmd += ["--auto-learn", "--learn-skill", skill.name]
+        if compact:
+            cmd += ["--compact"]
+        if skill.autocompact_lines is not None:
+            cmd += ["--autocompact-lines", str(skill.autocompact_lines)]
     for key, value in (params or {}).items():
         cmd += ["--param", f"{key}={value}"]
     if workdir and str(workdir) != ".":
@@ -376,13 +381,22 @@ def _run_auto_learn_from_skill(
     workdir: Path,
     timed_out: bool = False,
     timed_out_seconds: int = 300,
+    provider=None,
+    model: str | None = None,
+    session=None,
 ) -> None:
-    """Run auto-learn for a skill, handling timeout case."""
+    """Run auto-learn for a skill using LLM."""
     from datetime import datetime
+    from common.learn import (
+        analyze_session,
+        update_learn_file,
+        get_learn_analysis_prompt,
+        get_learn_result_template,
+    )
 
     learn_path = skill.path / "LEARN.md"
 
-    if timed_out:
+    if timed_out and session is None:
         timestamp = datetime.utcnow().isoformat()
         content = f"""# Lessons Learned for {skill.name}
 
@@ -403,3 +417,25 @@ def _run_auto_learn_from_skill(
         logger.info(
             "auto_learn_timeout", skill=skill.name, timeout_seconds=timed_out_seconds
         )
+    elif provider is not None:
+        try:
+            learn_analysis_prompt = get_learn_analysis_prompt()
+            learn_result_template = get_learn_result_template()
+            content = analyze_session(
+                session,
+                skill.name,
+                provider,
+                model,
+                learn_analysis_prompt=learn_analysis_prompt,
+                learn_result_template=learn_result_template,
+            )
+            update_learn_file(
+                skill.name,
+                content,
+                merge=True,
+                provider=provider,
+                model=model,
+            )
+            logger.info("auto_learn_success", skill=skill.name)
+        except Exception as exc:
+            logger.warning("auto_learn_failed", skill=skill.name, error=str(exc))

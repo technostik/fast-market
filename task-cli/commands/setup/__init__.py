@@ -166,9 +166,14 @@ def init_task_config(config: dict | None = None) -> dict:
             },
         }
 
-    if "learn_prompt" not in task:
-        from commands.task.learner import LEARN_PROMPT_TEMPLATE
+    if "learn_analysis_prompt" not in task:
+        from common.learn import LEARN_ANALYSIS_PROMPT_TEMPLATE
 
-        task["learn_prompt"] = LEARN_PROMPT_TEMPLATE
+        task["learn_analysis_prompt"] = LEARN_ANALYSIS_PROMPT_TEMPLATE
+
+    if "learn_result_template" not in task:
+        from common.learn import LEARN_RESULT_TEMPLATE
+
+        task["learn_result_template"] = LEARN_RESULT_TEMPLATE
 
     return task

@@ -62,6 +62,7 @@ name: my-skill
 description: What this skill does
 max_iterations: 10
 timeout: 300
+autocompact: 40
 ---
 
 # My Skill
@@ -72,6 +73,14 @@ Describe when to use this skill.
 ## Instructions
 Step-by-step instructions.
 ```
+
+**Frontmatter options:**
+- `name` — Skill name (defaults to directory name)
+- `description` — Brief description
+- `max_iterations` — Max LLM iterations for prompt-based skills
+- `timeout` — Execution timeout in seconds (0 = no timeout)
+- `llm_timeout` — LLM call timeout in seconds
+- `autocompact` — Auto-compact LEARN.md when exceeding this many lines
 
 ## CLI Reference
 
@@ -135,13 +144,15 @@ Apply (execute) a skill.
 skill apply <skill-name>                          # Execute skill
 skill apply <skill-name>/<script>                 # Execute specific script
 skill apply <skill-name> KEY=VALUE               # Pass parameters
-skill apply <skill-name> -w /path                 # Working directory
-skill apply <skill-name> -t 60                    # Timeout (seconds)
+skill apply <skill-name> -w /path                 # Working directory (default: common config workdir)
+skill apply <skill-name> -t 60                    # Timeout (seconds, 0=no timeout)
 skill apply <skill-name> -i 5                     # Max iterations
 skill apply <skill-name> -n                      # Dry run
 skill apply <skill-name> -L                      # Auto-learn after execution
+skill apply <skill-name> -C                      # Use compacting prompt to consolidate learnings
 skill apply <skill-name> --format json           # JSON output
 skill apply <skill-name> -P openai -m gpt-4      # LLM provider/model
+skill apply <skill-name> --save-session file.yaml  # Save session to file
 ```
 
 ### skill run
@@ -177,12 +188,35 @@ skill completion fish     # Fish only
 
 ### skill auto-learn
 
-Manage auto-learn prompt template.
+Manage auto-learn prompt templates.
 
 ```bash
-skill auto-learn path     # Show config path
-skill auto-learn show     # Show current template
-skill auto-learn edit     # Edit template
+skill auto-learn path              # Show config path
+skill auto-learn show             # Show learn_analysis_prompt (how to analyze sessions)
+skill auto-learn show --result    # Show learn_result_template (expected LEARN.md format)
+skill auto-learn show --compact   # Show learn_compacting_prompt (how to consolidate learnings)
+skill auto-learn edit            # Edit learn_analysis_prompt
+skill auto-learn edit --result   # Edit learn_result_template
+skill auto-learn edit --compact   # Edit learn_compacting_prompt
+skill auto-learn compact <skill>  # Compact LEARN.md using LLM
+skill auto-learn compact <skill> -n 20  # Compact to 20 lines
+```
+
+## Auto-Learn Templates
+
+The auto-learn system uses three configurable templates:
+
+1. **learn_analysis_prompt** — How the LLM should analyze sessions to extract lessons
+2. **learn_result_template** — The expected format/structure of LEARN.md output
+3. **learn_compacting_prompt** — How to consolidate multiple learnings into one
+
+Templates are stored in `~/.config/fast-market/skill/config.yaml` and support placeholders:
+- `{task_description}`, `{skill_name}`, `{outcome}`, `{iterations_used}`, `{max_iterations}`, `{params_summary}`, `{session_log}`, `{learn_result_template}`, `{max_lines}`
+
+**Compacting:**
+```bash
+skill auto-learn compact myskill     # Compact to default (80 lines)
+skill auto-learn compact myskill -n 30  # Compact to 30 lines
 ```
 
 ## Features
@@ -191,7 +225,9 @@ skill auto-learn edit     # Edit template
 - **Script Execution** — Run executable scripts within skills
 - **LLM Integration** — Apply skills with LLM providers, auto-learn from execution
 - **Parameter Passing** — Pass `KEY=VALUE` parameters to skills
-- **Working Directory** — Execute skills in specific directories
+- **Working Directory** — Execute skills in specific directories (defaults to common config workdir)
+- **Auto-Learn** — Automatically extract lessons from executions to LEARN.md
+- **Auto-Compact** — Automatically consolidate learnings when exceeding line threshold
 - **Dry Run** — Preview execution without running
 - **JSON Output** — Machine-readable output for piping
 - **Shell Completion** — Bash, Zsh, Fish support
@@ -223,6 +259,12 @@ skill apply github-summary repo=owner/repo format=markdown
 skill apply complex-task -n --format json
 ```
 
+### Apply with auto-learn and compacting
+
+```bash
+skill apply myskill --auto-learn --compact
+```
+
 ### Chain skills
 
 ```bash
@@ -243,7 +285,7 @@ skill-cli/
 │   ├── apply/           # Execute skill
 │   ├── run/             # Orchestrate skills (LLM)
 │   ├── path/            # Show skills path
-│   ├── auto_learn/     # Auto-learn management
+│   ├── auto_learn/      # Auto-learn management
 │   └── params.py        # Custom Click types
 ├── core/                # Core functionality
 └── skill_entry/         # Package entry point

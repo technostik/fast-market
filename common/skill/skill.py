@@ -20,6 +20,7 @@ class Skill:
     max_iterations: int | None = None
     timeout: int | None = None
     llm_timeout: int | None = None
+    autocompact_lines: int | None = None
 
     @classmethod
     def from_path(cls, path: Path) -> Optional[Skill]:
@@ -44,6 +45,7 @@ class Skill:
                         max_iterations=frontmatter.get("max_iterations"),
                         timeout=frontmatter.get("timeout"),
                         llm_timeout=frontmatter.get("llm_timeout"),
+                        autocompact_lines=frontmatter.get("autocompact"),
                     )
                 except Exception:
                     pass
