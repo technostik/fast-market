@@ -36,5 +36,5 @@ dev = ["pytest>=8.0", "httpx>=0.27"]
 corpus = "corpus_entry:main"
 
 [tool.setuptools]
-packages = ["common", "common.core", "common.auth", "common.cli", "common.storage", "common.llm", "corpus_entry", "cli", "core", "storage", "plugins", "plugins.obsidian", "plugins.youtube", "api", "commands", "commands.sync", "commands.search", "commands.list", "commands.get", "commands.get_last", "commands.get_from_source", "commands.delete", "commands.status", "commands.reindex", "commands.serve", "commands.setup", "commands.setconfig", "commands.retry_failures", "commands.db_migrate", "commands.embed_server"]
-py-modules = ["setup_wizard", "yaml_shim"]
+packages = ["common", "common.core", "common.auth", "common.cli", "common.storage", "common.llm", "corpus_entry", "cli", "core", "storage", "plugins", "plugins.obsidian", "plugins.youtube", "api", "commands", "commands.sync", "commands.search", "commands.list", "commands.get_from_id", "commands.get_last", "commands.get_from_source", "commands.delete", "commands.status", "commands.serve", "commands.setup", "commands.embed_server"]
+py-modules = ["setup_wizard"]

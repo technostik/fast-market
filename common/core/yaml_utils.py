@@ -28,4 +28,5 @@ def dump_yaml(
         default_flow_style=default_flow_style,
         sort_keys=sort_keys,
         allow_unicode=allow_unicode,
+        Dumper=yaml.SafeDumper,
     )
