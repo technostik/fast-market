@@ -23,7 +23,9 @@ class SkillResult:
     timed_out: bool = False
 
 
-def resolve_skill_script(skill_ref: str) -> tuple[Skill, Path] | tuple[None, None] | tuple[Skill, None]:
+def resolve_skill_script(
+    skill_ref: str,
+) -> tuple[Skill, Path] | tuple[None, None] | tuple[Skill, None]:
     """
     Resolve 'skillname' or 'skillname/scriptname' to (Skill, script_path).
 
@@ -38,7 +40,9 @@ def resolve_skill_script(skill_ref: str) -> tuple[Skill, Path] | tuple[None, Non
     if not ref:
         return None, None
 
-    skill_name, script_name = (ref.split("/", 1) + [None])[:2] if "/" in ref else (ref, None)
+    skill_name, script_name = (
+        (ref.split("/", 1) + [None])[:2] if "/" in ref else (ref, None)
+    )
 
     skills = discover_skills(get_skills_dir())
     skill = next((s for s in skills if s.name == skill_name), None)
@@ -68,7 +72,7 @@ def execute_skill_script(
     skill_ref: str,
     workdir: Path,
     params: dict[str, str] | None = None,
-    timeout: int = 60,
+    timeout: int | None = None,
 ) -> SkillResult:
     """Execute a skill script directly with SKILL_* environment parameters."""
     resolved = (skill_ref or "").strip().split()[0] if skill_ref else ""
@@ -118,12 +122,19 @@ def execute_skill_script(
     for key, value in (params or {}).items():
         env[f"SKILL_{str(key).upper()}"] = str(value)
 
+    effective_timeout = timeout if timeout is not None else skill.timeout
+    if effective_timeout is None:
+        effective_timeout = 60
+    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    if effective_timeout == 0:
+        effective_timeout = None  # 0 means no timeout
+
     logger.debug(
         "executing skill script",
         skill=skill.name,
         script=str(script_path),
         workdir=str(workdir),
-        timeout=timeout,
+        timeout=effective_timeout,
     )
 
     try:
@@ -133,7 +144,7 @@ def execute_skill_script(
             env=env,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=effective_timeout if effective_timeout else None,
         )
         return SkillResult(
             skill_name=skill.name,
@@ -147,7 +158,8 @@ def execute_skill_script(
             skill_name=skill.name,
             script_name=script_path.name,
             stdout=exc.stdout or "",
-            stderr=(exc.stderr or "") or f"Skill script timed out after {timeout} seconds",
+            stderr=(exc.stderr or "")
+            or f"Skill script timed out after {effective_timeout} seconds",
             exit_code=124,
             timed_out=True,
         )
@@ -157,7 +169,7 @@ def execute_skill_run(
     skill: Skill,
     workdir: Path,
     params: dict[str, str] | None = None,
-    timeout: int = 60,
+    timeout: int | None = None,
 ) -> SkillResult:
     """
     Execute the skill's run: frontmatter command.
@@ -179,6 +191,51 @@ def execute_skill_run(
                 "Pass them as KEY=VALUE arguments."
             ),
             exit_code=1,
+        )
+
+    env = os.environ.copy()
+    for key, value in (params or {}).items():
+        env[f"SKILL_{str(key).upper()}"] = str(value)
+
+    effective_timeout = timeout if timeout is not None else skill.timeout
+    if effective_timeout is None:
+        effective_timeout = 60
+    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    if effective_timeout == 0:
+        effective_timeout = None  # 0 means no timeout
+
+    logger.debug(
+        "executing skill run command",
+        skill=skill.name,
+        command=cmd,
+        workdir=str(workdir),
+        timeout=effective_timeout,
+    )
+
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=workdir,
+            env=env,
+            capture_output=False,
+            timeout=effective_timeout if effective_timeout else None,
+        )
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="run:",
+            stdout="",
+            stderr="",
+            exit_code=result.returncode,
+        )
+    except subprocess.TimeoutExpired:
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="run:",
+            stdout="",
+            stderr=f"Skill run timed out after {effective_timeout}s",
+            exit_code=124,
+            timed_out=True,
         )
 
     env = os.environ.copy()
@@ -224,10 +281,14 @@ def execute_skill_prompt(
     skill: Skill,
     workdir: Path,
     params: dict[str, str] | None = None,
-    timeout: int = 300,
+    timeout: int | None = None,
+    max_iterations: int | None = None,
+    llm_timeout: int | None = None,
+    auto_learn: bool = False,
     provider: str | None = None,
     model: str | None = None,
     save_session: Path | None = None,
+    compact: bool = False,
 ) -> SkillResult:
     """
     Execute skill body as a task description via `task apply`.
@@ -241,11 +302,38 @@ def execute_skill_prompt(
         learn_content = learn_path.read_text(encoding="utf-8")
         body = f"{body}\n\n---\n## Lessons from previous runs\n{learn_content}"
 
+    effective_timeout = timeout if timeout is not None else skill.timeout
+    if effective_timeout is None:
+        effective_timeout = 300
+    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    if effective_timeout == 0:
+        effective_timeout = None  # 0 means no timeout
+
+    effective_max_iterations = (
+        max_iterations if max_iterations is not None else skill.max_iterations
+    )
+
+    effective_llm_timeout = (
+        llm_timeout if llm_timeout is not None else skill.llm_timeout
+    )
+    if effective_llm_timeout is None:
+        effective_llm_timeout = 0  # no limit
+
     cmd = ["task", "apply", body]
     if provider:
         cmd += ["-P", provider]
     if model:
         cmd += ["-m", model]
+    if effective_max_iterations is not None:
+        cmd += ["--max-iterations", str(effective_max_iterations)]
+    if effective_llm_timeout > 0:
+        cmd += ["--llm-timeout", str(effective_llm_timeout)]
+    if auto_learn:
+        cmd += ["--auto-learn", "--learn-skill", skill.name]
+        if compact:
+            cmd += ["--compact"]
+        if skill.autocompact_lines is not None:
+            cmd += ["--autocompact-lines", str(skill.autocompact_lines)]
     for key, value in (params or {}).items():
         cmd += ["--param", f"{key}={value}"]
     if workdir and str(workdir) != ".":
@@ -259,7 +347,7 @@ def execute_skill_prompt(
         result = subprocess.run(
             cmd,
             cwd=workdir,
-            timeout=timeout,
+            timeout=effective_timeout if effective_timeout else None,
         )
         return SkillResult(
             skill_name=skill.name,
@@ -273,7 +361,7 @@ def execute_skill_prompt(
             skill_name=skill.name,
             script_name="prompt:",
             stdout="",
-            stderr=f"Task timed out after {timeout}s",
+            stderr=f"Task timed out after {effective_timeout}s",
             exit_code=124,
             timed_out=True,
         )
@@ -285,3 +373,69 @@ def execute_skill_prompt(
             stderr="'task' command not found. Is task-cli installed?",
             exit_code=127,
         )
+
+
+def _run_auto_learn_from_skill(
+    skill: Skill,
+    params: dict[str, str] | None,
+    workdir: Path,
+    timed_out: bool = False,
+    timed_out_seconds: int = 300,
+    provider=None,
+    model: str | None = None,
+    session=None,
+) -> None:
+    """Run auto-learn for a skill using LLM."""
+    from datetime import datetime
+    from common.learn import (
+        analyze_session,
+        update_learn_file,
+        get_learn_analysis_prompt,
+        get_learn_result_template,
+    )
+
+    learn_path = skill.path / "LEARN.md"
+
+    if timed_out and session is None:
+        timestamp = datetime.utcnow().isoformat()
+        content = f"""# Lessons Learned for {skill.name}
+
+## What to Avoid
+- Task timed out after {timed_out_seconds}s — consider increasing timeout or simplifying the task
+
+## Common Errors and Fixes
+- Error: Task timeout → Fix: Increase --timeout value or reduce task complexity
+"""
+        existing = ""
+        if learn_path.exists():
+            existing = learn_path.read_text(encoding="utf-8")
+
+        stamped = f"---\n<!-- auto-learn: {timestamp} (timeout) -->\n\n{content}"
+        merged = (existing.rstrip() + "\n\n" + stamped).strip() + "\n"
+
+        learn_path.write_text(merged, encoding="utf-8")
+        logger.info(
+            "auto_learn_timeout", skill=skill.name, timeout_seconds=timed_out_seconds
+        )
+    elif provider is not None:
+        try:
+            learn_analysis_prompt = get_learn_analysis_prompt()
+            learn_result_template = get_learn_result_template()
+            content = analyze_session(
+                session,
+                skill.name,
+                provider,
+                model,
+                learn_analysis_prompt=learn_analysis_prompt,
+                learn_result_template=learn_result_template,
+            )
+            update_learn_file(
+                skill.name,
+                content,
+                merge=True,
+                provider=provider,
+                model=model,
+            )
+            logger.info("auto_learn_success", skill=skill.name)
+        except Exception as exc:
+            logger.warning("auto_learn_failed", skill=skill.name, error=str(exc))

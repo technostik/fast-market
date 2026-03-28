@@ -5,11 +5,12 @@ import sys
 import click
 
 from commands.base import CommandManifest
+from commands.completion import PromptNameParamType
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("edit")
-    @click.argument("name")
+    @click.argument("name", type=PromptNameParamType())
     @click.pass_context
     def edit_cmd(ctx, name):
         """Edit a prompt in the default editor."""

@@ -5,6 +5,8 @@ import click
 import yaml
 from pathlib import Path
 
+from common.core.yaml_utils import dump_yaml
+
 from common.core.config import (
     load_common_config,
     load_llm_config,
@@ -153,6 +155,79 @@ def register():
         save_common_config(config)
         click.echo(f"Default workdir set to: {path}")
 
+    @setup_cmd.command("clean-workdir")
+    @click.option(
+        "--force",
+        "-f",
+        is_flag=True,
+        help="Skip confirmation prompt",
+    )
+    @click.option(
+        "--all",
+        "-a",
+        is_flag=True,
+        help="Also remove subdirectories and hidden files",
+    )
+    def clean_workdir(force, all):
+        """Clean the global default working directory."""
+        config = load_common_config()
+        workdir = config.get("workdir")
+
+        if not workdir:
+            click.echo("No workdir configured. Run: common-setup workdir <path>")
+            return
+
+        workdir_path = Path(workdir).expanduser().resolve()
+
+        if not workdir_path.exists():
+            click.echo(f"Workdir does not exist: {workdir_path}")
+            return
+
+        if not force:
+            click.echo(f"Workdir: {workdir_path}")
+            if not click.confirm("Delete all files in workdir?"):
+                click.echo("Cancelled.")
+                return
+
+        removed_count = 0
+        kept_count = 0
+
+        for item in workdir_path.iterdir():
+            if item.name.startswith("."):
+                if all:
+                    try:
+                        if item.is_dir():
+                            import shutil
+
+                            shutil.rmtree(item)
+                        else:
+                            item.unlink()
+                        removed_count += 1
+                    except Exception as e:
+                        click.echo(f"Error removing {item}: {e}")
+                else:
+                    kept_count += 1
+                continue
+
+            try:
+                if item.is_dir():
+                    if all:
+                        import shutil
+
+                        shutil.rmtree(item)
+                        removed_count += 1
+                    else:
+                        kept_count += 1
+                else:
+                    item.unlink()
+                    removed_count += 1
+            except Exception as e:
+                click.echo(f"Error removing {item}: {e}")
+
+        click.echo(f"Removed {removed_count} items.")
+        if kept_count > 0:
+            click.echo(f"Kept {kept_count} items (directories or hidden files).")
+
     return setup_cmd
 
 
@@ -163,9 +238,9 @@ def _show_config():
         click.echo("No config found. Run: common-setup")
         return
     click.echo("=== common/config.yaml ===")
-    click.echo(yaml.safe_dump(common_cfg, default_flow_style=False, sort_keys=False))
+    click.echo(dump_yaml(common_cfg, sort_keys=False))
     click.echo("=== common/llm/config.yaml ===")
-    click.echo(yaml.safe_dump(llm_cfg, default_flow_style=False, sort_keys=False))
+    click.echo(dump_yaml(llm_cfg, sort_keys=False))
 
 
 def _prompt_provider_settings(provider: str) -> dict:

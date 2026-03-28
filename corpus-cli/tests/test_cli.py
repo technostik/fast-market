@@ -42,7 +42,9 @@ def test_sync_all(runner, mock_env):
 def test_sync_clean(runner, mock_env):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
-    result = runner.invoke(main, ["sync", "--source", "obsidian", "--clean", "--format", "json"])
+    result = runner.invoke(
+        main, ["sync", "--source", "obsidian", "--clean", "--format", "json"]
+    )
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)[0]["indexed"] >= 1
 
@@ -50,7 +52,9 @@ def test_sync_clean(runner, mock_env):
 def test_search_keyword(runner, mock_env):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
-    result = runner.invoke(main, ["search", "hello", "--mode", "keyword", "--format", "json"])
+    result = runner.invoke(
+        main, ["search", "hello", "--mode", "keyword", "--format", "json"]
+    )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert len(data) >= 1
@@ -75,7 +79,9 @@ def test_search_text_output(runner, mock_env):
 def test_search_no_results(runner, mock_env):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
-    result = runner.invoke(main, ["search", "xyzzy_nonexistent_zzz", "--mode", "keyword"])
+    result = runner.invoke(
+        main, ["search", "xyzzy_nonexistent_zzz", "--mode", "keyword"]
+    )
     assert result.exit_code == 0
     assert "no results" in result.output
 
@@ -83,9 +89,13 @@ def test_search_no_results(runner, mock_env):
 def test_get_meta(runner, mock_env):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
-    search = runner.invoke(main, ["search", "hello", "--mode", "keyword", "--format", "json"])
+    search = runner.invoke(
+        main, ["search", "hello", "--mode", "keyword", "--format", "json"]
+    )
     handle = json.loads(search.output)[0]["handle"]
-    result = runner.invoke(main, ["get", handle, "--what", "meta", "--format", "json"])
+    result = runner.invoke(
+        main, ["get-from-id", handle, "--what", "meta", "--format", "json"]
+    )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["handle"] == handle
@@ -95,28 +105,32 @@ def test_get_meta(runner, mock_env):
 def test_get_content(runner, mock_env):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
-    search = runner.invoke(main, ["search", "hello", "--mode", "keyword", "--format", "json"])
+    search = runner.invoke(
+        main, ["search", "hello", "--mode", "keyword", "--format", "json"]
+    )
     handle = json.loads(search.output)[0]["handle"]
-    result = runner.invoke(main, ["get", handle, "--what", "content"])
+    result = runner.invoke(main, ["get-from-id", handle, "--what", "content"])
     assert result.exit_code == 0
     assert "hello" in result.output.lower()
 
 
 def test_get_not_found(runner, mock_env):
     main = _main_with_reload()
-    result = runner.invoke(main, ["get", "ob-nonexistent-0000"])
+    result = runner.invoke(main, ["get-from-id", "ob-nonexistent-0000"])
     assert result.exit_code == 1
 
 
 def test_delete_by_handle(runner, mock_env):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
-    search = runner.invoke(main, ["search", "hello", "--mode", "keyword", "--format", "json"])
+    search = runner.invoke(
+        main, ["search", "hello", "--mode", "keyword", "--format", "json"]
+    )
     handle = json.loads(search.output)[0]["handle"]
     result = runner.invoke(main, ["delete", handle, "--format", "json"])
     assert result.exit_code == 0
     assert json.loads(result.output)["deleted"] is True
-    assert runner.invoke(main, ["get", handle]).exit_code == 1
+    assert runner.invoke(main, ["get-from-id", handle]).exit_code == 1
 
 
 def test_delete_not_found(runner, mock_env):
@@ -143,7 +157,9 @@ def test_status_empty(runner, mock_env):
 def test_reindex(runner, mock_env):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
-    result = runner.invoke(main, ["reindex", "--source", "obsidian", "--format", "json"])
+    result = runner.invoke(
+        main, ["sync", "--source", "obsidian", "--mode", "reindex", "--format", "json"]
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data[0]["source"] == "obsidian"
@@ -205,25 +221,19 @@ def test_plugin_removal_simulation(runner, mock_env, monkeypatch):
     assert result.exit_code != 0
 
 
-def test_retry_failures_command_clears_and_resyncs(runner, mock_env, config_dict):
+def test_retry_failure_option_clears_and_resyncs(runner, mock_env, config_dict):
     store = SQLiteStore(config_dict["db_path"])
     store.record_failure("youtube", "vid1", "tmp", "transient")
 
     main = _main_with_reload()
-    result = runner.invoke(main, ["retry-failures", "--source", "youtube", "--format", "json"])
+    result = runner.invoke(
+        main, ["sync", "--source", "youtube", "--retry-failure", "--format", "json"]
+    )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data[0]["source"] == "youtube"
     assert data[0]["indexed"] >= 1
     assert store.list_failures("youtube") == []
-
-
-def test_db_migrate_command(runner, mock_env):
-    main = _main_with_reload()
-    result = runner.invoke(main, ["db-migrate", "--format", "json"])
-    assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
-    assert data["status"] == "ok"
 
 
 def test_status_includes_sync_failure_stats(runner, mock_env, config_dict):
@@ -258,7 +268,9 @@ def test_list_command_pagination(mock_env, runner):
     page1 = json.loads(result.output)
     assert len(page1) == 2
 
-    result = runner.invoke(main, ["list", "--limit", "2", "--offset", "2", "--format", "json"])
+    result = runner.invoke(
+        main, ["list", "--limit", "2", "--offset", "2", "--format", "json"]
+    )
     page2 = json.loads(result.output)
     assert len(page2) >= 1
 
@@ -295,7 +307,9 @@ def test_list_command_sorting(mock_env, runner):
     titles = [d["title"] for d in data]
     assert titles == sorted(titles, reverse=True)
 
-    result = runner.invoke(main, ["list", "--order-by", "title", "--reverse", "--format", "json"])
+    result = runner.invoke(
+        main, ["list", "--order-by", "title", "--reverse", "--format", "json"]
+    )
     data_rev = json.loads(result.output)
     titles_rev = [d["title"] for d in data_rev]
     assert titles_rev == sorted(titles)
@@ -305,12 +319,18 @@ def test_list_command_date_filtering(mock_env, runner):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
 
-    result = runner.invoke(main, [
-        "list",
-        "--since", "2000-01-01",
-        "--until", "2100-12-31",
-        "--format", "json",
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "list",
+            "--since",
+            "2000-01-01",
+            "--until",
+            "2100-12-31",
+            "--format",
+            "json",
+        ],
+    )
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     for doc in data:

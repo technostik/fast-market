@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
 
 from common import structlog
 from common.youtube.transport import RSSPlaylistTransport, Transport
+from common.youtube.client import YouTubeClient
+from common.auth.youtube import YouTubeOAuth
 
 from core.models import Document
-from core.sync_errors import NetworkError, TranscriptUnavailableError
+from core.sync_errors import (
+    MembershipOnlyError,
+    NetworkError,
+    TranscriptUnavailableError,
+    VideoBlockedError,
+)
 from plugins.base import ItemMeta, SourcePlugin
 
 logger = structlog.get_logger(__name__)
@@ -39,33 +48,143 @@ class YouTubePlugin(SourcePlugin):
             raise ValueError("Missing youtube.channel_id in config") from exc
 
         self.transport = transport or RSSPlaylistTransport(cookies=self.cookies)
+        self._api_client: YouTubeClient | None = None
+
+    def _get_api_client(self) -> YouTubeClient:
+        if self._api_client is None:
+            yt_cfg = self._get_config().get("youtube", {})
+            client_secret = yt_cfg.get("client_secret_path")
+            oauth = YouTubeOAuth(client_secret_path=client_secret)
+            api = oauth.get_client()
+            self._api_client = YouTubeClient(api, channel_id=self.channel_id)
+        return self._api_client
+
+    def _get_config(self) -> dict:
+        from common.core.config import load_config
+
+        return load_config()
 
     def list_items(
         self,
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
+        use_api: bool = False,
+    ) -> list[ItemMeta]:
+        if use_api:
+            return self._list_items_via_api(limit, known_id_dates)
+        return self._list_items_via_rss(limit, known_id_dates)
+
+    def _list_items_via_api(
+        self,
+        limit: int,
+        known_id_dates: dict[str, datetime | None] | None = None,
     ) -> list[ItemMeta]:
         known = set(known_id_dates or {})
-        out: list[ItemMeta] = []
+        all_new: list[ItemMeta] = []
         skipped_privacy = 0
+        skipped_indexed = 0
+
+        logger.info("youtube_api_list_videos", channel_id=self.channel_id)
+        client = self._get_api_client()
+
+        max_fetch = limit * 50
+        videos = client.get_channel_videos(self.channel_id, max_results=max_fetch)
+
+        for video in videos:
+            if video.video_id in known:
+                skipped_indexed += 1
+                continue
+
+            privacy = video.privacy_status or "unknown"
+            if not self.index_non_public and privacy not in _PUBLIC_STATUSES:
+                logger.info(
+                    "video_skipped_privacy",
+                    video_id=video.video_id,
+                    privacy_status=privacy,
+                )
+                skipped_privacy += 1
+                continue
+
+            duration = 0
+            if video.duration:
+                match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", video.duration)
+                if match:
+                    h, m, s = (int(x or 0) for x in match.groups())
+                    duration = h * 3600 + m * 60 + s
+
+            try:
+                updated = (
+                    datetime.fromisoformat(
+                        video.published_at.replace("Z", "+00:00")
+                    ).replace(tzinfo=None)
+                    if video.published_at
+                    else datetime.now()
+                )
+            except ValueError:
+                updated = datetime.now()
+
+            all_new.append(
+                ItemMeta(
+                    source_id=video.video_id,
+                    updated_at=updated,
+                    metadata={
+                        "id": video.video_id,
+                        "title": video.title,
+                        "description": video.description,
+                        "published_at": video.published_at,
+                        "url": video.url,
+                        "duration_seconds": duration,
+                        "privacy_status": privacy,
+                    },
+                )
+            )
+
+        logger.info(
+            "api_fetched",
+            source=self.name,
+            total_api=len(videos),
+            already_indexed=skipped_indexed,
+            skipped_privacy=skipped_privacy,
+            new_available=len(all_new),
+        )
+
+        out = all_new[:limit]
+        for item in out:
+            logger.info(
+                "video_listed",
+                video_id=item.source_id,
+                title=item.metadata.get("title", ""),
+                duration=_format_duration(item.metadata.get("duration_seconds", 0)),
+                privacy_status=item.metadata.get("privacy_status", "unknown"),
+            )
+
+        if skipped_privacy:
+            logger.info("videos_skipped_non_public", count=skipped_privacy)
+        logger.info("items_listed", source=self.name, count=len(out), requested=limit)
+        return out
+
+    def _list_items_via_rss(
+        self,
+        limit: int,
+        known_id_dates: dict[str, datetime | None] | None = None,
+    ) -> list[ItemMeta]:
+        known = set(known_id_dates or {})
+        all_new: list[ItemMeta] = []
+        skipped_privacy = 0
+        skipped_indexed = 0
 
         playlist_id = self.transport.get_uploads_playlist(self.channel_id)
 
         for page in self.transport.iter_playlist_pages(playlist_id):
-            if len(out) >= limit:
-                break
-
             video_ids = [item["snippet"]["resourceId"]["videoId"] for item in page]
             details = self.transport.get_video_details(video_ids)
 
             for item in page:
-                if len(out) >= limit:
-                    break
-
                 snippet = item["snippet"]
                 video_id = snippet["resourceId"]["videoId"]
 
                 if video_id in known:
+                    skipped_indexed += 1
                     continue
 
                 detail = details.get(video_id, {})
@@ -106,14 +225,7 @@ class YouTubePlugin(SourcePlugin):
                 except ValueError:
                     updated = datetime.now()
 
-                logger.info(
-                    "video_listed",
-                    video_id=video_id,
-                    title=snippet.get("title", ""),
-                    duration=_format_duration(duration),
-                    privacy_status=privacy,
-                )
-                out.append(
+                all_new.append(
                     ItemMeta(
                         source_id=video_id,
                         updated_at=updated,
@@ -129,9 +241,28 @@ class YouTubePlugin(SourcePlugin):
                     )
                 )
 
+        logger.info(
+            "rss_fetched",
+            source=self.name,
+            total_rss=len(all_new) + skipped_indexed + skipped_privacy,
+            already_indexed=skipped_indexed,
+            skipped_privacy=skipped_privacy,
+            new_available=len(all_new),
+        )
+
+        out = all_new[:limit]
+        for item in out:
+            logger.info(
+                "video_listed",
+                video_id=item.source_id,
+                title=item.metadata.get("title", ""),
+                duration=_format_duration(item.metadata.get("duration_seconds", 0)),
+                privacy_status=item.metadata.get("privacy_status", "unknown"),
+            )
+
         if skipped_privacy:
             logger.info("videos_skipped_non_public", count=skipped_privacy)
-        logger.info("items_listed", source=self.name, count=len(out))
+        logger.info("items_listed", source=self.name, count=len(out), requested=limit)
         return out
 
     def fetch(self, item_meta: ItemMeta) -> Document:
@@ -150,18 +281,58 @@ class YouTubePlugin(SourcePlugin):
             privacy_status=privacy_status,
         )
 
-        transcript = self.transport.get_transcript(video_id, self.cookies)
+        transcript = None
+        last_error = None
+
+        # Fallback 1: youtube-transcript-api
+        try:
+            transcript = self.transport.get_transcript(video_id, self.cookies)
+        except VideoBlockedError as exc:
+            logger.info("transcript_api_blocked_trying_yt_dlp", video_id=video_id)
+            last_error = exc
+        except TranscriptUnavailableError:
+            logger.info("transcript_unavailable_trying_yt_dlp", video_id=video_id)
+        except Exception as exc:
+            logger.warning(
+                "transcript_api_error", video_id=video_id, error=str(exc)[:100]
+            )
+            last_error = exc
+
+        # Fallback 2: yt-dlp subtitles
         if transcript is None:
-            logger.info("transcript_unavailable_trying_audio", video_id=video_id)
-            audio = self.transport.download_audio(video_id, self.cookies)
-            if audio is None:
-                raise TranscriptUnavailableError(f"No transcript for {video_id}")
             try:
-                transcript = transcribe_audio(audio, self.whisper_model)
-            except OSError as exc:
-                raise NetworkError(
-                    f"Network error while transcribing {video_id}"
-                ) from exc
+                transcript = self._try_yt_dlp_subs(video_id)
+            except Exception as exc:
+                logger.info(
+                    "yt_dlp_subs_failed", video_id=video_id, error=str(exc)[:100]
+                )
+                last_error = exc
+
+        # Fallback 3: YouTube API captions
+        if transcript is None:
+            try:
+                transcript = self._try_youtube_api_captions(video_id)
+            except Exception as exc:
+                logger.info(
+                    "youtube_api_captions_failed",
+                    video_id=video_id,
+                    error=str(exc)[:100],
+                )
+                last_error = exc
+
+        # Fallback 4: whisper (download audio + transcribe)
+        if transcript is None:
+            try:
+                transcript = self._try_whisper(video_id)
+            except Exception as exc:
+                logger.info("whisper_failed", video_id=video_id, error=str(exc)[:100])
+                last_error = exc
+
+        # If all fallbacks failed
+        if transcript is None:
+            raise VideoBlockedError(
+                f"All transcript methods failed for {video_id}: {last_error}"
+            )
 
         raw_text = (
             f"{description}\n\n{transcript}".strip() if description else transcript
@@ -178,6 +349,134 @@ class YouTubePlugin(SourcePlugin):
             privacy_status=privacy_status,
             metadata=meta,
         )
+
+    def _try_yt_dlp_subs(self, video_id: str) -> str | None:
+        """Try to get subtitles using yt-dlp."""
+        try:
+            import yt_dlp
+        except ImportError as exc:
+            raise RuntimeError("pip install yt-dlp") from exc
+
+        import tempfile
+        from pathlib import Path
+
+        out_dir = Path(tempfile.mkdtemp())
+        ydl_opts: dict = {
+            "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
+            "quiet": True,
+            "write_subs": True,
+            "write_auto_subs": True,
+            "skip_download": True,
+            "subtitleslangs": ["en", "fr"],
+        }
+        if self.cookies:
+            ydl_opts["cookiefile"] = self.cookies
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+        except Exception as exc:
+            logger.info(
+                "yt_dlp_subs_download_failed", video_id=video_id, error=str(exc)[:100]
+            )
+            return None
+
+        # Look for subtitle files
+        for ext in ["srt", "vtt", "txt"]:
+            subs = list(out_dir.glob(f"*.{ext}"))
+            if subs:
+                text = subs[0].read_text(encoding="utf-8")
+                # Simple cleanup - extract text from srt/vtt
+                if ext == "srt":
+                    import re
+
+                    text = re.sub(r"\d+\n\d{2}:\d{2}:\d{2},\d{3} --> .*\n", "", text)
+                elif ext == "vtt":
+                    import re
+
+                    text = re.sub(r"WEBVTT\n.*\n\n", "", text)
+                text = text.strip()
+                if text:
+                    logger.info(
+                        "yt_dlp_subs_success", video_id=video_id, chars=len(text)
+                    )
+                    return text
+
+        logger.info("yt_dlp_no_subs_found", video_id=video_id)
+        return None
+
+    def _try_youtube_api_captions(self, video_id: str) -> str | None:
+        """Try to get captions using YouTube Data API."""
+        try:
+            client = self._get_api_client()
+            yt = client.youtube
+        except Exception as exc:
+            logger.warning(
+                "youtube_api_client_failed", video_id=video_id, error=str(exc)[:100]
+            )
+            raise RuntimeError(
+                "YouTube API not available. Ensure OAuth credentials are configured "
+                "with 'https://www.googleapis.com/auth/youtube.force-ssl' scope. "
+                f"Error: {exc}"
+            ) from exc
+
+        try:
+            # List captions
+            captions = yt.captions().list(part="snippet", videoId=video_id).execute()
+
+            if not captions.get("items"):
+                logger.info("youtube_api_no_captions", video_id=video_id)
+                return None
+
+            # Get the first available caption track
+            caption_id = captions["items"][0]["id"]
+
+            # Download caption
+            caption = yt.captions().download(id=caption_id, tfmt="srt").execute()
+
+            if caption:
+                import re
+
+                text = (
+                    caption.decode("utf-8")
+                    if isinstance(caption, bytes)
+                    else str(caption)
+                )
+                # Convert SRT to plain text
+                text = re.sub(r"\d+\n\d{2}:\d{2}:\d{2},\d{3} --> .*\n", "", text)
+                text = text.strip()
+                logger.info(
+                    "youtube_api_captions_success", video_id=video_id, chars=len(text)
+                )
+                return text
+
+        except Exception as exc:
+            error_msg = str(exc).lower()
+            if "not found" in error_msg or "closed" in error_msg:
+                logger.info("youtube_api_no_captions", video_id=video_id)
+                return None
+            if "scope" in error_msg or "permission" in error_msg:
+                raise RuntimeError(
+                    "YouTube API missing required scope. "
+                    "Re-authenticate with: "
+                    "https://console.cloud.google.com/apis/credentials "
+                    "Ensure token has 'https://www.googleapis.com/auth/youtube.force-ssl' scope."
+                ) from exc
+            raise
+
+        return None
+
+    def _try_whisper(self, video_id: str) -> str | None:
+        """Try to transcribe using whisper (download audio + transcribe)."""
+        logger.info("transcript_unavailable_trying_whisper", video_id=video_id)
+        audio = self.transport.download_audio(video_id, self.cookies)
+        if audio is None:
+            return None
+        try:
+            transcript = transcribe_audio(audio, self.whisper_model)
+            return transcript
+        except OSError as exc:
+            raise NetworkError(f"Network error while transcribing {video_id}") from exc
 
 
 def transcribe_audio(audio_path: Path, model_size: str = "base") -> str:

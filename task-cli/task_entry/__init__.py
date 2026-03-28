@@ -32,11 +32,12 @@ def _load():
         click.echo("Run: common-setup", err=True)
         sys.exit(1)
 
-    from commands.task.register import register as task_register
+    from commands.task.register import register as task_register, report_cmd
     from commands.setup.register import register as setup_register
 
     main = create_cli_group("apply", default_command="apply")
     main.add_command(task_register(plugin_manifests).click_command)
+    main.add_command(report_cmd)
     main.add_command(setup_register())
 
     return main

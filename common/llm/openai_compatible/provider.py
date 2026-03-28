@@ -21,6 +21,17 @@ logger = structlog.get_logger(__name__)
 class OpenAICompatibleProvider(LazyLLMProvider):
     name = "openai-compatible"
 
+    def complete(self, request: LLMRequest) -> LLMResponse:
+        self._ensure_initialized()
+        if self._provider is None:
+            raise RuntimeError(
+                f"OpenAI-compatible provider not initialized. "
+                f"Check base_url and API key configuration. "
+                f"base_url: {getattr(self, 'base_url', 'not set')}, "
+                f"model: {getattr(self, 'default_model', 'not set')}"
+            )
+        return self._provider.complete(request)
+
     def _initialize(self):
         try:
             from openai import OpenAI
@@ -103,11 +114,35 @@ class _RealOpenAICompatibleProvider(LLMProvider):
         if request.tools:
             kwargs["tools"] = request.tools
             kwargs["tool_choice"] = "auto"
+        if request.timeout > 0:
+            kwargs["timeout"] = request.timeout
 
-        try:
-            response = self.client.chat.completions.create(**kwargs)
-        except Exception as exc:
-            raise RuntimeError(f"OpenAI-compatible API call failed: {exc}") from exc
+        for attempt in range(3):
+            try:
+                response = self.client.chat.completions.create(**kwargs)
+                break
+            except Exception as exc:
+                if attempt == 2:
+                    import warnings
+
+                    warnings.warn(
+                        f"OpenAI-compatible API call failed after 3 retries: {exc}"
+                    )
+                    break
+                if not (
+                    isinstance(exc, ConnectionError)
+                    or (hasattr(exc, "status_code") and exc.status_code == 500)
+                    or (
+                        hasattr(exc, "response")
+                        and hasattr(exc.response, "status_code")
+                        and exc.response.status_code == 500
+                    )
+                ):
+                    import warnings
+                    warnings.warn(f"OpenAI-compatible API call failed: {exc}")
+                    break
+                import time
+                time.sleep(1)
         message = response.choices[0].message
         content = message.content or ""
 
@@ -134,7 +169,11 @@ class _RealOpenAICompatibleProvider(LLMProvider):
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
             },
-            metadata={"id": response.id, "base_url": self.base_url},
+            metadata={
+                "id": response.id,
+                "base_url": self.base_url,
+                "finish_reason": response.choices[0].finish_reason,
+            },
             tool_calls=tool_calls,
         )
 

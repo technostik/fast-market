@@ -24,6 +24,7 @@ class TaskConfig:
     system_commands: list[str]
     max_iterations: int = 20
     default_timeout: int = 60
+    llm_timeout: int = 0  # 0 = no limit
     allowed_commands: list[str] = field(default_factory=list)
 
 
@@ -220,6 +221,7 @@ class TaskLoop:
                 system=system_prompt,
                 max_tokens=4096,
                 tools=tools,
+                timeout=self.config.llm_timeout,
             )
 
             if self._debug_full:

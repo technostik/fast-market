@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# guess — a fictional CLI tool for learning tests
+# The LLM cannot know the correct invocation without reading --help twice.
+
+set -euo pipefail
+
+if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" ]]; then
+    echo "guess — a mysterious computation tool"
+    echo ""
+    echo "Usage: guess <command> [args]"
+    echo ""
+    echo "Commands:"
+    echo "  doit    Perform the core operation"
+    echo ""
+    echo "Run 'guess doit --help' for more information."
+    exit 0
+fi
+
+COMMAND="$1"
+shift
+
+if [[ "$COMMAND" != "doit" ]]; then
+    echo "Error: unknown command '$COMMAND'" >&2
+    echo "Run 'guess --help' for usage." >&2
+    exit 1
+fi
+
+if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" ]]; then
+    echo "guess doit — perform the core operation"
+    echo ""
+    echo "Usage: guess doit again <STRING>"
+    echo ""
+    echo "Arguments:"
+    echo "  again     Required keyword"
+    echo "  STRING    The input string to process"
+    echo ""
+    echo "Example: guess doit again hello"
+    exit 0
+fi
+
+SUBCOMMAND="$1"
+shift
+
+if [[ "$SUBCOMMAND" != "again" ]]; then
+    echo "Error: expected keyword 'again', got '$SUBCOMMAND'" >&2
+    echo "Run 'guess doit --help' for usage." >&2
+    exit 1
+fi
+
+if [[ $# -eq 0 ]]; then
+    echo "Error: missing STRING argument" >&2
+    echo "Run 'guess doit --help' for usage." >&2
+    exit 1
+fi
+
+INPUT="$1"
+
+# Core operation: reverse the string
+echo "$INPUT" | rev

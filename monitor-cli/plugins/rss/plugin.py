@@ -17,7 +17,6 @@ class RSSPlugin(SourcePlugin):
         self,
         last_item_id: str | None = None,
         limit: int = 50,
-        last_fetched_at: datetime | None = None,
         force: bool = False,
     ) -> list[ItemMetadata]:
         if not self._should_fetch(force):
@@ -71,9 +70,6 @@ class RSSPlugin(SourcePlugin):
                 published = datetime.now(timezone.utc)
 
             if last_item_id and entry.id == last_item_id:
-                break
-
-            if last_fetched_at and published <= last_fetched_at:
                 break
 
             item = ItemMetadata(

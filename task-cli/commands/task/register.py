@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -93,6 +94,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--timeout", "-t", type=int, default=None, help="Timeout per command (seconds)"
     )
     @click.option(
+        "--llm-timeout",
+        type=int,
+        default=0,
+        help="Timeout per LLM call (seconds, 0=no limit)",
+    )
+    @click.option(
         "--dry-run", "-n", is_flag=True, help="Show commands without executing"
     )
     @click.option(
@@ -119,6 +126,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Skill name to write LEARN.md to (required if --auto-learn and task is not 'skill apply ...')",
     )
     @click.option(
+        "--compact",
+        "-C",
+        is_flag=True,
+        help="Use compacting prompt to consolidate multiple learnings",
+    )
+    @click.option(
+        "--autocompact-lines",
+        type=int,
+        default=None,
+        help="Auto-compact LEARN.md when it exceeds this many lines",
+    )
+    @click.option(
         "--save-session",
         "-o",
         type=click.Path(),
@@ -136,12 +155,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
         model,
         max_iterations,
         timeout,
+        llm_timeout,
         dry_run,
         debug,
         fmt,
         silent,
         auto_learn,
         learn_skill,
+        compact,
+        autocompact_lines,
         save_session,
     ):
         """Execute a task with LLM-driven CLI command loop.
@@ -169,6 +191,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             allowed_commands=allowed_commands,
             max_iterations=max_iterations or task_config_dict.get("max_iterations", 20),
             default_timeout=timeout or task_config_dict.get("default_timeout", 60),
+            llm_timeout=llm_timeout,
         )
 
         resolved_workdir = (
@@ -269,6 +292,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     model=model,
                     config=task_config_dict,
                     silent=silent,
+                    compact=compact,
+                    autocompact_lines=autocompact_lines,
                 )
 
             if save_session and loop.session:
@@ -277,6 +302,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 loop.session.save(session_path)
                 if not silent:
                     click.echo(f"\nSession saved to: {session_path}")
+
+            if not silent and loop.session:
+                m = loop.session.metrics_dict()
+                click.echo(
+                    "\n── Session Metrics ──────────────────────────\n"
+                    f"  Tool calls : {m['total_tool_calls']}\n"
+                    f"  Rounds     : {m['iterations_used']}\n"
+                    f"  Errors     : {m['error_count']}\n"
+                    f"  Guesses    : {m['guess_count']}\n"
+                    f"  Success    : {m['success_rate']:.0%}\n"
+                    "────────────────────────────────────────────",
+                    err=True,
+                )
 
             if debug == "full" and not silent and loop.session:
                 click.echo("\n" + "=" * 60, file=sys.stderr)
@@ -294,6 +332,57 @@ def register(plugin_manifests: dict) -> CommandManifest:
             sys.exit(1)
 
     return CommandManifest(name="apply", click_command=apply_cmd)
+
+
+@click.command("report")
+@click.argument("session_file", type=click.Path(exists=True))
+@click.option(
+    "--format",
+    "-F",
+    "fmt",
+    type=click.Choice(["text", "json"]),
+    default="text",
+)
+def report_cmd(session_file, fmt):
+    """Show metrics and error summary for a saved session."""
+    data = yaml.safe_load(Path(session_file).read_text(encoding="utf-8")) or {}
+
+    metrics = data.get("metrics", {})
+    turns = data.get("turns", [])
+
+    failures = []
+    for turn in turns:
+        for tc in turn.get("tool_calls", []):
+            exit_code = tc.get("exit_code")
+            if exit_code is not None and exit_code != 0:
+                failures.append(
+                    {
+                        "command": tc.get("arguments", {}).get("command", ""),
+                        "exit_code": exit_code,
+                        "stderr": tc.get("stderr", "")[:200],
+                        "stdout": tc.get("stdout", "")[:200],
+                    }
+                )
+
+    if fmt == "json":
+        click.echo(json.dumps({"metrics": metrics, "failures": failures}, indent=2))
+        return
+
+    click.echo(f"\nSession: {session_file}")
+    click.echo(f"Task: {str(data.get('task_description', ''))[:80]}")
+    click.echo("\n── Metrics ──────────────────")
+    for k, v in metrics.items():
+        click.echo(f"  {k}: {v}")
+
+    if failures:
+        click.echo(f"\n── Failures ({len(failures)}) ──────────────")
+        for i, failure in enumerate(failures, 1):
+            click.echo(f"  [{i}] cmd: {failure['command']}")
+            click.echo(f"      exit: {failure['exit_code']}")
+            if failure["stderr"]:
+                click.echo(f"      err: {failure['stderr'][:100]}")
+    else:
+        click.echo("\n  No failures ✓")
 
 
 def _resolve_workdir(path: str) -> Path:
@@ -384,13 +473,22 @@ def _infer_skill_name_from_session(session) -> str | None:
     return None
 
 
-def _run_auto_learn(session, skill_name, provider_instance, model, config, silent):
+def _run_auto_learn(
+    session,
+    skill_name,
+    provider_instance,
+    model,
+    config,
+    silent,
+    compact=False,
+    autocompact_lines=None,
+):
     if not skill_name:
         if not silent:
             click.echo("[AUTO-LEARN] Skipped: no skill name", err=True)
         return
 
-    from commands.task.learner import analyze_session, update_learn_file
+    from common.learn import analyze_session, update_learn_file
 
     if not silent:
         click.echo(
@@ -399,19 +497,23 @@ def _run_auto_learn(session, skill_name, provider_instance, model, config, silen
         )
 
     try:
-        learn_prompt = config.get("learn_prompt", None)
+        learn_analysis_prompt = config.get("learn_analysis_prompt", None)
+        learn_result_template = config.get("learn_result_template", None)
         content = analyze_session(
             session,
             skill_name,
             provider_instance,
             model,
-            learn_prompt,
+            learn_analysis_prompt=learn_analysis_prompt,
+            learn_result_template=learn_result_template,
         )
         path = update_learn_file(
             skill_name,
             content,
             provider=provider_instance,
             model=model,
+            autocompact_lines=autocompact_lines,
+            use_compacting=compact,
         )
         if not silent:
             click.echo(f"[AUTO-LEARN] LEARN.md updated: {path}", err=True)

@@ -29,8 +29,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Read message content from stdin (for piping)",
     )
+    @click.option(
+        "--markdown",
+        is_flag=True,
+        default=False,
+        help="Use Markdown parse mode instead of HTML",
+    )
     @click.pass_context
-    def ask_cmd(ctx, message, source, fmt, stdin, **kwargs):
+    def ask_cmd(ctx, message, source, fmt, stdin, markdown, **kwargs):
         if stdin or message == "-":
             message = read_stdin()
         elif not message:
@@ -44,8 +50,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             timeout = config.get("telegram", {}).get("default_timeout", 300)
 
         message_id = None
+        parse_mode = "Markdown" if markdown else "HTML"
         try:
-            message_id = plugin.send_message(message)
+            message_id = plugin.send_message(message, parse_mode=parse_mode)
             response = plugin.wait_for_reply(timeout)
             out(
                 {

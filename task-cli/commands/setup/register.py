@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from common.core.config import _resolve_config_path
+from common.core.yaml_utils import dump_yaml
 from commands.setup import init_task_config, load_task_config, save_task_config
 from commands.setup.task_edit import edit_task_config
 
@@ -25,11 +26,7 @@ def register(plugin_manifests: dict | None = None):
         """Show current task config."""
         config = load_task_config()
         task = init_task_config(config)
-        import yaml
-
-        click.echo(
-            yaml.safe_dump({"task": task}, default_flow_style=False, sort_keys=False)
-        )
+        click.echo(dump_yaml({"task": task}, sort_keys=False))
 
     @setup_cmd.command("edit")
     def edit_cmd():

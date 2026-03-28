@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from common.core.config import _resolve_config_path, load_tool_config
+from common.core.yaml_utils import dump_yaml
 from commands.setup import load_config, save_config, init_task_config
 
 from common.cli.helpers import get_editor
@@ -18,7 +19,7 @@ def edit_task_config() -> bool:
     config = load_config(config_path)
     init_task_config(config)
 
-    yaml_content = yaml.safe_dump(config, default_flow_style=False, sort_keys=False)
+    yaml_content = dump_yaml(config, sort_keys=False)
 
     import tempfile
 

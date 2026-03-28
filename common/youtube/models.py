@@ -22,6 +22,7 @@ class Video(BaseModel):
     language: str = ""
     days_old: int = 0
     duration: str = ""  # ISO 8601 duration (e.g., "PT5M34S")
+    privacy_status: str = "public"  # public, private, unlisted
 
     @classmethod
     def from_search_result(cls, item: dict, details: Optional[dict] = None) -> "Video":

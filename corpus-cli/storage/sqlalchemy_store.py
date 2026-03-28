@@ -23,6 +23,7 @@ from storage.models import ChunkModel, DocumentModel, SyncFailureModel
 logger = structlog.get_logger(__name__)
 
 YOUTUBE_SHORT_MAX_SECONDS = 60
+MAX_TRANSIENT_RETRIES = 3
 
 
 class SearchFilters:
@@ -331,7 +332,7 @@ class SQLAlchemyStore:
                     LIMIT :limit
                     """
                     ),
-                    {"query": query, "limit": limit * 5},
+                    {"query": f'"{query}"', "limit": limit * 5},
                 )
                 .mappings()
                 .all()
@@ -568,6 +569,17 @@ class SQLAlchemyStore:
                 existing.retry_count = int(existing.retry_count or 0) + 1
                 existing.last_retry_at = now
                 existing.vault_path = vault_path
+                if (
+                    error_type == "transient"
+                    and existing.retry_count >= MAX_TRANSIENT_RETRIES
+                ):
+                    logger.info(
+                        "failure_upgraded_to_permanent",
+                        source_plugin=source_plugin,
+                        source_id=source_id,
+                        retry_count=existing.retry_count,
+                    )
+                    existing.error_type = "permanent"
                 return
             session.add(
                 SyncFailureModel(
@@ -637,10 +649,24 @@ class SQLAlchemyStore:
         return [dict(row) for row in rows]
 
     def clear_failures(
-        self, source_plugin: str | None = None, include_permanent: bool = False
+        self,
+        source_plugin: str | None = None,
+        include_permanent: bool = False,
+        include_blocked: bool = False,
     ) -> int:
         with self._session() as session:
-            if source_plugin and include_permanent:
+            if include_blocked:
+                # Clear ALL failures (transient + permanent + blocked)
+                if source_plugin:
+                    res = session.execute(
+                        text(
+                            "DELETE FROM sync_failures WHERE source_plugin=:source_plugin"
+                        ),
+                        {"source_plugin": source_plugin},
+                    )
+                else:
+                    res = session.execute(text("DELETE FROM sync_failures"))
+            elif source_plugin and include_permanent:
                 res = session.execute(
                     text(
                         "DELETE FROM sync_failures WHERE source_plugin=:source_plugin"

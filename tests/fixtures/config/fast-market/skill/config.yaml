@@ -1,1 +1,8 @@
-# no overrides needed, inherits llm from common
+workdir: /tmp/fast-market-test-workdir
+llm:
+  default_provider: openai-compatible
+auto_learn_prompt: "# Lessons Learned for {skill_name}\n\n## What Works\n- Skill execution\
+  \ `{skill_ref}` exited with code `{exit_code}`.\n- Key stdout signal: `{stdout_preview}`\n\
+  \n## What to Avoid\n- Pattern leading to failure: `{stderr_preview}`\n\n## Common\
+  \ Errors and Fixes\n- Error: `{stderr_preview}` \u2192 Fix: adjust params/inputs\
+  \ and retry.\n"

@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from common import structlog
+from common.core.yaml_utils import dump_yaml
 
 logger = structlog.get_logger(__name__)
 
@@ -87,7 +88,7 @@ def save_aliases(aliases: dict[str, dict]) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     data = {"aliases": aliases}
-    yaml_content = yaml.dump(data, default_flow_style=False, sort_keys=False)
+    yaml_content = dump_yaml(data, sort_keys=False)
     config_path.write_text(yaml_content, encoding="utf-8")
 
     global _aliases_cache
@@ -276,7 +277,7 @@ def export_aliases() -> str:
     """Export all aliases as YAML string."""
     aliases = load_aliases()
     data = {"aliases": aliases}
-    return yaml.dump(data, default_flow_style=False, sort_keys=False)
+    return dump_yaml(data, sort_keys=False)
 
 
 def get_alias_config_path() -> Path:

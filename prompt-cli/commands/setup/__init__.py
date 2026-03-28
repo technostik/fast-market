@@ -6,6 +6,7 @@ import click
 import yaml
 
 from common.core.config import _resolve_config_path
+from common.core.yaml_utils import dump_yaml
 
 
 def load_task_config() -> dict:
@@ -35,7 +36,7 @@ def save_task_config(config: dict) -> None:
 
     task_data = config.get("task", config)
     with open(config_path, "w") as f:
-        yaml.safe_dump(task_data, f, default_flow_style=False, sort_keys=False)
+        f.write(dump_yaml(task_data, sort_keys=False))
 
 
 _SUPPORTED_PROVIDERS = {"anthropic", "openai", "openai-compatible", "ollama"}
@@ -160,7 +161,7 @@ def load_config(config_path: Path) -> dict:
 def save_config(config_path: Path, config: dict) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
-        yaml.safe_dump(config, default_flow_style=False, sort_keys=False),
+        dump_yaml(config, sort_keys=False),
         encoding="utf-8",
     )
 

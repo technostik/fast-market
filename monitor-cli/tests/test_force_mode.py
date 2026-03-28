@@ -72,12 +72,9 @@ class TestForceMode:
 
         called_args = {}
 
-        async def mock_fetch_new_items(
-            last_item_id=None, limit=50, last_fetched_at=None, force=False
-        ):
+        async def mock_fetch_new_items(last_item_id=None, limit=50, force=False):
             called_args["last_item_id"] = last_item_id
             called_args["limit"] = limit
-            called_args["last_fetched_at"] = last_fetched_at
             called_args["force"] = force
             return items
 
@@ -100,7 +97,6 @@ class TestForceMode:
 
             assert called_args.get("last_item_id") is None
             assert called_args.get("limit") == 10
-            assert called_args.get("last_fetched_at") is None
             assert '"mode": "force"' in result.output
 
     def test_run_command_normal_mode(self, tmp_path):
@@ -132,9 +128,8 @@ class TestForceMode:
 
         called_args = {}
 
-        async def mock_fetch_new_items(last_item_id=None, limit=50, last_fetched_at=None):
+        async def mock_fetch_new_items(last_item_id=None, limit=50, force=False):
             called_args["last_item_id"] = last_item_id
-            called_args["last_fetched_at"] = last_fetched_at
             return []
 
         mock_plugin_instance = MagicMock()
@@ -154,24 +149,24 @@ class TestForceMode:
             runner = CliRunner()
             result = runner.invoke(cmd, ["--format", "json"])
 
-            assert called_args.get("last_fetched_at") == last_fetch
+            assert called_args.get("last_item_id") is None
             assert '"mode": "normal"' in result.output
 
-    def test_force_mode_preserves_last_fetched_at(self, tmp_path):
-        """Test that --force mode does NOT update the last_fetched_at."""
+    def test_force_mode_preserves_last_item_id(self, tmp_path):
+        """Test that --force mode does NOT update the last_item_id."""
         from core.storage import MonitorStorage
         from commands.run.register import register
 
         db_path = tmp_path / "test.db"
         storage = MonitorStorage(db_path)
 
-        original_time = datetime.now(timezone.utc)
+        original_item_id = "old-video-id"
         source = Source(
             id="test-src-force",
             plugin="youtube",
             origin="UC123456789",
             description="Test Channel",
-            last_fetched_at=original_time,
+            last_item_id=original_item_id,
             created_at=datetime.now(),
         )
         storage.add_source(source)
@@ -197,7 +192,7 @@ class TestForceMode:
             ),
         ]
 
-        async def mock_fetch_new_items(last_item_id=None, limit=50, last_fetched_at=None):
+        async def mock_fetch_new_items(last_item_id=None, limit=50, force=False):
             return items
 
         mock_plugin_instance = MagicMock()
@@ -218,7 +213,7 @@ class TestForceMode:
             result = runner.invoke(cmd, ["--force", "--format", "json"])
 
             updated_source = storage.get_source("test-src-force")
-            assert updated_source.last_fetched_at == original_time
+            assert updated_source.last_item_id == original_item_id
 
     def test_force_mode_limit_works(self, tmp_path):
         """Test that --limit works correctly with --force."""
@@ -247,9 +242,7 @@ class TestForceMode:
 
         called_args = {}
 
-        async def mock_fetch_new_items(
-            last_item_id=None, limit=50, last_fetched_at=None, force=False
-        ):
+        async def mock_fetch_new_items(last_item_id=None, limit=50, force=False):
             called_args["limit"] = limit
             return []
 

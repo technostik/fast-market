@@ -6,6 +6,7 @@ import click
 import yaml
 
 from common.core.config import _resolve_config_path, load_tool_config, save_tool_config
+from common.core.yaml_utils import dump_yaml
 
 
 def load_task_config() -> dict:
@@ -35,7 +36,7 @@ def save_task_config(config: dict) -> None:
 
     task_data = config.get("task", config)
     with open(config_path, "w") as f:
-        yaml.safe_dump(task_data, f, default_flow_style=False, sort_keys=False)
+        f.write(dump_yaml(task_data, sort_keys=False))
 
 
 DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
@@ -166,9 +167,14 @@ def init_task_config(config: dict | None = None) -> dict:
             },
         }
 
-    if "learn_prompt" not in task:
-        from commands.task.learner import LEARN_PROMPT_TEMPLATE
+    if "learn_analysis_prompt" not in task:
+        from common.learn import LEARN_ANALYSIS_PROMPT_TEMPLATE
 
-        task["learn_prompt"] = LEARN_PROMPT_TEMPLATE
+        task["learn_analysis_prompt"] = LEARN_ANALYSIS_PROMPT_TEMPLATE
+
+    if "learn_result_template" not in task:
+        from common.learn import LEARN_RESULT_TEMPLATE
+
+        task["learn_result_template"] = LEARN_RESULT_TEMPLATE
 
     return task

@@ -7,7 +7,14 @@ from common import structlog
 
 from core.embedder import Embedder
 from core.handle import make_handle
-from core.models import Chunk, Document, ReindexResult, SyncFailure, SyncResult
+from core.models import (
+    Chunk,
+    Document,
+    ReindexResult,
+    SyncFailure,
+    SyncResult,
+    SyncResult,
+)
 from core.sync_errors import SyncError
 from plugins.base import SourcePlugin
 from storage.sqlite_store import SQLiteStore
@@ -48,16 +55,43 @@ class SyncEngine:
         return chunks
 
     def sync(
-        self, plugin: SourcePlugin, mode: str, limit: int, vault_path: str | None = None
+        self,
+        plugin: SourcePlugin,
+        mode: str,
+        limit: int,
+        vault_path: str | None = None,
+        use_api: bool = False,
     ) -> SyncResult:
         known_id_dates = (
             self.store.get_indexed_id_dates(plugin.name) if mode == "new" else {}
         )
 
         permanent_failures = self.store.get_permanent_failures(plugin.name)
-        items = plugin.list_items(limit=limit, known_id_dates=known_id_dates)
+
+        list_kwargs = {"limit": limit, "known_id_dates": known_id_dates}
+        if hasattr(plugin, "list_items"):
+            import inspect
+
+            sig = inspect.signature(plugin.list_items)
+            if "use_api" in sig.parameters:
+                list_kwargs["use_api"] = use_api
+
+        items = plugin.list_items(**list_kwargs)
+
+        logger.info(
+            "sync_started",
+            source=plugin.name,
+            mode=mode,
+            limit=limit,
+            use_api=use_api,
+            known_ids=len(known_id_dates),
+            permanent_failures=len(permanent_failures),
+            items_available=len(items),
+        )
+
         processed = indexed = skipped = 0
         failures: list[SyncFailure] = []
+        warning: str | None = None
 
         for item in items:
             if item.source_id in permanent_failures:
@@ -117,7 +151,21 @@ class SyncEngine:
                 )
                 failures.append(SyncFailure(source_id=item.source_id, error=str(exc)))
 
-        return SyncResult(plugin.name, processed, indexed, skipped, failures)
+        if processed == 0 and len(items) == 0:
+            warning = f"No items found for {plugin.name}. Check RSS feed or network connection."
+            logger.warning("sync_no_items", source=plugin.name, warning=warning)
+        elif processed == 0 and len(items) > 0:
+            warning = f"All {len(items)} items skipped (all permanent failures or already indexed)."
+            logger.warning(
+                "sync_all_skipped",
+                source=plugin.name,
+                warning=warning,
+                skipped=len(items),
+            )
+
+        return SyncResult(
+            plugin.name, processed, indexed, skipped, failures, warning=warning
+        )
 
     def reindex(self, plugin: SourcePlugin) -> ReindexResult:
         rows = self.store.get_documents_raw(plugin.name)

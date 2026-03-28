@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,7 @@ import yaml
 from common import structlog
 from common.core.paths import get_cache_dir, get_skills_dir
 from common.llm.base import LLMRequest
+from common.rt_subprocess import rt_subprocess
 from common.skill.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
@@ -157,7 +159,16 @@ def _execute_skill(
     if workdir and workdir != ".":
         cmd += ["--workdir", workdir]
 
-    result = subprocess.run(cmd, timeout=timeout)
+    debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+        "1",
+        "true",
+        "TRUE",
+    }
+    if debug_enabled:
+        result = rt_subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
+        print(f"[router][exec] command={' '.join(cmd)} exit={result.returncode}")
+    else:
+        result = subprocess.run(cmd, timeout=timeout)
     return result.returncode
 
 
@@ -186,7 +197,9 @@ def _read_session(session_file: Path) -> str:
     return combined[:3000]
 
 
-def _call_plan(state: RouterState, provider, model: str | None, skills: list[Skill]) -> dict:
+def _call_plan(
+    state: RouterState, provider, model: str | None, skills: list[Skill]
+) -> dict:
     prompt = PLAN_PROMPT.format(
         goal=state.goal,
         skills_list=build_skills_list(skills),
@@ -194,7 +207,55 @@ def _call_plan(state: RouterState, provider, model: str | None, skills: list[Ski
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=500)
     response = provider.complete(req)
-    data = json.loads((response.content or "").strip())
+    raw = (response.content or "").strip()
+    debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+        "1",
+        "true",
+        "TRUE",
+    }
+    if debug_enabled:
+        print("[router][plan] model:", model or "(provider default)")
+        print("[router][plan] prompt:\n", prompt[:4000])
+        print("[router][plan] raw response:\n", raw if raw else "(empty)")
+
+    if not raw:
+        model_name = response.model or model or "unknown"
+        finish_reason = (
+            response.metadata.get("finish_reason") if response.metadata else None
+        )
+        raise ValueError(
+            f"Planner returned empty response. "
+            f"Model: {model_name}, finish_reason: {finish_reason}. "
+            f"Enable SKILL_ROUTER_DEBUG_LLM=1 to print prompt/response details."
+        )
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        cleaned = raw
+        if "```" in cleaned:
+            cleaned = cleaned.replace("```json", "```")
+            parts = [p.strip() for p in cleaned.split("```") if p.strip()]
+            json_candidates = [
+                p for p in parts if p.startswith("{") and p.endswith("}")
+            ]
+            if json_candidates:
+                cleaned = json_candidates[0]
+
+        if not (cleaned.startswith("{") and cleaned.endswith("}")):
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start : end + 1]
+
+        try:
+            data = json.loads(cleaned)
+        except Exception as exc:
+            raise ValueError(
+                "Planner returned invalid JSON. "
+                f"Raw response: {raw[:300]!r}. Parse error: {exc}"
+            ) from exc
+
     if not isinstance(data, dict):
         raise ValueError("Planner returned non-object JSON")
     return data
@@ -216,13 +277,32 @@ def _call_distill(
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=500)
     response = provider.complete(req)
-    return (response.content or "").strip()
+    distilled = (response.content or "").strip()
+    debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+        "1",
+        "true",
+        "TRUE",
+    }
+    if debug_enabled:
+        print(f"[router][distill] skill={skill_name} params={params}")
+        print("[router][distill] prompt:\n", prompt[:3000])
+        print(
+            "[router][distill] raw response:\n", distilled if distilled else "(empty)"
+        )
+
+    if distilled:
+        return distilled
+    # Fallback for unstable/empty LLM responses: preserve actionable session facts.
+    fallback = (session_output or "").strip()
+    return fallback[:1000] if fallback else "(no distilled output)"
 
 
 def _print_attempt(attempt: SkillAttempt) -> None:
     status = "success" if attempt.success else "failed"
     params = ", ".join(f"{k}={v}" for k, v in attempt.params.items())
-    print(f"[router] step {attempt.iteration}: {attempt.skill_name} ({params}) -> {status}")
+    print(
+        f"[router] step {attempt.iteration}: {attempt.skill_name} ({params}) -> {status}"
+    )
     print(f"[router] distilled: {attempt.distilled_result[:300]}")
 
 
@@ -236,7 +316,9 @@ def run_router(
     retry_limit: int = 2,
     verbose: bool = False,
 ) -> RouterState:
-    state = RouterState(goal=goal, attempts=[], iteration=0, max_iterations=max_iterations)
+    state = RouterState(
+        goal=goal, attempts=[], iteration=0, max_iterations=max_iterations
+    )
     skills = discover_skills(get_skills_dir())
 
     if not skills:
@@ -253,6 +335,13 @@ def run_router(
             state.failed = True
             state.failure_reason = f"Planner failed: {exc}"
             break
+
+        if os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+            "1",
+            "true",
+            "TRUE",
+        }:
+            print(f"[router][plan] parsed action: {plan}")
 
         action = plan.get("action")
         if action == "done":
@@ -282,7 +371,9 @@ def run_router(
             state.failure_reason = f"Planner returned unknown skill: {skill_name}"
             break
 
-        failed_count = sum(1 for a in state.attempts if a.skill_name == skill_name and not a.success)
+        failed_count = sum(
+            1 for a in state.attempts if a.skill_name == skill_name and not a.success
+        )
         if failed_count >= retry_limit:
             attempt = SkillAttempt(
                 skill_name=skill_name,
@@ -298,11 +389,22 @@ def run_router(
             continue
 
         session_file = _make_session_path(workdir, state.iteration)
-        exit_code = _execute_skill(skill_name, params, workdir, skill_timeout, session_file)
+        exit_code = _execute_skill(
+            skill_name, params, workdir, skill_timeout, session_file
+        )
         session_output = _read_session(session_file)
+        if os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+            "1",
+            "true",
+            "TRUE",
+        }:
+            print(f"[router][session] file={session_file}")
+            print("[router][session] summary:\n", session_output[:3000])
 
         try:
-            distilled = _call_distill(skill_name, params, session_output, provider, model)
+            distilled = _call_distill(
+                skill_name, params, session_output, provider, model
+            )
         except Exception as exc:
             distilled = f"Distillation failed: {exc}"
 
@@ -320,6 +422,8 @@ def run_router(
 
     if not state.done and not state.failed and state.iteration >= max_iterations:
         state.failed = True
-        state.failure_reason = f"Max iterations ({max_iterations}) reached without completion"
+        state.failure_reason = (
+            f"Max iterations ({max_iterations}) reached without completion"
+        )
 
     return state

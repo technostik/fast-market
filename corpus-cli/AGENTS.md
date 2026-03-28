@@ -10,10 +10,58 @@ corpus-agent/
 ├── core/           # Foundation: config, models, embedding, sync engine
 ├── storage/        # Persistence: SQLite with SQLAlchemy + Alembic
 ├── plugins/        # Source integrations: YouTube, Obsidian
-├── commands/       # CLI modules: sync, search, list, serve, etc.
+├── commands/       # CLI modules (see below)
 ├── api/            # HTTP endpoints (via server.py)
 ├── ui/             # Frontend HTML pages
 └── cli/            # Entry point (main.py)
+```
+
+## CLI Commands
+
+### Core Commands
+
+| Command | Description |
+|---------|-------------|
+| `corpus sync` | Fetch content and index into corpus |
+| `corpus search` | Search indexed documents |
+| `corpus list` | List indexed documents |
+| `corpus get-from-id` | Get document by handle |
+| `corpus get-from-source` | Get document by source + id |
+| `corpus get-last` | Get most recently indexed document |
+| `corpus delete` | Delete document by handle |
+| `corpus status` | Show corpus statistics |
+| `corpus serve` | Start web server |
+| `corpus embed-server` | Start embedding server |
+
+### Sync Modes
+
+The `corpus sync` command supports three modes:
+
+- `new` (default) — Sync only new items, skip already-indexed
+- `backfill` — Re-fetch all items, ignore previous indexing
+- `reindex` — Regenerate embeddings for existing documents (no content re-fetch)
+
+```bash
+corpus sync                          # new items only (default)
+corpus sync --mode backfill          # re-fetch all content
+corpus sync --mode reindex           # regenerate embeddings
+```
+
+### Retry Failures
+
+Use `--retry-failure` to clear tracked sync failures before syncing:
+
+```bash
+corpus sync --retry-failure                      # retry transient failures
+corpus sync --retry-failure --clear-permanent    # include permanent failures
+corpus sync --retry-failure --include-blocked   # include blocked videos
+```
+
+### Setup Commands
+
+```bash
+corpus setup run    # Run interactive setup wizard
+corpus setup edit  # Interactively edit config.yaml
 ```
 
 ## 📋 Core System Responsibilities
@@ -153,6 +201,12 @@ All commands must follow standard short form conventions:
 4. Add API router via `CommandManifest.api_router` (optional)
 5. Add frontend JS via `CommandManifest.frontend_js` (optional)
 6. Registry auto-injects plugin options and registers command
+
+### Add Subcommand to Existing Group
+For commands that need subcommands (like `setup`):
+1. Create `commands/parent_command/subcommands/your_subcommand.py`
+2. Implement `register(plugin_manifests) -> click.Command`
+3. Parent command auto-discovers and adds subcommands
 
 ### Add New UI Feature
 1. Add HTML page to `ui/` directory

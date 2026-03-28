@@ -43,23 +43,35 @@ def fmt_duration(seconds: int | None) -> str:
 
 def make_filters(**kwargs) -> SearchFilters:
     """Build SearchFilters from kwargs, ignoring unrecognized keys."""
-    return SearchFilters(**{key: value for key, value in kwargs.items() if key in _SF_PARAMS})
+    return SearchFilters(
+        **{key: value for key, value in kwargs.items() if key in _SF_PARAMS}
+    )
 
 
 _NOISY_LOGGERS = [
-    "core", "storage", "plugins", "sentence_transformers",
-    "transformers", "huggingface_hub", "torch", "filelock",
-    "urllib3", "httpx",
+    "core",
+    "storage",
+    "plugins",
+    "sentence_transformers",
+    "transformers",
+    "huggingface_hub",
+    "torch",
+    "filelock",
+    "urllib3",
+    "httpx",
 ]
 
 
 def _configure_logging(verbose: bool) -> None:
     import logging
 
-    level = logging.INFO if verbose else logging.CRITICAL
-    logging.basicConfig(level=level, stream=sys.stderr,
-                        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
-                        force=True)
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        stream=sys.stderr,
+        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+        force=True,
+    )
     logging.root.setLevel(level)
     for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(level)

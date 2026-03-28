@@ -31,7 +31,11 @@ class MessagePlugin(ABC):
 
     @abstractmethod
     def send_alert(
-        self, text: str, wait_for_ack: bool = False, timeout: int = 300
+        self,
+        text: str,
+        wait_for_ack: bool = False,
+        timeout: int = 300,
+        parse_mode: str = "HTML",
     ) -> dict:
         raise NotImplementedError
 

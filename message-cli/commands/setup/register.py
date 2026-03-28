@@ -6,6 +6,8 @@ from pathlib import Path
 import click
 import yaml
 from telegram import Update
+
+from common.core.yaml_utils import dump_yaml
 from telegram.ext import Application, MessageHandler, filters
 
 from commands.base import CommandManifest
@@ -43,7 +45,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if show_config:
             config = load_config()
             if config:
-                click.echo(yaml.dump(config, default_flow_style=False))
+                click.echo(dump_yaml(config))
             else:
                 click.echo("(no configuration found)")
             return
@@ -111,7 +113,7 @@ def _setup_telegram(config_path: Path):
         },
     }
 
-    config_path.write_text(yaml.dump(new_config, default_flow_style=False))
+    config_path.write_text(dump_yaml(new_config))
     click.echo(f"\nConfiguration saved to: {config_path}")
 
     if not bot_token:
@@ -178,7 +180,7 @@ async def _test_and_capture(bot_token, telegram_config, config_path, new_config)
 
     if chat_id_captured["id"]:
         new_config["telegram"]["allowed_chat_id"] = chat_id_captured["id"]
-        config_path.write_text(yaml.dump(new_config, default_flow_style=False))
+        config_path.write_text(dump_yaml(new_config))
         click.echo(f"\nChat ID saved: {chat_id_captured['id']}")
         click.echo("Your bot is now configured and ready!")
     elif not telegram_config.get("allowed_chat_id"):

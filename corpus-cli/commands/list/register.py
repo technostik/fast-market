@@ -1,11 +1,41 @@
 from __future__ import annotations
 
 import json
+import logging
+import sys
 import click
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from commands.base import CommandManifest
-from commands.helpers import build_engine, fmt_duration, make_filters, out
+from commands.helpers import fmt_duration, make_filters, out
+
+
+_NOISY_LOGGERS = [
+    "core",
+    "storage",
+    "common.storage",
+    "plugins",
+    "sentence_transformers",
+    "transformers",
+    "huggingface_hub",
+    "torch",
+    "filelock",
+    "urllib3",
+    "httpx",
+]
+
+
+def _configure_list_logging(verbose: bool) -> None:
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        stream=sys.stderr,
+        format="%(asctime)s [%(levelname)-8s] %(name)s %(message)s",
+        force=True,
+    )
+    logging.root.setLevel(level)
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -58,7 +88,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if offset < 0:
             raise click.ClickException("--offset must be >= 0")
 
-        _, _, store = build_engine(ctx.obj["verbose"])
+        _configure_list_logging(ctx.obj["verbose"])
+        from common.core.config import load_config
+        from storage.sqlite_store import SQLiteStore
+
+        config = load_config()
+        store = SQLiteStore(config.get("db_path"))
         filters = make_filters(source=source, **kwargs)
         all_docs = store.list_documents_extended(
             source=source,

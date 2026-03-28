@@ -60,6 +60,15 @@ common-setup workdir /path/to/dir
 
 # Show current working directory
 common-setup workdir
+
+# Clean working directory (delete all files)
+common-setup clean-workdir
+
+# Clean with confirmation skipped
+common-setup clean-workdir --force
+
+# Clean including subdirectories and hidden files
+common-setup clean-workdir --all
 ```
 
 ## Shell Autocompletion

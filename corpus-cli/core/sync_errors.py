@@ -11,6 +11,16 @@ class TranscriptUnavailableError(SyncError):
     permanent = True
 
 
+class MembershipOnlyError(SyncError):
+    permanent = True
+
+
+class VideoBlockedError(SyncError):
+    """IP blocked by YouTube - retryable but can be grouped separately."""
+
+    permanent = False
+
+
 class APIRateLimitError(SyncError):
     permanent = False
 

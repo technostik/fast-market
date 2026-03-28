@@ -8,6 +8,7 @@ import yaml
 
 from commands.base import CommandManifest
 from common.core.config import load_tool_config
+from common.core.yaml_utils import dump_yaml
 from common.core.paths import get_tool_config
 from core.config import get_default_config
 
@@ -60,9 +61,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             _list_engines(config)
             return
         if show_config:
-            click.echo(
-                yaml.safe_dump(config, default_flow_style=False, sort_keys=False)
-            )
+            click.echo(dump_yaml(config, sort_keys=False))
             return
         if show_config_path:
             click.echo(config_path)
@@ -104,7 +103,7 @@ def _save_config(config_path: Path, config: dict) -> None:
     """Save config to file, creating directories as needed."""
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
-        yaml.safe_dump(config, default_flow_style=False, sort_keys=False),
+        dump_yaml(config, sort_keys=False),
         encoding="utf-8",
     )
 

@@ -44,7 +44,7 @@ class TelegramPlugin(MessagePlugin):
                     self._app = Application.builder().token(self.bot_token).build()
         return self._app
 
-    def send_message(self, text: str, parse_mode: str = "Markdown") -> int:
+    def send_message(self, text: str, parse_mode: str = "HTML") -> int:
         if not self.allowed_chat_id:
             raise RuntimeError(
                 "No allowed_chat_id configured. Run 'message setup --plugin telegram' first."
@@ -152,9 +152,13 @@ class TelegramPlugin(MessagePlugin):
         return asyncio.run(_wait())
 
     def send_alert(
-        self, text: str, wait_for_ack: bool = False, timeout: int = 300
+        self,
+        text: str,
+        wait_for_ack: bool = False,
+        timeout: int = 300,
+        parse_mode: str = "HTML",
     ) -> dict:
-        message_id = self.send_message(text)
+        message_id = self.send_message(text, parse_mode=parse_mode)
 
         if wait_for_ack:
             reply = self.wait_for_any_update(timeout)

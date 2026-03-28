@@ -10,7 +10,9 @@ def test_sources(api_client):
 
 
 def test_sync_obsidian(api_client):
-    resp = api_client.post("/sync", json={"source": "obsidian", "mode": "new", "limit": 10})
+    resp = api_client.post(
+        "/sync", json={"source": "obsidian", "mode": "new", "limit": 10}
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["source"] == "obsidian"
@@ -67,8 +69,18 @@ def test_delete_document(api_client):
     api_client.post("/sync", json={"source": "obsidian", "mode": "new", "limit": 10})
     items = api_client.get("/items?limit=10").json()
     doc = items[0]
-    assert api_client.delete(f"/document/{doc['source_plugin']}/{doc['source_id']}").status_code == 200
-    assert api_client.get(f"/document/{doc['source_plugin']}/{doc['source_id']}").status_code == 404
+    assert (
+        api_client.delete(
+            f"/document/{doc['source_plugin']}/{doc['source_id']}"
+        ).status_code
+        == 200
+    )
+    assert (
+        api_client.get(
+            f"/document/{doc['source_plugin']}/{doc['source_id']}"
+        ).status_code
+        == 404
+    )
 
 
 def test_delete_document_not_found(api_client):
@@ -77,7 +89,7 @@ def test_delete_document_not_found(api_client):
 
 def test_reindex(api_client):
     api_client.post("/sync", json={"source": "obsidian", "mode": "new", "limit": 10})
-    resp = api_client.post("/reindex", json={"source": "obsidian"})
+    resp = api_client.post("/sync", json={"source": "obsidian", "mode": "reindex"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["source"] == "obsidian"

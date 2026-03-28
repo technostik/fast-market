@@ -11,6 +11,7 @@ import yaml
 
 from commands.base import CommandManifest
 from common.cli.helpers import out
+from common.core.yaml_utils import dump_yaml
 from common.youtube.models import Video
 from core.config import load_config
 from core.engine import build_youtube_client
@@ -159,7 +160,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 Path(output).write_text(
                     json.dumps(videos, ensure_ascii=False, default=str)
                     if fmt == "json"
-                    else yaml.dump(videos, allow_unicode=True, default_flow_style=False)
+                    else dump_yaml(videos)
                 )
                 click.echo(f"Saved {len(videos)} videos to {output}")
             else:

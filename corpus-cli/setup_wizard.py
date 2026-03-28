@@ -5,7 +5,13 @@ from pathlib import Path
 from common import structlog
 import yaml
 
-from common.core.paths import get_fastmarket_dir, get_tool_cache_dir, get_tool_config, get_tool_data_dir
+from common.core.paths import (
+    get_fastmarket_dir,
+    get_tool_cache_dir,
+    get_tool_config,
+    get_tool_data_dir,
+)
+from common.core.yaml_utils import dump_yaml
 
 logger = structlog.get_logger(__name__)
 
@@ -44,9 +50,11 @@ def run_wizard() -> None:
         "youtube": {"channel_id": channel_id, "client_secret_path": str(client_secret)},
         "whisper": {"model": whisper_size},
     }
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    config_path.write_text(dump_yaml(config), encoding="utf-8")
     if not env_path.exists():
-        env_path.write_text("# shared secrets for fast-market tools\n", encoding="utf-8")
+        env_path.write_text(
+            "# shared secrets for fast-market tools\n", encoding="utf-8"
+        )
 
     logger.info(
         "setup_complete",
