@@ -11,7 +11,7 @@ from commands.helpers import build_engine, out
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command(
-        "get",
+        "get-from-id",
         help="Retrieve an indexed document by handle and display its metadata or content.",
     )
     @click.argument("handle")
@@ -45,7 +45,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     click.echo(f"  {key}: {value}")
 
     return CommandManifest(
-        name="get",
+        name="get-from-id",
         click_command=get_cmd,
         api_router=_build_router(),
     )

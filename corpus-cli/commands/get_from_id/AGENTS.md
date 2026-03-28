@@ -1,6 +1,6 @@
-# commands/get/
+# commands/get-from-id/
 
-Implements the `corpus get` CLI command and document lookup API endpoints.
+Implements the `corpus get-from-id` CLI command and document lookup API endpoints.
 
 ## Extension points
 

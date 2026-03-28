@@ -33,10 +33,16 @@ pip install -e ".[whisper]"
 
 ### First-time setup
 
-Run the interactive wizard to generate `corpus.yaml`:
+Run the interactive wizard to configure sources, credentials, and preferences:
 
 ```bash
-corpus setup
+corpus setup run
+```
+
+Or edit config.yaml interactively:
+
+```bash
+corpus setup edit
 ```
 
 This writes config/data under XDG-style paths:
@@ -77,12 +83,6 @@ rm -rf ~/.cache/fast-market/corpus
 
 If you still use legacy `config.yaml` in your current directory, it is supported with a deprecation warning. Move it to `~/.local/share/fast-market/config/corpus.yaml`.
 
-If you upgrade corpus-agent and need to force schema updates manually, run:
-
-```bash
-corpus db-migrate
-```
-
 ---
 
 ### How incremental sync works
@@ -92,6 +92,7 @@ corpus db-migrate
 - **First run**: no prior timestamp → fetches the N most recent items (controlled by `--limit`).
 - **Subsequent runs**: only fetches items published after the previous run timestamp.
 - **Backfill**: `--mode backfill` ignores the timestamp and reprocesses all items up to `--limit`.
+- **Reindex**: `--mode reindex` regenerates embeddings without re-fetching content.
 - **Full reset**: `--clean` wipes the entire index and sync log before syncing.
 
 ---
@@ -122,18 +123,19 @@ corpus search "topic" --format json | jq '.[] | select(.privacy_status == "publi
 
 ### Sync failure handling
 
-Sync now records per-item failures in `sync_failures`:
+Sync records per-item failures in `sync_failures`:
 
 - **Permanent failures** (for example missing transcript) are marked and skipped on later sync runs.
 - **Transient failures** (rate limit/network/unknown runtime errors) are recorded and retried on subsequent runs.
 - A successful sync of an item clears any previous failure record.
 
-Use `corpus retry-failures` to clear failures and retry:
+Use `--retry-failure` to clear failures and retry:
 
 ```bash
-corpus retry-failures
-corpus retry-failures --source youtube
-corpus retry-failures --clear-permanent
+corpus sync --retry-failure                    # retry transient failures
+corpus sync --retry-failure --clear-permanent # include permanent failures
+corpus sync --retry-failure --include-blocked # include blocked videos
+corpus sync --source youtube --retry-failure  # retry failures for specific source
 ```
 
 ---
@@ -220,33 +222,32 @@ corpus -v search "landing page" --format json | jq '.[0].handle'
 corpus sync [OPTIONS]
 ```
 
-Fetch and index new content.
+Fetch and index content. Supports three modes: sync new items, backfill, or reindex embeddings.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--source obsidian\|youtube\|all` | `all` | Which source to sync |
-| `--mode new\|backfill` | `new` | `new`: only items newer than last sync run. `backfill`: ignore last-sync timestamp |
+| `--mode new\|backfill\|reindex` | `new` | `new`: only new items. `backfill`: re-fetch all. `reindex`: regenerate embeddings only |
 | `--limit N`, `-l N` | 10 obsidian / 5 youtube | Max items to fetch |
+| `--retry-failure` | off | Clear tracked failures before syncing |
+| `--clear-permanent` | off | Also retry permanent failures (requires --retry-failure) |
+| `--include-blocked` | off | Also retry blocked videos (requires --retry-failure) |
 | `--clean` | off | Wipe entire index and sync log before syncing |
+| `--silent`, `-s` | off | Suppress detailed logs |
+| `--use-api` | off | Use YouTube API instead of RSS |
 | `--format json\|text`, `-F` | `text` | Output format |
 
 ```bash
-corpus sync                                      # sync all sources, new items only
-corpus sync --source youtube -l 20                # last 20 YouTube videos
+corpus sync                                      # sync new items only
+corpus sync --mode backfill                      # re-fetch all content
+corpus sync --mode reindex                       # regenerate embeddings
+corpus sync --source youtube -l 20               # last 20 YouTube videos
 corpus sync --source obsidian --mode backfill    # reprocess all Obsidian notes
+corpus sync --retry-failure                     # retry failed items
+corpus sync --retry-failure --clear-permanent   # include permanent failures
 corpus sync --clean                              # wipe index and start fresh
 corpus sync -F json                              # machine-readable result
 ```
-
----
-
-### db-migrate
-
-```bash
-corpus db-migrate [--format json|text]
-```
-
-Run Alembic migrations to `head` for the configured corpus database.
 
 ---
 
@@ -286,7 +287,7 @@ corpus search "topic" -F json | jq '.[0].handle'
 ```bash
 corpus search "bureaucratie" --source youtube -F json \
   | jq -r '.[0].handle' \
-  | xargs corpus get --what content
+  | xargs corpus get-from-id --what content
 ```
 
 
@@ -341,13 +342,13 @@ corpus list -l 5 -F json | jq '.[0].handle'
 
 ---
 
-### get
+### get-from-id
 
 ```bash
-corpus get HANDLE [OPTIONS]
+corpus get-from-id HANDLE [OPTIONS]
 ```
 
-Retrieve a document by its **handle** (e.g. `yt-my-video-a3f2`) or by `source_id` (e.g. `Note.md`).
+Retrieve a document by its **handle** (e.g. `yt-my-video-a3f2`).
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -355,13 +356,48 @@ Retrieve a document by its **handle** (e.g. `yt-my-video-a3f2`) or by `source_id
 | `--format json\|text`, `-F` | `text` | Output format |
 
 ```bash
-corpus get yt-my-video-a3f2                        # metadata only
-corpus get yt-my-video-a3f2 --what content         # transcript/text only
-corpus get yt-my-video-a3f2 --what all -F json
-corpus get "Note.md" --what meta
+corpus get-from-id yt-my-video-a3f2                 # metadata only
+corpus get-from-id yt-my-video-a3f2 --what content  # transcript/text only
+corpus get-from-id yt-my-video-a3f2 --what all -F json
 ```
 
 **Handles** are stable slugs assigned at index time: `yt-{title-slug}-{4char-hash}` for YouTube, `ob-{title-slug}-{4char-hash}` for Obsidian. They are shell-safe (no spaces, no special characters) and survive reindexing.
+
+---
+
+### get-from-source
+
+```bash
+corpus get-from-source SOURCE ID [OPTIONS]
+```
+
+Retrieve a document by source plugin and source_id (e.g. `Note.md` for Obsidian).
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--what meta\|content\|all` | `meta` | What to display |
+| `--format json\|text`, `-F` | `text` | Output format |
+
+```bash
+corpus get-from-source obsidian "Note.md"
+corpus get-from-source obsidian "Note.md" --what content
+```
+
+---
+
+### get-last
+
+```bash
+corpus get-last [OPTIONS]
+```
+
+Get the most recently indexed document.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--source obsidian\|youtube` | — | Filter by source |
+| `--what meta\|content\|all` | `meta` | What to display |
+| `--format json\|text`, `-F` | `text` | Output format |
 
 ---
 
@@ -375,19 +411,9 @@ Remove a document and all its chunks from the index.
 
 ```bash
 corpus delete yt-my-video-a3f2
-corpus delete "Note.md"
+corpus delete "ob-my-note-a3f2"
 corpus delete yt-my-video-a3f2 -F json
 ```
-
----
-
-### reindex
-
-```bash
-corpus reindex [--source obsidian|youtube|all] [-F json|text]
-```
-
-Rebuild embeddings for all indexed documents without re-fetching from source. Use after changing the embedding model or chunking logic.
 
 ---
 
@@ -410,6 +436,16 @@ corpus serve [--port PORT]   # default: 8000
 ```
 
 Start the HTTP API and web frontend.
+
+---
+
+### embed-server
+
+```bash
+corpus embed-server [--port PORT]   # default: 8100
+```
+
+Start a dedicated embedding server that keeps the ML model loaded in memory.
 
 ---
 
@@ -437,8 +473,7 @@ Start the server and open `http://localhost:8000` (redirects to `/ui`).
 | GET | `/document/{plugin}/{id}` | Get full document including raw text |
 | GET | `/handle/{handle}` | Get document by handle |
 | DELETE | `/document/{plugin}/{id}` | Delete document from index |
-| POST | `/sync` | `{"source": "obsidian", "mode": "new", "limit": 10}` |
-| POST | `/reindex` | `{"source": "youtube"}` |
+| POST | `/sync` | `{"source": "obsidian", "mode": "new", "limit": 10}` (mode: new/backfill/reindex) |
 | GET | `/search` | `?q=…&mode=semantic&limit=5&privacy_status=public` (same filters as CLI) |
 
 ---
@@ -475,14 +510,19 @@ No external fixtures or data files are required.
 - If a video/note is permanently failing but should be retried, run:
 
 ```bash
-corpus retry-failures --clear-permanent
-corpus retry-failures --source youtube -l 10
-corpus retry-failures -F json
+corpus sync --retry-failure --clear-permanent --source youtube
+corpus sync --retry-failure --clear-permanent -F json
 ```
 
 - If only transient failures should be retried, run:
 
 ```bash
-corpus retry-failures
+corpus sync --retry-failure
+corpus sync --source youtube --retry-failure
 ```
 
+- If blocked videos should be retried, run:
+
+```bash
+corpus sync --retry-failure --include-blocked
+```
