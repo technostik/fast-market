@@ -14,7 +14,7 @@ def create_cli_group(tool_name: str, default_command: str | None = None) -> clic
 
     @click.group(invoke_without_command=True)
     @click.option(
-        "--verbose", "-v", is_flag=True, default=True, help="Show logs on stderr."
+        "--verbose", "-v", is_flag=True, default=False, help="Show logs on stderr."
     )
     @click.pass_context
     def main(ctx: click.Context, verbose: bool) -> None:
