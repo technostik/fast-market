@@ -159,6 +159,11 @@ skill apply <skill-name> --save-session file.yaml  # Save session to file
 
 Orchestrate multiple skills to accomplish complex tasks (requires LLM).
 
+Each skill execution runs in an isolated subdirectory within the workdir:
+`{workdir}/{iteration:02d}_{skill_name}/`
+
+This prevents file collisions between skill executions and keeps the working directory clean.
+
 ```bash
 skill run "your task description"                 # Run with default LLM
 skill run "task" -P openai -m gpt-4               # Specific provider

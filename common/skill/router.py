@@ -37,8 +37,17 @@ If you need to run a skill:
   "action": "run",
   "skill_name": "the-skill-name",
   "params": {{"key": "value"}},
-  "reason": "one sentence why"
+  "reason": "one sentence why",
+  "context_hint": "The next skill will need X, Y, Z from this result",
+  "copy_from": [
+    {{"subdir": "01_skill-name", "files": ["output.json"]}}
+  ]
 }}
+
+- context_hint (optional): one sentence describing what the NEXT skill will need from this result
+- copy_from (optional): list of previous subdirs and files to copy into the next skill's directory
+  - Use this for large/binary files or outputs that should be physically present
+  - For small outputs, prefer passing via params or context instead
 
 If the goal is fully achieved:
 {{
@@ -59,28 +68,42 @@ Rules:
 - Params must be concrete values, not placeholders
 - If a skill produced output that a next skill needs, include the relevant
   part directly in that skill's params
+- Use subdir paths from history to reference previous outputs
+- Prefer passing small outputs via params or context; use copy_from for large/binary files
 """
 
-DISTILL_PROMPT = """You have just executed a skill. Read the session output and
-extract what matters for the next step.
+RUNNER_SUMMARY_PROMPT = """Write a concise summary (max 15 lines) for the orchestrator:
+- Did it succeed or fail?
+- What approach was used?
+- What errors occurred?
+- What files or outputs were produced (names only, not contents)?
+Do NOT include file contents or large data.
 
 ## Skill executed
 {skill_name} with params: {params}
 
 ## Session output (truncated to last {max_chars} chars if long)
 {session_output}
+"""
 
-## Instructions
+CONTEXT_EXTRACT_PROMPT = """You are preparing context for the NEXT skill in a pipeline.
 
-Write a concise summary (max 10 lines) that captures:
-- What was accomplished (specific facts, data, results)
-- What the output contains (e.g. "a marketing analysis in French, 500 words")
-- Any errors or problems encountered
-- Any data that will likely be needed by the next skill
+## Goal of the overall task
+{goal}
 
-Be specific. Include actual values (URLs, IDs, counts, key findings).
-Do NOT include general observations or meta-commentary.
-Output plain text, no headers, no JSON.
+## Skill just executed
+{skill_name} with params: {params}
+
+## Session output (truncated to last {max_chars} chars if long)
+{session_output}
+
+## What the next step will likely need
+{next_step_hint}
+
+Extract ONLY what a downstream skill will need to do its job.
+Include: key data, results, extracted content, file contents if small (<200 lines).
+For large files: include the first 50 lines and note the full path.
+Be specific. No meta-commentary.
 """
 
 
@@ -89,9 +112,13 @@ class SkillAttempt:
     skill_name: str
     params: dict[str, str]
     exit_code: int
-    distilled_result: str
+    runner_summary: str
+    context: str
+    context_hint: str
     success: bool
     iteration: int
+    subdir: Path
+    copied_files: list[str]
 
 
 @dataclass
@@ -134,8 +161,12 @@ def _format_history(attempts: list[SkillAttempt]) -> str:
     for a in attempts:
         status = "✓ success" if a.success else "✗ failed"
         params_str = ", ".join(f"{k}={v}" for k, v in a.params.items())
+        subdir_name = a.subdir.name if a.subdir else "N/A"
         lines.append(f"Step {a.iteration}: {a.skill_name}({params_str}) → {status}")
-        lines.append(f"  Result: {a.distilled_result}")
+        lines.append(f"  Subdir: {subdir_name}")
+        if a.copied_files:
+            lines.append(f"  Copied from previous: {', '.join(a.copied_files)}")
+        lines.append(f"  Summary: {a.runner_summary[:200]}")
     return "\n".join(lines)
 
 
@@ -143,6 +174,44 @@ def _make_session_path(workdir: str, iteration: int) -> Path:
     cache = get_cache_dir() / "skill-router"
     cache.mkdir(parents=True, exist_ok=True)
     return cache / f"session-{iteration:02d}.yaml"
+
+
+def _copy_context_files(
+    copy_from: list[dict],
+    workdir: Path,
+    dest: Path,
+) -> list[str]:
+    copied = []
+    for item in copy_from:
+        subdir_name = item.get("subdir", "")
+        files = item.get("files", [])
+        src_subdir = workdir / subdir_name
+        if not src_subdir.exists():
+            logger.warning(
+                "copy_from_subdir_not_found",
+                subdir=subdir_name,
+                expected_path=str(src_subdir),
+            )
+            continue
+        for filename in files:
+            src_file = src_subdir / filename
+            if not src_file.exists():
+                logger.warning(
+                    "copy_from_file_not_found",
+                    subdir=subdir_name,
+                    file=filename,
+                    expected_path=str(src_file),
+                )
+                continue
+            dest_file = dest / filename
+            dest_file.write_bytes(src_file.read_bytes())
+            copied.append(filename)
+            logger.debug(
+                "copied_context_file",
+                src=str(src_file),
+                dest=str(dest_file),
+            )
+    return copied
 
 
 def _execute_skill(
@@ -153,10 +222,13 @@ def _execute_skill(
     session_file: Path,
     auto_learn: bool = False,
     compact: bool = False,
+    router_context: str | None = None,
 ) -> int:
     cmd = ["skill", "apply", skill_name]
     for k, v in params.items():
         cmd.append(f"{k}={v}")
+    if router_context:
+        cmd.append(f"_router_context={router_context}")
     cmd += ["--save-session", str(session_file)]
     if workdir and workdir != ".":
         cmd += ["--workdir", workdir]
@@ -267,7 +339,7 @@ def _call_plan(
     return data
 
 
-def _call_distill(
+def _call_runner_summary(
     skill_name: str,
     params: dict[str, str],
     session_output: str,
@@ -275,7 +347,7 @@ def _call_distill(
     model: str | None,
     max_chars: int = 3000,
 ) -> str:
-    prompt = DISTILL_PROMPT.format(
+    prompt = RUNNER_SUMMARY_PROMPT.format(
         skill_name=skill_name,
         params=params,
         session_output=session_output[-max_chars:],
@@ -283,33 +355,77 @@ def _call_distill(
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=500)
     response = provider.complete(req)
-    distilled = (response.content or "").strip()
+    summary = (response.content or "").strip()
     debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
         "1",
         "true",
         "TRUE",
     }
     if debug_enabled:
-        print(f"[router][distill] skill={skill_name} params={params}")
-        print("[router][distill] prompt:\n", prompt[:3000])
+        print(f"[router][runner_summary] skill={skill_name} params={params}")
+        print("[router][runner_summary] prompt:\n", prompt[:3000])
         print(
-            "[router][distill] raw response:\n", distilled if distilled else "(empty)"
+            "[router][runner_summary] raw response:\n",
+            summary if summary else "(empty)",
         )
 
-    if distilled:
-        return distilled
-    # Fallback for unstable/empty LLM responses: preserve actionable session facts.
+    if summary:
+        return summary
     fallback = (session_output or "").strip()
-    return fallback[:1000] if fallback else "(no distilled output)"
+    return fallback[:1000] if fallback else "(no summary)"
+
+
+def _call_context_extract(
+    goal: str,
+    skill_name: str,
+    params: dict[str, str],
+    session_output: str,
+    next_step_hint: str,
+    provider,
+    model: str | None,
+    max_chars: int = 5000,
+) -> str:
+    prompt = CONTEXT_EXTRACT_PROMPT.format(
+        goal=goal,
+        skill_name=skill_name,
+        params=params,
+        session_output=session_output[-max_chars:],
+        next_step_hint=next_step_hint
+        or "Extract any useful data or results for the next skill.",
+        max_chars=max_chars,
+    )
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=1000)
+    response = provider.complete(req)
+    context = (response.content or "").strip()
+    debug_enabled = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+        "1",
+        "true",
+        "TRUE",
+    }
+    if debug_enabled:
+        print(f"[router][context_extract] skill={skill_name} params={params}")
+        print("[router][context_extract] prompt:\n", prompt[:3000])
+        print(
+            "[router][context_extract] raw response:\n",
+            context if context else "(empty)",
+        )
+
+    if context:
+        return context
+    return ""
 
 
 def _print_attempt(attempt: SkillAttempt) -> None:
     status = "success" if attempt.success else "failed"
     params = ", ".join(f"{k}={v}" for k, v in attempt.params.items())
+    subdir_name = attempt.subdir.name if attempt.subdir else "N/A"
     print(
         f"[router] step {attempt.iteration}: {attempt.skill_name} ({params}) -> {status}"
     )
-    print(f"[router] distilled: {attempt.distilled_result[:300]}")
+    print(f"[router] subdir: {subdir_name}")
+    if attempt.copied_files:
+        print(f"[router] copied files: {', '.join(attempt.copied_files)}")
+    print(f"[router] summary: {attempt.runner_summary[:300]}")
 
 
 def run_router(
@@ -328,6 +444,7 @@ def run_router(
         goal=goal, attempts=[], iteration=0, max_iterations=max_iterations
     )
     skills = discover_skills(get_skills_dir())
+    workdir_path = Path(workdir).expanduser().resolve()
 
     if not skills:
         state.failed = True
@@ -373,6 +490,11 @@ def run_router(
             params = {}
         params = {str(k): str(v) for k, v in params.items()}
 
+        context_hint = str(plan.get("context_hint", ""))
+        copy_from = plan.get("copy_from", [])
+        if not isinstance(copy_from, list):
+            copy_from = []
+
         matched = next((s for s in skills if s.name == skill_name), None)
         if not matched:
             state.failed = True
@@ -387,24 +509,44 @@ def run_router(
                 skill_name=skill_name,
                 params=params,
                 exit_code=1,
-                distilled_result=f"Skipped: retry limit ({retry_limit}) reached for {skill_name}",
+                runner_summary=f"Skipped: retry limit ({retry_limit}) reached for {skill_name}",
+                context="",
+                context_hint=context_hint,
                 success=False,
                 iteration=state.iteration,
+                subdir=Path(""),
+                copied_files=[],
             )
             state.attempts.append(attempt)
             if verbose:
                 _print_attempt(attempt)
             continue
 
-        session_file = _make_session_path(workdir, state.iteration)
+        subdir_name = f"{state.iteration:02d}_{skill_name}"
+        subdir = workdir_path / subdir_name
+        subdir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "created_skill_subdir", subdir=str(subdir), iteration=state.iteration
+        )
+
+        copied_files = _copy_context_files(copy_from, workdir_path, subdir)
+        if copied_files:
+            logger.info("copied_context_files", files=copied_files, dest=str(subdir))
+
+        prev_context = ""
+        if state.attempts and state.attempts[-1].context:
+            prev_context = state.attempts[-1].context
+
+        session_file = _make_session_path(str(subdir), state.iteration)
         exit_code = _execute_skill(
             skill_name,
             params,
-            workdir,
+            str(subdir),
             skill_timeout,
             session_file,
             auto_learn=auto_learn,
             compact=compact,
+            router_context=prev_context if prev_context else None,
         )
         session_output = _read_session(session_file)
         if os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
@@ -416,19 +558,36 @@ def run_router(
             print("[router][session] summary:\n", session_output[:3000])
 
         try:
-            distilled = _call_distill(
+            runner_summary = _call_runner_summary(
                 skill_name, params, session_output, provider, model
             )
         except Exception as exc:
-            distilled = f"Distillation failed: {exc}"
+            runner_summary = f"Summary failed: {exc}"
+
+        try:
+            context = _call_context_extract(
+                goal,
+                skill_name,
+                params,
+                session_output,
+                context_hint,
+                provider,
+                model,
+            )
+        except Exception as exc:
+            context = f"Context extraction failed: {exc}"
 
         attempt = SkillAttempt(
             skill_name=skill_name,
             params=params,
             exit_code=exit_code,
-            distilled_result=distilled,
+            runner_summary=runner_summary,
+            context=context,
+            context_hint=context_hint,
             success=(exit_code == 0),
             iteration=state.iteration,
+            subdir=subdir,
+            copied_files=copied_files,
         )
         state.attempts.append(attempt)
         if verbose:

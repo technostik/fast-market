@@ -17,7 +17,7 @@ def _state_debug_dump(state) -> str:
                 f"iter={attempt.iteration} skill={attempt.skill_name} "
                 f"success={attempt.success} exit={attempt.exit_code} "
                 f"params={attempt.params} "
-                f"distilled={attempt.distilled_result[:240]!r}"
+                f"summary={attempt.runner_summary[:240]!r}"
             )
         )
     attempts_blob = "\n".join(attempts) if attempts else "(none)"
@@ -194,7 +194,7 @@ def test_router_sessions_written_to_cache(workdir, isolate_xdg):
     )
 
 
-def test_distilled_result_not_raw_session(workdir):
+def test_runner_summary_not_raw_session(workdir):
     from common.skill.router import run_router
 
     provider = get_llm_provider()
@@ -206,8 +206,8 @@ def test_distilled_result_not_raw_session(workdir):
     )
     _assert_router_progress(state)
     for attempt in state.attempts:
-        assert "tool_calls:" not in attempt.distilled_result, _state_debug_dump(state)
-        assert len(attempt.distilled_result) < 1000, _state_debug_dump(state)
+        assert "tool_calls:" not in attempt.runner_summary, _state_debug_dump(state)
+        assert len(attempt.runner_summary) < 1000, _state_debug_dump(state)
 
 
 def test_session_metrics_written(workdir, skills_dir):
@@ -251,6 +251,8 @@ def test_successful_skill_has_zero_errors(workdir):
             "message=zero-errors",
             "--save-session",
             str(session_file),
+            "--workdir",
+            str(workdir),
         ],
         timeout=60,
         check=True,

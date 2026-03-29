@@ -11,7 +11,7 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - `commands/create/register.py` — Scaffold new skill
 - `commands/delete/register.py` — Remove skill
 - `commands/edit/register.py` — Edit skill files, supports `--learned` for LEARN.md
-- `commands/run/register.py` — Orchestrate multiple skills (LLM-powered)
+- `commands/run/register.py` — Orchestrate multiple skills (LLM-powered) with isolated subdirs
 - `commands/apply/register.py` — Apply/execute a skill
 - `commands/auto_learn/register.py` — Auto-learn templates and compact command
 - `commands/path/register.py` — Print skills directory path
@@ -26,6 +26,14 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - Auto-compact: Consolidate LEARN.md when exceeding line threshold
 - Validate file paths to prevent directory traversal attacks
 - Work standalone, delegate LLM operations to common/learn
+
+## skill run coordination model
+- Each skill execution runs in an isolated subdirectory: `{workdir}/{iteration:02d}_{skill_name}/`
+- The planner receives history including subdir paths and copied files info
+- Two-part distillation: `runner_summary` (≤15 lines for planner) + `context` (transferable to next skill)
+- Planner can provide `context_hint` to guide context extraction
+- Planner can specify `copy_from` to copy files from previous subdirs
+- The router passes `_router_context` param to skills with the previous skill's context
 
 ## SKILL.md Frontmatter Options
 - `name` — Skill name (defaults to directory name)

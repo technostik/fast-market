@@ -20,7 +20,11 @@ def get_cli():
 
 def test_apply_echo_skill(workdir):
     runner = CliRunner()
-    result = runner.invoke(get_cli(), ["apply", "test-echo", "message=hello"], catch_exceptions=False)
+    result = runner.invoke(
+        get_cli(),
+        ["apply", "test-echo", "message=hello", "--workdir", str(workdir)],
+        catch_exceptions=False,
+    )
     assert result.exit_code == 0
     assert "ECHO: hello" in result.output
 
@@ -40,7 +44,8 @@ def test_apply_default_param_used(workdir):
             "apply",
             "test-echo",
             "message=hi",
-            # prefix not provided, default "ECHO" should be used
+            "--workdir",
+            str(workdir),
         ],
     )
     assert result.exit_code == 0
@@ -62,7 +67,9 @@ def test_apply_fail_skill_propagates_exit_code(workdir):
 
 def test_apply_dry_run(workdir):
     runner = CliRunner()
-    result = runner.invoke(get_cli(), ["apply", "test-echo", "message=test", "--dry-run"])
+    result = runner.invoke(
+        get_cli(), ["apply", "test-echo", "message=test", "--dry-run"]
+    )
     assert result.exit_code == 0
     assert "DRY RUN" in result.output
     assert "ECHO: test" not in result.output  # script output not produced
@@ -71,7 +78,16 @@ def test_apply_dry_run(workdir):
 def test_apply_json_format(workdir):
     runner = CliRunner()
     result = runner.invoke(
-        get_cli(), ["apply", "test-echo", "message=jsontest", "--format", "json"]
+        get_cli(),
+        [
+            "apply",
+            "test-echo",
+            "message=jsontest",
+            "--format",
+            "json",
+            "--workdir",
+            str(workdir),
+        ],
     )
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -81,7 +97,10 @@ def test_apply_json_format(workdir):
 
 def test_apply_explicit_script(workdir):
     runner = CliRunner()
-    result = runner.invoke(get_cli(), ["apply", "test-echo/run.sh", "message=explicit"])
+    result = runner.invoke(
+        get_cli(),
+        ["apply", "test-echo/run.sh", "message=explicit", "--workdir", str(workdir)],
+    )
     assert result.exit_code == 0
     assert "explicit" in result.output
 
@@ -101,6 +120,8 @@ def test_apply_save_session_writes_file_for_script_mode(workdir):
             "message=session-check",
             "--save-session",
             str(session_file),
+            "--workdir",
+            str(workdir),
         ],
         catch_exceptions=False,
     )

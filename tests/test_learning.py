@@ -58,8 +58,8 @@ def _get_stdout_outputs(state) -> list[str]:
     """Extract all tool call stdout values from router state attempts."""
     outputs = []
     for attempt in state.attempts:
-        if attempt.distilled_result:
-            outputs.append(attempt.distilled_result)
+        if attempt.runner_summary:
+            outputs.append(attempt.runner_summary)
     return outputs
 
 
