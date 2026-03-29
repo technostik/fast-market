@@ -38,6 +38,10 @@ def isolate_xdg(tmp_path_factory):
     scope=session: set once for the whole test run.
     autouse=True: applies to every test automatically.
     """
+    from dotenv import load_dotenv
+
+    load_dotenv(REPO_ROOT / ".env")
+
     tmp_cache = tmp_path_factory.mktemp("cache")
 
     original_path = os.environ.get("PATH", "")

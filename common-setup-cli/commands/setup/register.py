@@ -19,6 +19,10 @@ from common.core.paths import (
     get_llm_config_path,
     get_tool_config_path,
 )
+from commands.completion import (
+    AvailableProviderParamType,
+    ProviderParamType,
+)
 
 _PROVIDERS = {
     "anthropic": {
@@ -97,7 +101,7 @@ def register():
                 click.echo(f"    api_key_env: {settings['api_key_env']}")
 
     @llm_group.command("add")
-    @click.argument("provider", type=click.Choice(list(_PROVIDERS)))
+    @click.argument("provider", type=AvailableProviderParamType())
     def llm_add(provider):
         """Add or reconfigure a provider."""
         config = load_llm_config()
@@ -111,7 +115,7 @@ def register():
         _print_env_reminder(provider, settings)
 
     @llm_group.command("remove")
-    @click.argument("provider")
+    @click.argument("provider", type=ProviderParamType())
     def llm_remove(provider):
         """Remove a provider."""
         config = load_llm_config()
@@ -129,7 +133,7 @@ def register():
         click.echo(f"Provider '{provider}' removed.")
 
     @llm_group.command("set-default")
-    @click.argument("provider")
+    @click.argument("provider", type=ProviderParamType())
     def llm_set_default(provider):
         """Set the default LLM provider."""
         config = load_llm_config()
@@ -141,6 +145,25 @@ def register():
         config["default_provider"] = provider
         save_llm_config(config)
         click.echo(f"Default provider set to: {provider}")
+
+    @setup_cmd.command("path")
+    @click.option(
+        "--common", "path_type", flag_value="common", help="Show common config path"
+    )
+    @click.option("--llm", "path_type", flag_value="llm", help="Show LLM config path")
+    @click.pass_context
+    def show_path(ctx, path_type):
+        """Show config file paths."""
+        common_path = get_common_config_path()
+        llm_path = get_llm_config_path()
+
+        if path_type == "common":
+            click.echo(common_path)
+        elif path_type == "llm":
+            click.echo(llm_path)
+        else:
+            click.echo(f"common: {common_path}")
+            click.echo(f"llm:    {llm_path}")
 
     @setup_cmd.command("workdir")
     @click.argument("path", required=False)

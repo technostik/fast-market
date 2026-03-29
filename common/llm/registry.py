@@ -11,6 +11,8 @@ _PROVIDER_MODULES = {
     "openai": "common.llm.openai.register",
     "openai-compatible": "common.llm.openai_compatible.register",
     "ollama": "common.llm.ollama.register",
+    "groq": "common.llm.groq.register",
+    "xai": "common.llm.xai.register",
 }
 
 

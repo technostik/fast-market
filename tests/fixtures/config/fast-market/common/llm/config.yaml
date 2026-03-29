@@ -1,4 +1,4 @@
-default_provider: openai-compatible
+default_provider: xai
 providers:
   ollama:
     base_url: http://localhost:11434
@@ -7,3 +7,9 @@ providers:
     default_model: deepseek-chat
     base_url: http://localhost:5005/v1
     api_key_env: NONE
+  xai:
+    default_model: grok-4-1-fast-non-reasoning
+    api_key_env: XAI_API_KEY
+  groq:
+    default_model: llama-3.3-70b-versatile
+    api_key_env: GROQ_API_KEY
