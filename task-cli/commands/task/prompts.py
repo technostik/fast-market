@@ -2,8 +2,90 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from common.core.paths import get_skills_dir
-from common.skill.skill import discover_skills
+
+DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
+
+# Your Task
+{task_description}
+{params_section}
+
+# Working Directory
+All commands execute in: `{workdir}`
+
+You can read and write files in this directory. Relative paths are resolved from here.
+
+---
+
+{command_docs}
+
+---
+
+# How to Work
+
+1. **Understand the task**: Break it down into clear steps
+2. **Explore first**: Use `ls` and `cat` to understand what files exist
+3. **Execute incrementally**: Run one command, check the result, then decide next step
+4. **Handle errors**: If a command fails, read the error message and try a different approach
+5. **Stay focused**: Only use commands that advance the task
+6. **Finish clearly**: When done, summarize what you accomplished (without making tool calls)
+
+# Critical Rules
+
+- **Only use listed commands** - others will be rejected
+- **Work within the directory** - you cannot escape `{workdir}`
+- **Check outputs** - always verify command results before proceeding
+- **Be efficient** - prefer one good command over many guesses
+- **Ask for help** - if truly stuck, explain what you need
+"""
+
+
+DEFAULT_FASTMARKET_TOOLS = {
+    "corpus": {
+        "description": "Search and query your knowledge base with embeddings.",
+        "commands": ["index", "search", "list", "delete"],
+    },
+    "image": {
+        "description": "Generate images from text prompts using AI image generation APIs.",
+        "commands": ["generate", "serve", "setup"],
+    },
+    "message": {
+        "description": "Send messages and alerts via Telegram.",
+        "commands": ["alert", "ask", "setup"],
+    },
+    "task": {
+        "description": "Execute agentic task",
+        "commands": ["run"],
+    },
+    "skill": {
+        "description": "Execute skill scripts",
+        "commands": ["list", "run"],
+    },
+    "youtube": {
+        "description": "Search YouTube videos and manage comments via the YouTube Data API.",
+        "commands": ["search", "comments", "reply", "setup"],
+    },
+}
+
+DEFAULT_SYSTEM_COMMANDS = [
+    "ls",
+    "cat",
+    "jq",
+    "grep",
+    "find",
+    "echo",
+    "head",
+    "tail",
+    "wc",
+    "mkdir",
+    "touch",
+    "rm",
+    "cp",
+    "mv",
+    "sort",
+    "uniq",
+    "awk",
+    "sed",
+]
 
 
 SYSTEM_COMMAND_DOCS = {
@@ -378,42 +460,64 @@ def _build_system_commands_section(system_commands: list[str]) -> str:
 
 def _build_skills_section() -> str:
     """Build the skills section of command documentation."""
-    skills_dir = get_skills_dir()
-    skills = discover_skills(skills_dir)
-    if not skills:
-        return ""
+    return ""
 
-    docs = ["\n## Skills\n"]
-    docs.append(
-        "Skills provide specialized capabilities for specific tasks. Use `skill:name/script [args]` to execute.\n"
-    )
 
-    for skill in skills:
-        docs.append(f"### {skill.name}")
-        if skill.description:
-            docs.append(f"{skill.description}")
-        if skill.has_scripts:
-            scripts_dir = skill.path / "scripts"
-            scripts = [
-                f.name
-                for f in scripts_dir.iterdir()
-                if f.is_file() and not f.name.startswith(".")
-            ]
-            if scripts:
-                docs.append(
-                    f"**Scripts**: {', '.join(f'`{s}`' for s in sorted(scripts))}"
-                )
-        docs.append("")
+def _load_task_config() -> dict:
+    """Load task config from file, returning dict with task key."""
+    from common.core.config import _resolve_config_path
 
-    return "\n".join(docs)
+    config_path = _resolve_config_path("task")
+    if config_path.exists():
+        import yaml
+
+        with open(config_path) as f:
+            data = yaml.safe_load(f) or {}
+        if "task" in data:
+            return data
+        return {"task": data}
+    return {}
+
+
+def _init_task_config(config: dict | None = None) -> dict:
+    """Initialize task config with defaults if not present."""
+    if config is None:
+        config = _load_task_config()
+
+    task = config.get("task", config)
+
+    task.setdefault("fastmarket_tools", dict(DEFAULT_FASTMARKET_TOOLS))
+    task.setdefault("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
+
+    if "agent_prompt" not in task:
+        task["agent_prompt"] = {
+            "active": "default",
+            "templates": {
+                "default": {
+                    "description": "Default agent prompt",
+                    "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
+                }
+            },
+        }
+
+    if "tools_doc" not in task:
+        task["tools_doc"] = {
+            "active": "minimal",
+            "templates": {
+                "minimal": {
+                    "description": "Minimal tools documentation",
+                    "template": TOOLS_DOC_TEMPLATES["minimal"],
+                }
+            },
+        }
+
+    return task
 
 
 def get_active_tools_doc_prompt_config() -> dict:
     """Get the active tools doc prompt configuration from task config."""
-    from commands.setup import init_task_config, load_task_config
-
-    config = load_task_config()
-    task = init_task_config(config)
+    config = _load_task_config()
+    task = _init_task_config(config)
     tools_doc = task.get("tools_doc", {})
     active_name = tools_doc.get("active", "minimal")
     templates = tools_doc.get("templates", {})
@@ -428,16 +532,13 @@ def get_active_tools_doc_prompt_config() -> dict:
 
 def get_active_agent_prompt_config() -> dict:
     """Get the active agent prompt configuration from task config."""
-    from commands.setup import init_task_config, load_task_config
-
-    config = load_task_config()
-    task = init_task_config(config)
+    config = _load_task_config()
+    task = _init_task_config(config)
     agent_prompt = task.get("agent_prompt", {})
     active_name = agent_prompt.get("active", "default")
     templates = agent_prompt.get("templates", {})
 
     template_config = templates.get(active_name, templates.get("default", {}))
-    from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
 
     return {
         "name": active_name,
@@ -464,9 +565,6 @@ def build_command_documentation(
     fastmarket_tools_section = _build_fastmarket_tools_section(fastmarket_tools_config)
     system_commands_section = _build_system_commands_section(system_commands)
     skills_section = _build_skills_section()
-
-    skills_dir = get_skills_dir()
-    skills = discover_skills(skills_dir)
 
     fastmarket_tools_minimal = ", ".join(
         f"`{c}`" for c in sorted(fastmarket_tools_config.keys())
@@ -516,22 +614,9 @@ def build_command_documentation(
     if aliases_minimal_parts:
         aliases_minimal = "**Aliases**: " + ", ".join(aliases_minimal_parts) + "\n"
 
-    skills_minimal_parts = []
-    for skill in skills:
-        if skill.has_scripts:
-            scripts_dir = skill.path / "scripts"
-            scripts = [
-                f.name
-                for f in scripts_dir.iterdir()
-                if f.is_file() and not f.name.startswith(".")
-            ]
-            for script in sorted(scripts):
-                skills_minimal_parts.append(f"skill:{skill.name}/{script}")
     skills_minimal = ""
-    if skills_minimal_parts:
-        skills_minimal = (
-            "**Skills**: " + ", ".join(f"`{s}`" for s in skills_minimal_parts) + "\n"
-        )
+    other_commands = ""
+    other_commands_minimal = ""
 
     return {
         "aliases": aliases_section,
@@ -541,6 +626,8 @@ def build_command_documentation(
         "fastmarket_tools_commands": fastmarket_tools_commands,
         "system_commands": system_commands_section,
         "system_commands_minimal": system_commands_minimal,
+        "other_commands": other_commands,
+        "other_commands_minimal": other_commands_minimal,
         "skills": skills_section,
         "skills_minimal": skills_minimal,
     }
@@ -556,25 +643,14 @@ def render_command_documentation(
     return prompt_config["template"].format(**placeholders)
 
 
-def _load_skill_learn_content(skill_name: str) -> str | None:
-    """Load LEARN.md for a skill if it exists. Returns None if not found."""
-    learn_path = get_skills_dir() / skill_name / "LEARN.md"
-    if learn_path.exists():
-        return learn_path.read_text(encoding="utf-8")
-    return None
-
-
 def build_system_prompt(
     task_description: str,
     fastmarket_tools_config: dict,
     system_commands: list[str],
     workdir: Path,
     task_params: dict[str, str] | None = None,
-    skill_learn_content: str | None = None,
 ) -> str:
     """Build system prompt for task execution agent."""
-    from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
-
     prompt_config = get_active_agent_prompt_config()
     command_docs = render_command_documentation(
         fastmarket_tools_config, system_commands
@@ -587,18 +663,10 @@ def build_system_prompt(
             display_value = value if len(value) < 200 else value[:197] + "..."
             params_section += f"- **{key}**: {display_value}\n"
 
-    learn_section = ""
-    if skill_learn_content:
-        learn_section = (
-            "\n---\n\n## Skill-Specific Lessons (auto-learned)\n\n"
-            f"{skill_learn_content}\n\n---\n"
-        )
-
     template = prompt_config.get("template", DEFAULT_AGENT_PROMPT_TEMPLATE)
     return template.format(
         task_description=task_description,
         params_section=params_section,
         workdir=str(workdir),
         command_docs=command_docs,
-        learn_section=learn_section,
     )

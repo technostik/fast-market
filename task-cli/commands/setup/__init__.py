@@ -53,7 +53,6 @@ You can read and write files in this directory. Relative paths are resolved from
 ---
 
 {command_docs}
-{learn_section}
 
 ---
 

@@ -243,56 +243,20 @@ def resolve_and_execute_command(
     return result
 
 
-
-
 def execute_skill_command(
     skill_ref: str,
     workdir: Path,
     timeout: int = 60,
     params: dict[str, str] | None = None,
 ) -> CommandResult:
-    """
-    Execute a skill script and adapt the result to CommandResult.
-
-    Also parse inline params from skill_ref:
-    'skillname/script key=val key=val' -> skill_ref='skillname/script', params={key: val}
-    """
-    from common.skill.runner import execute_skill_script
-
-    parts = skill_ref.split()
-    if not parts:
-        return CommandResult(
-            command="skill:",
-            stdout="",
-            stderr="Empty skill reference",
-            exit_code=126,
-        )
-
-    ref = parts[0]
-    inline_params = {}
-    for p in parts[1:]:
-        if "=" in p:
-            k, v = p.split("=", 1)
-            inline_params[k] = v
-
-    merged_params = {**(params or {}), **inline_params}
-    result = execute_skill_script(ref, workdir, params=merged_params or None, timeout=timeout)
-    reason = result.stderr
-    if not reason:
-        if result.timed_out:
-            reason = "Skill command ended: timeout"
-        elif result.exit_code == 0:
-            reason = "Skill command ended: success"
-        else:
-            reason = f"Skill command ended: failure (exit {result.exit_code})"
-
+    """Execute a skill script. Skills are no longer supported in task-cli."""
     return CommandResult(
         command=f"skill:{skill_ref}",
-        stdout=result.stdout,
-        stderr=reason,
-        exit_code=result.exit_code,
-        timed_out=result.timed_out,
+        stdout="",
+        stderr="Skills are no longer supported in task-cli. Use the skill CLI directly.",
+        exit_code=1,
     )
+
 
 def _needs_shell(cmd_str: str) -> bool:
     """Check if command requires shell features (redirection, pipes, heredocs, etc.)."""
