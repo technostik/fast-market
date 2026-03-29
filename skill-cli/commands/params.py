@@ -4,7 +4,7 @@ import click
 from click.shell_completion import CompletionItem
 
 from common.core.paths import get_skills_dir
-from common.skill.skill import Skill, discover_skills
+from core.skill import Skill, discover_skills
 
 
 class SkillRefType(click.ParamType):

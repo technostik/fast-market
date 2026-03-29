@@ -4,7 +4,7 @@ import click
 
 from commands.base import CommandManifest
 from common.core.paths import get_skills_dir
-from common.skill.skill import Skill
+from core.skill import Skill
 
 
 def register(plugin_manifests: dict) -> CommandManifest:

@@ -12,7 +12,7 @@ from common.core.config import (
     requires_common_config,
 )
 from common.llm.registry import discover_providers, get_default_provider_name
-from common.skill.router import run_router
+from core.router import run_router
 
 
 def register(plugin_manifests: dict) -> CommandManifest:

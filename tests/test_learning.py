@@ -42,7 +42,7 @@ def get_llm_provider():
 
 def _run_router(goal: str, workdir: str):
     """Run skill router and return state."""
-    from common.skill.router import run_router
+    from core.router import run_router
 
     provider = get_llm_provider()
     state = run_router(

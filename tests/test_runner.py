@@ -1,5 +1,5 @@
 def test_execute_echo_skill(workdir, skills_dir):
-    from common.skill.runner import execute_skill_script
+    from core.runner import execute_skill_script
 
     result = execute_skill_script("test-echo", workdir, params={"message": "hello"})
     assert result.exit_code == 0
@@ -7,7 +7,7 @@ def test_execute_echo_skill(workdir, skills_dir):
 
 
 def test_execute_echo_with_prefix(workdir, skills_dir):
-    from common.skill.runner import execute_skill_script
+    from core.runner import execute_skill_script
 
     result = execute_skill_script(
         "test-echo", workdir, params={"message": "world", "prefix": "TEST"}
@@ -17,7 +17,7 @@ def test_execute_echo_with_prefix(workdir, skills_dir):
 
 
 def test_execute_fail_skill(workdir, skills_dir):
-    from common.skill.runner import execute_skill_script
+    from core.runner import execute_skill_script
 
     result = execute_skill_script("test-fail", workdir)
     assert result.exit_code == 1
@@ -25,7 +25,7 @@ def test_execute_fail_skill(workdir, skills_dir):
 
 
 def test_execute_nonexistent_skill(workdir):
-    from common.skill.runner import execute_skill_script
+    from core.runner import execute_skill_script
 
     result = execute_skill_script("does-not-exist", workdir)
     assert result.exit_code == 127
@@ -33,7 +33,7 @@ def test_execute_nonexistent_skill(workdir):
 
 
 def test_resolve_skill_script_single_script(skills_dir):
-    from common.skill.runner import resolve_skill_script
+    from core.runner import resolve_skill_script
 
     skill, script = resolve_skill_script("test-echo")
     assert skill is not None
@@ -42,7 +42,7 @@ def test_resolve_skill_script_single_script(skills_dir):
 
 
 def test_resolve_skill_script_explicit(skills_dir):
-    from common.skill.runner import resolve_skill_script
+    from core.runner import resolve_skill_script
 
     skill, script = resolve_skill_script("test-echo/run.sh")
     assert skill is not None
@@ -51,7 +51,7 @@ def test_resolve_skill_script_explicit(skills_dir):
 
 
 def test_resolve_nonexistent_returns_none(skills_dir):
-    from common.skill.runner import resolve_skill_script
+    from core.runner import resolve_skill_script
 
     skill, script = resolve_skill_script("does-not-exist")
     assert skill is None
@@ -60,7 +60,7 @@ def test_resolve_nonexistent_returns_none(skills_dir):
 
 def test_params_passed_as_env_vars(workdir, skills_dir):
     """Verify SKILL_* env vars are set correctly."""
-    from common.skill.runner import execute_skill_script
+    from core.runner import execute_skill_script
 
     # test-echo prints SKILL_PREFIX: SKILL_MESSAGE
     result = execute_skill_script(
@@ -89,7 +89,7 @@ def test_timeout_triggers(workdir, tmp_path, skills_dir):
     shutil.copytree(slow_skill_dir, target)
 
     try:
-        from common.skill.runner import execute_skill_script
+        from core.runner import execute_skill_script
 
         result = execute_skill_script("test-slow", workdir, timeout=1)
         assert result.timed_out is True

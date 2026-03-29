@@ -12,7 +12,7 @@ from common.core.config import load_common_config, load_tool_config, save_tool_c
 from common.core.yaml_utils import dump_yaml
 from common.core.paths import get_skills_dir
 from common.llm.registry import get_default_provider_name
-from common.skill.skill import Skill
+from core.skill import Skill
 
 logger = structlog.get_logger(__name__)
 
@@ -143,7 +143,7 @@ def apply_skill_impl(
     save_session: str | None = None,
     compact: bool = False,
 ) -> None:
-    from common.skill.runner import (
+    from core.runner import (
         execute_skill_prompt,
         execute_skill_run,
         execute_skill_script,
@@ -156,7 +156,8 @@ def apply_skill_impl(
 
     workdir_path = Path(workdir).expanduser().resolve()
 
-    click.echo(f"workdir: {workdir_path}")
+    if fmt != "json":
+        click.echo(f"workdir: {workdir_path}")
 
     provided_params: dict[str, str] = {}
     invalid_params: list[str] = []
@@ -312,7 +313,7 @@ def apply_skill_impl(
         )
 
         if auto_learn:
-            from common.skill.runner import _run_auto_learn_from_skill
+            from core.runner import _run_auto_learn_from_skill
 
             timed_out_seconds = timeout if timeout is not None else skill.timeout
             if timed_out_seconds is None:

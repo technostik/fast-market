@@ -91,7 +91,7 @@ def test_skill_run_command_executes_router(workdir):
 
 
 def test_router_picks_correct_skill(workdir):
-    from common.skill.router import run_router
+    from core.router import run_router
 
     provider = get_llm_provider()
     state = run_router(
@@ -105,7 +105,7 @@ def test_router_picks_correct_skill(workdir):
 
 
 def test_router_extracts_params(workdir):
-    from common.skill.router import run_router
+    from core.router import run_router
 
     provider = get_llm_provider()
     state = run_router(
@@ -122,7 +122,7 @@ def test_router_extracts_params(workdir):
 
 
 def test_router_retries_on_failure(workdir):
-    from common.skill.router import run_router
+    from core.router import run_router
 
     provider = get_llm_provider()
     state = run_router(
@@ -139,7 +139,7 @@ def test_router_retries_on_failure(workdir):
 
 
 def test_router_chains_two_skills(workdir):
-    from common.skill.router import run_router
+    from core.router import run_router
 
     provider = get_llm_provider()
     state = run_router(
@@ -161,7 +161,7 @@ def test_router_chains_two_skills(workdir):
 
 
 def test_router_declares_fail_on_impossible_goal(workdir):
-    from common.skill.router import run_router
+    from core.router import run_router
 
     provider = get_llm_provider()
     state = run_router(
@@ -176,7 +176,7 @@ def test_router_declares_fail_on_impossible_goal(workdir):
 
 def test_router_sessions_written_to_cache(workdir, isolate_xdg):
     from common.core.paths import get_cache_dir
-    from common.skill.router import run_router
+    from core.router import run_router
 
     provider = get_llm_provider()
     run_router(
@@ -195,7 +195,7 @@ def test_router_sessions_written_to_cache(workdir, isolate_xdg):
 
 
 def test_runner_summary_not_raw_session(workdir):
-    from common.skill.router import run_router
+    from core.router import run_router
 
     provider = get_llm_provider()
     state = run_router(
@@ -213,7 +213,7 @@ def test_runner_summary_not_raw_session(workdir):
 def test_session_metrics_written(workdir, skills_dir):
     """Session files produced by router contain metrics."""
     from common.core.paths import get_cache_dir
-    from common.skill.router import run_router
+    from core.router import run_router
     from helpers import get_session_metrics
 
     provider = get_llm_provider()

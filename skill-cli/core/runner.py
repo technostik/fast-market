@@ -8,7 +8,7 @@ from pathlib import Path
 
 from common import structlog
 from common.core.paths import get_skills_dir
-from common.skill.skill import Skill, discover_skills
+from core.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
 
@@ -234,44 +234,6 @@ def execute_skill_run(
             script_name="run:",
             stdout="",
             stderr=f"Skill run timed out after {effective_timeout}s",
-            exit_code=124,
-            timed_out=True,
-        )
-
-    env = os.environ.copy()
-    for key, value in (params or {}).items():
-        env[f"SKILL_{str(key).upper()}"] = str(value)
-
-    logger.debug(
-        "executing skill run command",
-        skill=skill.name,
-        command=cmd,
-        workdir=str(workdir),
-        timeout=timeout,
-    )
-
-    try:
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            cwd=workdir,
-            env=env,
-            capture_output=False,
-            timeout=timeout,
-        )
-        return SkillResult(
-            skill_name=skill.name,
-            script_name="run:",
-            stdout="",
-            stderr="",
-            exit_code=result.returncode,
-        )
-    except subprocess.TimeoutExpired:
-        return SkillResult(
-            skill_name=skill.name,
-            script_name="run:",
-            stdout="",
-            stderr=f"Command timed out after {timeout}s",
             exit_code=124,
             timed_out=True,
         )

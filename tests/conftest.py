@@ -96,14 +96,14 @@ def skills_dir(isolate_xdg):
 @pytest.fixture
 def test_echo_skill(skills_dir):
     """Return the test-echo Skill object."""
-    from common.skill.skill import Skill
+    from core.skill import Skill
 
     return Skill.from_path(skills_dir / "test-echo")
 
 
 @pytest.fixture
 def test_fail_skill(skills_dir):
-    from common.skill.skill import Skill
+    from core.skill import Skill
 
     return Skill.from_path(skills_dir / "test-fail")
 

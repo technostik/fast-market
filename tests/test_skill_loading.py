@@ -1,5 +1,5 @@
 def test_discover_finds_test_skills(skills_dir):
-    from common.skill.skill import discover_skills
+    from core.skill import discover_skills
 
     skills = discover_skills(skills_dir)
     names = [s.name for s in skills]
@@ -25,7 +25,7 @@ def test_skill_has_scripts(test_echo_skill):
 
 
 def test_skill_get_body_returns_content(skills_dir):
-    from common.skill.skill import Skill
+    from core.skill import Skill
 
     skill = Skill.from_path(skills_dir / "test-prompt")
     body = skill.get_body()
@@ -33,14 +33,14 @@ def test_skill_get_body_returns_content(skills_dir):
 
 
 def test_skill_without_parameters_has_empty_list(skills_dir):
-    from common.skill.skill import Skill
+    from core.skill import Skill
 
     skill = Skill.from_path(skills_dir / "test-prompt")
     assert skill.parameters == []
 
 
 def test_nonexistent_skill_returns_none(skills_dir):
-    from common.skill.skill import Skill
+    from core.skill import Skill
 
     result = Skill.from_path(skills_dir / "does-not-exist")
     assert result is None

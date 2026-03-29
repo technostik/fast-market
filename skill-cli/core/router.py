@@ -12,7 +12,7 @@ from common import structlog
 from common.core.paths import get_cache_dir, get_skills_dir
 from common.llm.base import LLMRequest
 from common.rt_subprocess import rt_subprocess
-from common.skill.skill import Skill, discover_skills
+from core.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
 

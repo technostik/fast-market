@@ -6,7 +6,7 @@ import click
 
 from commands.base import CommandManifest
 from common.core.paths import get_skills_dir
-from common.skill.skill import discover_skills
+from core.skill import discover_skills
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
