@@ -156,6 +156,8 @@ def apply_skill_impl(
 
     workdir_path = Path(workdir).expanduser().resolve()
 
+    click.echo(f"workdir: {workdir_path}")
+
     provided_params: dict[str, str] = {}
     invalid_params: list[str] = []
     for param in params:
@@ -276,6 +278,11 @@ def apply_skill_impl(
 
         provider_name, model_name = _resolve_prompt_provider_model(provider, model)
 
+        llm_display = model_name if model_name else "default"
+        if provider_name:
+            llm_display = f"{provider_name}/{llm_display}"
+        click.echo(f"llm: {llm_display}")
+
         if dry_run:
             if fmt == "json":
                 click.echo(json.dumps({"exit_code": 0, "stdout": "", "stderr": ""}))
@@ -297,14 +304,14 @@ def apply_skill_impl(
             timeout=timeout,
             max_iterations=max_iterations,
             llm_timeout=llm_timeout,
-            auto_learn=auto_learn,
+            auto_learn=False,  # Handle auto-learn in skill-cli after task completes
             provider=provider_name,
             model=model_name,
             save_session=_resolve_save_session_path(save_session, workdir_path),
             compact=compact,
         )
 
-        if auto_learn and result.timed_out:
+        if auto_learn:
             from common.skill.runner import _run_auto_learn_from_skill
 
             timed_out_seconds = timeout if timeout is not None else skill.timeout
@@ -347,7 +354,7 @@ def apply_skill_impl(
                 skill=skill,
                 params=provided_params,
                 workdir=workdir_path,
-                timed_out=True,
+                timed_out=result.timed_out,
                 timed_out_seconds=timed_out_seconds,
                 provider=llm_provider,
                 model=model_name,

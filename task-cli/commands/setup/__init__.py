@@ -91,10 +91,6 @@ DEFAULT_FASTMARKET_TOOLS = {
         "description": "Execute agentic task",
         "commands": ["run"],
     },
-    "skill": {
-        "description": "Execute skill scripts",
-        "commands": ["list", "run"],
-    },
     "youtube": {
         "description": "Search YouTube videos and manage comments via the YouTube Data API.",
         "commands": ["search", "comments", "reply", "setup"],

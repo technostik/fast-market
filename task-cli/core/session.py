@@ -71,6 +71,59 @@ class Session:
     exit_code: int = 0
     error: Optional[str] = None
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "Session":
+        """Create a Session from a dict (e.g., loaded from YAML)."""
+        from datetime import datetime
+
+        def parse_time(ts):
+            if ts is None:
+                return datetime.utcnow()
+            if isinstance(ts, datetime):
+                return ts
+            if isinstance(ts, str):
+                return datetime.fromisoformat(ts)
+            return datetime.utcnow()
+
+        turns = []
+        for turn_data in data.get("turns", []):
+            tool_calls = []
+            for tc_data in turn_data.get("tool_calls", []):
+                tc = ToolCallEvent(
+                    tool_call_id=tc_data.get("tool_call_id", ""),
+                    tool_name=tc_data.get("tool_name", ""),
+                    arguments=tc_data.get("arguments", {}),
+                    explanation=tc_data.get("explanation", ""),
+                    result=tc_data.get("result"),
+                    exit_code=tc_data.get("exit_code"),
+                    stdout=tc_data.get("stdout", ""),
+                    stderr=tc_data.get("stderr", ""),
+                    error=tc_data.get("error"),
+                )
+                tool_calls.append(tc)
+            turn = Turn(
+                role=turn_data.get("role", "assistant"),
+                content=turn_data.get("content", ""),
+                tool_calls=tool_calls,
+                timestamp=parse_time(turn_data.get("timestamp")),
+            )
+            turns.append(turn)
+
+        return cls(
+            task_description=data.get("task_description", ""),
+            workdir=data.get("workdir", ""),
+            provider=data.get("provider", ""),
+            model=data.get("model", ""),
+            max_iterations=data.get("max_iterations", 20),
+            task_params=data.get("task_params", {}),
+            turns=turns,
+            start_time=parse_time(data.get("start_time")),
+            end_time=parse_time(data.get("end_time")),
+            end_reason=data.get("end_reason", ""),
+            exit_code=data.get("exit_code", 0),
+            error=data.get("error"),
+        )
+
     def add_turn(self, turn: Turn) -> None:
         self.turns.append(turn)
 

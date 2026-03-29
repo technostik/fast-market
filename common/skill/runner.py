@@ -328,12 +328,6 @@ def execute_skill_prompt(
         cmd += ["--max-iterations", str(effective_max_iterations)]
     if effective_llm_timeout > 0:
         cmd += ["--llm-timeout", str(effective_llm_timeout)]
-    if auto_learn:
-        cmd += ["--auto-learn", "--learn-skill", skill.name]
-        if compact:
-            cmd += ["--compact"]
-        if skill.autocompact_lines is not None:
-            cmd += ["--autocompact-lines", str(skill.autocompact_lines)]
     for key, value in (params or {}).items():
         cmd += ["--param", f"{key}={value}"]
     if workdir and str(workdir) != ".":

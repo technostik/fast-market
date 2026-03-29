@@ -56,10 +56,6 @@ DEFAULT_FASTMARKET_TOOLS = {
         "description": "Execute agentic task",
         "commands": ["run"],
     },
-    "skill": {
-        "description": "Execute skill scripts",
-        "commands": ["list", "run"],
-    },
     "youtube": {
         "description": "Search YouTube videos and manage comments via the YouTube Data API.",
         "commands": ["search", "comments", "reply", "setup"],
@@ -306,8 +302,8 @@ SYSTEM_COMMAND_DOCS = {
 }
 
 TOOLS_DOC_TEMPLATES = {
-    "full": "{aliases}{fastmarket_tools}{system_commands}{other_commands}{skills}",
-    "minimal": "{aliases}{fastmarket_tools_minimal}{system_commands_minimal}{other_commands_minimal}{skills_minimal}",
+    "full": "{aliases}{fastmarket_tools}{system_commands}{other_commands}",
+    "minimal": "{aliases}{fastmarket_tools_minimal}{system_commands_minimal}{other_commands_minimal}",
 }
 
 
@@ -332,11 +328,6 @@ def format_fastmarket_tool_minimal(cmd_name: str) -> str:
 def format_other_command_minimal(cmd_name: str) -> str:
     """Format minimal other command doc."""
     return f"`{cmd_name}`"
-
-
-def format_skill_minimal(skill) -> str:
-    """Format minimal skill doc."""
-    return f"`skill:{skill.name}/script`"
 
 
 def format_alias_minimal(alias_name: str, alias_data) -> str:
@@ -458,11 +449,6 @@ def _build_system_commands_section(system_commands: list[str]) -> str:
     return "\n".join(docs)
 
 
-def _build_skills_section() -> str:
-    """Build the skills section of command documentation."""
-    return ""
-
-
 def _load_task_config() -> dict:
     """Load task config from file, returning dict with task key."""
     from common.core.config import _resolve_config_path
@@ -559,12 +545,11 @@ def build_command_documentation(
 
     Returns a dict with keys: aliases, fastmarket_tools, fastmarket_tools_minimal,
     fastmarket_tools_brief, fastmarket_tools_commands, system_commands,
-    system_commands_minimal, skills, skills_minimal
+    system_commands_minimal, other_commands, other_commands_minimal
     """
     aliases_section = _build_aliases_section()
     fastmarket_tools_section = _build_fastmarket_tools_section(fastmarket_tools_config)
     system_commands_section = _build_system_commands_section(system_commands)
-    skills_section = _build_skills_section()
 
     fastmarket_tools_minimal = ", ".join(
         f"`{c}`" for c in sorted(fastmarket_tools_config.keys())
@@ -614,7 +599,6 @@ def build_command_documentation(
     if aliases_minimal_parts:
         aliases_minimal = "**Aliases**: " + ", ".join(aliases_minimal_parts) + "\n"
 
-    skills_minimal = ""
     other_commands = ""
     other_commands_minimal = ""
 
@@ -628,8 +612,6 @@ def build_command_documentation(
         "system_commands_minimal": system_commands_minimal,
         "other_commands": other_commands,
         "other_commands_minimal": other_commands_minimal,
-        "skills": skills_section,
-        "skills_minimal": skills_minimal,
     }
 
 

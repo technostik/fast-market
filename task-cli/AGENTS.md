@@ -10,7 +10,6 @@ Agentic task execution CLI for fast-market. Executes whitelisted CLI commands it
 
 ## What it does NOT manage
 - LLM configuration → use `common-setup`
-- Skills → use `skill` (Phase 6)
 
 ## Dependencies
 - common.core.config (load_tool_config for task)

@@ -65,7 +65,7 @@ def register(plugin_manifests: dict | None = None):
         fastmarket_tools = task.setdefault("fastmarket_tools", {})
         system_commands = task.setdefault("system_commands", [])
 
-        known_tools = {"corpus", "image", "message", "task", "skill", "youtube"}
+        known_tools = {"corpus", "image", "message", "task", "youtube"}
 
         if command_type == "system" or (
             command_type is None and command not in known_tools

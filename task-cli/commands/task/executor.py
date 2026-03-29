@@ -213,15 +213,11 @@ def resolve_and_execute_command(
     allowed: set[str],
     timeout: int = 60,
 ) -> CommandResult:
-    """Execute a command with alias resolution and skill script support.
+    """Execute a command with alias resolution.
 
     Resolves any aliases in the command before execution.
-    Supports skill: prefix for executing skill scripts.
     Tracks original command and alias for debugging.
     """
-    if cmd_str.startswith("skill:"):
-        return execute_skill_command(cmd_str[6:], workdir, timeout)
-
     resolved_cmd, alias_used = _resolve_alias(cmd_str)
 
     if resolved_cmd != cmd_str:
@@ -241,21 +237,6 @@ def resolve_and_execute_command(
     result.resolved_from_alias = alias_used
 
     return result
-
-
-def execute_skill_command(
-    skill_ref: str,
-    workdir: Path,
-    timeout: int = 60,
-    params: dict[str, str] | None = None,
-) -> CommandResult:
-    """Execute a skill script. Skills are no longer supported in task-cli."""
-    return CommandResult(
-        command=f"skill:{skill_ref}",
-        stdout="",
-        stderr="Skills are no longer supported in task-cli. Use the skill CLI directly.",
-        exit_code=1,
-    )
 
 
 def _needs_shell(cmd_str: str) -> bool:
