@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import yaml
-from yaml import dump as _yaml_dump
-
-_multiline_representer_added = False
 
 
-def _str_representer(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
-    if "\n" in data:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+class _BlockStringDumper(yaml.SafeDumper):
+    """Custom SafeDumper that uses block style (|) for multiline strings."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.add_representer(str, self._str_representer)
+
+    def _str_representer(self, dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
+        if "\n" in data:
+            escaped_data = data.replace("\n---\n", "\n...\n")
+            escaped_data = escaped_data.replace(" \n", "\n")
+            return dumper.represent_scalar(
+                "tag:yaml.org,2002:str", escaped_data, style="|"
+            )
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 
 def dump_yaml(
@@ -18,15 +26,10 @@ def dump_yaml(
     sort_keys: bool = False,
     allow_unicode: bool = True,
 ) -> str:
-    global _multiline_representer_added
-    if not _multiline_representer_added:
-        yaml.SafeDumper.add_representer(str, _str_representer)
-        _multiline_representer_added = True
-
-    return _yaml_dump(
+    return yaml.dump(
         data,
         default_flow_style=default_flow_style,
         sort_keys=sort_keys,
         allow_unicode=allow_unicode,
-        Dumper=yaml.SafeDumper,
+        Dumper=_BlockStringDumper,
     )

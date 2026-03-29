@@ -13,6 +13,7 @@ from common.core.config import (
     requires_common_config,
 )
 from common.core.paths import get_skills_dir
+from common.core.yaml_utils import dump_yaml
 from common.learn import (
     LEARN_ANALYSIS_PROMPT_TEMPLATE,
     LEARN_RESULT_TEMPLATE,
@@ -24,19 +25,6 @@ from common.learn import (
     MAX_LEARN_LINES,
 )
 from common.llm.registry import discover_providers, get_default_provider_name
-
-
-def _dump_yaml_with_block_strings(data: dict) -> str:
-    """Dump YAML with multiline strings using block style (|)."""
-    lines = []
-    for key, value in data.items():
-        if isinstance(value, str) and "\n" in value:
-            lines.append(f"{key}: |")
-            for line in value.split("\n"):
-                lines.append(f"  {line}")
-        else:
-            lines.append(f"{key}: {yaml.dump(value, default_flow_style=True).strip()}")
-    return "\n".join(lines) + "\n"
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -107,7 +95,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if config_key not in data:
                 data[config_key] = default_template
         path.write_text(
-            _dump_yaml_with_block_strings(data),
+            dump_yaml(data),
             encoding="utf-8",
         )
         open_editor(path)
