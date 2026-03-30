@@ -321,6 +321,7 @@ def apply_skill_impl(
             timed_out_seconds = int(str(timed_out_seconds).rstrip("s"))
 
             session = None
+            session_path = None
             if save_session:
                 session_path = _resolve_save_session_path(save_session, workdir_path)
                 if session_path and session_path.exists():
@@ -328,7 +329,7 @@ def apply_skill_impl(
 
                     session_data = yaml.safe_load(session_path.read_text())
                     if session_data:
-                        from core.session import Session
+                        from common.agent.session import Session
 
                         session = Session.from_dict(session_data)
 
@@ -360,6 +361,7 @@ def apply_skill_impl(
                 provider=llm_provider,
                 model=model_name,
                 session=session,
+                session_path=session_path,
             )
 
     if fmt == "json":

@@ -100,6 +100,60 @@ def register(plugin_manifests: dict) -> CommandManifest:
         )
         open_editor(path)
 
+    @auto_learn_group.command("reset")
+    @click.option(
+        "--result",
+        "-r",
+        is_flag=True,
+        help="Reset learn_result_template to default",
+    )
+    @click.option(
+        "--compact",
+        "-c",
+        is_flag=True,
+        help="Reset learn_compacting_prompt to default",
+    )
+    @click.option(
+        "--all",
+        "-a",
+        is_flag=True,
+        help="Reset all templates to defaults",
+    )
+    def auto_learn_reset(result, compact, all):
+        """Reset auto-learn templates to defaults."""
+        path = get_tool_config_path("skill")
+
+        if not path.exists():
+            click.echo("No config file found, nothing to reset.")
+            return
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        keys_to_reset = []
+
+        if all:
+            keys_to_reset = [
+                "learn_analysis_prompt",
+                "learn_result_template",
+                "learn_compacting_prompt",
+            ]
+        elif compact:
+            keys_to_reset = ["learn_compacting_prompt"]
+        elif result:
+            keys_to_reset = ["learn_result_template"]
+        else:
+            keys_to_reset = ["learn_analysis_prompt"]
+
+        for key in keys_to_reset:
+            if key in data:
+                del data[key]
+
+        if data:
+            path.write_text(dump_yaml(data, sort_keys=False), encoding="utf-8")
+        else:
+            path.unlink()
+
+        click.echo(f"Reset: {', '.join(keys_to_reset)}")
+
     @auto_learn_group.command("compact")
     @click.argument("skill_name", type=SkillNameType())
     @click.option(

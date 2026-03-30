@@ -31,11 +31,13 @@ Parameters: {params_summary}
 ## Full Session Log
 {session_log}
 
+{existing_learnings_block}
+
 ---
 
 ## Your job
 
-Write a LEARN.md file for the skill '{skill_name}'. This file will be injected into the system prompt of future task runs using this skill, so it must be:
+Write a LEARN.md file for the skill '{skill_name}' with NEW LESSONS LEARNED. This file will be injected into the system prompt of future task runs using this skill, so it must be:
 
 1. **Actionable** — specific commands, flags, paths, patterns that work
 2. **Concise** — maximum 30 lines total
@@ -53,6 +55,7 @@ Rules:
 - If the task succeeded on the first try with no errors, write only a "What Works" section with the successful approach
 - If no lessons were learned (trivial task), write: `# Lessons Learned\n\n_No lessons recorded for this run._`
 - Output ONLY the markdown content, no preamble, no code fences
+- ONLY new lessons learned should be included, not repeated content.
 """
 
 LEARN_RESULT_TEMPLATE = """```markdown
@@ -165,13 +168,28 @@ def analyze_session(
     model: str | None = None,
     learn_analysis_prompt: str | None = None,
     learn_result_template: str | None = None,
-) -> str:
-    """Analyze a session and return LEARN.md content as markdown."""
+    existing_learn_content: str | None = None,
+) -> tuple[str, str]:
+    """Analyze a session and return LEARN.md content as markdown.
+
+    Returns:
+        Tuple of (learn_content, full_prompt) for debugging purposes.
+    """
     from common.llm.base import LLMRequest
 
     try:
         analysis_prompt = learn_analysis_prompt or LEARN_ANALYSIS_PROMPT_TEMPLATE
         result_template = learn_result_template or LEARN_RESULT_TEMPLATE
+
+        if existing_learn_content:
+            existing_block = f"""## Existing Learnings
+{existing_learn_content}
+
+---
+
+**IMPORTANT:** Only write what is NEWLY learned in this session. Do NOT repeat what's already captured above."""
+        else:
+            existing_block = ""
 
         prompt = analysis_prompt.format(
             task_description=session.task_description,
@@ -182,6 +200,7 @@ def analyze_session(
             params_summary=session.task_params or {},
             session_log=format_session_log(session),
             learn_result_template=result_template,
+            existing_learnings_block=existing_block,
         )
 
         request = LLMRequest(
@@ -192,10 +211,12 @@ def analyze_session(
         )
         response = provider.complete(request)
         content = (response.content or "").strip()
-        return content or "# Lessons Learned\n\n_No lessons recorded for this run._"
+        default_content = "# Lessons Learned\n\n_No lessons recorded for this run._"
+        return content or default_content, prompt
     except Exception as exc:
         logger.warning("learn_analyze_failed", error=str(exc), skill=skill_name)
-        return "# Lessons Learned\n\n_No lessons recorded for this run._"
+        default_content = "# Lessons Learned\n\n_No lessons recorded for this run._"
+        return default_content, ""
 
 
 def compress_learn_content(

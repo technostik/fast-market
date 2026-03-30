@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from common import structlog
+from common.core.config import load_tool_config
 from common.core.paths import get_skills_dir
+from common.core.yaml_utils import dump_yaml
 from core.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
@@ -394,9 +396,11 @@ def _run_auto_learn_from_skill(
     provider=None,
     model: str | None = None,
     session=None,
+    session_path: Path | None = None,
 ) -> None:
     """Run auto-learn for a skill using LLM."""
     from datetime import datetime
+    import yaml
     from common.learn import (
         analyze_session,
         update_learn_file,
@@ -429,15 +433,22 @@ def _run_auto_learn_from_skill(
         )
     elif provider is not None:
         try:
-            learn_analysis_prompt = get_learn_analysis_prompt()
-            learn_result_template = get_learn_result_template()
-            content = analyze_session(
+            config = load_tool_config("skill")
+            learn_analysis_prompt = get_learn_analysis_prompt(config)
+            learn_result_template = get_learn_result_template(config)
+
+            existing_learn_content = None
+            if learn_path.exists():
+                existing_learn_content = learn_path.read_text(encoding="utf-8")
+
+            content, prompt = analyze_session(
                 session,
                 skill.name,
                 provider,
                 model,
                 learn_analysis_prompt=learn_analysis_prompt,
                 learn_result_template=learn_result_template,
+                existing_learn_content=existing_learn_content,
             )
             update_learn_file(
                 skill.name,
@@ -446,6 +457,21 @@ def _run_auto_learn_from_skill(
                 provider=provider,
                 model=model,
             )
+
+            if session_path and session_path.exists():
+                session_data = yaml.safe_load(session_path.read_text()) or {}
+                learning_section = {
+                    "learning": {
+                        "prompt": prompt,
+                        "result": content,
+                    }
+                }
+                session_data["learning"] = learning_section["learning"]
+                session_path.write_text(
+                    dump_yaml(session_data, sort_keys=False),
+                    encoding="utf-8",
+                )
+
             logger.info("auto_learn_success", skill=skill.name)
         except Exception as exc:
             logger.warning("auto_learn_failed", skill=skill.name, error=str(exc))
