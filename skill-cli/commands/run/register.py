@@ -12,7 +12,7 @@ from common.core.config import (
     requires_common_config,
 )
 from common.llm.registry import discover_providers, get_default_provider_name
-from core.router import run_router
+from core.router import CLIInteractionPlugin, run_router
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -68,6 +68,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Use compacting prompt to consolidate multiple learnings",
     )
+    @click.option(
+        "--no-ask",
+        is_flag=True,
+        default=False,
+        help="Disable user interaction — router will not ask questions (treat as failure instead)",
+    )
     def run_cmd(
         task,
         provider,
@@ -78,8 +84,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         retry_limit,
         auto_learn,
         compact,
+        no_ask,
     ):
-        """Orchestrate multiple skills to accomplish a complex task."""
+        """Orchestrate multiple skills to accomplish a complex task.
+
+        The router plans each step using an LLM, then executes skills or
+        free-form tasks directly (no subprocess). Results and context are
+        passed in-memory between steps.
+        """
         if workdir is None:
             common_config = load_common_config()
             workdir = common_config.get("workdir") or "."
@@ -98,7 +110,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Error: provider '{provider_name}' not available.", err=True)
             sys.exit(1)
 
+        interaction = _NoAskPlugin() if no_ask else CLIInteractionPlugin()
+
         click.echo(f"Router started: '{task}'", err=True)
+        click.echo(f"Provider: {provider_name}, model: {model or 'default'}", err=True)
 
         state = run_router(
             goal=task,
@@ -111,6 +126,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             verbose=verbose,
             auto_learn=auto_learn,
             compact=compact,
+            interaction=interaction,
         )
         click.echo("\n" + "=" * 50, err=True)
         if state.done:
@@ -126,3 +142,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         sys.exit(1)
 
     return CommandManifest(name="run", click_command=run_cmd)
+
+
+class _NoAskPlugin(CLIInteractionPlugin):
+    """Interaction plugin that refuses all questions — for non-interactive use."""
+
+    def ask(self, question: str) -> str:
+        # Return empty string; the router will treat this as a non-answer
+        # and the planner will have to decide next step with no answer.
+        return "(no answer — non-interactive mode)"
