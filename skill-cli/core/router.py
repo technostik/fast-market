@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
 
 from common import structlog
 from common.agent.loop import TaskConfig, TaskLoop
@@ -25,6 +24,9 @@ selecting and sequencing skills, one at a time.
 
 ## Goal
 {goal}
+
+## Success Criteria (what done looks like)
+{success_criteria}
 
 ## Available Skills
 {skills_list}
@@ -119,10 +121,63 @@ For large files: include the first 50 lines and note the full path.
 Be specific. No meta-commentary.
 """
 
+PREPARATION_PROMPT = """You are a skill orchestrator. Before entering the planning loop,
+read the goal and available skills, then produce a structured execution plan.
+
+## Goal
+{goal}
+
+## Available Skills
+{skills_list}
+
+## Your Task
+
+Analyze the goal and available skills. Produce a JSON object with your plan:
+
+```json
+{{
+  "plan": "step by step description of intended approach",
+  "success_criteria": "concrete, observable description of what done looks like",
+  "risks": "what could go wrong and how to handle it"
+}}
+```
+
+Be specific about the order of skills and what each step should accomplish.
+"""
+
+EVALUATION_PROMPT = """You are evaluating whether the last step brought us closer to the goal.
+
+## Goal
+{goal}
+
+## Success Criteria
+{success_criteria}
+
+## History
+{history}
+
+## Last Step Result
+{last_summary}
+
+## Your Task
+
+Determine if the last step satisfied the success criteria. Return a JSON object:
+
+```json
+{{
+  "satisfied": true or false,
+  "reason": "one sentence explaining your assessment",
+  "suggestion": "if not satisfied, what to try next"
+}}
+```
+
+Be honest — if the goal isn't met, say so and suggest a different approach."""
+
 
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class SkillAttempt:
@@ -139,6 +194,20 @@ class SkillAttempt:
 
 
 @dataclass
+class PreparationResult:
+    plan: str
+    success_criteria: str
+    risks: str
+
+
+@dataclass
+class EvaluationResult:
+    satisfied: bool
+    reason: str
+    suggestion: str
+
+
+@dataclass
 class RouterState:
     goal: str
     attempts: list[SkillAttempt]
@@ -148,11 +217,14 @@ class RouterState:
     final_result: str = ""
     failed: bool = False
     failure_reason: str = ""
+    success_criteria: str = ""
+    preparation: str = ""
 
 
 # ---------------------------------------------------------------------------
 # Interaction plugin interface
 # ---------------------------------------------------------------------------
+
 
 class InteractionPlugin:
     """Base class for user interaction during skill routing.
@@ -181,6 +253,7 @@ class CLIInteractionPlugin(InteractionPlugin):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def build_skills_list(skills: list[Skill]) -> str:
     parts = []
@@ -212,7 +285,9 @@ def _format_history(attempts: list[SkillAttempt]) -> str:
         params_str = ", ".join(f"{k}={v}" for k, v in a.params.items())
         subdir_name = a.subdir.name if a.subdir and a.subdir.name else "N/A"
         label = a.skill_name
-        lines.append(f"Step {a.iteration} [{a.action}]: {label}({params_str}) → {status}")
+        lines.append(
+            f"Step {a.iteration} [{a.action}]: {label}({params_str}) → {status}"
+        )
         lines.append(f"  Subdir: {subdir_name}")
         lines.append(f"  Summary: {a.runner_summary[:300]}")
         if a.context:
@@ -228,17 +303,67 @@ def _make_subdir(workdir: Path, iteration: int, label: str) -> Path:
     return subdir
 
 
-def _call_plan(state: RouterState, provider, model: str | None, skills: list[Skill]) -> dict:
+def _parse_llm_json(raw: str, context: str = "LLM") -> dict:
+    """Parse JSON from LLM response, stripping markdown fences.
+
+    Raises ValueError if JSON is invalid or not a dict.
+    """
+    if not raw:
+        raise ValueError(f"{context} returned empty response")
+
+    cleaned = raw
+    if "```" in cleaned:
+        cleaned = cleaned.replace("```json", "```")
+        parts = [p.strip() for p in cleaned.split("```") if p.strip()]
+        candidates = [p for p in parts if p.startswith("{") and p.endswith("}")]
+        if candidates:
+            cleaned = candidates[0]
+        else:
+            for p in parts:
+                if "{" in p and "}" in p:
+                    start, end = p.find("{"), p.rfind("}")
+                    if start != -1 and end > start:
+                        cleaned = p[start : end + 1]
+                        break
+
+    if not (cleaned.startswith("{") and cleaned.endswith("}")):
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start != -1 and end > start:
+            cleaned = cleaned[start : end + 1]
+
+    if not cleaned:
+        raise ValueError(f"{context} returned unparseable response: {raw[:200]!r}")
+
+    try:
+        data = json.loads(cleaned)
+    except Exception as exc:
+        raise ValueError(
+            f"{context} returned invalid JSON: {cleaned[:200]!r}. Error: {exc}"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} returned non-object JSON")
+    return data
+
+
+def _call_plan(
+    state: RouterState, provider, model: str | None, skills: list[Skill]
+) -> dict:
     prompt = PLAN_PROMPT.format(
         goal=state.goal,
         skills_list=build_skills_list(skills),
         history=_format_history(state.attempts),
+        success_criteria=state.success_criteria,
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=600)
     response = provider.complete(req)
     raw = (response.content or "").strip()
 
-    _debug = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {"1", "true", "TRUE"}
+    _debug = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+        "1",
+        "true",
+        "TRUE",
+    }
     if _debug:
         print(f"[router][plan] raw response:\n{raw}")
 
@@ -248,27 +373,7 @@ def _call_plan(state: RouterState, provider, model: str | None, skills: list[Ski
             f"Model: {response.model}. Set SKILL_ROUTER_DEBUG_LLM=1 for details."
         )
 
-    # Strip markdown fences if present
-    cleaned = raw
-    if "```" in cleaned:
-        cleaned = cleaned.replace("```json", "```")
-        parts = [p.strip() for p in cleaned.split("```") if p.strip()]
-        candidates = [p for p in parts if p.startswith("{") and p.endswith("}")]
-        if candidates:
-            cleaned = candidates[0]
-    if not (cleaned.startswith("{") and cleaned.endswith("}")):
-        start, end = cleaned.find("{"), cleaned.rfind("}")
-        if start != -1 and end > start:
-            cleaned = cleaned[start:end + 1]
-
-    try:
-        data = json.loads(cleaned)
-    except Exception as exc:
-        raise ValueError(f"Planner returned invalid JSON: {raw[:300]!r}. Error: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise ValueError("Planner returned non-object JSON")
-    return data
+    return _parse_llm_json(raw, context="Planner")
 
 
 def _call_runner_summary(
@@ -303,11 +408,123 @@ def _call_context_extract(
         skill_name=label,
         params=params,
         session_output=session_output[:5000],
-        next_step_hint=next_step_hint or "Extract any useful data or results for the next step.",
+        next_step_hint=next_step_hint
+        or "Extract any useful data or results for the next step.",
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=1000)
     response = provider.complete(req)
     return (response.content or "").strip()
+
+
+def _call_preparation(
+    goal: str,
+    provider,
+    model: str | None,
+    skills: list[Skill],
+    prompt_template: str | None = None,
+) -> PreparationResult:
+    """Call LLM to produce a preparation plan before the main loop."""
+    if prompt_template is None:
+        prompt_template = PREPARATION_PROMPT
+    prompt = prompt_template.format(
+        goal=goal,
+        skills_list=build_skills_list(skills),
+    )
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=1500)
+    response = provider.complete(req)
+    raw = (response.content or "").strip()
+
+    _debug = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+        "1",
+        "true",
+        "TRUE",
+    }
+    if _debug:
+        print(f"[router][preparation] raw response:\n{raw}")
+
+    logger.debug("preparation_raw_response", raw=raw[:500])
+
+    if not raw:
+        raise ValueError(
+            f"Preparation returned empty response. "
+            f"Model: {response.model}. Set SKILL_ROUTER_DEBUG_LLM=1 for details."
+        )
+
+    data = _parse_llm_json(raw, context="Preparation")
+
+    try:
+        return PreparationResult(
+            plan=data["plan"],
+            success_criteria=data["success_criteria"],
+            risks=data["risks"],
+        )
+    except KeyError as exc:
+        logger.warning(
+            "preparation_incomplete",
+            error=str(exc),
+            raw=raw[:300],
+        )
+        return PreparationResult(
+            plan="Continue with planner loop",
+            success_criteria="Goal achieved",
+            risks="Unknown",
+        )
+
+
+def _call_evaluation(
+    state: RouterState,
+    last_summary: str,
+    success_criteria: str,
+    provider,
+    model: str | None,
+    prompt_template: str | None = None,
+) -> EvaluationResult:
+    """Call LLM to evaluate if the last step satisfied success criteria."""
+    if prompt_template is None:
+        prompt_template = EVALUATION_PROMPT
+    prompt = prompt_template.format(
+        goal=state.goal,
+        success_criteria=success_criteria,
+        history=_format_history(state.attempts),
+        last_summary=last_summary,
+    )
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=400)
+    response = provider.complete(req)
+    raw = (response.content or "").strip()
+
+    _debug = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
+        "1",
+        "true",
+        "TRUE",
+    }
+    if _debug:
+        print(f"[router][evaluation] raw response:\n{raw}")
+
+    if not raw:
+        raise ValueError(
+            f"Evaluation returned empty response. "
+            f"Model: {response.model}. Set SKILL_ROUTER_DEBUG_LLM=1 for details."
+        )
+
+    data = _parse_llm_json(raw, context="Evaluation")
+
+    try:
+        return EvaluationResult(
+            satisfied=bool(data["satisfied"]),
+            reason=data["reason"],
+            suggestion=data.get("suggestion", ""),
+        )
+    except KeyError as exc:
+        logger.warning(
+            "evaluation_incomplete",
+            error=str(exc),
+            raw=raw[:300],
+        )
+        return EvaluationResult(
+            satisfied=False,
+            reason="Evaluation response incomplete",
+            suggestion="Continue with next step",
+        )
 
 
 def _session_to_text(session) -> str:
@@ -335,7 +552,9 @@ def _print_attempt(attempt: SkillAttempt) -> None:
     status = "success" if attempt.success else "failed"
     params = ", ".join(f"{k}={v}" for k, v in attempt.params.items())
     subdir_name = attempt.subdir.name if attempt.subdir else "N/A"
-    print(f"[router] step {attempt.iteration} [{attempt.action}]: {attempt.skill_name}({params}) -> {status}")
+    print(
+        f"[router] step {attempt.iteration} [{attempt.action}]: {attempt.skill_name}({params}) -> {status}"
+    )
     print(f"[router] subdir: {subdir_name}")
     print(f"[router] summary: {attempt.runner_summary[:300]}")
 
@@ -343,6 +562,7 @@ def _print_attempt(attempt: SkillAttempt) -> None:
 # ---------------------------------------------------------------------------
 # Executors
 # ---------------------------------------------------------------------------
+
 
 def _run_skill(
     skill: Skill,
@@ -408,7 +628,9 @@ def _run_skill(
     exit_code = 0 if "success" in end_reason else 1
 
     if auto_learn and loop.session:
-        _try_auto_learn(skill, effective_params, loop.session, subdir, None, model, compact)
+        _try_auto_learn(
+            skill, effective_params, loop.session, subdir, None, model, compact
+        )
 
     return exit_code, loop.session
 
@@ -426,7 +648,9 @@ def _run_task(
 
     full_description = description
     if prev_context:
-        full_description = f"{description}\n\n---\n## Context from previous steps\n{prev_context}"
+        full_description = (
+            f"{description}\n\n---\n## Context from previous steps\n{prev_context}"
+        )
 
     fastmarket_tools = agent_cfg.get("fastmarket_tools", {})
     system_commands = agent_cfg.get("system_commands", [])
@@ -492,6 +716,7 @@ def _try_auto_learn(skill, params, session, subdir, session_path, model, compact
 # Main router loop
 # ---------------------------------------------------------------------------
 
+
 def run_router(
     goal: str,
     provider,
@@ -504,11 +729,15 @@ def run_router(
     auto_learn: bool = False,
     compact: bool = False,
     interaction: InteractionPlugin | None = None,
+    evaluation_prompt: str | None = None,
+    skip_evaluation: bool = False,
 ) -> RouterState:
     """Orchestrate skills and free-form tasks to achieve a goal.
 
     Args:
         interaction: Plugin for user interaction. Defaults to CLIInteractionPlugin.
+        evaluation_prompt: Custom evaluation prompt template. If provided, overrides config.
+        skip_evaluation: If True, skip evaluation phase entirely.
     """
     from commands.setup import init_skill_agent_config
     from common.core.config import load_tool_config
@@ -526,13 +755,41 @@ def run_router(
         provider_name = getattr(provider, "name", "default")
 
     agent_cfg = init_skill_agent_config()
-    state = RouterState(goal=goal, attempts=[], iteration=0, max_iterations=max_iterations)
+    state = RouterState(
+        goal=goal, attempts=[], iteration=0, max_iterations=max_iterations
+    )
     skills = discover_skills(get_skills_dir())
     workdir_path = Path(workdir).expanduser().resolve()
+
+    preparation_prompt = agent_cfg.get("preparation_prompt")
+    if skip_evaluation:
+        evaluation_prompt_cfg = None
+    elif evaluation_prompt is not None:
+        evaluation_prompt_cfg = evaluation_prompt
+    else:
+        evaluation_prompt_cfg = agent_cfg.get("evaluation_prompt")
 
     if not skills:
         state.failed = True
         state.failure_reason = "No skills available"
+        return state
+
+    # --- Preparation phase ---
+    try:
+        preparation = _call_preparation(
+            goal, provider, model, skills, prompt_template=preparation_prompt
+        )
+        state.success_criteria = preparation.success_criteria
+        state.preparation = preparation.plan
+        logger.info(
+            "preparation_success_criteria", criteria=preparation.success_criteria
+        )
+        logger.info("preparation_plan", plan=preparation.plan)
+        logger.info("preparation_risks", risks=preparation.risks)
+    except Exception as exc:
+        logger.warning("preparation_failed", error=str(exc))
+        state.failed = True
+        state.failure_reason = f"Preparation failed: {exc}"
         return state
 
     prev_context = ""
@@ -602,7 +859,8 @@ def run_router(
                 break
 
             failed_count = sum(
-                1 for a in state.attempts
+                1
+                for a in state.attempts
                 if a.skill_name == skill_name and a.action == "run" and not a.success
             )
             if failed_count >= retry_limit:
@@ -649,7 +907,9 @@ def run_router(
 
             if not description:
                 state.failed = True
-                state.failure_reason = "Planner issued 'task' action with no description"
+                state.failure_reason = (
+                    "Planner issued 'task' action with no description"
+                )
                 break
 
             subdir = _make_subdir(workdir_path, state.iteration, "task")
@@ -674,7 +934,9 @@ def run_router(
 
         # --- Distill results (shared for "run" and "task") ---
         try:
-            runner_summary = _call_runner_summary(label, params, session_output, provider, model)
+            runner_summary = _call_runner_summary(
+                label, params, session_output, provider, model
+            )
         except Exception as exc:
             runner_summary = f"Summary failed: {exc}"
 
@@ -690,6 +952,29 @@ def run_router(
             )
         except Exception as exc:
             new_context = f"Context extraction failed: {exc}"
+
+        # --- Evaluation phase ---
+        if evaluation_prompt_cfg is not None:
+            try:
+                evaluation = _call_evaluation(
+                    state=state,
+                    last_summary=runner_summary,
+                    success_criteria=state.success_criteria,
+                    provider=provider,
+                    model=model,
+                    prompt_template=evaluation_prompt_cfg,
+                )
+                logger.info(
+                    "evaluation_satisfied",
+                    satisfied=evaluation.satisfied,
+                    reason=evaluation.reason,
+                )
+                if evaluation.satisfied:
+                    state.done = True
+                    state.final_result = evaluation.reason
+                    logger.info("goal_satisfied_early", reason=evaluation.reason)
+            except Exception as exc:
+                logger.warning("evaluation_failed", error=str(exc))
 
         prev_context = new_context
 
@@ -709,8 +994,13 @@ def run_router(
         if verbose:
             _print_attempt(attempt)
 
+        if state.done:
+            break
+
     if not state.done and not state.failed and state.iteration >= max_iterations:
         state.failed = True
-        state.failure_reason = f"Max iterations ({max_iterations}) reached without completion"
+        state.failure_reason = (
+            f"Max iterations ({max_iterations}) reached without completion"
+        )
 
     return state

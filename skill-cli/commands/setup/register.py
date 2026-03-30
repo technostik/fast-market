@@ -6,8 +6,9 @@ from common.core.config import _resolve_config_path
 from common.core.yaml_utils import dump_yaml
 from commands.base import CommandManifest
 from commands.setup import (
+    DEFAULT_EVALUATION_PROMPT,
+    DEFAULT_PREPARATION_PROMPT,
     init_skill_agent_config,
-    load_skill_agent_config,
     save_skill_agent_config,
 )
 from commands.setup.skill_edit import edit_skill_agent_config
@@ -152,5 +153,111 @@ def register(plugin_manifests: dict | None = None):
         config["workdir"] = path
         save_tool_config("skill", config)
         click.echo(f"Default workdir set to: {path}")
+
+    @setup_cmd.group("preparation-prompt")
+    def preparation_prompt_group():
+        """Manage preparation prompt template."""
+        pass
+
+    @preparation_prompt_group.command("show")
+    def show_preparation_prompt():
+        """Show current preparation prompt template."""
+        agent = init_skill_agent_config()
+        prompt = agent.get("preparation_prompt", DEFAULT_PREPARATION_PROMPT)
+        click.echo(prompt)
+
+    @preparation_prompt_group.command("edit")
+    def edit_preparation_prompt():
+        """Edit preparation prompt template in editor."""
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        from common.cli.helpers import get_editor
+
+        agent = init_skill_agent_config()
+        current = agent.get("preparation_prompt", DEFAULT_PREPARATION_PROMPT)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", prefix="fastmarket-prep-", delete=False
+        ) as f:
+            f.write(current)
+            temp_path = Path(f.name)
+
+        try:
+            editor = get_editor()
+            subprocess.run([editor, str(temp_path)], check=True)
+            new_prompt = temp_path.read_text()
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+        if new_prompt != current:
+            agent["preparation_prompt"] = new_prompt
+            save_skill_agent_config(agent)
+            click.echo("Preparation prompt updated.")
+
+    @preparation_prompt_group.command("reset")
+    def reset_preparation_prompt():
+        """Reset preparation prompt to default."""
+        agent = init_skill_agent_config()
+        if "preparation_prompt" in agent:
+            del agent["preparation_prompt"]
+            save_skill_agent_config(agent)
+            click.echo("Preparation prompt reset to default.")
+        else:
+            click.echo("Preparation prompt is already at default.")
+
+    @setup_cmd.group("evaluation-prompt")
+    def evaluation_prompt_group():
+        """Manage evaluation prompt template."""
+        pass
+
+    @evaluation_prompt_group.command("show")
+    def show_evaluation_prompt():
+        """Show current evaluation prompt template."""
+        agent = init_skill_agent_config()
+        prompt = agent.get("evaluation_prompt", DEFAULT_EVALUATION_PROMPT)
+        click.echo(prompt)
+
+    @evaluation_prompt_group.command("edit")
+    def edit_evaluation_prompt():
+        """Edit evaluation prompt template in editor."""
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        from common.cli.helpers import get_editor
+
+        agent = init_skill_agent_config()
+        current = agent.get("evaluation_prompt", DEFAULT_EVALUATION_PROMPT)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", prefix="fastmarket-eval-", delete=False
+        ) as f:
+            f.write(current)
+            temp_path = Path(f.name)
+
+        try:
+            editor = get_editor()
+            subprocess.run([editor, str(temp_path)], check=True)
+            new_prompt = temp_path.read_text()
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+        if new_prompt != current:
+            agent["evaluation_prompt"] = new_prompt
+            save_skill_agent_config(agent)
+            click.echo("Evaluation prompt updated.")
+
+    @evaluation_prompt_group.command("reset")
+    def reset_evaluation_prompt():
+        """Reset evaluation prompt to default."""
+        agent = init_skill_agent_config()
+        if "evaluation_prompt" in agent:
+            del agent["evaluation_prompt"]
+            save_skill_agent_config(agent)
+            click.echo("Evaluation prompt reset to default.")
+        else:
+            click.echo("Evaluation prompt is already at default.")
 
     return CommandManifest(name="setup", click_command=setup_cmd)

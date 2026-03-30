@@ -21,9 +21,16 @@ core/
 
 ### Design
 
-The router is a **planner loop**. At each iteration it calls an LLM to decide
-what to do next, executes that action in-process (no subprocess), distills the
-result, and feeds it back to the next plan call.
+The router has three phases:
+
+1. **Preparation** — runs once before the loop. The LLM reads the goal and
+   available skills, then produces a structured execution plan with
+   `success_criteria` (what done looks like) and `risks`.
+2. **Planning loop** — at each iteration, calls an LLM to decide what to do
+   next, executes that action in-process (no subprocess), distills the result,
+   and feeds it back to the next plan call.
+3. **Evaluation** — runs after each step. The LLM checks whether the result
+   matches the success criteria. If satisfied, the router stops early.
 
 ### Actions the planner can emit
 
@@ -70,6 +77,17 @@ class CLIInteractionPlugin(InteractionPlugin):
 
 Pass a custom plugin to `run_router(interaction=MyPlugin())` to route questions
 to Telegram, a web UI, etc.
+
+### Prompts
+
+The router uses three prompt templates:
+- `PREPARATION_PROMPT` — produces plan, success_criteria, risks
+- `PLAN_PROMPT` — decides next action (includes success_criteria from preparation)
+- `EVALUATION_PROMPT` — checks if last step satisfied success_criteria
+
+These are configurable via `skill setup preparation-prompt` and
+`skill setup evaluation-prompt`. Use `--no-eval` flag to skip evaluation
+entirely for fast/cheap runs.
 
 ---
 

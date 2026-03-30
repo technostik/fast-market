@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import yaml
-from pathlib import Path
 
-from common.core.config import _resolve_config_path, load_tool_config
+from common.core.config import _resolve_config_path
 from common.core.yaml_utils import dump_yaml
 
 
@@ -95,6 +94,58 @@ DEFAULT_FASTMARKET_TOOLS = {
     },
 }
 
+DEFAULT_PREPARATION_PROMPT = """You are a skill orchestrator. Before entering the planning loop,
+read the goal and available skills, then produce a structured execution plan.
+
+## Goal
+{goal}
+
+## Available Skills
+{skills_list}
+
+## Your Task
+
+Analyze the goal and available skills. Produce a JSON object with your plan:
+
+```json
+{{
+  "plan": "step by step description of intended approach",
+  "success_criteria": "concrete, observable description of what done looks like",
+  "risks": "what could go wrong and how to handle it"
+}}
+```
+
+Be specific about the order of skills and what each step should accomplish.
+"""
+
+DEFAULT_EVALUATION_PROMPT = """You are evaluating whether the last step brought us closer to the goal.
+
+## Goal
+{goal}
+
+## Success Criteria
+{success_criteria}
+
+## History
+{history}
+
+## Last Step Result
+{last_summary}
+
+## Your Task
+
+Determine if the last step satisfied the success criteria. Return a JSON object:
+
+```json
+{{
+  "satisfied": true or false,
+  "reason": "one sentence explaining your assessment",
+  "suggestion": "if not satisfied, what to try next"
+}}
+```
+
+Be honest — if the goal isn't met, say so and suggest a different approach."""
+
 DEFAULT_SYSTEM_COMMANDS = [
     "ls",
     "cat",
@@ -157,5 +208,8 @@ def init_skill_agent_config(agent_dict: dict | None = None) -> dict:
                 },
             },
         }
+
+    agent_dict.setdefault("preparation_prompt", DEFAULT_PREPARATION_PROMPT)
+    agent_dict.setdefault("evaluation_prompt", DEFAULT_EVALUATION_PROMPT)
 
     return agent_dict

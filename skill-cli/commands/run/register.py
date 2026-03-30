@@ -74,6 +74,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Disable user interaction — router will not ask questions (treat as failure instead)",
     )
+    @click.option(
+        "--no-eval",
+        is_flag=True,
+        default=False,
+        help="Skip evaluation phase — don't check if each step satisfies success criteria",
+    )
     def run_cmd(
         task,
         provider,
@@ -85,6 +91,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         auto_learn,
         compact,
         no_ask,
+        no_eval,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
@@ -127,6 +134,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             auto_learn=auto_learn,
             compact=compact,
             interaction=interaction,
+            skip_evaluation=no_eval,
         )
         click.echo("\n" + "=" * 50, err=True)
         if state.done:
