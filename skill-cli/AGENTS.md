@@ -16,6 +16,9 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - `commands/auto_learn/register.py` — Auto-learn templates and compact command
 - `commands/path/register.py` — Print skills directory path
 - `commands/params.py` — Custom Click types (`SkillNameType`, `SkillFileType`, `SkillRefType`, `SkillParamType`)
+- `commands/setup/register.py` — Skill agent config (allowed commands, prompt templates)
+- `commands/setup/__init__.py` — load/save/init skill agent config
+- `commands/setup/skill_edit.py` — editor + validation for agent config
 
 ## 📋 Core Responsibilities
 - Provide CRUD operations for skills (create, list, show, delete, edit)
@@ -57,8 +60,9 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - Include short forms for options: `-l` for `--learned`, `-c` for `--create`, `-C` for `--compact`
 - Keep commands thin — delegate to `common.skill.skill.Skill` for logic
 - Use `CommandManifest` dataclass to return commands
-- Use `SkillNameType` for skill name arguments with autocomplete
+- Use `SkillNameType()` for skill name arguments with autocomplete
 - Use `common.learn` for LLM-based learning functionality
+- Use `init_skill_agent_config()` in execute_skill_prompt() to get allowed commands
 
 ## ❌ Don'ts
 - Add inline LLM logic — use `common.learn` functions instead
@@ -67,6 +71,7 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - Hardcode skill directory path — use `get_skills_dir()`
 - Re-implement skill loading — use `Skill.from_path()`
 - Skip `requires_common_config()` for LLM-dependent commands
+- Do not read task-cli config in skill-cli; use skill's own agent config
 
 ## 🛠️ Extension Points
 
@@ -96,3 +101,11 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - See `common.core.paths.get_skills_dir()` for skills directory location
 - See `corpus-cli/commands/AGENTS.md` for command architecture patterns
 - See `GOLDEN_RULES.md` for core principles (DRY, KISS, CODE IS LAW, FAIL LOUDLY)
+
+## execute_skill_prompt() Implementation
+
+execute_skill_prompt() in core/runner.py uses common/agent.TaskLoop directly
+(no subprocess). It reads skill's own agent config via init_skill_agent_config()
+from commands/setup/__init__.py. The agent config is stored under the "agent"
+key in ~/.config/fast-market/skill/config.yaml, separate from other skill tool
+settings (workdir, auto_learn_prompt).

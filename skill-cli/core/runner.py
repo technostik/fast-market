@@ -252,9 +252,13 @@ def execute_skill_prompt(
     save_session: Path | None = None,
     compact: bool = False,
 ) -> SkillResult:
-    """
-    Execute skill body as a task description via `task apply`.
-    """
+    """Execute skill body as a task description via common/agent TaskLoop."""
+    from functools import partial
+    from common.agent.loop import TaskConfig, TaskLoop
+    from common.agent.executor import resolve_and_execute_command
+    from common.core.config import load_tool_config
+    from common.llm.registry import discover_providers, get_default_provider_name
+
     body = skill.get_body()
     for key, value in (params or {}).items():
         body = body.replace(f"{{{key}}}", str(value))
@@ -269,7 +273,7 @@ def execute_skill_prompt(
         effective_timeout = 300
     effective_timeout = int(str(effective_timeout).rstrip("s"))
     if effective_timeout == 0:
-        effective_timeout = None  # 0 means no timeout
+        effective_timeout = None
 
     effective_max_iterations = (
         max_iterations if max_iterations is not None else skill.max_iterations
@@ -279,55 +283,105 @@ def execute_skill_prompt(
         llm_timeout if llm_timeout is not None else skill.llm_timeout
     )
     if effective_llm_timeout is None:
-        effective_llm_timeout = 0  # no limit
+        effective_llm_timeout = 0
 
-    cmd = ["task", "apply", body]
-    if provider:
-        cmd += ["-P", provider]
-    if model:
-        cmd += ["-m", model]
-    if effective_max_iterations is not None:
-        cmd += ["--max-iterations", str(effective_max_iterations)]
-    if effective_llm_timeout > 0:
-        cmd += ["--llm-timeout", str(effective_llm_timeout)]
-    for key, value in (params or {}).items():
-        cmd += ["--param", f"{key}={value}"]
-    if workdir and str(workdir) != ".":
-        cmd += ["--workdir", str(workdir)]
-    if save_session:
-        cmd += ["--save-session", str(save_session)]
+    from commands.setup import init_skill_agent_config
 
-    logger.debug("executing_skill_prompt", skill=skill.name, cmd=cmd)
+    task_config_dict = init_skill_agent_config()
+
+    fastmarket_tools = task_config_dict.get("fastmarket_tools", {})
+    system_commands = task_config_dict.get("system_commands", [])
+    allowed_commands = list(fastmarket_tools.keys()) + system_commands
+
+    task_config = TaskConfig(
+        fastmarket_tools=fastmarket_tools,
+        system_commands=system_commands,
+        allowed_commands=allowed_commands,
+        max_iterations=effective_max_iterations
+        or task_config_dict.get("max_iterations", 20),
+        default_timeout=task_config_dict.get("default_timeout", 60),
+        llm_timeout=effective_llm_timeout,
+    )
 
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=workdir,
-            timeout=effective_timeout if effective_timeout else None,
+        config = load_tool_config("apply")
+        providers = discover_providers(config)
+        provider_name = provider or get_default_provider_name(config)
+    except Exception as exc:
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="prompt:",
+            stdout="",
+            stderr=f"Failed to load LLM config: {exc}",
+            exit_code=1,
         )
+
+    if provider_name not in providers:
+        return SkillResult(
+            skill_name=skill.name,
+            script_name="prompt:",
+            stdout="",
+            stderr=f"LLM provider '{provider_name}' not available",
+            exit_code=1,
+        )
+
+    loop = TaskLoop(
+        config=task_config,
+        workdir=workdir,
+        provider=provider_name,
+        model=model,
+        silent=True,
+    )
+
+    execute_fn = partial(
+        resolve_and_execute_command,
+        workdir=workdir,
+        allowed=set(task_config.allowed_commands),
+        timeout=task_config.default_timeout,
+    )
+
+    try:
+        loop.run(
+            body,
+            execute_fn,
+            task_params=params or {},
+        )
+
+        if save_session and loop.session:
+            from datetime import datetime
+
+            loop.session.end_time = datetime.utcnow()
+            loop.session.save(save_session)
+
+        end_reason = getattr(loop.session, "end_reason", "") or ""
+        exit_code = 0 if "success" in end_reason else 1
+
         return SkillResult(
             skill_name=skill.name,
             script_name="prompt:",
             stdout="",
             stderr="",
-            exit_code=result.returncode,
+            exit_code=exit_code,
+            timed_out=False,
         )
-    except subprocess.TimeoutExpired:
+
+    except Exception as exc:
+        logger.error("execute_skill_prompt_failed", skill=skill.name, error=str(exc))
+        if save_session and loop.session:
+            from datetime import datetime
+
+            loop.session.exit_code = 1
+            loop.session.error = str(exc)
+            loop.session.end_reason = f"internal failure: {exc}"
+            loop.session.end_time = datetime.utcnow()
+            loop.session.save(save_session)
         return SkillResult(
             skill_name=skill.name,
             script_name="prompt:",
             stdout="",
-            stderr=f"Task timed out after {effective_timeout}s",
-            exit_code=124,
-            timed_out=True,
-        )
-    except FileNotFoundError:
-        return SkillResult(
-            skill_name=skill.name,
-            script_name="prompt:",
-            stdout="",
-            stderr="'task' command not found. Is task-cli installed?",
-            exit_code=127,
+            stderr=str(exc),
+            exit_code=1,
+            timed_out=False,
         )
 
 
