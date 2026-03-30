@@ -574,6 +574,7 @@ def _run_skill(
     auto_learn: bool,
     compact: bool,
     prev_context: str,
+    save_session: bool = False,
 ) -> tuple[int, object]:  # (exit_code, session)
     """Execute a skill directly in-process. Returns (exit_code, session)."""
     from functools import partial
@@ -632,6 +633,12 @@ def _run_skill(
             skill, effective_params, loop.session, subdir, None, model, compact
         )
 
+    if save_session and loop.session:
+        session_path = subdir / f"{skill.name}.session.yaml"
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        loop.session.save(session_path)
+        logger.info("session_saved", skill=skill.name, path=str(session_path))
+
     return exit_code, loop.session
 
 
@@ -642,6 +649,7 @@ def _run_task(
     model: str | None,
     prev_context: str,
     agent_cfg: dict,
+    save_session: bool = False,
 ) -> tuple[int, object]:  # (exit_code, session)
     """Execute a free-form task with raw CLI tools. Returns (exit_code, session)."""
     from functools import partial
@@ -684,6 +692,13 @@ def _run_task(
 
     end_reason = getattr(loop.session, "end_reason", "") or ""
     exit_code = 0 if "success" in end_reason else 1
+
+    if save_session and loop.session:
+        session_path = subdir / "task.session.yaml"
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        loop.session.save(session_path)
+        logger.info("session_saved", skill="task", path=str(session_path))
+
     return exit_code, loop.session
 
 
@@ -731,6 +746,7 @@ def run_router(
     interaction: InteractionPlugin | None = None,
     evaluation_prompt: str | None = None,
     skip_evaluation: bool = False,
+    save_session: bool = False,
 ) -> RouterState:
     """Orchestrate skills and free-form tasks to achieve a goal.
 
@@ -793,6 +809,10 @@ def run_router(
         return state
 
     prev_context = ""
+
+    logger.info(
+        "router_loop_starting", max_iterations=max_iterations, skills_count=len(skills)
+    )
 
     while state.iteration < max_iterations and not state.done and not state.failed:
         state.iteration += 1
@@ -894,6 +914,7 @@ def run_router(
                 auto_learn=auto_learn,
                 compact=compact,
                 prev_context=prev_context,
+                save_session=save_session,
             )
 
             session_output = _session_to_text(session)
@@ -922,6 +943,7 @@ def run_router(
                 model=model,
                 prev_context=prev_context,
                 agent_cfg=agent_cfg,
+                save_session=save_session,
             )
 
             session_output = _session_to_text(session)
@@ -991,6 +1013,12 @@ def run_router(
             subdir=subdir,
         )
         state.attempts.append(attempt)
+        logger.info(
+            "attempt_added",
+            skill_name=attempt.skill_name,
+            iteration=attempt.iteration,
+            attempts_count=len(state.attempts),
+        )
         if verbose:
             _print_attempt(attempt)
 
@@ -1002,5 +1030,146 @@ def run_router(
         state.failure_reason = (
             f"Max iterations ({max_iterations}) reached without completion"
         )
+
+    if save_session:
+        from datetime import datetime
+
+        logger.warning(
+            "!!! SAVE_SESSION_DEBUG !!!",
+            save_session_flag=save_session,
+            attempts_count=len(state.attempts),
+            iterations_done=state.iteration,
+            workdir=str(workdir_path),
+        )
+
+        all_turns = []
+        for i, attempt in enumerate(state.attempts):
+            logger.info(
+                "save_session_attempt",
+                i=i,
+                skill_name=attempt.skill_name,
+                subdir=str(attempt.subdir),
+                subdir_exists=attempt.subdir.exists() if attempt.subdir else False,
+            )
+
+            if not attempt.subdir:
+                logger.warning("save_session_no_subdir", i=i)
+                continue
+
+            if not attempt.subdir.exists():
+                logger.warning(
+                    "save_session_subdir_not_exists", subdir=str(attempt.subdir)
+                )
+                continue
+
+            # Try different possible session filenames
+            base_name = (
+                attempt.skill_name.replace("/", "-").replace("(", "").replace(")", "")
+            )
+            possible_names = [f"{base_name}.session.yaml"]
+            if attempt.skill_name.startswith("(task)"):
+                possible_names.append("task.session.yaml")
+
+            logger.info("save_session_trying_names", possible_names=possible_names)
+
+            session_file = None
+            for name in possible_names:
+                candidate = attempt.subdir / name
+                logger.info(
+                    "save_session_checking",
+                    candidate=str(candidate),
+                    exists=candidate.exists(),
+                )
+                if candidate.exists():
+                    session_file = candidate
+                    break
+
+            if not session_file:
+                logger.warning(
+                    "save_session_file_not_found",
+                    subdir=str(attempt.subdir),
+                    tried=possible_names,
+                )
+                continue
+
+            try:
+                import yaml
+
+                data = yaml.safe_load(session_file.read_text())
+                logger.info(
+                    "save_session_yaml_loaded",
+                    path=str(session_file),
+                    has_turns=bool(data and "turns" in data),
+                    turns_count=len(data.get("turns", [])) if data else 0,
+                )
+
+                if data and "turns" in data:
+                    session = Session.from_dict(data)
+                    all_turns.extend(session.turns)
+                    logger.info(
+                        "save_session_turns_added",
+                        turns_count=len(session.turns),
+                        total=all_turns,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "save_session_load_failed",
+                    path=str(session_file),
+                    error=str(e),
+                )
+
+        logger.info(
+            "save_session_summary",
+            total_attempts=len(state.attempts),
+            total_turns=len(all_turns),
+        )
+
+        if not all_turns:
+            logger.error(
+                "save_session_no_turns_collected", attempts_count=len(state.attempts)
+            )
+            # Force save with empty turns for debugging
+            from common.agent.session import Session
+
+            global_session = Session(
+                task_description=goal,
+                workdir=str(workdir_path),
+                provider=provider_name,
+                model=model or "default",
+                max_iterations=max_iterations,
+                turns=[],
+                end_time=datetime.utcnow(),
+                end_reason="debug: no turns collected",
+                exit_code=1,
+            )
+            global_session_path = workdir_path / "router.session.yaml"
+            global_session.save(global_session_path)
+            logger.info(
+                "save_session_debug_file_written", path=str(global_session_path)
+            )
+        else:
+            from common.agent.session import Session
+
+            end_reason = "completed" if state.done else "failed"
+            if state.failed:
+                end_reason = f"failed: {state.failure_reason}"
+            elif not state.done and not state.failed:
+                end_reason = "max iterations reached"
+
+            global_session = Session(
+                task_description=goal,
+                workdir=str(workdir_path),
+                provider=provider_name,
+                model=model or "default",
+                max_iterations=max_iterations,
+                turns=all_turns,
+                end_time=datetime.utcnow(),
+                end_reason=end_reason,
+                exit_code=0 if state.done else 1,
+            )
+
+            global_session_path = workdir_path / "router.session.yaml"
+            global_session.save(global_session_path)
+            logger.info("router_session_saved", path=str(global_session_path))
 
     return state

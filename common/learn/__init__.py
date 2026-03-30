@@ -97,6 +97,38 @@ Analyze all the learning sessions and create ONE consolidated LEARN.md that:
 Output ONLY the markdown content, no preamble, no code fences."""
 
 
+SKILL_EXTRACTION_PROMPT_TEMPLATE = """You are creating a new skill from a session log.
+
+## Session Summary
+Task: {task_description}
+Outcome: {outcome}
+Iterations used: {iterations_used} / {max_iterations}
+Parameters: {params_summary}
+
+## Commands Executed
+{session_log}
+
+---
+
+Your job is to create a SKILL.md file. Output ONLY a JSON object:
+
+```json
+{{
+  "name": "skill-name-in-slug-format",
+  "description": "2-3 sentences describing what this skill does",
+  "body": "Step-by-step instructions derived from the commands above. Use present tense, be concise and actionable."
+}}
+```
+
+Rules:
+- name must be lowercase with hyphens (e.g., "extract-video-metadata")
+- description should be general enough to know when to use this skill
+- body should contain the actual instructions someone would follow
+- Extract patterns from commands, not just list them
+- If the task failed, focus on what would make it succeed
+- Output ONLY the JSON, no preamble, no code fences."""
+
+
 def get_learn_analysis_prompt(config: dict | None = None) -> str:
     """Get the learn analysis prompt from config or return default."""
     if config:
@@ -122,6 +154,15 @@ def get_learn_compacting_prompt(config: dict | None = None) -> str:
         if isinstance(template, str) and template.strip():
             return template
     return LEARN_COMPACTING_PROMPT_TEMPLATE
+
+
+def get_skill_extraction_prompt(config: dict | None = None) -> str:
+    """Get the skill extraction prompt from config or return default."""
+    if config:
+        template = config.get("skill_extraction_prompt")
+        if isinstance(template, str) and template.strip():
+            return template
+    return SKILL_EXTRACTION_PROMPT_TEMPLATE
 
 
 def format_session_log(session) -> str:
@@ -330,3 +371,50 @@ def update_learn_file(
                 encoding="utf-8",
             )
         return fallback
+
+
+def extract_skill_from_session(
+    session,
+    provider,
+    model: str | None = None,
+    config: dict | None = None,
+) -> tuple[str, str, str]:
+    """Extract a skill definition from a session.
+
+    Returns:
+        Tuple of (name, description, body) for creating a SKILL.md.
+    """
+    from common.llm.base import LLMRequest
+
+    prompt_template = get_skill_extraction_prompt(config)
+    session_log = format_session_log(session)
+
+    prompt = prompt_template.format(
+        task_description=session.task_description,
+        outcome="success" if session.exit_code == 0 else "failed",
+        iterations_used=len(session.turns),
+        max_iterations=session.max_iterations,
+        params_summary=session.task_params or {},
+        session_log=session_log,
+    )
+
+    request = LLMRequest(
+        prompt=prompt,
+        model=model,
+        temperature=0.2,
+        max_tokens=1500,
+    )
+    response = provider.complete(request)
+    content = (response.content or "").strip()
+
+    try:
+        import json
+
+        data = json.loads(content)
+        name = data.get("name", "new-skill")
+        description = data.get("description", "")
+        body = data.get("body", "")
+        return name, description, body
+    except json.JSONDecodeError:
+        logger.warning("skill_extraction_parse_failed", content=content[:500])
+        return "new-skill", "Skill extracted from session", content

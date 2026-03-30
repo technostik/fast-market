@@ -80,6 +80,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Skip evaluation phase — don't check if each step satisfies success criteria",
     )
+    @click.option(
+        "--save-session",
+        "-S",
+        is_flag=True,
+        default=False,
+        help="Save each skill's session to {subdir}/{skill_name}.session.yaml",
+    )
     def run_cmd(
         task,
         provider,
@@ -92,6 +99,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         compact,
         no_ask,
         no_eval,
+        save_session,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
@@ -135,6 +143,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             compact=compact,
             interaction=interaction,
             skip_evaluation=no_eval,
+            save_session=save_session,
         )
         click.echo("\n" + "=" * 50, err=True)
         if state.done:

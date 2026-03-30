@@ -11,6 +11,7 @@ dependencies = [
   "click>=8.1",
   "auto-click-auto>=0.1.0",
   "pyyaml>=6.0",
+  "prompt_toolkit>=3.0",
 ]
 
 [project.scripts]

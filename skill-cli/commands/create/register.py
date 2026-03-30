@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import click
 
@@ -9,7 +10,12 @@ from common.core.paths import get_skills_dir
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.command("create")
+    @click.group("create")
+    def create_group():
+        """Create a new skill."""
+        pass
+
+    @create_group.command("name")
     @click.argument("name")
     @click.option("--description", "-d", help="Skill description")
     @click.option("--with-scripts", "-s", is_flag=True, help="Create scripts directory")
@@ -50,4 +56,19 @@ Include examples of how to use this skill.
 
         click.echo(f"Created skill: {name} at {skill_path}")
 
-    return CommandManifest(name="create", click_command=create_cmd)
+    @create_group.command("auto-from-session")
+    @click.argument("session_file", type=click.Path(exists=True))
+    @click.option(
+        "--skill-name",
+        "-n",
+        default=None,
+        help="Skill name (auto-generated if omitted)",
+    )
+    def auto_from_session_cmd(session_file, skill_name):
+        """Create a skill draft from a session file."""
+        from core.session_to_skill import create_skill_from_session
+
+        session_path = Path(session_file)
+        create_skill_from_session(session_path, skill_name)
+
+    return CommandManifest(name="create", click_command=create_group)
