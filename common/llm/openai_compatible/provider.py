@@ -128,7 +128,7 @@ class _RealOpenAICompatibleProvider(LLMProvider):
                     warnings.warn(
                         f"OpenAI-compatible API call failed after 3 retries: {exc}"
                     )
-                    break
+                    raise
                 if not (
                     isinstance(exc, ConnectionError)
                     or (hasattr(exc, "status_code") and exc.status_code == 500)
@@ -139,9 +139,11 @@ class _RealOpenAICompatibleProvider(LLMProvider):
                     )
                 ):
                     import warnings
+
                     warnings.warn(f"OpenAI-compatible API call failed: {exc}")
                     break
                 import time
+
                 time.sleep(1)
         message = response.choices[0].message
         content = message.content or ""
