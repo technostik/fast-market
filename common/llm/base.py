@@ -78,6 +78,11 @@ class LazyLLMProvider(LLMProvider):
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         self._ensure_initialized()
+        if self._provider is None:
+            raise RuntimeError(
+                f"Provider '{getattr(self, 'name', 'unknown')}' is not configured. "
+                f"Set the required API key environment variable or run 'prompt setup' to configure."
+            )
         return self._provider.complete(request)
 
     def list_models(self) -> list[str]:

@@ -145,7 +145,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
             temperature=temp,
             max_tokens=max_tok,
         )
-        response = providers[provider_name].complete(request)
+        try:
+            response = providers[provider_name].complete(request)
+        except RuntimeError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(1)
+        except Exception as exc:
+            click.echo(f"Error: {provider_name} provider failed: {exc}", err=True)
+            sys.exit(1)
 
         # Record execution (only for saved prompts or with a meaningful identifier)
         execution_name = prompt_name_or_content if not is_direct_prompt else "<direct>"
