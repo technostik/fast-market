@@ -9,6 +9,7 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
+from commands.params import RuleIdType, SourceIdType, ActionIdType
 
 _follow_running = False
 
@@ -22,9 +23,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("logs")
     @click.option("--since", help="Show/delete logs since (e.g., '1d', '1h', '30m', or ISO date)")
     @click.option("--before", help="Delete logs before (e.g., '7d', '2024-01-01')")
-    @click.option("--rule-id", help="Filter by rule ID")
-    @click.option("--source-id", help="Filter by source ID")
-    @click.option("--action-id", help="Filter by action ID")
+    @click.option("--rule-id", type=RuleIdType(), help="Filter by rule ID")
+    @click.option("--source-id", type=SourceIdType(), help="Filter by source ID")
+    @click.option("--action-id", type=ActionIdType(), help="Filter by action ID")
     @click.option("--meta-filter", "meta_filter", help="Filter by source metadata (key=value)")
     @click.option("--limit", type=int, default=100, help="Maximum number of logs to show")
     @click.option("--format", "fmt", type=click.Choice(["json", "text", "yaml"]), default="text")
