@@ -63,19 +63,26 @@ returned directly and converted to text via `_session_to_text()`.
 The cache dir `~/.cache/fast-market/skill-router/` is no longer used.
 
 ### Workdir isolation
-Each step still creates an isolated subdirectory: `{workdir}/{iteration:02d}_{label}/`
-This is filesystem hygiene, not IPC. Scripts and LLM tool calls work inside that dir.
+Each step creates an isolated subdirectory: `{run_root}/{iteration:02d}_{label}/`
+where `run_root = {workdir}/{run_id}` with `run_id = {timestamp}_{uuid6}`.
+
+This ensures:
+- Sequential or concurrent runs using the same workdir do not collide
+- The router session file (`router.session.yaml`) lives inside `run_root`, not directly in workdir
+- All filesystem writes go into `run_root`; the external `workdir` argument is only used for logging
+
+If `run_root.mkdir` fails, the exception propagates — fail loudly.
 
 ### Session persistence with `--save-session`
 When `--save-session` flag is passed to `skill run`, the router aggregates all skill
-execution sessions into a single `router.session.yaml` file in the workdir root.
+execution sessions into a single `router.session.yaml` file in `run_root`.
 
 The aggregation process:
-1. After the router completes (or fails/max iterations reached), it scans the workdir
+1. After the router completes (or fails/max iterations reached), it scans `run_root`
 2. Finds all subdirectories matching the pattern `XX_*` (two digits + underscore)
 3. Looks for `*.session.yaml` files in each subdir (written by individual skill runs)
 4. Aggregates all turns into a single Session object
-5. Saves to `{workdir}/router.session.yaml`
+5. Saves to `{run_root}/router.session.yaml`
 
 The aggregated session contains:
 - `task_description`: The original goal

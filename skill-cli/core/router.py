@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from dataclasses import dataclass
+from datetime import datetime as dt
 from pathlib import Path
 
 
@@ -782,6 +784,10 @@ def run_router(
     skills = discover_skills(get_skills_dir())
     workdir_path = Path(workdir).expanduser().resolve()
 
+    run_id = dt.utcnow().strftime("%Y%m%dT%H%M%S") + "_" + uuid.uuid4().hex[:6]
+    run_root = workdir_path / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+
     preparation_prompt = agent_cfg.get("preparation_prompt")
     if skip_evaluation:
         evaluation_prompt_cfg = None
@@ -906,7 +912,7 @@ def run_router(
                     _print_attempt(attempt)
                 continue
 
-            subdir = _make_subdir(workdir_path, state.iteration, skill_name)
+            subdir = _make_subdir(run_root, state.iteration, skill_name)
             logger.info("router_run_skill", skill=skill_name, subdir=str(subdir))
 
             exit_code, session, session_path = _run_skill(
@@ -941,7 +947,7 @@ def run_router(
                 )
                 break
 
-            subdir = _make_subdir(workdir_path, state.iteration, "task")
+            subdir = _make_subdir(run_root, state.iteration, "task")
             logger.info("router_run_task", subdir=str(subdir))
 
             exit_code, session, session_path = _run_task(
@@ -1043,8 +1049,6 @@ def run_router(
         )
 
     if save_session:
-        from datetime import datetime
-
         logger.warning(
             "!!! SAVE_SESSION_AGGREGATION_START !!!",
             save_session_flag=save_session,
@@ -1086,7 +1090,7 @@ def run_router(
                 model=model or "default",
                 max_iterations=max_iterations,
                 turns=[],
-                end_time=datetime.utcnow(),
+                end_time=dt.utcnow(),
                 end_reason="no session files found in subdirs",
                 exit_code=1,
             )
@@ -1106,12 +1110,12 @@ def run_router(
                 model=model or "default",
                 max_iterations=max_iterations,
                 turns=all_turns,
-                end_time=datetime.utcnow(),
+                end_time=dt.utcnow(),
                 end_reason=end_reason,
                 exit_code=0 if state.done else 1,
             )
 
-        global_session_path = workdir_path / "router.session.yaml"
+        global_session_path = run_root / "router.session.yaml"
         global_session.save(global_session_path)
         logger.info(
             "router_session_saved",
