@@ -575,7 +575,7 @@ def _run_skill(
     compact: bool,
     prev_context: str,
     save_session: bool = False,
-) -> tuple[int, object]:  # (exit_code, session)
+) -> tuple[int, object, Path | None]:
     """Execute a skill directly in-process. Returns (exit_code, session)."""
     from functools import partial
     from commands.setup import init_skill_agent_config
@@ -638,8 +638,10 @@ def _run_skill(
         session_path.parent.mkdir(parents=True, exist_ok=True)
         loop.session.save(session_path)
         logger.info("session_saved", skill=skill.name, path=str(session_path))
+    else:
+        session_path = None
 
-    return exit_code, loop.session
+    return exit_code, loop.session, session_path
 
 
 def _run_task(
@@ -650,7 +652,7 @@ def _run_task(
     prev_context: str,
     agent_cfg: dict,
     save_session: bool = False,
-) -> tuple[int, object]:  # (exit_code, session)
+) -> tuple[int, object, Path | None]:
     """Execute a free-form task with raw CLI tools. Returns (exit_code, session)."""
     from functools import partial
 
@@ -698,8 +700,10 @@ def _run_task(
         session_path.parent.mkdir(parents=True, exist_ok=True)
         loop.session.save(session_path)
         logger.info("session_saved", skill="task", path=str(session_path))
+    else:
+        session_path = None
 
-    return exit_code, loop.session
+    return exit_code, loop.session, session_path
 
 
 def _try_auto_learn(skill, params, session, subdir, session_path, model, compact):
@@ -774,6 +778,7 @@ def run_router(
     state = RouterState(
         goal=goal, attempts=[], iteration=0, max_iterations=max_iterations
     )
+    session_files: list[Path] = []  # Track session files as they are created
     skills = discover_skills(get_skills_dir())
     workdir_path = Path(workdir).expanduser().resolve()
 
@@ -904,7 +909,7 @@ def run_router(
             subdir = _make_subdir(workdir_path, state.iteration, skill_name)
             logger.info("router_run_skill", skill=skill_name, subdir=str(subdir))
 
-            exit_code, session = _run_skill(
+            exit_code, session, session_path = _run_skill(
                 skill=matched,
                 params=params,
                 subdir=subdir,
@@ -916,6 +921,9 @@ def run_router(
                 prev_context=prev_context,
                 save_session=save_session,
             )
+
+            if session_path:
+                session_files.append(session_path)
 
             session_output = _session_to_text(session)
             label = skill_name
@@ -936,7 +944,7 @@ def run_router(
             subdir = _make_subdir(workdir_path, state.iteration, "task")
             logger.info("router_run_task", subdir=str(subdir))
 
-            exit_code, session = _run_task(
+            exit_code, session, session_path = _run_task(
                 description=description,
                 subdir=subdir,
                 provider_name=provider_name,
@@ -945,6 +953,9 @@ def run_router(
                 agent_cfg=agent_cfg,
                 save_session=save_session,
             )
+
+            if session_path:
+                session_files.append(session_path)
 
             session_output = _session_to_text(session)
             label = f"(task) {description[:60]}"
@@ -1040,41 +1051,25 @@ def run_router(
             workdir=str(workdir_path),
         )
 
-        # Direct scan of subdirs instead of relying on state.attempts
         all_turns = []
 
-        # Find all subdirs matching pattern XX_*/
-        subdirs = sorted(
-            [d for d in workdir_path.iterdir() if d.is_dir() and d.name[0].isdigit()]
-        )
-        logger.info("save_session_found_subdirs", subdirs=[str(s) for s in subdirs])
+        for session_file in session_files:
+            try:
+                import yaml
 
-        for subdir in subdirs:
-            # Look for any .session.yaml file in the subdir
-            session_files = list(subdir.glob("*.session.yaml"))
-            logger.info(
-                "save_session_subdir_check",
-                subdir=str(subdir),
-                session_files=[str(s) for s in session_files],
-            )
-
-            for session_file in session_files:
-                try:
-                    import yaml
-
-                    data = yaml.safe_load(session_file.read_text())
-                    if data and "turns" in data:
-                        session = Session.from_dict(data)
-                        all_turns.extend(session.turns)
-                        logger.info(
-                            "save_session_loaded",
-                            file=str(session_file),
-                            turns_count=len(session.turns),
-                        )
-                except Exception as e:
-                    logger.warning(
-                        "save_session_failed", path=str(session_file), error=str(e)
+                data = yaml.safe_load(session_file.read_text())
+                if data and "turns" in data:
+                    session = Session.from_dict(data)
+                    all_turns.extend(session.turns)
+                    logger.info(
+                        "save_session_loaded",
+                        file=str(session_file),
+                        turns_count=len(session.turns),
                     )
+            except Exception as e:
+                logger.warning(
+                    "save_session_failed", path=str(session_file), error=str(e)
+                )
 
         logger.info("save_session_aggregation_complete", total_turns=len(all_turns))
 
