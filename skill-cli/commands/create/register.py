@@ -71,4 +71,25 @@ Include examples of how to use this skill.
         session_path = Path(session_file)
         create_skill_from_session(session_path, skill_name)
 
+    @create_group.command("from-description")
+    @click.argument("description", required=False)
+    @click.option(
+        "--skill-name",
+        "-n",
+        default=None,
+        help="Skill name (auto-generated if omitted)",
+    )
+    def from_description_cmd(description, skill_name):
+        """Create a skill from a task description."""
+        from core.description_to_skill import create_skill_from_description
+
+        if not description:
+            from core.repl import prompt_free_text
+
+            description = prompt_free_text("Enter task description: ")
+            while not description:
+                description = prompt_free_text("Enter task description: ")
+
+        create_skill_from_description(description, skill_name)
+
     return CommandManifest(name="create", click_command=create_group)

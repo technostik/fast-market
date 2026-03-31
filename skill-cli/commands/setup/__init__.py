@@ -146,6 +146,38 @@ Determine if the last step satisfied the success criteria. Return a JSON object:
 
 Be honest — if the goal isn't met, say so and suggest a different approach."""
 
+DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT = """You are creating a new skill from a task description.
+
+## Task Description
+{task_description}
+
+## Available Tools
+{tools_description}
+
+## Existing Skills
+{existing_skills}
+
+---
+
+Your job is to create a SKILL.md file. Output ONLY a JSON object:
+
+```json
+{{
+  "name": "skill-name-in-slug-format",
+  "description": "2-3 sentences describing when to use this skill",
+  "when_to_use": "One sentence on when this skill is appropriate",
+  "body": "Step-by-step instructions. Use present tense, be concise and actionable."
+}}
+```
+
+Rules:
+- name must be lowercase with hyphens (e.g., "extract-video-metadata")
+- description should explain what the skill does
+- when_to_use should help decide when to pick this skill vs others
+- body should contain the actual instructions someone would follow
+- Consider what tools the skill will need and include relevant commands
+- Output ONLY the JSON, no preamble, no code fences."""
+
 DEFAULT_SYSTEM_COMMANDS = [
     "ls",
     "cat",
@@ -211,5 +243,8 @@ def init_skill_agent_config(agent_dict: dict | None = None) -> dict:
 
     agent_dict.setdefault("preparation_prompt", DEFAULT_PREPARATION_PROMPT)
     agent_dict.setdefault("evaluation_prompt", DEFAULT_EVALUATION_PROMPT)
+    agent_dict.setdefault(
+        "skill_from_description_prompt", DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT
+    )
 
     return agent_dict

@@ -8,6 +8,7 @@ from commands.base import CommandManifest
 from commands.setup import (
     DEFAULT_EVALUATION_PROMPT,
     DEFAULT_PREPARATION_PROMPT,
+    DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT,
     init_skill_agent_config,
     save_skill_agent_config,
 )
@@ -259,5 +260,62 @@ def register(plugin_manifests: dict | None = None):
             click.echo("Evaluation prompt reset to default.")
         else:
             click.echo("Evaluation prompt is already at default.")
+
+    @setup_cmd.group("skill-from-description-prompt")
+    def skill_from_description_prompt_group():
+        """Manage skill-from-description prompt template."""
+        pass
+
+    @skill_from_description_prompt_group.command("show")
+    def show_skill_from_description_prompt():
+        """Show current skill-from-description prompt template."""
+        agent = init_skill_agent_config()
+        prompt = agent.get(
+            "skill_from_description_prompt", DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT
+        )
+        click.echo(prompt)
+
+    @skill_from_description_prompt_group.command("edit")
+    def edit_skill_from_description_prompt():
+        """Edit skill-from-description prompt template in editor."""
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        from common.cli.helpers import get_editor
+
+        agent = init_skill_agent_config()
+        current = agent.get(
+            "skill_from_description_prompt", DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", prefix="fastmarket-sfd-", delete=False
+        ) as f:
+            f.write(current)
+            temp_path = Path(f.name)
+
+        try:
+            editor = get_editor()
+            subprocess.run([editor, str(temp_path)], check=True)
+            new_prompt = temp_path.read_text()
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+        if new_prompt != current:
+            agent["skill_from_description_prompt"] = new_prompt
+            save_skill_agent_config(agent)
+            click.echo("Skill-from-description prompt updated.")
+
+    @skill_from_description_prompt_group.command("reset")
+    def reset_skill_from_description_prompt():
+        """Reset skill-from-description prompt to default."""
+        agent = init_skill_agent_config()
+        if "skill_from_description_prompt" in agent:
+            del agent["skill_from_description_prompt"]
+            save_skill_agent_config(agent)
+            click.echo("Skill-from-description prompt reset to default.")
+        else:
+            click.echo("Skill-from-description prompt is already at default.")
 
     return CommandManifest(name="setup", click_command=setup_cmd)
