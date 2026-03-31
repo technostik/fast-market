@@ -28,22 +28,6 @@ sys.path.insert(0, str(TESTS_DIR))
 pytestmark = pytest.mark.llm
 
 
-def get_test_env():
-    """Get environment with XDG fixture paths for subprocess calls.
-
-    Must mirror what conftest.py's isolate_xdg fixture sets.
-    IMPORTANT: Use the values already set by conftest, don't override them.
-    """
-    from dotenv import load_dotenv
-    from pathlib import Path
-
-    # Load .env first
-    load_dotenv(TESTS_DIR.parent / ".env")
-
-    # Use whatever conftest already set - don't override!
-    return os.environ.copy()
-
-
 @pytest.fixture(autouse=True)
 def cleanup_created_skills(skills_dir):
     """Snapshot skills_dir before test, remove any created skills after."""
@@ -98,12 +82,44 @@ def test_skill_run_full_pipeline(workdir, skills_dir):
         capture_output=True,
         text=True,
         timeout=300,
-        env=get_test_env(),
+        env=os.environ.copy(),
     )
 
     print(f"=== skill run output ===\n{result.stdout}")
     if result.stderr:
         print(f"=== skill run stderr ===\n{result.stderr}")
+
+    # Debug: print workdir contents
+    print(f"\n=== WORKDIR CONTENTS ===")
+    for item in sorted(workdir.iterdir()):
+        print(f"  {item.name}")
+        if item.is_dir():
+            for sub in sorted(item.iterdir()):
+                print(f"    - {sub.name}")
+
+    # Debug: check subdirs matching pattern
+    subdirs_check = [d for d in workdir.iterdir() if d.is_dir() and d.name[0].isdigit()]
+    print(f"\n=== SUBDIRS MATCHING NN_* ===")
+    for sd in subdirs_check:
+        print(f"  {sd.name}")
+        sessions = list(sd.glob("*.session.yaml"))
+        print(f"    session files: {[s.name for s in sessions]}")
+        # Try to load the first session file
+        if sessions:
+            try:
+                with open(sessions[0]) as f:
+                    data = yaml.safe_load(f)
+                print(
+                    f"    loaded: turns={len(data.get('turns', []))}, exit_code={data.get('exit_code')}"
+                )
+            except Exception as e:
+                print(f"    ERROR loading: {e}")
+
+    # Check for shell errors that indicate tool execution problems
+    if "/bin/sh:" in result.stderr and "Syntax error" in result.stderr:
+        pytest.fail(
+            f"Shell syntax error detected in stderr - indicates tool execution issue:\n{result.stderr}"
+        )
 
     router_session_path = workdir / "router.session.yaml"
     assert router_session_path.exists(), (
@@ -116,6 +132,43 @@ def test_skill_run_full_pipeline(workdir, skills_dir):
 
     assert session_data is not None, "router.session.yaml is empty"
     assert "task_description" in session_data, "Missing task_description in session"
+
+    # Check if the router session indicates success
+    router_exit_code = session_data.get("exit_code", 0)
+    end_reason = session_data.get("end_reason", "")
+
+    # Print this for debugging
+    print(f"\n=== ROUTER SESSION STATUS ===")
+    print(f"exit_code: {router_exit_code}")
+    print(f"end_reason: {end_reason}")
+    print(f"turns count: {len(session_data.get('turns', []))}")
+
+    # The pipeline should have succeeded (exit_code == 0)
+    # If exit_code != 0, it means the router didn't complete successfully
+    if router_exit_code != 0:
+        pytest.fail(
+            f"Router session indicates failure: exit_code={router_exit_code}, end_reason={end_reason}.\n"
+            f"This means the pipeline did not complete successfully.\n"
+            f"session_data: {session_data}"
+        )
+
+    # Also check each subdir's session for failures
+    for subdir in subdirs:
+        session_files = list(subdir.glob("*.session.yaml"))
+        for sf in session_files:
+            with open(sf) as f:
+                sub_session = yaml.safe_load(f)
+            sub_exit_code = sub_session.get("exit_code", 0) if sub_session else 0
+            sub_workdir = (
+                sub_session.get("workdir", "unknown") if sub_session else "unknown"
+            )
+            print(f"=== Subdir {subdir.name} exit_code: {sub_exit_code} ===")
+            if sub_exit_code != 0:
+                pytest.fail(
+                    f"Subdir {subdir.name} has exit_code={sub_exit_code}.\n"
+                    f"workdir: {sub_workdir}\n"
+                    f"This means the skill/task in this subdir failed."
+                )
 
     subdirs = [d for d in workdir.iterdir() if d.is_dir() and d.name[0].isdigit()]
     assert len(subdirs) >= 2, (
