@@ -1051,6 +1051,8 @@ def run_router(
             workdir=str(workdir_path),
         )
 
+        from common.agent.session import Session
+
         all_turns = []
 
         for session_file in session_files:
