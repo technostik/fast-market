@@ -161,9 +161,7 @@ def create_skill_from_session(
                 skill_name = prompt_free_text("Enter skill name: ")
 
     click.echo("\nExtracting skill from session...")
-    name, description, body = extract_skill_from_session(
-        session, provider, skill_name=skill_name
-    )
+    name, description, body = extract_skill_from_session(session, provider)
 
     if skill_name:
         name = skill_name

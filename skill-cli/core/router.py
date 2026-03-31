@@ -1035,100 +1035,51 @@ def run_router(
         from datetime import datetime
 
         logger.warning(
-            "!!! SAVE_SESSION_DEBUG !!!",
+            "!!! SAVE_SESSION_AGGREGATION_START !!!",
             save_session_flag=save_session,
-            attempts_count=len(state.attempts),
-            iterations_done=state.iteration,
             workdir=str(workdir_path),
         )
 
+        # Direct scan of subdirs instead of relying on state.attempts
         all_turns = []
-        for i, attempt in enumerate(state.attempts):
-            logger.info(
-                "save_session_attempt",
-                i=i,
-                skill_name=attempt.skill_name,
-                subdir=str(attempt.subdir),
-                subdir_exists=attempt.subdir.exists() if attempt.subdir else False,
-            )
 
-            if not attempt.subdir:
-                logger.warning("save_session_no_subdir", i=i)
-                continue
-
-            if not attempt.subdir.exists():
-                logger.warning(
-                    "save_session_subdir_not_exists", subdir=str(attempt.subdir)
-                )
-                continue
-
-            # Try different possible session filenames
-            base_name = (
-                attempt.skill_name.replace("/", "-").replace("(", "").replace(")", "")
-            )
-            possible_names = [f"{base_name}.session.yaml"]
-            if attempt.skill_name.startswith("(task)"):
-                possible_names.append("task.session.yaml")
-
-            logger.info("save_session_trying_names", possible_names=possible_names)
-
-            session_file = None
-            for name in possible_names:
-                candidate = attempt.subdir / name
-                logger.info(
-                    "save_session_checking",
-                    candidate=str(candidate),
-                    exists=candidate.exists(),
-                )
-                if candidate.exists():
-                    session_file = candidate
-                    break
-
-            if not session_file:
-                logger.warning(
-                    "save_session_file_not_found",
-                    subdir=str(attempt.subdir),
-                    tried=possible_names,
-                )
-                continue
-
-            try:
-                import yaml
-
-                data = yaml.safe_load(session_file.read_text())
-                logger.info(
-                    "save_session_yaml_loaded",
-                    path=str(session_file),
-                    has_turns=bool(data and "turns" in data),
-                    turns_count=len(data.get("turns", [])) if data else 0,
-                )
-
-                if data and "turns" in data:
-                    session = Session.from_dict(data)
-                    all_turns.extend(session.turns)
-                    logger.info(
-                        "save_session_turns_added",
-                        turns_count=len(session.turns),
-                        total=all_turns,
-                    )
-            except Exception as e:
-                logger.warning(
-                    "save_session_load_failed",
-                    path=str(session_file),
-                    error=str(e),
-                )
-
-        logger.info(
-            "save_session_summary",
-            total_attempts=len(state.attempts),
-            total_turns=len(all_turns),
+        # Find all subdirs matching pattern XX_*/
+        subdirs = sorted(
+            [d for d in workdir_path.iterdir() if d.is_dir() and d.name[0].isdigit()]
         )
+        logger.info("save_session_found_subdirs", subdirs=[str(s) for s in subdirs])
+
+        for subdir in subdirs:
+            # Look for any .session.yaml file in the subdir
+            session_files = list(subdir.glob("*.session.yaml"))
+            logger.info(
+                "save_session_subdir_check",
+                subdir=str(subdir),
+                session_files=[str(s) for s in session_files],
+            )
+
+            for session_file in session_files:
+                try:
+                    import yaml
+
+                    data = yaml.safe_load(session_file.read_text())
+                    if data and "turns" in data:
+                        session = Session.from_dict(data)
+                        all_turns.extend(session.turns)
+                        logger.info(
+                            "save_session_loaded",
+                            file=str(session_file),
+                            turns_count=len(session.turns),
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "save_session_failed", path=str(session_file), error=str(e)
+                    )
+
+        logger.info("save_session_aggregation_complete", total_turns=len(all_turns))
 
         if not all_turns:
-            logger.error(
-                "save_session_no_turns_collected", attempts_count=len(state.attempts)
-            )
-            # Force save with empty turns for debugging
+            logger.error("save_session_no_turns_found_in_subdirs")
             from common.agent.session import Session
 
             global_session = Session(
@@ -1139,13 +1090,8 @@ def run_router(
                 max_iterations=max_iterations,
                 turns=[],
                 end_time=datetime.utcnow(),
-                end_reason="debug: no turns collected",
+                end_reason="no session files found in subdirs",
                 exit_code=1,
-            )
-            global_session_path = workdir_path / "router.session.yaml"
-            global_session.save(global_session_path)
-            logger.info(
-                "save_session_debug_file_written", path=str(global_session_path)
             )
         else:
             from common.agent.session import Session
@@ -1168,8 +1114,12 @@ def run_router(
                 exit_code=0 if state.done else 1,
             )
 
-            global_session_path = workdir_path / "router.session.yaml"
-            global_session.save(global_session_path)
-            logger.info("router_session_saved", path=str(global_session_path))
+        global_session_path = workdir_path / "router.session.yaml"
+        global_session.save(global_session_path)
+        logger.info(
+            "router_session_saved",
+            path=str(global_session_path),
+            turns_count=len(all_turns),
+        )
 
     return state

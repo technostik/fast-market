@@ -66,6 +66,26 @@ The cache dir `~/.cache/fast-market/skill-router/` is no longer used.
 Each step still creates an isolated subdirectory: `{workdir}/{iteration:02d}_{label}/`
 This is filesystem hygiene, not IPC. Scripts and LLM tool calls work inside that dir.
 
+### Session persistence with `--save-session`
+When `--save-session` flag is passed to `skill run`, the router aggregates all skill
+execution sessions into a single `router.session.yaml` file in the workdir root.
+
+The aggregation process:
+1. After the router completes (or fails/max iterations reached), it scans the workdir
+2. Finds all subdirectories matching the pattern `XX_*` (two digits + underscore)
+3. Looks for `*.session.yaml` files in each subdir (written by individual skill runs)
+4. Aggregates all turns into a single Session object
+5. Saves to `{workdir}/router.session.yaml`
+
+The aggregated session contains:
+- `task_description`: The original goal
+- `turns`: All LLM turns from all skills and tasks
+- `exit_code`: 0 if goal was achieved, 1 otherwise
+- `end_reason`: Why the session ended (completed/failed/max iterations)
+
+This file can be used with `skill create auto-from-session` to create a new skill
+that reproduces the pipeline.
+
 ### InteractionPlugin
 ```python
 class InteractionPlugin:
