@@ -538,9 +538,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option("--enable/--disable", default=None, help="Enable or disable source")
     @click.option("--editor", help="Editor to use (default: $EDITOR or nano)")
+    @click.option(
+        "--clear-seen",
+        is_flag=True,
+        help="Clear all seen items history for this source",
+    )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
     def source_edit(
-        source_id, interactive, description, meta, check_interval, is_new, enable, editor, fmt
+        source_id,
+        interactive,
+        description,
+        meta,
+        check_interval,
+        is_new,
+        enable,
+        editor,
+        clear_seen,
+        fmt,
     ):
         """Edit an existing source interactively or with options.
 
@@ -550,6 +564,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             monitor setup source-edit my-source --meta theme=tech --enable
             monitor setup source-edit my-source --check-interval 5m
             monitor setup source-edit my-source --is-new
+            monitor setup source-edit my-source --clear-seen  # Reset seen items
         """
         storage = get_storage()
         existing = storage.get_source(source_id)
@@ -589,6 +604,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if enable is not None:
             existing.enabled = enable
+
+        if clear_seen:
+            count = storage.clear_seen_items(source_id)
+            if not cron:
+                click.echo(f"[CLEAR] Cleared {count} seen items for source '{source_id}'")
 
         storage.update_source(existing)
         out_formatted(

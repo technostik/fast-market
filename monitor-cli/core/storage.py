@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generator
 
@@ -102,6 +102,18 @@ class MonitorStorage:
 
                 CREATE INDEX IF NOT EXISTS idx_mismatch_logs_source
                 ON rule_mismatch_logs(source_id, evaluated_at);
+
+                CREATE TABLE IF NOT EXISTS seen_items (
+                    source_id TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    published_at TEXT NOT NULL,
+                    seen_at TEXT NOT NULL,
+                    PRIMARY KEY (source_id, item_id),
+                    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_seen_items_source_published
+                ON seen_items(source_id, published_at);
             """)
             self._migrate_rules_columns(conn)
             self._migrate_sources_columns(conn)
@@ -229,6 +241,61 @@ class MonitorStorage:
     def delete_source(self, source_id: str) -> None:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+            conn.execute("DELETE FROM seen_items WHERE source_id = ?", (source_id,))
+
+    def add_seen_item(self, source_id: str, item_id: str, published_at: datetime) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO seen_items (source_id, item_id, published_at, seen_at)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    source_id,
+                    item_id,
+                    published_at.isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+    def add_seen_items(self, source_id: str, items: list[tuple[str, datetime]]) -> None:
+        if not items:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_conn() as conn:
+            conn.executemany(
+                """INSERT OR REPLACE INTO seen_items (source_id, item_id, published_at, seen_at)
+                   VALUES (?, ?, ?, ?)""",
+                [
+                    (source_id, item_id, published_at.isoformat(), now)
+                    for item_id, published_at in items
+                ],
+            )
+
+    def get_seen_item_ids(self, source_id: str) -> set[str]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT item_id FROM seen_items WHERE source_id = ?", (source_id,)
+            ).fetchall()
+            return {row["item_id"] for row in rows}
+
+    def clean_old_seen_items(self, source_id: str, older_than: datetime) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM seen_items WHERE source_id = ? AND published_at < ?",
+                (source_id, older_than.isoformat()),
+            )
+            return cur.rowcount
+
+    def clear_seen_items(self, source_id: str) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute("DELETE FROM seen_items WHERE source_id = ?", (source_id,))
+            return cur.rowcount
+
+    def get_seen_items_count(self, source_id: str) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM seen_items WHERE source_id = ?", (source_id,)
+            ).fetchone()
+            return row[0] if row else 0
 
     def get_all_actions(self, include_disabled: bool = False) -> list[Action]:
         with self._get_conn() as conn:

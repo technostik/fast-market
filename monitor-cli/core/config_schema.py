@@ -80,6 +80,7 @@ class RuleConfig(BaseModel):
 
 class MonitorConfig(BaseModel):
     default_check_interval: str | None = None
+    seen_items_decay_days: int | None = Field(default=7, ge=1, le=365)
     sources: list[SourceConfig] = Field(default_factory=list)
     actions: list[ActionConfig] = Field(default_factory=list)
     rules: list[RuleConfig] = Field(default_factory=list)
@@ -291,6 +292,15 @@ def get_config_template() -> str:
 # =============================================================================
 # This file is the source of truth. Run: monitor config sync
 # =============================================================================
+
+# =============================================================================
+# GLOBAL SETTINGS
+# =============================================================================
+# default_check_interval: Default cooldown between fetches (e.g., '15m', '1h')
+# seen_items_decay_days: Days to keep seen items history (default: 7, max: 365)
+# =============================================================================
+# default_check_interval: "15m"
+# seen_items_decay_days: 7
 
 # =============================================================================
 # SOURCES

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +44,15 @@ def _get_default_check_interval() -> str | None:
         return config.get("default_check_interval")
     except Exception:
         return None
+
+
+def _get_seen_items_decay_days() -> int:
+    """Get seen_items_decay_days from monitor config. Default: 7 days."""
+    try:
+        config = load_tool_config("monitor")
+        return config.get("seen_items_decay_days", 7)
+    except Exception:
+        return 7
 
 
 def _build_hook_item_metadata(
@@ -172,8 +181,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             force_mode = force or (not source.is_new)
             cooldown_active = not plugin_instance._should_fetch()
-            items = []
+            seen_ids: set[str] = set()
             fetch_error = None
+
+            if not force_mode and source.is_new:
+                seen_ids = storage.get_seen_item_ids(source.id)
+                decay_days = _get_seen_items_decay_days()
+                if decay_days > 0:
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=decay_days)
+                    removed = storage.clean_old_seen_items(source.id, cutoff)
+                    if removed > 0 and not cron:
+                        click.echo(
+                            f"[CLEANUP] source='{source.id}' removed {removed} expired seen items",
+                            err=True,
+                        )
+                    seen_ids = storage.get_seen_item_ids(source.id)
+
+            items = []
 
             try:
                 if cooldown_active:
@@ -229,6 +253,28 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 source_stats[source.id] = {"fetched": 0, "filtered": 0, "error": fetch_error}
                 continue
 
+            # Plugin-agnostic filtering at command level
+            # Filter by seen_ids first (items we've already processed)
+            if source.is_new and seen_ids:
+                original_count = len(items)
+                items = [item for item in items if item.id not in seen_ids]
+                seen_filtered_count = original_count - len(items)
+            else:
+                seen_filtered_count = 0
+
+            # Filter by last_item_id (position-based, legacy optimization)
+            if source.last_item_id and not force_mode and source.last_item_id:
+                original_count = len(items)
+                filtered_items = []
+                for item in items:
+                    if item.id == source.last_item_id:
+                        break
+                    filtered_items.append(item)
+                items = filtered_items
+                lastid_filtered_count = original_count - len(items)
+            else:
+                lastid_filtered_count = 0
+
             fetched_count = len(items)
 
             if items and not force_mode:
@@ -249,6 +295,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 now = datetime.now(timezone.utc)
                 source.last_check = now
                 storage.update_source_last_check_time(source.id, now)
+
+            if items and not force_mode and source.is_new:
+                items_to_mark = [(item.id, item.published_at) for item in items]
+                storage.add_seen_items(source.id, items_to_mark)
 
             matched_items = []
             for item in items:
@@ -293,6 +343,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "fetched": fetched_count,
                 "matched": len(matched_items),
                 "filtered": filtered_count,
+                "seen_filtered": seen_filtered_count,
+                "lastid_filtered": lastid_filtered_count,
             }
 
             if not cron and not silent:
