@@ -139,6 +139,21 @@ def get_status() -> dict:
     }
 
 
+@app.get("/api/filters")
+def get_filters() -> dict:
+    storage = _get_storage()
+
+    sources = storage.get_all_sources()
+    rules = storage.get_all_rules()
+    actions = storage.get_all_actions()
+
+    return {
+        "rule_ids": [r.id for r in rules],
+        "source_ids": [s.id for s in sources],
+        "action_ids": [a.id for a in actions],
+    }
+
+
 @app.get("/api/config")
 def get_config() -> dict:
     cfg_path = get_tool_config_path("monitor").parent / "monitor.yaml"

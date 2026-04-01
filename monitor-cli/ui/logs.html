@@ -51,6 +51,7 @@
             color: var(--text);
             border-radius: 4px;
         }
+        input[list] { min-width: 150px; }
         button { cursor: pointer; }
         button:hover { background: var(--accent); }
         .logs { display: flex; flex-direction: column; gap: 8px; }
@@ -90,9 +91,12 @@
             <option value="mismatch">Mismatch Logs</option>
         </select>
         <input type="text" id="since" placeholder="since (e.g. 1d, 1h)" value="1d">
-        <input type="text" id="ruleId" placeholder="rule ID">
-        <input type="text" id="sourceId" placeholder="source ID">
-        <input type="text" id="actionId" placeholder="action ID">
+        <input type="text" id="ruleId" placeholder="rule ID" list="ruleIds">
+        <datalist id="ruleIds"></datalist>
+        <input type="text" id="sourceId" placeholder="source ID" list="sourceIds">
+        <datalist id="sourceIds"></datalist>
+        <input type="text" id="actionId" placeholder="action ID" list="actionIds">
+        <datalist id="actionIds"></datalist>
         <input type="number" id="limit" value="50" min="1" max="500" style="width: 80px;">
         <button id="refresh">Refresh</button>
         <button id="follow">Follow</button>
@@ -110,9 +114,21 @@
         const limit = document.getElementById('limit');
         const refreshBtn = document.getElementById('refresh');
         const followBtn = document.getElementById('follow');
+        const ruleIdsList = document.getElementById('ruleIds');
+        const sourceIdsList = document.getElementById('sourceIds');
+        const actionIdsList = document.getElementById('actionIds');
 
         let following = false;
         let followInterval = null;
+
+        async function fetchFilters() {
+            const resp = await fetch('/api/filters');
+            const data = await resp.json();
+            
+            ruleIdsList.innerHTML = data.rule_ids.map(id => `<option value="${id}">`).join('');
+            sourceIdsList.innerHTML = data.source_ids.map(id => `<option value="${id}">`).join('');
+            actionIdsList.innerHTML = data.action_ids.map(id => `<option value="${id}">`).join('');
+        }
 
         async function fetchLogs() {
             const params = new URLSearchParams();
@@ -193,6 +209,7 @@
             }
         });
 
+        fetchFilters();
         load();
     </script>
 </body>
