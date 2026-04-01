@@ -958,6 +958,9 @@ crontab -e
 */1 * * * * /path/to/monitor run --cron >> ~/.local/share/fast-market/monitor/cron.log 2>&1
 ```
 
+How to have the correct venv and avoid concurrent calls : 
+* * * * * /usr/bin/flock -n /tmp/monitor.lock bash -c 'source /path/to/venv/bin/activate && /path/to/venv/bin/monitor run --cron
+
 ## Architecture
 
 ```
