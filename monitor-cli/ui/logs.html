@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor Logs</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --bg-secondary: #16213e;
+            --text: #eee;
+            --text-dim: #888;
+            --accent: #0f3460;
+            --success: #4ade80;
+            --error: #f87171;
+            --warning: #fbbf24;
+            --border: #333;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        h1 { margin: 0; font-size: 1.5rem; }
+        .nav { display: flex; gap: 15px; }
+        .nav a { color: var(--text-dim); text-decoration: none; }
+        .nav a:hover, .nav a.active { color: var(--text); }
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+        input, select, button {
+            padding: 8px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+        }
+        button { cursor: pointer; }
+        button:hover { background: var(--accent); }
+        .logs { display: flex; flex-direction: column; gap: 8px; }
+        .log-entry {
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        .log-entry.mismatch { border-left: 3px solid var(--warning); }
+        .log-entry.success { border-left: 3px solid var(--success); }
+        .log-entry.error { border-left: 3px solid var(--error); }
+        .log-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+        .timestamp { color: var(--text-dim); font-size: 0.8rem; }
+        .exit-code { padding: 2px 6px; border-radius: 3px; font-size: 0.8rem; }
+        .exit-code.success { background: var(--success); color: #000; }
+        .exit-code.error { background: var(--error); color: #000; }
+        .meta { color: var(--text-dim); font-size: 0.8rem; margin-top: 6px; }
+        .title { display: block; margin-top: 6px; word-break: break-all; }
+        .loading { text-align: center; padding: 20px; color: var(--text-dim); }
+        .empty { text-align: center; padding: 40px; color: var(--text-dim); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Monitor Logs</h1>
+        <nav class="nav">
+            <a href="/ui/logs" class="active">Logs</a>
+            <a href="/ui/status">Status</a>
+        </nav>
+    </div>
+
+    <div class="controls">
+        <select id="filterType">
+            <option value="triggers">Trigger Logs</option>
+            <option value="mismatch">Mismatch Logs</option>
+        </select>
+        <input type="text" id="since" placeholder="since (e.g. 1d, 1h)" value="1d">
+        <input type="text" id="ruleId" placeholder="rule ID">
+        <input type="text" id="sourceId" placeholder="source ID">
+        <input type="text" id="actionId" placeholder="action ID">
+        <input type="number" id="limit" value="50" min="1" max="500" style="width: 80px;">
+        <button id="refresh">Refresh</button>
+        <button id="follow">Follow</button>
+    </div>
+
+    <div id="logs" class="logs"></div>
+
+    <script>
+        const logsEl = document.getElementById('logs');
+        const filterType = document.getElementById('filterType');
+        const since = document.getElementById('since');
+        const ruleId = document.getElementById('ruleId');
+        const sourceId = document.getElementById('sourceId');
+        const actionId = document.getElementById('actionId');
+        const limit = document.getElementById('limit');
+        const refreshBtn = document.getElementById('refresh');
+        const followBtn = document.getElementById('follow');
+
+        let following = false;
+        let followInterval = null;
+
+        async function fetchLogs() {
+            const params = new URLSearchParams();
+            if (since.value) params.set('since', since.value);
+            if (ruleId.value) params.set('rule_id', ruleId.value);
+            if (sourceId.value) params.set('source_id', sourceId.value);
+            if (actionId.value) params.set('action_id', actionId.value);
+            params.set('limit', limit.value);
+            params.set('mismatch', filterType.value === 'mismatch' ? 'true' : 'false');
+
+            const resp = await fetch('/api/logs?' + params);
+            return await resp.json();
+        }
+
+        function renderLogs(logs) {
+            if (!logs.length) {
+                logsEl.innerHTML = '<div class="empty">No logs found</div>';
+                return;
+            }
+
+            logsEl.innerHTML = logs.map(log => {
+                const ts = new Date(log.triggered_at || log.evaluated_at);
+                const isMismatch = log.failed_conditions !== undefined;
+                const exitCode = log.exit_code;
+                let exitClass = '';
+                let borderClass = 'log-entry';
+                if (isMismatch) {
+                    borderClass += ' mismatch';
+                } else if (exitCode === 0) {
+                    borderClass += ' success';
+                    exitClass = 'success';
+                } else if (exitCode !== undefined && exitCode !== 0) {
+                    borderClass += ' error';
+                    exitClass = 'error';
+                }
+
+                return `
+                    <div class="${borderClass}">
+                        <div class="log-header">
+                            <span class="timestamp">${ts.toLocaleString()}</span>
+                            ${!isMismatch && exitCode !== undefined ? `<span class="exit-code ${exitClass}">${exitCode}</span>` : ''}
+                            ${isMismatch ? '<span class="exit-code" style="background: var(--warning); color: #000;">MISMATCH</span>' : ''}
+                        </div>
+                        <div class="meta">
+                            rule=${log.rule_id} | source=${log.source_id}
+                            ${log.action_id ? ' | action=' + log.action_id : ''}
+                        </div>
+                        <span class="title">${log.item_title}</span>
+                        ${log.output ? `<pre style="margin: 8px 0 0 0; font-size: 0.8rem; color: var(--text-dim);">${log.output}</pre>` : ''}
+                        ${log.failed_conditions ? `<div style="margin-top: 6px; font-size: 0.8rem; color: var(--warning);">Failed: ${JSON.stringify(log.failed_conditions)}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function load() {
+            logsEl.innerHTML = '<div class="loading">Loading...</div>';
+            try {
+                const logs = await fetchLogs();
+                renderLogs(logs);
+            } catch (e) {
+                logsEl.innerHTML = '<div class="empty">Error loading logs: ' + e.message + '</div>';
+            }
+        }
+
+        refreshBtn.addEventListener('click', load);
+        filterType.addEventListener('change', load);
+        [since, ruleId, sourceId, actionId, limit].forEach(el => el.addEventListener('change', load));
+
+        followBtn.addEventListener('click', () => {
+            following = !following;
+            followBtn.textContent = following ? 'Stop' : 'Follow';
+            if (following) {
+                load();
+                followInterval = setInterval(load, 2000);
+            } else {
+                clearInterval(followInterval);
+            }
+        });
+
+        load();
+    </script>
+</body>
+</html>

@@ -8,10 +8,12 @@ A rule-based content monitoring agent that watches web sources (YouTube, RSS fee
 ```
 monitor-agent/
 ├── core/                    # Core logic: models, rule engine, executor, storage
-├── plugins/                 # Source plugins: youtube, rss
-├── commands/                # CLI commands: setup, run, logs, status
+├── plugins/                 # Source plugins: youtube, rss, yt_search
+├── commands/                # CLI commands: setup, run, logs, status, config, serve
+├── api/                    # FastAPI server for web interface
+├── ui/                     # HTML frontend pages
 ├── monitor_entry/          # CLI entry point
-└── cli/                    # Internal CLI setup
+└── cli/                   # Internal CLI setup
 ```
 
 ## 📋 Core System Responsibilities
@@ -78,6 +80,8 @@ Commands:
   run/    → RuleEngine + Executor + Storage
   logs/   → Storage (query trigger logs)
   status/ → Storage (statistics)
+  config/ → Storage + YAML file sync
+  serve/  → FastAPI server (web interface)
 
 Core:
   models.py           → Dataclasses: Source, Action, Rule, ItemMetadata, TriggerLog, RuleEvaluationResult
@@ -150,6 +154,14 @@ Core:
 2. Implement `register(plugin_manifests) -> CommandManifest`
 3. Define Click options in decorators
 4. Use `out_formatted()` for consistent output
+5. Add to `pyproject.toml` packages list
+
+### Add Web Interface (serve command)
+1. Create `api/server.py` with FastAPI app
+2. Create `ui/*.html` frontend pages
+3. Add API endpoints in server.py
+4. Create `commands/serve/register.py` with uvicorn.run()
+5. Include `api` and `ui` in package list
 
 ### Add New Rule Operator
 1. Update `_evaluate_single_condition()` in `core/rule_engine.py`
@@ -398,4 +410,32 @@ monitor logs --since 1d --format json
 
 # Check status
 monitor status --format json
+
+# Start web server for log viewing and status
+monitor serve                    # Default port 8006
+monitor serve -p 9000            # Custom port
+```
+
+## Web Interface
+
+The `monitor serve` command starts a FastAPI web server with:
+
+### Pages
+- `/ui/logs` — Log viewer with filters and follow mode
+- `/ui/status` — Dashboard showing sources, rules, actions, statistics
+
+### API Endpoints
+- `GET /api/logs` — Query trigger logs
+  - Query params: `since`, `rule_id`, `source_id`, `action_id`, `limit`, `mismatch`
+- `GET /api/status` — Get statistics and configured entities
+- `GET /api/config` — Get current config file content
+- `POST /api/config/sync` — Sync config from YAML file to database
+
+Example:
+```bash
+# Query logs for specific rule
+curl "http://localhost:8006/api/logs?rule_id=my-rule&since=1d&limit=50"
+
+# Get status
+curl http://localhost:8006/api/status
 ```
