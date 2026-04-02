@@ -137,3 +137,113 @@ class SkillParamType(click.ParamType):
 
     def convert(self, value, param, ctx):
         return value
+
+
+class SessionFileType(click.ParamType):
+    name = "SESSION_FILE"
+
+    def shell_complete(self, ctx, param, incomplete):
+        from pathlib import Path
+
+        try:
+            workdir = ctx.params.get("workdir") if ctx else None
+            if workdir:
+                cwd = Path(workdir)
+            else:
+                try:
+                    from common.core.config import load_common_config
+
+                    common_config = load_common_config()
+                    workdir_path = common_config.get("workdir")
+                    cwd = (
+                        Path(workdir_path).expanduser().resolve()
+                        if workdir_path
+                        else Path.cwd()
+                    )
+                except Exception:
+                    cwd = Path.cwd()
+        except Exception:
+            try:
+                from common.core.config import load_common_config
+
+                common_config = load_common_config()
+                workdir_path = common_config.get("workdir")
+                cwd = (
+                    Path(workdir_path).expanduser().resolve()
+                    if workdir_path
+                    else Path.cwd()
+                )
+            except Exception:
+                cwd = Path.cwd()
+
+        if not cwd.exists() or not cwd.is_dir():
+            return []
+
+        items = []
+        search_in = incomplete
+
+        ends_with_slash = search_in.endswith("/")
+
+        if not ends_with_slash and "/" not in search_in:
+            search_patterns = ["*.yaml", "*.session.yaml"]
+            for pattern in search_patterns:
+                for path in cwd.glob(pattern):
+                    if path.is_file() and not path.name.startswith("."):
+                        try:
+                            rel = path.relative_to(cwd)
+                        except Exception:
+                            continue
+                        if rel.as_posix().startswith(search_in):
+                            items.append(CompletionItem(rel.as_posix()))
+
+            for path in sorted(cwd.iterdir()):
+                if path.is_dir() and not path.name.startswith("."):
+                    if path.name.startswith(search_in):
+                        items.append(CompletionItem(path.name + "/", help="Directory"))
+        else:
+            if ends_with_slash:
+                search_in = search_in[:-1]
+
+            search_dir = cwd / search_in
+            if search_dir.is_dir():
+                for path in sorted(search_dir.iterdir()):
+                    if path.name.startswith("."):
+                        continue
+                    if path.is_file():
+                        if path.name.endswith(".yaml") or path.name.endswith(
+                            ".session.yaml"
+                        ):
+                            items.append(CompletionItem(incomplete + path.name))
+                    elif path.is_dir():
+                        items.append(
+                            CompletionItem(
+                                incomplete + path.name + "/", help="Directory"
+                            )
+                        )
+            elif "/" in search_in:
+                base_path = search_in.rsplit("/", 1)[0]
+                prefix = base_path + "/"
+                search_prefix = search_in.split("/")[-1]
+                search_dir = cwd / base_path
+                if search_dir.is_dir():
+                    for path in sorted(search_dir.iterdir()):
+                        if path.name.startswith("."):
+                            continue
+                        if path.is_dir():
+                            if path.name.startswith(search_prefix):
+                                items.append(
+                                    CompletionItem(
+                                        prefix + path.name + "/", help="Directory"
+                                    )
+                                )
+                        elif path.is_file():
+                            if path.name.endswith(".yaml") or path.name.endswith(
+                                ".session.yaml"
+                            ):
+                                if path.name.startswith(search_prefix):
+                                    items.append(CompletionItem(prefix + path.name))
+
+        return sorted(items, key=lambda x: x.name or "")
+
+    def convert(self, value, param, ctx):
+        return value
