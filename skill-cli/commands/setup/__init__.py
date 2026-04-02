@@ -115,6 +115,8 @@ Analyze the goal and available skills. Produce a JSON object with your plan:
 }}
 ```
 
+IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes.
+
 Be specific about the order of skills and what each step should accomplish.
 """
 
@@ -144,7 +146,77 @@ Determine if the last step satisfied the success criteria. Return a JSON object:
 }}
 ```
 
+IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes.
+
 Be honest — if the goal isn't met, say so and suggest a different approach."""
+
+DEFAULT_PLAN_PROMPT = """You are a skill orchestrator. Your job is to achieve a goal by
+selecting and sequencing skills, one at a time.
+
+## Goal
+{goal}
+
+## Success Criteria (what done looks like)
+{success_criteria}
+
+## Available Skills
+{skills_list}
+
+## History
+{history}
+
+## Instructions
+
+Decide what to do next. You must return ONLY a JSON object.
+
+### Actions
+
+Run a specific skill:
+{{
+  "action": "run",
+  "skill_name": "the-skill-name",
+  "params": {{"key": "value"}},
+  "reason": "one sentence why",
+  "context_hint": "what the next skill will need from this result"
+}}
+
+Run a free-form task with raw CLI tools (use when no skill fits or a skill failed and you need to improvise):
+{{
+  "action": "task",
+  "description": "detailed description of what to accomplish",
+  "reason": "one sentence why no skill fits or why improvising is better",
+  "context_hint": "what the next step will need from this result"
+}}
+
+Ask the user a question when you have genuine ambiguity you cannot resolve yourself:
+{{
+  "action": "ask",
+  "question": "clear, specific question for the user",
+  "reason": "one sentence why you need this information"
+}}
+
+Goal fully achieved:
+{{
+  "action": "done",
+  "reason": "one sentence summary of what was accomplished"
+}}
+
+Goal cannot be achieved (repeated failures, missing capability):
+{{
+  "action": "fail",
+  "reason": "one sentence explanation of why"
+}}
+
+### Rules
+- Only use skills from the Available Skills list for "run" actions
+- Use "task" when no skill fits OR when a skill failed and you want to try a different approach with raw tools
+- Use "ask" sparingly — only when the goal is genuinely ambiguous, not just when a skill fails
+- If a previous attempt failed, try a different approach (different skill, different params, or "task")
+- Never repeat the exact same skill+params that already failed
+- Params must be concrete values, not placeholders
+- If a skill produced output that a next skill needs, it is available in history as context
+- IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes
+"""
 
 DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT = """You are creating a new skill from a task description.
 
@@ -243,6 +315,7 @@ def init_skill_agent_config(agent_dict: dict | None = None) -> dict:
 
     agent_dict.setdefault("preparation_prompt", DEFAULT_PREPARATION_PROMPT)
     agent_dict.setdefault("evaluation_prompt", DEFAULT_EVALUATION_PROMPT)
+    agent_dict.setdefault("plan_prompt", DEFAULT_PLAN_PROMPT)
     agent_dict.setdefault(
         "skill_from_description_prompt", DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT
     )

@@ -86,6 +86,7 @@ Goal cannot be achieved (repeated failures, missing capability):
 - Never repeat the exact same skill+params that already failed
 - Params must be concrete values, not placeholders
 - If a skill produced output that a next skill needs, it is available in history as context
+- IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes
 """
 
 RUNNER_SUMMARY_PROMPT = """Write a concise summary (max 15 lines) for the orchestrator:
@@ -144,6 +145,8 @@ Analyze the goal and available skills. Produce a JSON object with your plan:
 }}
 ```
 
+IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\\") or use single quotes only when the outer string uses double quotes.
+
 Be specific about the order of skills and what each step should accomplish.
 """
 
@@ -172,6 +175,8 @@ Determine if the last step satisfied the success criteria. Return a JSON object:
   "suggestion": "if not satisfied, what to try next"
 }}
 ```
+
+IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\\") or use single quotes only when the outer string uses double quotes.
 
 Be honest — if the goal isn't met, say so and suggest a different approach."""
 
@@ -305,6 +310,39 @@ def _make_subdir(workdir: Path, iteration: int, label: str) -> Path:
     return subdir
 
 
+def _repair_json(cleaned: str) -> str:
+    """Attempt to repair common JSON encoding issues from LLM output."""
+    if not cleaned:
+        return cleaned
+
+    repaired = cleaned
+
+    if '"' in repaired and '\\"' not in repaired:
+        parts = []
+        in_string = False
+        i = 0
+        while i < len(repaired):
+            char = repaired[i]
+            if char == "\\" and i + 1 < len(repaired):
+                parts.append(char)
+                parts.append(repaired[i + 1])
+                i += 2
+                continue
+            if char == '"' and not in_string:
+                in_string = True
+            elif char == '"' and in_string:
+                in_string = False
+            elif char == "'" and in_string:
+                parts.append('\\"')
+                i += 1
+                continue
+            parts.append(char)
+            i += 1
+        repaired = "".join(parts)
+
+    return repaired
+
+
 def _parse_llm_json(raw: str, context: str = "LLM") -> dict:
     """Parse JSON from LLM response, stripping markdown fences.
 
@@ -339,9 +377,13 @@ def _parse_llm_json(raw: str, context: str = "LLM") -> dict:
     try:
         data = json.loads(cleaned)
     except Exception as exc:
-        raise ValueError(
-            f"{context} returned invalid JSON: {cleaned[:200]!r}. Error: {exc}"
-        ) from exc
+        repaired = _repair_json(cleaned)
+        try:
+            data = json.loads(repaired)
+        except Exception:
+            raise ValueError(
+                f"{context} returned invalid JSON: {cleaned[:200]!r}. Error: {exc}"
+            ) from exc
 
     if not isinstance(data, dict):
         raise ValueError(f"{context} returned non-object JSON")
@@ -349,9 +391,15 @@ def _parse_llm_json(raw: str, context: str = "LLM") -> dict:
 
 
 def _call_plan(
-    state: RouterState, provider, model: str | None, skills: list[Skill]
+    state: RouterState,
+    provider,
+    model: str | None,
+    skills: list[Skill],
+    prompt_template: str | None = None,
 ) -> dict:
-    prompt = PLAN_PROMPT.format(
+    if prompt_template is None:
+        prompt_template = PLAN_PROMPT
+    prompt = prompt_template.format(
         goal=state.goal,
         skills_list=build_skills_list(skills),
         history=_format_history(state.attempts),
@@ -789,6 +837,7 @@ def run_router(
     run_root.mkdir(parents=True, exist_ok=True)
 
     preparation_prompt = agent_cfg.get("preparation_prompt")
+    plan_prompt = agent_cfg.get("plan_prompt")
     if skip_evaluation:
         evaluation_prompt_cfg = None
     elif evaluation_prompt is not None:
@@ -830,7 +879,9 @@ def run_router(
 
         # --- Plan ---
         try:
-            plan = _call_plan(state, provider, model, skills)
+            plan = _call_plan(
+                state, provider, model, skills, prompt_template=plan_prompt
+            )
         except Exception as exc:
             state.failed = True
             state.failure_reason = f"Planner failed: {exc}"

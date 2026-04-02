@@ -7,6 +7,7 @@ from common.core.yaml_utils import dump_yaml
 from commands.base import CommandManifest
 from commands.setup import (
     DEFAULT_EVALUATION_PROMPT,
+    DEFAULT_PLAN_PROMPT,
     DEFAULT_PREPARATION_PROMPT,
     DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT,
     init_skill_agent_config,
@@ -260,6 +261,59 @@ def register(plugin_manifests: dict | None = None):
             click.echo("Evaluation prompt reset to default.")
         else:
             click.echo("Evaluation prompt is already at default.")
+
+    @setup_cmd.group("plan-prompt")
+    def plan_prompt_group():
+        """Manage plan prompt template."""
+        pass
+
+    @plan_prompt_group.command("show")
+    def show_plan_prompt():
+        """Show current plan prompt template."""
+        agent = init_skill_agent_config()
+        prompt = agent.get("plan_prompt", DEFAULT_PLAN_PROMPT)
+        click.echo(prompt)
+
+    @plan_prompt_group.command("edit")
+    def edit_plan_prompt():
+        """Edit plan prompt template in editor."""
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        from common.cli.helpers import get_editor
+
+        agent = init_skill_agent_config()
+        current = agent.get("plan_prompt", DEFAULT_PLAN_PROMPT)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", prefix="fastmarket-plan-", delete=False
+        ) as f:
+            f.write(current)
+            temp_path = Path(f.name)
+
+        try:
+            editor = get_editor()
+            subprocess.run([editor, str(temp_path)], check=True)
+            new_prompt = temp_path.read_text()
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+        if new_prompt != current:
+            agent["plan_prompt"] = new_prompt
+            save_skill_agent_config(agent)
+            click.echo("Plan prompt updated.")
+
+    @plan_prompt_group.command("reset")
+    def reset_plan_prompt():
+        """Reset plan prompt to default."""
+        agent = init_skill_agent_config()
+        if "plan_prompt" in agent:
+            del agent["plan_prompt"]
+            save_skill_agent_config(agent)
+            click.echo("Plan prompt reset to default.")
+        else:
+            click.echo("Plan prompt is already at default.")
 
     @setup_cmd.group("skill-from-description-prompt")
     def skill_from_description_prompt_group():
