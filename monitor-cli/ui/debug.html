@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor Debug - Seen Items</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --bg-secondary: #16213e;
+            --text: #eee;
+            --text-dim: #888;
+            --accent: #0f3460;
+            --success: #4ade80;
+            --error: #f87171;
+            --warning: #fbbf24;
+            --border: #333;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        h1 { margin: 0; font-size: 1.5rem; }
+        .nav { display: flex; gap: 15px; }
+        .nav a { color: var(--text-dim); text-decoration: none; }
+        .nav a:hover, .nav a.active { color: var(--text); }
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+        input, select, button {
+            padding: 8px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+        }
+        input[list] { min-width: 150px; }
+        button { cursor: pointer; }
+        button:hover { background: var(--accent); }
+        .source-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .source-card {
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .source-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .source-id { font-weight: bold; color: var(--success); }
+        .source-meta { font-size: 0.85rem; color: var(--text-dim); }
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .items-table th, .items-table td {
+            text-align: left;
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .items-table th { color: var(--text-dim); }
+        .items-table tr:hover { background: var(--accent); }
+        .item-id { font-family: monospace; color: var(--warning); }
+        .item-id.highlight {
+            background: var(--warning);
+            color: #000;
+            padding: 2px 6px;
+            border-radius: 3px;
+            animation: pulse 1s infinite;
+        }
+        .highlight-row { background: rgba(251, 191, 36, 0.2); }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .timestamp { font-family: monospace; color: var(--text-dim); font-size: 0.8rem; }
+        .loading { text-align: center; padding: 20px; color: var(--text-dim); }
+        .empty { text-align: center; padding: 40px; color: var(--text-dim); }
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: var(--accent);
+            border-radius: 8px;
+        }
+        .stat { text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: bold; }
+        .stat-label { font-size: 0.85rem; color: var(--text-dim); }
+        .detail-view { margin-top: 15px; }
+        .source-detail {
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            gap: 8px;
+            font-size: 0.9rem;
+        }
+        .detail-key { color: var(--text-dim); }
+        .detail-value { font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Monitor Debug - Seen Items</h1>
+        <nav class="nav">
+            <a href="/ui/logs">Logs</a>
+            <a href="/ui/status">Status</a>
+            <a href="/ui/debug" class="active">Debug</a>
+        </nav>
+    </div>
+
+    <div class="controls">
+        <select id="sourceSelect">
+            <option value="">Select a source...</option>
+        </select>
+        <button id="loadSource">Load Source</button>
+        <button id="loadAll">Load All Sources</button>
+    </div>
+
+    <div id="stats" class="stats" style="display: none;"></div>
+    <div id="content"></div>
+
+    <script>
+        const sourceSelect = document.getElementById('sourceSelect');
+        const loadSourceBtn = document.getElementById('loadSource');
+        const loadAllBtn = document.getElementById('loadAll');
+        const statsEl = document.getElementById('stats');
+        const contentEl = document.getElementById('content');
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const highlightItemId = urlParams.get('item_id');
+        const highlightSourceId = urlParams.get('source_id');
+
+        async function fetchSources() {
+            const resp = await fetch('/api/status');
+            const data = await resp.json();
+            return data.sources;
+        }
+
+        async function loadSource(sourceId) {
+            contentEl.innerHTML = '<div class="loading">Loading...</div>';
+            try {
+                const resp = await fetch(`/api/debug/source/${sourceId}`);
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    contentEl.innerHTML = '<div class="empty">Error: ' + err.detail + '</div>';
+                    return;
+                }
+                const data = await resp.json();
+                renderSourceDetail(data);
+            } catch (e) {
+                contentEl.innerHTML = '<div class="empty">Error: ' + e.message + '</div>';
+            }
+        }
+
+        async function loadAll() {
+            contentEl.innerHTML = '<div class="loading">Loading...</div>';
+            try {
+                const resp = await fetch('/api/debug/seen-items');
+                const data = await resp.json();
+                renderAllSources(data);
+            } catch (e) {
+                contentEl.innerHTML = '<div class="empty">Error: ' + e.message + '</div>';
+            }
+        }
+
+        function renderSourceDetail(data) {
+            const s = data.source;
+            contentEl.innerHTML = `
+                <div class="source-detail" id="source-${s.id}">
+                    <div class="detail-header">
+                        <h2>Source: ${s.id}</h2>
+                    </div>
+                    <div class="detail-grid">
+                        <span class="detail-key">Plugin:</span>
+                        <span class="detail-value">${s.plugin}</span>
+                        
+                        <span class="detail-key">Origin:</span>
+                        <span class="detail-value">${s.origin}</span>
+                        
+                        <span class="detail-key">is_new:</span>
+                        <span class="detail-value">${s.is_new}</span>
+                        
+                        <span class="detail-key">last_item_id:</span>
+                        <span class="detail-value">${s.last_item_id || 'null'}</span>
+                        
+                        <span class="detail-key">last_fetched_at:</span>
+                        <span class="detail-value">${s.last_fetched_at || 'null'}</span>
+                        
+                        <span class="detail-key">last_check:</span>
+                        <span class="detail-value">${s.last_check || 'null'}</span>
+                        
+                        <span class="detail-key">seen_items_count:</span>
+                        <span class="detail-value">${data.seen_items_count}</span>
+                        
+                        <span class="detail-key">seen_ids_sample:</span>
+                        <span class="detail-value">${data.seen_ids_sample.join(', ') || 'none'}</span>
+                    </div>
+                    ${data.seen_items && data.seen_items.length > 0 ? `
+                    <h3 style="margin-top: 20px;">Seen Items</h3>
+                    <table class="items-table">
+                        <thead>
+                            <tr>
+                                <th>item_id</th>
+                                <th>published_at</th>
+                                <th>seen_at</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.seen_items.map(item => `
+                                <tr class="${item.item_id === highlightItemId ? 'highlight-row' : ''}">
+                                    <td class="item-id ${item.item_id === highlightItemId ? 'highlight' : ''}">${item.item_id}</td>
+                                    <td class="timestamp">${item.published_at}</td>
+                                    <td class="timestamp">${item.seen_at}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    ` : ''}
+                </div>
+            `;
+
+            if (highlightItemId) {
+                const el = document.querySelector('.highlight');
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+        }
+
+        function renderAllSources(data) {
+            if (!data.sources || data.sources.length === 0) {
+                contentEl.innerHTML = '<div class="empty">No seen items found</div>';
+                return;
+            }
+
+            statsEl.style.display = 'flex';
+            statsEl.innerHTML = `
+                <div class="stat">
+                    <div class="stat-value">${data.total_sources}</div>
+                    <div class="stat-label">Sources</div>
+                </div>
+            `;
+
+            contentEl.innerHTML = data.sources.map(source => `
+                <div class="source-card" id="source-${source.source_id}">
+                    <div class="source-header">
+                        <span class="source-id">${source.source_id}</span>
+                        <span class="source-meta">${source.count} items</span>
+                    </div>
+                    <table class="items-table">
+                        <thead>
+                            <tr>
+                                <th>item_id</th>
+                                <th>published_at</th>
+                                <th>seen_at</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${source.items.map(item => `
+                                <tr class="${item.item_id === highlightItemId ? 'highlight-row' : ''}">
+                                    <td class="item-id ${item.item_id === highlightItemId ? 'highlight' : ''}">${item.item_id}</td>
+                                    <td class="timestamp">${item.published_at}</td>
+                                    <td class="timestamp">${item.seen_at}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `).join('');
+
+            if (highlightItemId) {
+                const el = document.querySelector('.highlight');
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+        }
+
+        async function init() {
+            const sources = await fetchSources();
+            sourceSelect.innerHTML = '<option value="">Select a source...</option>' +
+                sources.map(s => `<option value="${s.id}">${s.id} (${s.plugin})</option>`).join('');
+            
+            if (highlightItemId) {
+                loadAll();
+            } else if (highlightSourceId) {
+                sourceSelect.value = highlightSourceId;
+                loadSource(highlightSourceId);
+            } else {
+                loadAll();
+            }
+        }
+
+        loadSourceBtn.addEventListener('click', () => {
+            if (sourceSelect.value) {
+                loadSource(sourceSelect.value);
+            }
+        });
+
+        loadAllBtn.addEventListener('click', loadAll);
+
+        init();
+    </script>
+</body>
+</html>

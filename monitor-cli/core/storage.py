@@ -297,6 +297,42 @@ class MonitorStorage:
             ).fetchone()
             return row[0] if row else 0
 
+    def get_seen_items_for_source(self, source_id: str) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT item_id, published_at, seen_at FROM seen_items 
+                   WHERE source_id = ? ORDER BY published_at DESC""",
+                (source_id,),
+            ).fetchall()
+            return [
+                {
+                    "item_id": row["item_id"],
+                    "published_at": row["published_at"],
+                    "seen_at": row["seen_at"],
+                }
+                for row in rows
+            ]
+
+    def get_all_seen_items_grouped(self) -> dict[str, list[dict]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT source_id, item_id, published_at, seen_at 
+                   FROM seen_items ORDER BY source_id, published_at DESC"""
+            ).fetchall()
+            result = {}
+            for row in rows:
+                source_id = row["source_id"]
+                if source_id not in result:
+                    result[source_id] = []
+                result[source_id].append(
+                    {
+                        "item_id": row["item_id"],
+                        "published_at": row["published_at"],
+                        "seen_at": row["seen_at"],
+                    }
+                )
+            return result
+
     def get_all_actions(self, include_disabled: bool = False) -> list[Action]:
         with self._get_conn() as conn:
             if include_disabled:

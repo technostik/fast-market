@@ -40,6 +40,7 @@ def root() -> RedirectResponse:
 for route, page in [
     ("/ui/logs", "logs.html"),
     ("/ui/status", "status.html"),
+    ("/ui/debug", "debug.html"),
 ]:
     app.add_api_route(
         route, (lambda p=page: _html(p)), methods=["GET"], response_class=HTMLResponse
@@ -151,6 +152,68 @@ def get_filters() -> dict:
         "rule_ids": [r.id for r in rules],
         "source_ids": [s.id for s in sources],
         "action_ids": [a.id for a in actions],
+    }
+
+
+@app.get("/api/debug/seen-items")
+def get_seen_items_debug(source_id: str | None = Query(None)) -> dict:
+    storage = _get_storage()
+
+    if source_id:
+        items = storage.get_seen_items_for_source(source_id)
+        count = storage.get_seen_items_count(source_id)
+        return {
+            "source_id": source_id,
+            "count": count,
+            "items": items,
+        }
+    else:
+        all_items = storage.get_all_seen_items_grouped()
+        return {
+            "sources": [
+                {
+                    "source_id": sid,
+                    "count": len(items),
+                    "items": items[:50],  # First 50 for preview
+                }
+                for sid, items in all_items.items()
+            ],
+            "total_sources": len(all_items),
+        }
+
+
+@app.get("/api/debug/source/{source_id}")
+def get_source_debug(source_id: str) -> dict:
+    storage = _get_storage()
+    source = storage.get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    seen_items = storage.get_seen_items_for_source(source_id)
+    seen_ids = storage.get_seen_item_ids(source_id)
+
+    return {
+        "source": {
+            "id": source.id,
+            "plugin": source.plugin,
+            "origin": source.origin,
+            "is_new": source.is_new,
+            "last_item_id": source.last_item_id,
+            "last_fetched_at": source.last_fetched_at.isoformat()
+            if source.last_fetched_at
+            else None,
+            "last_check": source.last_check.isoformat() if source.last_check else None,
+        },
+        "seen_items_count": len(seen_items),
+        "seen_ids_sample": list(seen_ids)[:20],
+        "seen_items": [
+            {
+                "item_id": item.item_id,
+                "published_at": item.published_at.isoformat(),
+                "seen_at": item.seen_at.isoformat(),
+            }
+            for item in seen_items
+        ],
     }
 
 

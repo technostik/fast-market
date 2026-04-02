@@ -82,6 +82,7 @@
         <nav class="nav">
             <a href="/ui/logs" class="active">Logs</a>
             <a href="/ui/status">Status</a>
+            <a href="/ui/debug">Debug</a>
         </nav>
     </div>
 
@@ -175,6 +176,7 @@
                         <div class="meta">
                             rule=${log.rule_id} | source=${log.source_id}
                             ${log.action_id ? ' | action=' + log.action_id : ''}
+                            ${log.item_id ? ` | <a href="/ui/debug?item_id=${log.item_id}&source_id=${log.source_id}" style="color: var(--warning);">item_id=${log.item_id}</a>` : ''}
                         </div>
                         <span class="title">${log.item_title}</span>
                         ${log.output ? `<pre style="margin: 8px 0 0 0; font-size: 0.8rem; color: var(--text-dim);">${log.output}</pre>` : ''}
