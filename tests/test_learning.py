@@ -147,16 +147,18 @@ def test_learn_md_improves_subsequent_runs(workdir, skills_dir):
 
     env = os.environ.copy()
 
-    # Run 1: Use skill run (router) to explore and potentially fail/learn
+    run1_session = workdir / "run1-session.yaml"
     result1 = subprocess.run(
         [
             "skill",
-            "run",
-            "Use the test-guess skill to process input='first'",
+            "apply",
+            "test-guess",
+            "input=first",
+            "--auto-learn",
+            "--save-session",
+            str(run1_session),
             "--workdir",
             str(workdir),
-            "--max-iterations",
-            "5",
         ],
         env=env,
         timeout=180,
@@ -167,21 +169,43 @@ def test_learn_md_improves_subsequent_runs(workdir, skills_dir):
     print(f"Run 1 return code: {result1.returncode}")
     print(f"Run 1 stderr: {result1.stderr}")
 
-    # Check LEARN.md was created by checking skill directory
-    # (The router should trigger auto-learn via skill apply)
-    from common.core.paths import get_skills_dir
-
-    test_guess_dir = get_skills_dir() / "test-guess"
-    learn_path = test_guess_dir / "LEARN.md"
-
     print(f"LEARN.md exists: {learn_path.exists()}")
     if learn_path.exists():
         print(f"LEARN.md content:\n{learn_path.read_text()[:500]}")
 
-    # For now, just verify the first run completed
-    # Full error reduction test is done in test_learn_md_reduces_errors
-    assert result1.returncode == 0 or learn_path.exists(), (
-        f"Run 1 did not produce LEARN.md. stderr: {result1.stderr}"
+    if not run1_session.exists():
+        raise RuntimeError(f"Run 1 session file was not created at {run1_session}")
+
+    assert learn_path.exists(), (
+        f"Run 1 did not create LEARN.md. stderr: {result1.stderr}"
+    )
+
+    run2_session = workdir / "run2-session.yaml"
+    result2 = subprocess.run(
+        [
+            "skill",
+            "apply",
+            "test-guess",
+            "input=second",
+            "--save-session",
+            str(run2_session),
+            "--workdir",
+            str(workdir),
+        ],
+        env=env,
+        timeout=180,
+        capture_output=True,
+        text=True,
+    )
+
+    print(f"Run 2 return code: {result2.returncode}")
+    print(f"Run 2 stderr: {result2.stderr}")
+
+    if not run2_session.exists():
+        raise RuntimeError(f"Run 2 session file was not created at {run2_session}")
+
+    assert result2.returncode == 0, (
+        f"Run 2 failed with LEARN.md present. stderr: {result2.stderr}"
     )
 
 
