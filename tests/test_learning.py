@@ -271,6 +271,9 @@ def test_learn_md_reduces_errors(workdir, skills_dir):
     baseline_rounds = count_total_rounds(apply1_session)
     baseline_errors = count_session_errors(apply1_session)
 
+    if baseline_steps == 0:
+        raise RuntimeError(f"Apply 1 session file with 0 steps {apply1_session}")
+
     print(
         f"Baseline: {baseline_errors} errors, {baseline_steps} steps, {baseline_rounds} rounds"
     )
@@ -380,6 +383,9 @@ def test_learn_md_reduces_steps(workdir, skills_dir):
     baseline_steps = count_total_steps(apply1_session)
     baseline_rounds = count_total_rounds(apply1_session)
     baseline_guesses = count_exploratory_commands(apply1_session)
+
+    if baseline_steps == 0:
+        raise RuntimeError(f"Apply 1 session file with 0 steps {apply1_session}")
 
     print(
         f"Baseline: {baseline_steps} steps, {baseline_rounds} rounds, {baseline_guesses} exploratory commands"
