@@ -91,7 +91,7 @@ Goal cannot be achieved (repeated failures, missing capability):
 """
 
 RUNNER_SUMMARY_PROMPT = """Write a concise summary (max 15 lines) for the orchestrator:
-- Did it succeed or fail?
+- Did it succeed or fail? Use EXIT CODE of the LAST command to determine: exit code 0 = success, non-zero = failure
 - What approach was used?
 - What errors occurred? What is the root cause?
 - What alternative approaches could work if this failed?
