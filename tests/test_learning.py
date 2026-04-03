@@ -40,7 +40,7 @@ def get_llm_provider():
     return providers[name]
 
 
-def _run_router(goal: str, workdir: str):
+def _run_router(goal: str, workdir: str, skills_dir: Path | None = None):
     """Run skill router and return state."""
     from core.router import run_router
 
@@ -50,6 +50,8 @@ def _run_router(goal: str, workdir: str):
         provider=provider,
         workdir=workdir,
         max_iterations=10,
+        skills_dir=skills_dir,
+        save_session=True,
     )
     return state
 
@@ -60,6 +62,21 @@ def _get_stdout_outputs(state) -> list[str]:
     for attempt in state.attempts:
         if attempt.runner_summary:
             outputs.append(attempt.runner_summary)
+        if attempt.context:
+            outputs.append(attempt.context)
+        if attempt.subdir and attempt.subdir.exists():
+            session_files = list(attempt.subdir.glob("*.session.yaml"))
+            if session_files:
+                try:
+                    import yaml
+
+                    session_data = yaml.safe_load(session_files[0].read_text())
+                    for turn in session_data.get("turns", []):
+                        for tool_call in turn.get("tool_calls", []):
+                            if tool_call.get("arguments", {}).get("stdout"):
+                                outputs.append(tool_call["arguments"]["stdout"])
+                except Exception:
+                    pass
     return outputs
 
 
@@ -430,6 +447,7 @@ def test_run1_produces_correct_output(workdir, skills_dir):
     state = _run_router(
         goal="Use the test-guess skill with input='hello'",
         workdir=str(workdir),
+        skills_dir=skills_dir,
     )
 
     assert len(state.attempts) > 0, f"Router did nothing: {state}"
@@ -460,6 +478,7 @@ def test_router_with_learn_md_produces_correct_output(workdir, skills_dir):
     state = _run_router(
         goal="Use the test-guess skill with input='test'",
         workdir=str(workdir),
+        skills_dir=skills_dir,
     )
 
     assert len(state.attempts) > 0, f"Router did nothing: {state}"

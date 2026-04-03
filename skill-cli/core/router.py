@@ -629,7 +629,20 @@ def _run_skill(
 ) -> tuple[int, object, Path | None]:
     """Execute a skill directly in-process. Returns (exit_code, session)."""
     from functools import partial
-    from commands.setup import init_skill_agent_config
+
+    # Use importlib to explicitly load from skill-cli's commands.setup
+    # (avoids sys.path ordering issues with task-cli vs skill-cli)
+    import importlib.util
+
+    skill_cli_setup_path = (
+        Path(__file__).parent.parent / "commands" / "setup" / "__init__.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "skill_cli_setup", skill_cli_setup_path
+    )
+    skill_cli_setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(skill_cli_setup)
+    init_skill_agent_config = skill_cli_setup.init_skill_agent_config
 
     # Inject router context as a param so the skill's LLM can see it
     effective_params = dict(params)
@@ -802,6 +815,7 @@ def run_router(
     evaluation_prompt: str | None = None,
     skip_evaluation: bool = False,
     save_session: bool = False,
+    skills_dir: Path | None = None,
 ) -> RouterState:
     """Orchestrate skills and free-form tasks to achieve a goal.
 
@@ -810,7 +824,19 @@ def run_router(
         evaluation_prompt: Custom evaluation prompt template. If provided, overrides config.
         skip_evaluation: If True, skip evaluation phase entirely.
     """
-    from commands.setup import init_skill_agent_config
+    # Use importlib to explicitly load from skill-cli's commands.setup
+    # (avoids sys.path ordering issues with task-cli vs skill-cli)
+    import importlib.util
+
+    skill_cli_setup_path = (
+        Path(__file__).parent.parent / "commands" / "setup" / "__init__.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "skill_cli_setup", skill_cli_setup_path
+    )
+    skill_cli_setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(skill_cli_setup)
+    init_skill_agent_config = skill_cli_setup.init_skill_agent_config
     from common.core.config import load_tool_config
     from common.llm.registry import get_default_provider_name
 
@@ -830,7 +856,7 @@ def run_router(
         goal=goal, attempts=[], iteration=0, max_iterations=max_iterations
     )
     session_files: list[Path] = []  # Track session files as they are created
-    skills = discover_skills(get_skills_dir())
+    skills = discover_skills(skills_dir or get_skills_dir())
     workdir_path = Path(workdir).expanduser().resolve()
 
     run_id = dt.utcnow().strftime("%Y%m%dT%H%M%S") + "_" + uuid.uuid4().hex[:6]
