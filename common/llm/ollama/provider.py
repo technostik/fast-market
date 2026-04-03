@@ -135,8 +135,10 @@ class _RealOllamaProvider(LLMProvider):
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
-                    except json.JSONDecodeError:
-                        pass
+                    except json.JSONDecodeError as exc:
+                        raise RuntimeError(
+                            f"Failed to parse tool call arguments: {args[:200]}"
+                        ) from exc
                 tool_calls.append(
                     ToolCall(
                         id=tc.get("id", ""),

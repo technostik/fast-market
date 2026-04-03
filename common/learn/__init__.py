@@ -21,23 +21,11 @@ MAX_LEARN_LINES = 80
 
 LEARN_ANALYSIS_PROMPT_TEMPLATE = """You are analyzing an agentic task session to extract lessons for future runs of the same skill.
 
-## Session Summary
-Task: {task_description}
-Skill: {skill_name}
-Outcome: {outcome}
-Iterations used: {iterations_used} / {max_iterations}
-Parameters: {params_summary}
-
-## Full Session Log
-{session_log}
-
-{existing_learnings_block}
-
----
-
 ## Your job
 
-Write a LEARN.md file for the skill '{skill_name}' with NEW LESSONS LEARNED. This file will be injected into the system prompt of future task runs using this skill, so it must be:
+Write a LEARN.md file for the skill '{skill_name}' with NEW LESSONS LEARNED.
+A Lesson is what allow future run to avoid steps, errors or guesses and go directly to useful commands.
+This file will be injected into the system prompt of future task runs using this skill, so it must be:
 
 1. **Actionable** — specific commands, flags, paths, patterns that work
 2. **Concise** — maximum 30 lines total
@@ -52,10 +40,28 @@ Rules:
 - Each bullet must be concrete and specific to THIS skill/task
 - Do NOT include generic advice (e.g., "check outputs carefully")
 - Do NOT include anything already obvious from the SKILL.md instructions
-- If the task succeeded on the first try with no errors, write only a "What Works" section with the successful approach
-- If no lessons were learned (trivial task), write: `# Lessons Learned\n\n_No lessons recorded for this run._`
+- ALWAYS extract lessons when there were command failures (non-zero exit codes), even if the task eventually succeeded
+- If the task succeeded on the first try with ZERO errors, write only a "What Works" section with the successful approach
+- If no commands were executed at all, write: `# Lessons Learned\n\nERROR: No commands executed\n\n_No lessons recorded for this run._`
 - Output ONLY the markdown content, no preamble, no code fences
 - ONLY new lessons learned should be included, not repeated content.
+
+---
+
+## Session to Analayse
+Task: {task_description}
+Skill: {skill_name}
+Outcome: {outcome}
+Errors: {error_count}
+Iterations used: {iterations_used} / {max_iterations}
+Parameters: {params_summary}
+
+## Full Session Log
+{session_log}
+
+{existing_learnings_block}
+
+
 """
 
 LEARN_RESULT_TEMPLATE = """```markdown
@@ -259,9 +265,7 @@ def format_session_log(session) -> str:
                 if reason:
                     lines.append(f"  Reason: {reason}")
                 lines.append(f"  Exit: {tc.exit_code}")
-                if tc.stdout and tc.exit_code != 0:
-                    lines.append(f"  Stdout: {tc.stdout[:300]}")
-                if hasattr(tc, "stderr") and tc.stderr:
+                if tc.stderr:
                     lines.append(f"  Stderr: {tc.stderr[:300]}")
         elif (
             hasattr(turn, "role")
@@ -309,7 +313,10 @@ def analyze_session(
             task_description=session.task_description,
             skill_name=skill_name,
             outcome="success" if session.exit_code == 0 else "failed",
-            iterations_used=len(session.turns),
+            error_count=session.metrics_dict().get("error_count", 0),
+            iterations_used=session.metrics_dict().get(
+                "iterations_used", len(session.turns)
+            ),
             max_iterations=session.max_iterations,
             params_summary=session.task_params or {},
             session_log=format_session_log(session),
@@ -325,11 +332,23 @@ def analyze_session(
         )
         response = provider.complete(request)
         content = (response.content or "").strip()
-        default_content = "# Lessons Learned\n\n_No lessons recorded for this run._"
+        logger.info(
+            "learn_analyze_response",
+            content_len=len(content),
+            has_content=bool(content),
+        )
+        default_content = f"# Lessons Learned\n\nERROR: Failed to generate lessons (empty response)\n\n_No lessons recorded for this run._"
         return content or default_content, prompt
     except Exception as exc:
-        logger.warning("learn_analyze_failed", error=str(exc), skill=skill_name)
-        default_content = "# Lessons Learned\n\n_No lessons recorded for this run._"
+        logger.warning(
+            "learn_analyze_failed", error=str(exc), skill=skill_name, model=model
+        )
+        import traceback
+
+        logger.warning("learn_analyze_traceback", traceback=traceback.format_exc())
+        default_content = (
+            f"# Lessons Learned\n\nERROR: {exc}\n\n_No lessons recorded for this run._"
+        )
         return default_content, ""
 
 
@@ -436,11 +455,14 @@ def update_learn_file(
         return learn_path
     except Exception as exc:
         logger.warning("learn_update_failed", error=str(exc), skill=skill_name)
+        import traceback
+
+        logger.warning("learn_update_traceback", traceback=traceback.format_exc())
         fallback = get_skills_dir() / skill_name / "LEARN.md"
         fallback.parent.mkdir(parents=True, exist_ok=True)
         if not fallback.exists():
             fallback.write_text(
-                "# Lessons Learned\n\n_No lessons recorded for this run._\n",
+                f"# Lessons Learned\n\nERROR: {exc}\n\n_No lessons recorded for this run._\n",
                 encoding="utf-8",
             )
         return fallback
@@ -488,9 +510,9 @@ def extract_skill_from_session(
         description = data.get("description", "")
         body = data.get("body", "")
         return name, description, body
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         logger.warning("skill_extraction_parse_failed", content=content[:500])
-        return "new-skill", "Skill extracted from session", content
+        raise ValueError(f"Failed to parse skill extraction JSON: {exc}") from exc
 
 
 def extract_skill_from_description(
@@ -541,6 +563,6 @@ def extract_skill_from_description(
         when_to_use = data.get("when_to_use", "")
         body = data.get("body", "")
         return name, description, when_to_use, body
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         logger.warning("skill_from_description_parse_failed", content=content[:500])
-        return "new-skill", "Skill from description", "", content
+        raise ValueError(f"Failed to parse skill from description JSON: {exc}") from exc

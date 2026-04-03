@@ -16,9 +16,10 @@ Requires: ollama running. Run with: pytest tests/test_learning.py -m llm -s
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
+
+from common.rt_subprocess import rt_subprocess
 
 import pytest
 import yaml
@@ -90,7 +91,7 @@ def _reverse(s: str) -> str:
 
 def test_guess_command_works():
     """Verify the guess binary itself works correctly before running LLM tests."""
-    result = subprocess.run(
+    result = rt_subprocess.run(
         ["guess", "doit", "again", "hello"], capture_output=True, text=True
     )
     assert result.returncode == 0
@@ -99,17 +100,21 @@ def test_guess_command_works():
 
 def test_guess_command_fails_without_again():
     """Verify wrong invocation fails — this is the trap for the LLM."""
-    result = subprocess.run(["guess", "doit", "hello"], capture_output=True, text=True)
+    result = rt_subprocess.run(
+        ["guess", "doit", "hello"], capture_output=True, text=True
+    )
     assert result.returncode != 0
 
 
 def test_guess_help_shows_doit():
-    result = subprocess.run(["guess", "--help"], capture_output=True, text=True)
+    result = rt_subprocess.run(["guess", "--help"], capture_output=True, text=True)
     assert "doit" in result.stdout
 
 
 def test_guess_doit_help_shows_again():
-    result = subprocess.run(["guess", "doit", "--help"], capture_output=True, text=True)
+    result = rt_subprocess.run(
+        ["guess", "doit", "--help"], capture_output=True, text=True
+    )
     assert "again" in result.stdout
 
 
@@ -124,7 +129,7 @@ def test_skill_apply_creates_learn_md(workdir, skills_dir):
 
     env = os.environ.copy()
     session_file = workdir / "session.yaml"
-    result = subprocess.run(
+    result = rt_subprocess.run(
         [
             "skill",
             "apply",
@@ -165,7 +170,7 @@ def test_learn_md_improves_subsequent_runs(workdir, skills_dir):
     env = os.environ.copy()
 
     run1_session = workdir / "run1-session.yaml"
-    result1 = subprocess.run(
+    result1 = rt_subprocess.run(
         [
             "skill",
             "apply",
@@ -198,7 +203,7 @@ def test_learn_md_improves_subsequent_runs(workdir, skills_dir):
     )
 
     run2_session = workdir / "run2-session.yaml"
-    result2 = subprocess.run(
+    result2 = rt_subprocess.run(
         [
             "skill",
             "apply",
@@ -243,7 +248,7 @@ def test_learn_md_reduces_errors(workdir, skills_dir):
     env = os.environ.copy()
 
     apply1_session = workdir / "apply1-session.yaml"
-    result1 = subprocess.run(
+    result1 = rt_subprocess.run(
         [
             "skill",
             "apply",
@@ -282,14 +287,14 @@ def test_learn_md_reduces_errors(workdir, skills_dir):
     if learn_path.exists():
         learn_content = learn_path.read_text()
         print(f"LEARN.md content:\n{learn_content[:500]}")
-        assert "_No lessons" not in learn_content, (
+        assert "_No lessons" not in learn_content and "ERROR:" not in learn_content, (
             f"Auto-learn failed to extract real lessons. Content: {learn_content}"
         )
 
     assert learn_path.exists(), "LEARN.md was not created by --auto-learn"
 
     apply2_session = workdir / "apply2-session.yaml"
-    result2 = subprocess.run(
+    result2 = rt_subprocess.run(
         [
             "skill",
             "apply",
@@ -329,7 +334,8 @@ def test_learn_md_reduces_errors(workdir, skills_dir):
     )
 
     learn_content = learn_path.read_text()
-    if "_No lessons" in learn_content:
+    has_error = "ERROR:" in learn_content
+    if "_No lessons" in learn_content and not has_error:
         assert steps_with_learn < baseline_steps, (
             f"Learning placeholder did NOT reduce steps: baseline={baseline_steps} with_learn={steps_with_learn}"
         )
@@ -359,7 +365,7 @@ def test_learn_md_reduces_steps(workdir, skills_dir):
     env = os.environ.copy()
 
     apply1_session = workdir / "apply1-session.yaml"
-    result1 = subprocess.run(
+    result1 = rt_subprocess.run(
         [
             "skill",
             "apply",
@@ -394,7 +400,7 @@ def test_learn_md_reduces_steps(workdir, skills_dir):
     assert learn_path.exists(), "LEARN.md was not created by --auto-learn"
 
     apply2_session = workdir / "apply2-session.yaml"
-    result2 = subprocess.run(
+    result2 = rt_subprocess.run(
         [
             "skill",
             "apply",
@@ -434,7 +440,8 @@ def test_learn_md_reduces_steps(workdir, skills_dir):
     )
 
     learn_content = learn_path.read_text()
-    if "_No lessons" in learn_content:
+    has_error = "ERROR:" in learn_content
+    if "_No lessons" in learn_content and not has_error:
         assert steps_with_learn < baseline_steps, (
             f"Learning placeholder did NOT reduce steps: baseline={baseline_steps} with_learn={steps_with_learn}"
         )

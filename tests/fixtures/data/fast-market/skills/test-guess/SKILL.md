@@ -11,5 +11,5 @@ parameters:
 ## Instructions
 
 Use the `guess {input}` command to process the value of {input}.
-You do not know the correct invocation — explore with --help.
+Find the correct invocation if you encounter errors.
 Output only the result of the guess command, nothing else.

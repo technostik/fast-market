@@ -238,7 +238,7 @@ Rules:
 - Do NOT include generic advice (e.g., "check outputs carefully")
 - Do NOT include anything already obvious from the SKILL.md instructions
 - If the task succeeded on the first try with no errors, write only a "What Works" section with the successful approach
-- If no lessons were learned (trivial task), write: `# Lessons Learned\n\n_No lessons recorded for this run._`
+- If no lessons were learned (trivial task), write: `# Lessons Learned\n\nERROR: No lessons learned\n\n_No lessons recorded for this run._`
 - Output ONLY the markdown content, no preamble, no code fences
 - ONLY new lessons learned should be included, not repeated content.
 """,

@@ -111,8 +111,10 @@ class _RealOpenAIProvider(LLMProvider):
             for tc in message.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(
+                        f"Failed to parse tool call arguments: {tc.function.arguments[:200]}"
+                    ) from exc
                 tool_calls.append(
                     ToolCall(
                         id=tc.id,
