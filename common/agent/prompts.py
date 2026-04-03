@@ -533,7 +533,23 @@ def get_active_tools_doc_prompt_config() -> dict:
 
 
 def get_active_agent_prompt_config() -> dict:
-    """Get the active agent prompt configuration from task config."""
+    """Get the active agent prompt configuration.
+
+    First tries to use cached PromptManager from common.prompt, then falls back
+    to config-based approach.
+    """
+    from common.prompt import get_cached_manager
+
+    manager = get_cached_manager("task")
+    if manager:
+        template = manager.get("agent")
+        if template:
+            return {
+                "name": "default",
+                "description": "Default task execution prompt",
+                "template": template,
+            }
+
     config = _load_task_config()
     task = _init_task_config(config)
     agent_prompt = task.get("agent_prompt", {})

@@ -13,6 +13,7 @@ from common.agent.loop import TaskConfig, TaskLoop
 from common.agent.executor import resolve_and_execute_command
 from common.core.paths import get_skills_dir
 from common.llm.base import LLMRequest
+from common.prompt import get_prompt_manager
 from core.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
@@ -836,14 +837,19 @@ def run_router(
     run_root = workdir_path / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
-    preparation_prompt = agent_cfg.get("preparation_prompt")
-    plan_prompt = agent_cfg.get("plan_prompt")
+    from cli.main import get_skill_prompt_manager
+
+    prompt_manager = get_skill_prompt_manager()
+    preparation_prompt = prompt_manager.get("preparation") if prompt_manager else None
+    plan_prompt = prompt_manager.get("plan") if prompt_manager else None
     if skip_evaluation:
         evaluation_prompt_cfg = None
     elif evaluation_prompt is not None:
         evaluation_prompt_cfg = evaluation_prompt
     else:
-        evaluation_prompt_cfg = agent_cfg.get("evaluation_prompt")
+        evaluation_prompt_cfg = (
+            prompt_manager.get("evaluation") if prompt_manager else None
+        )
 
     if not skills:
         state.failed = True

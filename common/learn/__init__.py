@@ -162,7 +162,15 @@ Rules:
 
 
 def get_learn_analysis_prompt(config: dict | None = None) -> str:
-    """Get the learn analysis prompt from config or return default."""
+    """Get the learn analysis prompt from config or cached PromptManager."""
+    from common.prompt import get_cached_manager
+
+    manager = get_cached_manager("skill")
+    if manager:
+        override = manager.get("learn-analysis")
+        if override:
+            return override
+
     if config:
         template = config.get("learn_analysis_prompt")
         if isinstance(template, str) and template.strip():
@@ -171,7 +179,7 @@ def get_learn_analysis_prompt(config: dict | None = None) -> str:
 
 
 def get_learn_result_template(config: dict | None = None) -> str:
-    """Get the learn result template from config or return default."""
+    """Get the learn result template from config."""
     if config:
         template = config.get("learn_result_template")
         if isinstance(template, str) and template.strip():
@@ -180,7 +188,15 @@ def get_learn_result_template(config: dict | None = None) -> str:
 
 
 def get_learn_compacting_prompt(config: dict | None = None) -> str:
-    """Get the learn compacting prompt from config or return default."""
+    """Get the learn compacting prompt from config or cached PromptManager."""
+    from common.prompt import get_cached_manager
+
+    manager = get_cached_manager("skill")
+    if manager:
+        override = manager.get("learn-compacting")
+        if override:
+            return override
+
     if config:
         template = config.get("learn_compacting_prompt")
         if isinstance(template, str) and template.strip():
@@ -189,7 +205,15 @@ def get_learn_compacting_prompt(config: dict | None = None) -> str:
 
 
 def get_skill_extraction_prompt(config: dict | None = None) -> str:
-    """Get the skill extraction prompt from config or return default."""
+    """Get the skill extraction prompt from config or cached PromptManager."""
+    from common.prompt import get_cached_manager
+
+    manager = get_cached_manager("skill")
+    if manager:
+        override = manager.get("skill-extraction")
+        if override:
+            return override
+
     if config:
         template = config.get("skill_extraction_prompt")
         if isinstance(template, str) and template.strip():
@@ -198,7 +222,15 @@ def get_skill_extraction_prompt(config: dict | None = None) -> str:
 
 
 def get_skill_from_description_prompt(config: dict | None = None) -> str:
-    """Get the skill from description prompt from config or return default."""
+    """Get the skill from description prompt from config or cached PromptManager."""
+    from common.prompt import get_cached_manager
+
+    manager = get_cached_manager("skill")
+    if manager:
+        override = manager.get("skill-from-description")
+        if override:
+            return override
+
     if config:
         template = config.get("skill_from_description_prompt")
         if isinstance(template, str) and template.strip():

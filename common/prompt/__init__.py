@@ -9,6 +9,10 @@ import yaml
 from click.shell_completion import CompletionItem
 
 from common.core.paths import get_tool_config_path
+from common.core.yaml_utils import dump_yaml
+
+
+_managers: dict[str, "PromptManager"] = {}
 
 
 def _get_prompts_dir(tool_name: str) -> Path:
@@ -16,6 +20,18 @@ def _get_prompts_dir(tool_name: str) -> Path:
     prompts_dir = get_tool_config_path(tool_name).parent / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
     return prompts_dir
+
+
+def get_prompt_manager(tool_name: str, defaults: dict[str, str]) -> "PromptManager":
+    """Get a PromptManager instance for a tool (cached)."""
+    if tool_name not in _managers:
+        _managers[tool_name] = PromptManager(tool_name, defaults)
+    return _managers[tool_name]
+
+
+def get_cached_manager(tool_name: str) -> "PromptManager | None":
+    """Get a cached PromptManager if one exists."""
+    return _managers.get(tool_name)
 
 
 class PromptManager:
@@ -41,7 +57,7 @@ class PromptManager:
 
         path = self._get_prompt_path(prompt_id)
         data = {"id": prompt_id, "content": content}
-        path.write_text(yaml.dump(data), encoding="utf-8")
+        path.write_text(dump_yaml(data), encoding="utf-8")
         return True
 
     def delete(self, prompt_id: str) -> bool:
@@ -64,7 +80,7 @@ class PromptManager:
 
         data = yaml.safe_load(old_path.read_text(encoding="utf-8")) or {}
         data["id"] = new_id
-        new_path.write_text(yaml.dump(data), encoding="utf-8")
+        new_path.write_text(dump_yaml(data), encoding="utf-8")
         old_path.unlink()
         return True
 
@@ -97,7 +113,7 @@ class PromptManager:
         """Set prompt content. Creates if doesn't exist."""
         path = self._get_prompt_path(prompt_id)
         data = {"id": prompt_id, "content": content}
-        path.write_text(yaml.dump(data), encoding="utf-8")
+        path.write_text(dump_yaml(data), encoding="utf-8")
         return True
 
     def edit(self, prompt_id: str) -> bool:
@@ -109,7 +125,7 @@ class PromptManager:
         if not path.exists():
             default_content = self.defaults.get(prompt_id, "")
             path.write_text(
-                yaml.dump({"id": prompt_id, "content": default_content}),
+                dump_yaml({"id": prompt_id, "content": default_content}),
                 encoding="utf-8",
             )
 
