@@ -51,7 +51,7 @@ def _write_script_session(
                             "params": params,
                             "command": f"{skill_name}/{script_name}",
                         },
-                        "output": stdout,
+                        "stdout": stdout,
                         "error": stderr if exit_code != 0 else None,
                         "exit_code": exit_code,
                     }
