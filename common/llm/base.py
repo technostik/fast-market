@@ -19,13 +19,20 @@ class ToolCall:
 class LLMRequest:
     """Request to an LLM provider."""
 
-    prompt: str
+    prompt: str = ""
     model: str | None = None
     temperature: float = 0.7
     max_tokens: int = 2048
     system: str | None = None
     tools: list[dict] | None = None
     timeout: int = 0  # 0 = no limit
+    messages: list[dict] | None = (
+        None  # Native message history; overrides prompt when provided
+    )
+
+    def __post_init__(self):
+        if not self.messages and not self.prompt:
+            raise ValueError("LLMRequest requires either 'prompt' or 'messages'")
 
 
 @dataclass

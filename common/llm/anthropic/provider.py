@@ -87,11 +87,16 @@ class _RealAnthropicProvider(LLMProvider):
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)
 
+        if request.messages:
+            messages = list(request.messages)
+        else:
+            messages = [{"role": "user", "content": request.prompt}]
+
         kwargs = {
             "model": model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
-            "messages": [{"role": "user", "content": request.prompt}],
+            "messages": messages,
         }
         if request.system:
             kwargs["system"] = request.system

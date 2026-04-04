@@ -69,9 +69,14 @@ class _RealOllamaProvider(LLMProvider):
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)
 
-        messages = [{"role": "user", "content": request.prompt}]
-        if request.system:
-            messages.insert(0, {"role": "system", "content": request.system})
+        if request.messages:
+            messages = list(request.messages)
+            if request.system:
+                messages.insert(0, {"role": "system", "content": request.system})
+        else:
+            messages = [{"role": "user", "content": request.prompt}]
+            if request.system:
+                messages.insert(0, {"role": "system", "content": request.system})
 
         payload = {
             "model": model,
