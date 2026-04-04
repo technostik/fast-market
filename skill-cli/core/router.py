@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime as dt
 from pathlib import Path
 from functools import partial
@@ -141,7 +141,7 @@ Be honest — if the goal is not met, say so.
 @dataclass
 class SkillAttempt:
     action: str           # "run", "task", "ask"
-    skill_name: str       # skill name, "(task)", or "(ask)"
+    skill_name: str       # skill name, "(task)", or "(user)"
     params: dict[str, str]
     exit_code: int
     runner_summary: str
@@ -294,26 +294,6 @@ def _make_subdir(run_root: Path, iteration: int, label: str) -> Path:
     return subdir
 
 
-def _session_to_text(session) -> str:
-    if session is None:
-        return "(no session)"
-    parts = []
-    for turn in session.turns:
-        if turn.role == "assistant" and turn.content:
-            parts.append(f"ASSISTANT: {turn.content[:500]}")
-        for tc in turn.tool_calls:
-            cmd = tc.arguments.get("command", "") if tc.arguments else ""
-            stdout = (tc.stdout or "")[:300]
-            stderr = (tc.stderr or "")[:200]
-            exit_code = tc.exit_code if tc.exit_code is not None else "?"
-            parts.append(f"CMD [{exit_code}]: {cmd}")
-            if stdout:
-                parts.append(f"  OUT: {stdout}")
-            if stderr and exit_code != 0:
-                parts.append(f"  ERR: {stderr}")
-    return "\n".join(parts)[:4000]
-
-
 def _print_attempt(attempt: SkillAttempt) -> None:
     status = "success" if attempt.success else "failed"
     params = ", ".join(f"{k}={v}" for k, v in attempt.params.items())
@@ -441,7 +421,7 @@ def _call_evaluation(
 
 
 # ---------------------------------------------------------------------------
-# Skill / task executors
+# Skill executor — delegates to runner.py, no TaskLoop duplication
 # ---------------------------------------------------------------------------
 
 
@@ -455,75 +435,124 @@ def _run_skill(
     compact: bool,
     prev_context: str,
     save_session: bool = False,
-) -> tuple[int, object, Path | None]:
-    """Execute a skill in-process. Returns (exit_code, session, session_path)."""
-    import importlib.util
+) -> tuple[int, str, Path | None]:
+    """Execute a skill using the same dispatch as `skill apply`.
 
-    skill_cli_setup_path = (
-        Path(__file__).parent.parent / "commands" / "setup" / "__init__.py"
+    Returns (exit_code, session_output_text, session_path).
+    Delegates to runner.py — script/run:/prompt dispatch is not duplicated here.
+    """
+    from core.runner import (
+        execute_skill_prompt,
+        execute_skill_run,
+        execute_skill_script,
     )
-    spec = importlib.util.spec_from_file_location("skill_cli_setup", skill_cli_setup_path)
-    skill_cli_setup = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(skill_cli_setup)
-    init_skill_agent_config = skill_cli_setup.init_skill_agent_config
 
+    # Inject router context so prompt skills can see previous step output
     effective_params = dict(params)
     if prev_context:
         effective_params["_router_context"] = prev_context
 
-    body = skill.get_body()
-    for key, value in effective_params.items():
-        body = body.replace(f"{{{key}}}", str(value))
-
-    learn_path = skill.path / "LEARN.md"
-    if learn_path.exists():
-        learn_content = learn_path.read_text(encoding="utf-8")
-        body = f"{body}\n\n---\n## Lessons from previous runs\n{learn_content}"
-
-    agent_cfg = init_skill_agent_config()
-    fastmarket_tools = agent_cfg.get("fastmarket_tools", {})
-    system_commands = agent_cfg.get("system_commands", [])
-    allowed = list(fastmarket_tools.keys()) + system_commands
-
-    task_config = TaskConfig(
-        fastmarket_tools=fastmarket_tools,
-        system_commands=system_commands,
-        allowed_commands=allowed,
-        max_iterations=skill.max_iterations or agent_cfg.get("max_iterations", 20),
-        default_timeout=agent_cfg.get("default_timeout", 60),
-        llm_timeout=skill.llm_timeout or 0,
-    )
-
-    loop = TaskLoop(
-        config=task_config,
-        workdir=subdir,
-        provider=provider_name,
-        model=model,
-        silent=True,
-    )
-
-    execute_fn = partial(
-        resolve_and_execute_command,
-        workdir=subdir,
-        allowed=set(allowed),
-        timeout=task_config.default_timeout,
-    )
-
-    loop.run(body, execute_fn, task_params=effective_params)
-
-    end_reason = getattr(loop.session, "end_reason", "") or ""
-    exit_code = 0 if "success" in end_reason else 1
-
-    if auto_learn and loop.session:
-        _try_auto_learn(skill, effective_params, loop.session, subdir, None, model, compact)
-
     session_path = None
-    if save_session and loop.session:
-        session_path = subdir / f"{skill.name}.session.yaml"
-        loop.session.save(session_path)
-        logger.info("session_saved", skill=skill.name, path=str(session_path))
 
-    return exit_code, loop.session, session_path
+    if skill.has_scripts:
+        result = execute_skill_script(
+            skill_ref=skill.name,
+            workdir=subdir,
+            params=effective_params,
+        )
+        session_output = (result.stdout or "") + (result.stderr or "")
+        exit_code = result.exit_code
+
+    elif skill.run:
+        result = execute_skill_run(
+            skill=skill,
+            workdir=subdir,
+            params=effective_params,
+        )
+        session_output = (result.stdout or "") + (result.stderr or "")
+        exit_code = result.exit_code
+
+    else:
+        # Prompt skill — session file lives inside subdir
+        if save_session:
+            session_path = subdir / f"{skill.name}.session.yaml"
+
+        result = execute_skill_prompt(
+            skill=skill,
+            workdir=subdir,
+            params=effective_params,
+            provider=provider_name,
+            model=model,
+            save_session=session_path,
+            auto_learn=False,  # handled below with the right provider instance
+        )
+        session_output = (result.stdout or "") + (result.stderr or "")
+        exit_code = result.exit_code
+
+        if auto_learn and session_path and session_path.exists():
+            _try_auto_learn_from_path(
+                skill=skill,
+                params=effective_params,
+                session_path=session_path,
+                subdir=subdir,
+                model=model,
+                compact=compact,
+            )
+
+    # script/run: skills produce no session file
+    if session_path and not session_path.exists():
+        session_path = None
+
+    logger.info(
+        "skill_executed",
+        skill=skill.name,
+        exit_code=exit_code,
+        mode="script" if skill.has_scripts else ("run" if skill.run else "prompt"),
+    )
+    return exit_code, session_output, session_path
+
+
+def _try_auto_learn_from_path(
+    skill: Skill,
+    params: dict,
+    session_path: Path,
+    subdir: Path,
+    model: str | None,
+    compact: bool,
+) -> None:
+    """Load session from disk and run auto-learn. Never raises."""
+    try:
+        import yaml
+        from common.agent.session import Session
+        from common.core.config import load_tool_config
+        from common.llm.registry import discover_providers, get_default_provider_name
+        from core.runner import _run_auto_learn_from_skill
+
+        data = yaml.safe_load(session_path.read_text())
+        if not data:
+            return
+        session_obj = Session.from_dict(data)
+
+        config = load_tool_config("skill")
+        providers = discover_providers(config)
+        provider = providers.get(get_default_provider_name(config))
+        if provider:
+            _run_auto_learn_from_skill(
+                skill=skill,
+                params=params,
+                workdir=subdir,
+                provider=provider,
+                model=model,
+                session=session_obj,
+                session_path=session_path,
+            )
+    except Exception as exc:
+        logger.warning("auto_learn_failed", skill=skill.name, error=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Task executor — free-form CLI tools via TaskLoop
+# ---------------------------------------------------------------------------
 
 
 def _run_task(
@@ -534,8 +563,8 @@ def _run_task(
     prev_context: str,
     agent_cfg: dict,
     save_session: bool = False,
-) -> tuple[int, object, Path | None]:
-    """Execute a free-form task in-process. Returns (exit_code, session, session_path)."""
+) -> tuple[int, str, Path | None]:
+    """Execute a free-form task in-process. Returns (exit_code, output, session_path)."""
     full_description = description
     if prev_context:
         full_description = (
@@ -575,37 +604,37 @@ def _run_task(
     end_reason = getattr(loop.session, "end_reason", "") or ""
     exit_code = 0 if "success" in end_reason else 1
 
+    # Collect output from session turns
+    session_output = _session_to_text(loop.session)
+
     session_path = None
     if save_session and loop.session:
         session_path = subdir / "task.session.yaml"
         loop.session.save(session_path)
-        logger.info("session_saved", skill="task", path=str(session_path))
+        logger.info("task_session_saved", path=str(session_path))
 
-    return exit_code, loop.session, session_path
+    return exit_code, session_output, session_path
 
 
-def _try_auto_learn(skill, params, session, subdir, session_path, model, compact):
-    """Best-effort auto-learn — never raises."""
-    try:
-        from common.core.config import load_tool_config
-        from common.llm.registry import discover_providers, get_default_provider_name
-        from core.runner import _run_auto_learn_from_skill
-
-        config = load_tool_config("skill")
-        providers = discover_providers(config)
-        provider = providers.get(get_default_provider_name(config))
-        if provider:
-            _run_auto_learn_from_skill(
-                skill=skill,
-                params=params,
-                workdir=subdir,
-                provider=provider,
-                model=model,
-                session=session,
-                session_path=session_path,
-            )
-    except Exception as exc:
-        logger.warning("auto_learn_failed", skill=skill.name, error=str(exc))
+def _session_to_text(session) -> str:
+    """Convert a Session object to readable text for summarisation."""
+    if session is None:
+        return "(no session)"
+    parts = []
+    for turn in session.turns:
+        if turn.role == "assistant" and turn.content:
+            parts.append(f"ASSISTANT: {turn.content[:500]}")
+        for tc in turn.tool_calls:
+            cmd = tc.arguments.get("command", "") if tc.arguments else ""
+            stdout = (tc.stdout or "")[:300]
+            stderr = (tc.stderr or "")[:200]
+            exit_code = tc.exit_code if tc.exit_code is not None else "?"
+            parts.append(f"CMD [{exit_code}]: {cmd}")
+            if stdout:
+                parts.append(f"  OUT: {stdout}")
+            if stderr and exit_code != 0:
+                parts.append(f"  ERR: {stderr}")
+    return "\n".join(parts)[:4000]
 
 
 def _save_router_session(
@@ -680,6 +709,7 @@ def run_router(
     """Orchestrate skills and tasks to achieve a goal."""
     import importlib.util
 
+    # Load skill agent config via importlib to avoid sys.path ordering issues
     skill_cli_setup_path = (
         Path(__file__).parent.parent / "commands" / "setup" / "__init__.py"
     )
@@ -832,7 +862,7 @@ def run_router(
                 continue
 
             subdir = _make_subdir(run_root, state.iteration, skill_name)
-            exit_code, session, session_path = _run_skill(
+            exit_code, session_output, session_path = _run_skill(
                 skill=matched,
                 params=params,
                 subdir=subdir,
@@ -857,7 +887,7 @@ def run_router(
                 break
 
             subdir = _make_subdir(run_root, state.iteration, "task")
-            exit_code, session, session_path = _run_task(
+            exit_code, session_output, session_path = _run_task(
                 description=description,
                 subdir=subdir,
                 provider_name=provider_name,
@@ -875,8 +905,6 @@ def run_router(
 
         if session_path:
             session_files.append(session_path)
-
-        session_output = _session_to_text(session)
 
         try:
             runner_summary = _call_runner_summary(label, params, session_output, provider, model)
