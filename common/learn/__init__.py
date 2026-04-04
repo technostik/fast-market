@@ -502,6 +502,12 @@ def extract_skill_from_session(
     response = provider.complete(request)
     content = (response.content or "").strip()
 
+    if content.startswith("```"):
+        lines = content.split("\n")
+        content = "\n".join(lines[1:-1]).strip()
+    if content.startswith("json"):
+        content = content[4:].strip()
+
     try:
         import json
 
