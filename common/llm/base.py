@@ -29,6 +29,7 @@ class LLMRequest:
     messages: list[dict] | None = (
         None  # Native message history; overrides prompt when provided
     )
+    response_format: dict | None = None  # {"type": "json_object"} to force JSON output
 
     def __post_init__(self):
         if not self.messages and not self.prompt:

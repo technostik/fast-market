@@ -119,6 +119,8 @@ class _RealOpenAICompatibleProvider(LLMProvider):
         if request.tools:
             kwargs["tools"] = request.tools
             kwargs["tool_choice"] = "auto"
+        if request.response_format:
+            kwargs["response_format"] = request.response_format
         if request.timeout > 0:
             kwargs["timeout"] = request.timeout
 

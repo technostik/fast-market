@@ -22,20 +22,8 @@ logger = structlog.get_logger(__name__)
 # Prompts
 # ---------------------------------------------------------------------------
 
-PLAN_PROMPT = """You are a skill orchestrator. Your job is to achieve a goal by
+PLAN_PROMPT_SYSTEM = """You are a skill orchestrator. Your job is to achieve a goal by
 selecting and sequencing skills, one at a time.
-
-## Goal
-{goal}
-
-## Success Criteria (what done looks like)
-{success_criteria}
-
-## Available Skills
-{skills_list}
-
-## History
-{history}
 
 ## Instructions
 
@@ -89,6 +77,131 @@ Goal cannot be achieved (repeated failures, missing capability):
 - If a skill produced output that a next skill needs, it is available in history as context
 - IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes
 """
+
+PLAN_PROMPT = """## Goal
+{goal}
+
+## Success Criteria (what done looks like)
+{success_criteria}
+
+## Available Skills
+{skills_list}
+
+## History
+{history}
+"""
+
+PLAN_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_skill",
+            "description": "Run a specific skill from the Available Skills list. Use this to execute a skill with the provided parameters.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "The name of the skill to run (must be from Available Skills list)",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Key-value parameters to pass to the skill",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "One sentence explaining why this skill is needed",
+                    },
+                    "context_hint": {
+                        "type": "string",
+                        "description": "What information the next step will need from this result",
+                    },
+                },
+                "required": ["skill_name", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_task",
+            "description": "Run a free-form task using raw CLI tools. Use this when no skill fits, or when a skill failed and you need to improvise.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Detailed description of what to accomplish",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "One sentence why no skill fits or why improvising is better",
+                    },
+                    "context_hint": {
+                        "type": "string",
+                        "description": "What information the next step will need from this result",
+                    },
+                },
+                "required": ["description", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": "Ask the user a question. Use sparingly - only when you have genuine ambiguity you cannot resolve yourself.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The question to ask the user",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "One sentence explaining why you need this information",
+                    },
+                },
+                "required": ["question", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "goal_achieved",
+            "description": "Mark the goal as fully achieved. Use this when the success criteria have been met.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "One sentence summary of what was accomplished",
+                    },
+                },
+                "required": ["reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "goal_failed",
+            "description": "Mark the goal as cannot be achieved. Use only after repeated failures or when capability is missing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "One sentence explanation of why the goal cannot be achieved",
+                    },
+                },
+                "required": ["reason"],
+            },
+        },
+    },
+]
 
 RUNNER_SUMMARY_PROMPT = """Write a concise summary (max 15 lines) for the orchestrator:
 - Did it succeed or fail? Use EXIT CODE of the LAST command to determine: exit code 0 = success, non-zero = failure
@@ -396,17 +509,36 @@ def _call_plan(
     provider,
     model: str | None,
     skills: list[Skill],
+    messages: list[dict] | None = None,
     prompt_template: str | None = None,
 ) -> dict:
-    if prompt_template is None:
-        prompt_template = PLAN_PROMPT
-    prompt = prompt_template.format(
-        goal=state.goal,
-        skills_list=build_skills_list(skills),
-        history=_format_history(state.attempts),
-        success_criteria=state.success_criteria,
-    )
-    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=600)
+    if messages is not None:
+        req = LLMRequest(
+            messages=messages,
+            model=model,
+            system=PLAN_PROMPT_SYSTEM,
+            temperature=0.0,
+            max_tokens=600,
+            tools=PLAN_TOOLS,
+            response_format={"type": "json_object"},
+        )
+    else:
+        if prompt_template is None:
+            prompt_template = PLAN_PROMPT
+        prompt = prompt_template.format(
+            goal=state.goal,
+            skills_list=build_skills_list(skills),
+            history=_format_history(state.attempts),
+            success_criteria=state.success_criteria,
+        )
+        req = LLMRequest(
+            prompt=prompt,
+            model=model,
+            temperature=0.0,
+            max_tokens=600,
+            tools=PLAN_TOOLS,
+            response_format={"type": "json_object"},
+        )
     response = provider.complete(req)
     raw = (response.content or "").strip()
 
@@ -417,6 +549,44 @@ def _call_plan(
     }
     if _debug:
         print(f"[router][plan] raw response:\n{raw}")
+        if response.tool_calls:
+            print(f"[router][plan] tool calls: {response.tool_calls}")
+
+    if response.tool_calls:
+        tc = response.tool_calls[0]
+        args = tc.arguments
+        action = (
+            args.get("skill_name")
+            or args.get("description")
+            or args.get("question")
+            or args.get("reason", "")
+        )
+        action_type = tc.name
+        if action_type == "run_skill":
+            return {
+                "action": "run",
+                "skill_name": args.get("skill_name", ""),
+                "params": args.get("params", {}),
+                "reason": args.get("reason", ""),
+                "context_hint": args.get("context_hint", ""),
+            }
+        elif action_type == "run_task":
+            return {
+                "action": "task",
+                "description": args.get("description", ""),
+                "reason": args.get("reason", ""),
+                "context_hint": args.get("context_hint", ""),
+            }
+        elif action_type == "ask_user":
+            return {
+                "action": "ask",
+                "question": args.get("question", ""),
+                "reason": args.get("reason", ""),
+            }
+        elif action_type == "goal_achieved":
+            return {"action": "done", "reason": args.get("reason", "")}
+        elif action_type == "goal_failed":
+            return {"action": "fail", "reason": args.get("reason", "")}
 
     if not raw:
         raise ValueError(
@@ -481,7 +651,13 @@ def _call_preparation(
         goal=goal,
         skills_list=build_skills_list(skills),
     )
-    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=1500)
+    req = LLMRequest(
+        prompt=prompt,
+        model=model,
+        temperature=0.0,
+        max_tokens=1500,
+        response_format={"type": "json_object"},
+    )
     response = provider.complete(req)
     raw = (response.content or "").strip()
 
@@ -539,7 +715,13 @@ def _call_evaluation(
         history=_format_history(state.attempts),
         last_summary=last_summary,
     )
-    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=400)
+    req = LLMRequest(
+        prompt=prompt,
+        model=model,
+        temperature=0.0,
+        max_tokens=400,
+        response_format={"type": "json_object"},
+    )
     response = provider.complete(req)
     raw = (response.content or "").strip()
 
@@ -902,6 +1084,19 @@ def run_router(
 
     prev_context = ""
 
+    conversation_messages = [
+        {
+            "role": "user",
+            "content": (
+                f"## Goal\n{goal}\n\n"
+                f"## Success Criteria (what done looks like)\n{state.success_criteria}\n\n"
+                f"## Available Skills\n{build_skills_list(skills)}\n\n"
+                f"## History\n(No actions taken yet)\n\n"
+                f"Decide what to do next."
+            ),
+        }
+    ]
+
     logger.info(
         "router_loop_starting", max_iterations=max_iterations, skills_count=len(skills)
     )
@@ -912,12 +1107,20 @@ def run_router(
         # --- Plan ---
         try:
             plan = _call_plan(
-                state, provider, model, skills, prompt_template=plan_prompt
+                state,
+                provider,
+                model,
+                skills,
+                messages=conversation_messages,
+                prompt_template=plan_prompt,
             )
         except Exception as exc:
             state.failed = True
             state.failure_reason = f"Planner failed: {exc}"
             break
+
+        plan_json = json.dumps(plan, indent=2)
+        conversation_messages.append({"role": "assistant", "content": plan_json})
 
         action = plan.get("action")
         logger.debug("router_plan", iteration=state.iteration, action=action)
@@ -940,6 +1143,13 @@ def run_router(
             logger.info("router_asking_user", question=question, reason=reason)
 
             answer = interaction.ask(question)
+
+            conversation_messages.append(
+                {
+                    "role": "user",
+                    "content": f"User was asked: {question}\nUser answered: {answer}",
+                }
+            )
 
             # Inject answer back into goal context as a user turn in history
             attempt = SkillAttempt(
@@ -1113,6 +1323,22 @@ def run_router(
             subdir=subdir,
         )
         state.attempts.append(attempt)
+
+        conversation_messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"## Result of previous action\n"
+                    f"Action: {action}\n"
+                    f"Skill/Task: {attempt.skill_name}\n"
+                    f"Exit code: {exit_code}\n"
+                    f"Success: {attempt.success}\n\n"
+                    f"## Summary\n{runner_summary}\n\n"
+                    f"## Updated History\n{_format_history(state.attempts)}\n\n"
+                    f"Decide what to do next."
+                ),
+            }
+        )
         logger.info(
             "attempt_added",
             skill_name=attempt.skill_name,

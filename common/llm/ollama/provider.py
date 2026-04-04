@@ -90,6 +90,12 @@ class _RealOllamaProvider(LLMProvider):
         if request.tools:
             payload["tools"] = request.tools
 
+        if request.response_format:
+            logger.debug(
+                "ollama_ignores_response_format",
+                requested=request.response_format,
+            )
+
         body = json.dumps(payload).encode("utf-8")
         req = urllib_request.Request(
             f"{self.base_url}/api/chat",
