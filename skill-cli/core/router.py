@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime as dt
 from pathlib import Path
-
+from functools import partial
 
 from common import structlog
 from common.agent.loop import TaskConfig, TaskLoop
 from common.agent.executor import resolve_and_execute_command
 from common.core.paths import get_skills_dir
 from common.llm.base import LLMRequest
-from common.prompt import get_prompt_manager
 from core.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
@@ -22,63 +20,10 @@ logger = structlog.get_logger(__name__)
 # Prompts
 # ---------------------------------------------------------------------------
 
-PLAN_PROMPT_SYSTEM = """You are a skill orchestrator. Your job is to achieve a goal by
+PLAN_PROMPT = """You are a skill orchestrator. Your job is to achieve a goal by
 selecting and sequencing skills, one at a time.
 
-## Instructions
-
-Decide what to do next. You must return ONLY a JSON object.
-
-### Actions
-
-Run a specific skill:
-{{
-  "action": "run",
-  "skill_name": "the-skill-name",
-  "params": {{"key": "value"}},
-  "reason": "one sentence why",
-  "context_hint": "what the next skill will need from this result"
-}}
-
-Run a free-form task with raw CLI tools (use when no skill fits or a skill failed and you need to improvise):
-{{
-  "action": "task",
-  "description": "detailed description of what to accomplish",
-  "reason": "one sentence why no skill fits or why improvising is better",
-  "context_hint": "what the next step will need from this result"
-}}
-
-Ask the user a question when you have genuine ambiguity you cannot resolve yourself:
-{{
-  "action": "ask",
-  "question": "clear, specific question for the user",
-  "reason": "one sentence why you need this information"
-}}
-
-Goal fully achieved:
-{{
-  "action": "done",
-  "reason": "one sentence summary of what was accomplished"
-}}
-
-Goal cannot be achieved (repeated failures, missing capability):
-{{
-  "action": "fail",
-  "reason": "one sentence explanation of why"
-}}
-
-### Rules
-- Only use skills from the Available Skills list for "run" actions
-- Use "task" when no skill fits OR when a skill failed and you want to try a different approach with raw tools
-- Use "ask" sparingly — only when the goal is genuinely ambiguous, not just when a skill fails
-- If a previous attempt failed, try a different approach (different skill, different params, or "task")
-- Never repeat the exact same skill+params that already failed
-- Params must be concrete values, not placeholders
-- If a skill produced output that a next skill needs, it is available in history as context
-- IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes
-"""
-
-PLAN_PROMPT = """## Goal
+## Goal
 {goal}
 
 ## Success Criteria (what done looks like)
@@ -89,124 +34,41 @@ PLAN_PROMPT = """## Goal
 
 ## History
 {history}
+
+## Instructions
+
+Decide what to do next. Return ONLY a JSON object — no preamble, no code fences.
+
+### Actions
+
+Run a specific skill:
+{{"action": "run", "skill_name": "the-skill-name", "params": {{"key": "value"}}, "reason": "one sentence why", "context_hint": "what the next skill will need"}}
+
+Run a free-form task with raw CLI tools (when no skill fits or a skill failed):
+{{"action": "task", "description": "detailed description", "reason": "one sentence why", "context_hint": "what the next step will need"}}
+
+Ask the user a question (only when genuinely ambiguous):
+{{"action": "ask", "question": "clear specific question", "reason": "one sentence why"}}
+
+Goal fully achieved:
+{{"action": "done", "reason": "one sentence summary of what was accomplished"}}
+
+Goal cannot be achieved:
+{{"action": "fail", "reason": "one sentence explanation of why"}}
+
+### Rules
+- Only use skills from the Available Skills list for "run" actions
+- Use "task" when no skill fits OR when a skill failed and you want to improvise
+- Use "ask" sparingly — only for genuine ambiguity, not when a skill fails
+- Never repeat the exact same skill+params that already failed
+- Params must be concrete values, not placeholders
+- If a skill produced output the next skill needs, it is available in history as context
 """
 
-PLAN_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "run_skill",
-            "description": "Run a specific skill from the Available Skills list. Use this to execute a skill with the provided parameters.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "skill_name": {
-                        "type": "string",
-                        "description": "The name of the skill to run (must be from Available Skills list)",
-                    },
-                    "params": {
-                        "type": "object",
-                        "description": "Key-value parameters to pass to the skill",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "One sentence explaining why this skill is needed",
-                    },
-                    "context_hint": {
-                        "type": "string",
-                        "description": "What information the next step will need from this result",
-                    },
-                },
-                "required": ["skill_name", "reason"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_task",
-            "description": "Run a free-form task using raw CLI tools. Use this when no skill fits, or when a skill failed and you need to improvise.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "description": {
-                        "type": "string",
-                        "description": "Detailed description of what to accomplish",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "One sentence why no skill fits or why improvising is better",
-                    },
-                    "context_hint": {
-                        "type": "string",
-                        "description": "What information the next step will need from this result",
-                    },
-                },
-                "required": ["description", "reason"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ask_user",
-            "description": "Ask the user a question. Use sparingly - only when you have genuine ambiguity you cannot resolve yourself.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "question": {
-                        "type": "string",
-                        "description": "The question to ask the user",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "One sentence explaining why you need this information",
-                    },
-                },
-                "required": ["question", "reason"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "goal_achieved",
-            "description": "Mark the goal as fully achieved. Use this when the success criteria have been met.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "One sentence summary of what was accomplished",
-                    },
-                },
-                "required": ["reason"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "goal_failed",
-            "description": "Mark the goal as cannot be achieved. Use only after repeated failures or when capability is missing.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "One sentence explanation of why the goal cannot be achieved",
-                    },
-                },
-                "required": ["reason"],
-            },
-        },
-    },
-]
-
 RUNNER_SUMMARY_PROMPT = """Write a concise summary (max 15 lines) for the orchestrator:
-- Did it succeed or fail? Use EXIT CODE of the LAST command to determine: exit code 0 = success, non-zero = failure
+- Did it succeed or fail? Use EXIT CODE of the LAST command: exit code 0 = success, non-zero = failure
 - What approach was used?
-- What errors occurred? What is the root cause?
+- What errors occurred and what is the root cause?
 - What alternative approaches could work if this failed?
 - What files or outputs were produced (names only, not contents)?
 Do NOT include file contents or large data.
@@ -247,24 +109,11 @@ read the goal and available skills, then produce a structured execution plan.
 ## Available Skills
 {skills_list}
 
-## Your Task
-
-Analyze the goal and available skills. Produce a JSON object with your plan:
-
-```json
-{{
-  "plan": "step by step description of intended approach",
-  "success_criteria": "concrete, observable description of what done looks like",
-  "risks": "what could go wrong and how to handle it"
-}}
-```
-
-IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\\") or use single quotes only when the outer string uses double quotes.
-
-Be specific about the order of skills and what each step should accomplish.
+Return ONLY a JSON object — no preamble, no code fences:
+{{"plan": "step by step description", "success_criteria": "concrete observable description of what done looks like", "risks": "what could go wrong"}}
 """
 
-EVALUATION_PROMPT = """You are evaluating whether the last step brought us closer to the goal.
+EVALUATION_PROMPT = """You are evaluating whether the last step satisfied the goal.
 
 ## Goal
 {goal}
@@ -278,22 +127,11 @@ EVALUATION_PROMPT = """You are evaluating whether the last step brought us close
 ## Last Step Result
 {last_summary}
 
-## Your Task
+Return ONLY a JSON object — no preamble, no code fences:
+{{"satisfied": true or false, "reason": "one sentence assessment", "suggestion": "if not satisfied, what to try next"}}
 
-Determine if the last step satisfied the success criteria. Return a JSON object:
-
-```json
-{{
-  "satisfied": true or false,
-  "reason": "one sentence explaining your assessment",
-  "suggestion": "if not satisfied, what to try next"
-}}
-```
-
-IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\\") or use single quotes only when the outer string uses double quotes.
-
-Be honest — if the goal isn't met, say so and suggest a different approach."""
-
+Be honest — if the goal is not met, say so.
+"""
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -302,8 +140,8 @@ Be honest — if the goal isn't met, say so and suggest a different approach."""
 
 @dataclass
 class SkillAttempt:
-    action: str  # "run", "task", "ask"
-    skill_name: str  # skill name or "(task)" or "(ask)"
+    action: str           # "run", "task", "ask"
+    skill_name: str       # skill name, "(task)", or "(ask)"
     params: dict[str, str]
     exit_code: int
     runner_summary: str
@@ -340,35 +178,71 @@ class RouterState:
     failure_reason: str = ""
     success_criteria: str = ""
     preparation: str = ""
+    run_root: Path | None = None
 
 
 # ---------------------------------------------------------------------------
-# Interaction plugin interface
+# Interaction plugin
 # ---------------------------------------------------------------------------
 
 
 class InteractionPlugin:
-    """Base class for user interaction during skill routing.
-
-    Default implementation uses CLI stdin/stdout.
-    Override to implement Telegram, web UI, etc.
-    """
-
     def ask(self, question: str) -> str:
-        """Ask the user a question and return their answer."""
         raise NotImplementedError
 
 
 class CLIInteractionPlugin(InteractionPlugin):
-    """Default: ask via terminal prompt."""
-
     def ask(self, question: str) -> str:
         print(f"\n[router] Question for you:\n  {question}")
         try:
-            answer = input("Your answer: ").strip()
+            return input("Your answer: ").strip()
         except (EOFError, KeyboardInterrupt):
-            answer = ""
-        return answer
+            return ""
+
+
+# ---------------------------------------------------------------------------
+# JSON helpers
+# ---------------------------------------------------------------------------
+
+
+def _repair_json(s: str) -> str:
+    """Strip markdown fences and extract the first JSON object found."""
+    if not s:
+        return s
+    if "```" in s:
+        s = s.replace("```json", "```")
+        parts = [p.strip() for p in s.split("```") if p.strip()]
+        candidates = [p for p in parts if p.startswith("{") and p.endswith("}")]
+        if candidates:
+            return candidates[0]
+        for p in parts:
+            if "{" in p and "}" in p:
+                start, end = p.find("{"), p.rfind("}")
+                if start != -1 and end > start:
+                    return p[start:end + 1]
+    if not (s.startswith("{") and s.endswith("}")):
+        start, end = s.find("{"), s.rfind("}")
+        if start != -1 and end > start:
+            return s[start:end + 1]
+    return s
+
+
+def _parse_llm_json(raw: str, context: str = "LLM") -> dict:
+    """Parse JSON from LLM response. Raises ValueError on failure."""
+    if not raw:
+        raise ValueError(f"{context} returned empty response")
+    cleaned = _repair_json(raw)
+    if not cleaned:
+        raise ValueError(f"{context} returned unparseable response: {raw[:200]!r}")
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{context} returned invalid JSON: {cleaned[:200]!r}. Error: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} returned non-object JSON: {type(data)}")
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -399,109 +273,59 @@ def build_skills_list(skills: list[Skill]) -> str:
 def _format_history(attempts: list[SkillAttempt]) -> str:
     if not attempts:
         return "No steps executed yet."
-
     lines = []
     for a in attempts:
         status = "✓ success" if a.success else "✗ failed"
         params_str = ", ".join(f"{k}={v}" for k, v in a.params.items())
-        subdir_name = a.subdir.name if a.subdir and a.subdir.name else "N/A"
-        label = a.skill_name
         lines.append(
-            f"Step {a.iteration} [{a.action}]: {label}({params_str}) → {status}"
+            f"Step {a.iteration} [{a.action}]: {a.skill_name}({params_str}) → {status}"
         )
-        lines.append(f"  Subdir: {subdir_name}")
         lines.append(f"  Summary: {a.runner_summary[:300]}")
         if a.context:
             lines.append(f"  Context available: yes ({len(a.context)} chars)")
     return "\n".join(lines)
 
 
-def _make_subdir(workdir: Path, iteration: int, label: str) -> Path:
+def _make_subdir(run_root: Path, iteration: int, label: str) -> Path:
     name = f"{iteration:02d}_{label}"
-    subdir = workdir / name
+    subdir = run_root / name
     subdir.mkdir(parents=True, exist_ok=True)
     logger.info("created_subdir", subdir=str(subdir), iteration=iteration)
     return subdir
 
 
-def _repair_json(cleaned: str) -> str:
-    """Attempt to repair common JSON encoding issues from LLM output."""
-    if not cleaned:
-        return cleaned
-
-    repaired = cleaned
-
-    if '"' in repaired and '\\"' not in repaired:
-        parts = []
-        in_string = False
-        i = 0
-        while i < len(repaired):
-            char = repaired[i]
-            if char == "\\" and i + 1 < len(repaired):
-                parts.append(char)
-                parts.append(repaired[i + 1])
-                i += 2
-                continue
-            if char == '"' and not in_string:
-                in_string = True
-            elif char == '"' and in_string:
-                in_string = False
-            elif char == "'" and in_string:
-                parts.append('\\"')
-                i += 1
-                continue
-            parts.append(char)
-            i += 1
-        repaired = "".join(parts)
-
-    return repaired
+def _session_to_text(session) -> str:
+    if session is None:
+        return "(no session)"
+    parts = []
+    for turn in session.turns:
+        if turn.role == "assistant" and turn.content:
+            parts.append(f"ASSISTANT: {turn.content[:500]}")
+        for tc in turn.tool_calls:
+            cmd = tc.arguments.get("command", "") if tc.arguments else ""
+            stdout = (tc.stdout or "")[:300]
+            stderr = (tc.stderr or "")[:200]
+            exit_code = tc.exit_code if tc.exit_code is not None else "?"
+            parts.append(f"CMD [{exit_code}]: {cmd}")
+            if stdout:
+                parts.append(f"  OUT: {stdout}")
+            if stderr and exit_code != 0:
+                parts.append(f"  ERR: {stderr}")
+    return "\n".join(parts)[:4000]
 
 
-def _parse_llm_json(raw: str, context: str = "LLM") -> dict:
-    """Parse JSON from LLM response, stripping markdown fences.
+def _print_attempt(attempt: SkillAttempt) -> None:
+    status = "success" if attempt.success else "failed"
+    params = ", ".join(f"{k}={v}" for k, v in attempt.params.items())
+    subdir_name = attempt.subdir.name if attempt.subdir and attempt.subdir != Path("") else "N/A"
+    print(f"[router] step {attempt.iteration} [{attempt.action}]: {attempt.skill_name}({params}) -> {status}")
+    print(f"[router] subdir: {subdir_name}")
+    print(f"[router] summary: {attempt.runner_summary[:300]}")
 
-    Raises ValueError if JSON is invalid or not a dict.
-    """
-    if not raw:
-        raise ValueError(f"{context} returned empty response")
 
-    cleaned = raw
-    if "```" in cleaned:
-        cleaned = cleaned.replace("```json", "```")
-        parts = [p.strip() for p in cleaned.split("```") if p.strip()]
-        candidates = [p for p in parts if p.startswith("{") and p.endswith("}")]
-        if candidates:
-            cleaned = candidates[0]
-        else:
-            for p in parts:
-                if "{" in p and "}" in p:
-                    start, end = p.find("{"), p.rfind("}")
-                    if start != -1 and end > start:
-                        cleaned = p[start : end + 1]
-                        break
-
-    if not (cleaned.startswith("{") and cleaned.endswith("}")):
-        start, end = cleaned.find("{"), cleaned.rfind("}")
-        if start != -1 and end > start:
-            cleaned = cleaned[start : end + 1]
-
-    if not cleaned:
-        raise ValueError(f"{context} returned unparseable response: {raw[:200]!r}")
-
-    try:
-        data = json.loads(cleaned)
-    except Exception as exc:
-        repaired = _repair_json(cleaned)
-        try:
-            data = json.loads(repaired)
-        except Exception:
-            raise ValueError(
-                f"{context} returned invalid JSON: {cleaned[:200]!r}. Error: {exc}"
-            ) from exc
-
-    if not isinstance(data, dict):
-        raise ValueError(f"{context} returned non-object JSON")
-    return data
+# ---------------------------------------------------------------------------
+# LLM calls — all pure JSON, no tool calls
+# ---------------------------------------------------------------------------
 
 
 def _call_plan(
@@ -509,91 +333,21 @@ def _call_plan(
     provider,
     model: str | None,
     skills: list[Skill],
-    messages: list[dict] | None = None,
     prompt_template: str | None = None,
 ) -> dict:
-    if messages is not None:
-        req = LLMRequest(
-            messages=messages,
-            model=model,
-            system=PLAN_PROMPT_SYSTEM,
-            temperature=0.0,
-            max_tokens=600,
-            tools=PLAN_TOOLS,
-            response_format={"type": "json_object"},
-        )
-    else:
-        if prompt_template is None:
-            prompt_template = PLAN_PROMPT
-        prompt = prompt_template.format(
-            goal=state.goal,
-            skills_list=build_skills_list(skills),
-            history=_format_history(state.attempts),
-            success_criteria=state.success_criteria,
-        )
-        req = LLMRequest(
-            prompt=prompt,
-            model=model,
-            temperature=0.0,
-            max_tokens=600,
-            tools=PLAN_TOOLS,
-            response_format={"type": "json_object"},
-        )
+    """Ask the planner what to do next. Returns dict with 'action' key."""
+    template = prompt_template or PLAN_PROMPT
+    prompt = template.format(
+        goal=state.goal,
+        skills_list=build_skills_list(skills),
+        history=_format_history(state.attempts),
+        success_criteria=state.success_criteria,
+    )
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=600)
     response = provider.complete(req)
     raw = (response.content or "").strip()
-
-    _debug = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
-        "1",
-        "true",
-        "TRUE",
-    }
-    if _debug:
-        print(f"[router][plan] raw response:\n{raw}")
-        if response.tool_calls:
-            print(f"[router][plan] tool calls: {response.tool_calls}")
-
-    if response.tool_calls:
-        tc = response.tool_calls[0]
-        args = tc.arguments
-        action = (
-            args.get("skill_name")
-            or args.get("description")
-            or args.get("question")
-            or args.get("reason", "")
-        )
-        action_type = tc.name
-        if action_type == "run_skill":
-            return {
-                "action": "run",
-                "skill_name": args.get("skill_name", ""),
-                "params": args.get("params", {}),
-                "reason": args.get("reason", ""),
-                "context_hint": args.get("context_hint", ""),
-            }
-        elif action_type == "run_task":
-            return {
-                "action": "task",
-                "description": args.get("description", ""),
-                "reason": args.get("reason", ""),
-                "context_hint": args.get("context_hint", ""),
-            }
-        elif action_type == "ask_user":
-            return {
-                "action": "ask",
-                "question": args.get("question", ""),
-                "reason": args.get("reason", ""),
-            }
-        elif action_type == "goal_achieved":
-            return {"action": "done", "reason": args.get("reason", "")}
-        elif action_type == "goal_failed":
-            return {"action": "fail", "reason": args.get("reason", "")}
-
     if not raw:
-        raise ValueError(
-            f"Planner returned empty response. "
-            f"Model: {response.model}. Set SKILL_ROUTER_DEBUG_LLM=1 for details."
-        )
-
+        raise ValueError(f"Planner returned empty response. Model: {response.model}.")
     return _parse_llm_json(raw, context="Planner")
 
 
@@ -617,7 +371,7 @@ def _call_runner_summary(
 
 def _call_context_extract(
     goal: str,
-    label: str,  # skill name or task description prefix
+    label: str,
     params: dict,
     session_output: str,
     next_step_hint: str,
@@ -629,8 +383,7 @@ def _call_context_extract(
         skill_name=label,
         params=params,
         session_output=session_output[:5000],
-        next_step_hint=next_step_hint
-        or "Extract any useful data or results for the next step.",
+        next_step_hint=next_step_hint or "Extract any useful data or results for the next step.",
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=1000)
     response = provider.complete(req)
@@ -644,58 +397,19 @@ def _call_preparation(
     skills: list[Skill],
     prompt_template: str | None = None,
 ) -> PreparationResult:
-    """Call LLM to produce a preparation plan before the main loop."""
-    if prompt_template is None:
-        prompt_template = PREPARATION_PROMPT
-    prompt = prompt_template.format(
-        goal=goal,
-        skills_list=build_skills_list(skills),
-    )
-    req = LLMRequest(
-        prompt=prompt,
-        model=model,
-        temperature=0.0,
-        max_tokens=1500,
-        response_format={"type": "json_object"},
-    )
+    template = prompt_template or PREPARATION_PROMPT
+    prompt = template.format(goal=goal, skills_list=build_skills_list(skills))
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=800)
     response = provider.complete(req)
     raw = (response.content or "").strip()
-
-    _debug = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
-        "1",
-        "true",
-        "TRUE",
-    }
-    if _debug:
-        print(f"[router][preparation] raw response:\n{raw}")
-
-    logger.debug("preparation_raw_response", raw=raw[:500])
-
     if not raw:
-        raise ValueError(
-            f"Preparation returned empty response. "
-            f"Model: {response.model}. Set SKILL_ROUTER_DEBUG_LLM=1 for details."
-        )
-
+        raise ValueError(f"Preparation returned empty response. Model: {response.model}.")
     data = _parse_llm_json(raw, context="Preparation")
-
-    try:
-        return PreparationResult(
-            plan=data["plan"],
-            success_criteria=data["success_criteria"],
-            risks=data["risks"],
-        )
-    except KeyError as exc:
-        logger.warning(
-            "preparation_incomplete",
-            error=str(exc),
-            raw=raw[:300],
-        )
-        return PreparationResult(
-            plan="Continue with planner loop",
-            success_criteria="Goal achieved",
-            risks="Unknown",
-        )
+    return PreparationResult(
+        plan=data.get("plan", ""),
+        success_criteria=data.get("success_criteria", "Goal achieved"),
+        risks=data.get("risks", ""),
+    )
 
 
 def _call_evaluation(
@@ -706,94 +420,28 @@ def _call_evaluation(
     model: str | None,
     prompt_template: str | None = None,
 ) -> EvaluationResult:
-    """Call LLM to evaluate if the last step satisfied success criteria."""
-    if prompt_template is None:
-        prompt_template = EVALUATION_PROMPT
-    prompt = prompt_template.format(
+    template = prompt_template or EVALUATION_PROMPT
+    prompt = template.format(
         goal=state.goal,
         success_criteria=success_criteria,
         history=_format_history(state.attempts),
         last_summary=last_summary,
     )
-    req = LLMRequest(
-        prompt=prompt,
-        model=model,
-        temperature=0.0,
-        max_tokens=400,
-        response_format={"type": "json_object"},
-    )
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=400)
     response = provider.complete(req)
     raw = (response.content or "").strip()
-
-    _debug = os.environ.get("SKILL_ROUTER_DEBUG_LLM", "").strip() in {
-        "1",
-        "true",
-        "TRUE",
-    }
-    if _debug:
-        print(f"[router][evaluation] raw response:\n{raw}")
-
     if not raw:
-        raise ValueError(
-            f"Evaluation returned empty response. "
-            f"Model: {response.model}. Set SKILL_ROUTER_DEBUG_LLM=1 for details."
-        )
-
+        raise ValueError(f"Evaluation returned empty response. Model: {response.model}.")
     data = _parse_llm_json(raw, context="Evaluation")
-
-    try:
-        return EvaluationResult(
-            satisfied=bool(data["satisfied"]),
-            reason=data["reason"],
-            suggestion=data.get("suggestion", ""),
-        )
-    except KeyError as exc:
-        logger.warning(
-            "evaluation_incomplete",
-            error=str(exc),
-            raw=raw[:300],
-        )
-        return EvaluationResult(
-            satisfied=False,
-            reason="Evaluation response incomplete",
-            suggestion="Continue with next step",
-        )
-
-
-def _session_to_text(session) -> str:
-    """Convert a Session object to a readable text summary."""
-    if session is None:
-        return "(no session)"
-    parts = []
-    for turn in session.turns:
-        if turn.role == "assistant" and turn.content:
-            parts.append(f"ASSISTANT: {turn.content[:500]}")
-        for tc in turn.tool_calls:
-            cmd = tc.arguments.get("command", "") if tc.arguments else ""
-            stdout = (tc.stdout or "")[:300]
-            stderr = (tc.stderr or "")[:200]
-            exit_code = tc.exit_code if tc.exit_code is not None else "?"
-            parts.append(f"CMD [{exit_code}]: {cmd}")
-            if stdout:
-                parts.append(f"  OUT: {stdout}")
-            if stderr and exit_code != 0:
-                parts.append(f"  ERR: {stderr}")
-    return "\n".join(parts)[:4000]
-
-
-def _print_attempt(attempt: SkillAttempt) -> None:
-    status = "success" if attempt.success else "failed"
-    params = ", ".join(f"{k}={v}" for k, v in attempt.params.items())
-    subdir_name = attempt.subdir.name if attempt.subdir else "N/A"
-    print(
-        f"[router] step {attempt.iteration} [{attempt.action}]: {attempt.skill_name}({params}) -> {status}"
+    return EvaluationResult(
+        satisfied=bool(data.get("satisfied", False)),
+        reason=data.get("reason", ""),
+        suggestion=data.get("suggestion", ""),
     )
-    print(f"[router] subdir: {subdir_name}")
-    print(f"[router] summary: {attempt.runner_summary[:300]}")
 
 
 # ---------------------------------------------------------------------------
-# Executors
+# Skill / task executors
 # ---------------------------------------------------------------------------
 
 
@@ -803,30 +451,22 @@ def _run_skill(
     subdir: Path,
     provider_name: str,
     model: str | None,
-    skill_timeout: int,
     auto_learn: bool,
     compact: bool,
     prev_context: str,
     save_session: bool = False,
 ) -> tuple[int, object, Path | None]:
-    """Execute a skill directly in-process. Returns (exit_code, session)."""
-    from functools import partial
-
-    # Use importlib to explicitly load from skill-cli's commands.setup
-    # (avoids sys.path ordering issues with task-cli vs skill-cli)
+    """Execute a skill in-process. Returns (exit_code, session, session_path)."""
     import importlib.util
 
     skill_cli_setup_path = (
         Path(__file__).parent.parent / "commands" / "setup" / "__init__.py"
     )
-    spec = importlib.util.spec_from_file_location(
-        "skill_cli_setup", skill_cli_setup_path
-    )
+    spec = importlib.util.spec_from_file_location("skill_cli_setup", skill_cli_setup_path)
     skill_cli_setup = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(skill_cli_setup)
     init_skill_agent_config = skill_cli_setup.init_skill_agent_config
 
-    # Inject router context as a param so the skill's LLM can see it
     effective_params = dict(params)
     if prev_context:
         effective_params["_router_context"] = prev_context
@@ -875,17 +515,13 @@ def _run_skill(
     exit_code = 0 if "success" in end_reason else 1
 
     if auto_learn and loop.session:
-        _try_auto_learn(
-            skill, effective_params, loop.session, subdir, None, model, compact
-        )
+        _try_auto_learn(skill, effective_params, loop.session, subdir, None, model, compact)
 
+    session_path = None
     if save_session and loop.session:
         session_path = subdir / f"{skill.name}.session.yaml"
-        session_path.parent.mkdir(parents=True, exist_ok=True)
         loop.session.save(session_path)
         logger.info("session_saved", skill=skill.name, path=str(session_path))
-    else:
-        session_path = None
 
     return exit_code, loop.session, session_path
 
@@ -899,9 +535,7 @@ def _run_task(
     agent_cfg: dict,
     save_session: bool = False,
 ) -> tuple[int, object, Path | None]:
-    """Execute a free-form task with raw CLI tools. Returns (exit_code, session)."""
-    from functools import partial
-
+    """Execute a free-form task in-process. Returns (exit_code, session, session_path)."""
     full_description = description
     if prev_context:
         full_description = (
@@ -941,13 +575,11 @@ def _run_task(
     end_reason = getattr(loop.session, "end_reason", "") or ""
     exit_code = 0 if "success" in end_reason else 1
 
+    session_path = None
     if save_session and loop.session:
         session_path = subdir / "task.session.yaml"
-        session_path.parent.mkdir(parents=True, exist_ok=True)
         loop.session.save(session_path)
         logger.info("session_saved", skill="task", path=str(session_path))
-    else:
-        session_path = None
 
     return exit_code, loop.session, session_path
 
@@ -955,11 +587,10 @@ def _run_task(
 def _try_auto_learn(skill, params, session, subdir, session_path, model, compact):
     """Best-effort auto-learn — never raises."""
     try:
-        from common.core.config import load_tool_config, requires_common_config
+        from common.core.config import load_tool_config
         from common.llm.registry import discover_providers, get_default_provider_name
         from core.runner import _run_auto_learn_from_skill
 
-        requires_common_config("skill", ["llm"])
         config = load_tool_config("skill")
         providers = discover_providers(config)
         provider = providers.get(get_default_provider_name(config))
@@ -975,6 +606,53 @@ def _try_auto_learn(skill, params, session, subdir, session_path, model, compact
             )
     except Exception as exc:
         logger.warning("auto_learn_failed", skill=skill.name, error=str(exc))
+
+
+def _save_router_session(
+    goal: str,
+    session_files: list[Path],
+    run_root: Path,
+    provider_name: str,
+    model: str | None,
+    max_iterations: int,
+    state: RouterState,
+) -> None:
+    """Aggregate all skill session files into a single router.session.yaml."""
+    import yaml
+    from common.agent.session import Session
+
+    all_turns = []
+    for session_file in session_files:
+        try:
+            data = yaml.safe_load(session_file.read_text())
+            if data and "turns" in data:
+                s = Session.from_dict(data)
+                all_turns.extend(s.turns)
+                logger.info("aggregated_session", file=str(session_file), turns=len(s.turns))
+        except Exception as exc:
+            logger.warning("aggregate_session_failed", path=str(session_file), error=str(exc))
+
+    if state.done:
+        end_reason = "completed"
+    elif state.failed:
+        end_reason = f"failed: {state.failure_reason}"
+    else:
+        end_reason = "max iterations reached"
+
+    global_session = Session(
+        task_description=goal,
+        workdir=str(run_root),
+        provider=provider_name,
+        model=model or "default",
+        max_iterations=max_iterations,
+        turns=all_turns,
+        end_time=dt.utcnow(),
+        end_reason=end_reason,
+        exit_code=0 if state.done else 1,
+    )
+    path = run_root / "router.session.yaml"
+    global_session.save(path)
+    logger.info("router_session_saved", path=str(path), turns=len(all_turns))
 
 
 # ---------------------------------------------------------------------------
@@ -999,133 +677,94 @@ def run_router(
     save_session: bool = False,
     skills_dir: Path | None = None,
 ) -> RouterState:
-    """Orchestrate skills and free-form tasks to achieve a goal.
-
-    Args:
-        interaction: Plugin for user interaction. Defaults to CLIInteractionPlugin.
-        evaluation_prompt: Custom evaluation prompt template. If provided, overrides config.
-        skip_evaluation: If True, skip evaluation phase entirely.
-    """
-    # Use importlib to explicitly load from skill-cli's commands.setup
-    # (avoids sys.path ordering issues with task-cli vs skill-cli)
+    """Orchestrate skills and tasks to achieve a goal."""
     import importlib.util
 
     skill_cli_setup_path = (
         Path(__file__).parent.parent / "commands" / "setup" / "__init__.py"
     )
-    spec = importlib.util.spec_from_file_location(
-        "skill_cli_setup", skill_cli_setup_path
-    )
+    spec = importlib.util.spec_from_file_location("skill_cli_setup", skill_cli_setup_path)
     skill_cli_setup = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(skill_cli_setup)
     init_skill_agent_config = skill_cli_setup.init_skill_agent_config
+
     from common.core.config import load_tool_config
     from common.llm.registry import get_default_provider_name
 
     if interaction is None:
         interaction = CLIInteractionPlugin()
 
-    # Resolve provider name from the provider object's config
     try:
         config = load_tool_config("apply")
         provider_name = get_default_provider_name(config)
     except Exception:
-        # Fallback: try to get name from provider object
         provider_name = getattr(provider, "name", "default")
 
     agent_cfg = init_skill_agent_config()
-    state = RouterState(
-        goal=goal, attempts=[], iteration=0, max_iterations=max_iterations
-    )
-    session_files: list[Path] = []  # Track session files as they are created
     skills = discover_skills(skills_dir or get_skills_dir())
-    workdir_path = Path(workdir).expanduser().resolve()
 
+    workdir_path = Path(workdir).expanduser().resolve()
     run_id = dt.utcnow().strftime("%Y%m%dT%H%M%S") + "_" + uuid.uuid4().hex[:6]
     run_root = workdir_path / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
-    from cli.main import get_skill_prompt_manager
-
-    prompt_manager = get_skill_prompt_manager()
-    preparation_prompt = prompt_manager.get("preparation") if prompt_manager else None
-    plan_prompt = prompt_manager.get("plan") if prompt_manager else None
-    if skip_evaluation:
-        evaluation_prompt_cfg = None
-    elif evaluation_prompt is not None:
-        evaluation_prompt_cfg = evaluation_prompt
-    else:
-        evaluation_prompt_cfg = (
-            prompt_manager.get("evaluation") if prompt_manager else None
-        )
+    state = RouterState(
+        goal=goal,
+        attempts=[],
+        iteration=0,
+        max_iterations=max_iterations,
+        run_root=run_root,
+    )
 
     if not skills:
         state.failed = True
         state.failure_reason = "No skills available"
         return state
 
-    # --- Preparation phase ---
+    # Load prompt overrides
+    from cli.main import get_skill_prompt_manager
+    prompt_manager = get_skill_prompt_manager()
+    plan_prompt = prompt_manager.get("plan") if prompt_manager else None
+    preparation_prompt_cfg = prompt_manager.get("preparation") if prompt_manager else None
+
+    if skip_evaluation:
+        evaluation_prompt_cfg = None
+    elif evaluation_prompt is not None:
+        evaluation_prompt_cfg = evaluation_prompt
+    else:
+        evaluation_prompt_cfg = prompt_manager.get("evaluation") if prompt_manager else None
+
+    # --- Preparation ---
     try:
         preparation = _call_preparation(
-            goal, provider, model, skills, prompt_template=preparation_prompt
+            goal, provider, model, skills, prompt_template=preparation_prompt_cfg
         )
         state.success_criteria = preparation.success_criteria
         state.preparation = preparation.plan
-        logger.info(
-            "preparation_success_criteria", criteria=preparation.success_criteria
-        )
-        logger.info("preparation_plan", plan=preparation.plan)
-        logger.info("preparation_risks", risks=preparation.risks)
+        logger.info("preparation_done", criteria=preparation.success_criteria)
     except Exception as exc:
-        logger.warning("preparation_failed", error=str(exc))
         state.failed = True
         state.failure_reason = f"Preparation failed: {exc}"
         return state
 
+    session_files: list[Path] = []
     prev_context = ""
 
-    conversation_messages = [
-        {
-            "role": "user",
-            "content": (
-                f"## Goal\n{goal}\n\n"
-                f"## Success Criteria (what done looks like)\n{state.success_criteria}\n\n"
-                f"## Available Skills\n{build_skills_list(skills)}\n\n"
-                f"## History\n(No actions taken yet)\n\n"
-                f"Decide what to do next."
-            ),
-        }
-    ]
-
-    logger.info(
-        "router_loop_starting", max_iterations=max_iterations, skills_count=len(skills)
-    )
-
+    # --- Planning loop ---
     while state.iteration < max_iterations and not state.done and not state.failed:
         state.iteration += 1
 
-        # --- Plan ---
         try:
-            plan = _call_plan(
-                state,
-                provider,
-                model,
-                skills,
-                messages=conversation_messages,
-                prompt_template=plan_prompt,
-            )
+            plan = _call_plan(state, provider, model, skills, prompt_template=plan_prompt)
         except Exception as exc:
             state.failed = True
             state.failure_reason = f"Planner failed: {exc}"
             break
 
-        plan_json = json.dumps(plan, indent=2)
-        conversation_messages.append({"role": "assistant", "content": plan_json})
-
-        action = plan.get("action")
+        action = plan.get("action", "").strip()
         logger.debug("router_plan", iteration=state.iteration, action=action)
 
-        # --- Done / Fail ---
+        # Terminal actions
         if action == "done":
             state.done = True
             state.final_result = str(plan.get("reason", "Goal achieved"))
@@ -1136,22 +775,10 @@ def run_router(
             state.failure_reason = str(plan.get("reason", "Router declared failure"))
             break
 
-        # --- Ask user ---
+        # Ask user
         if action == "ask":
             question = str(plan.get("question", "What should I do next?"))
-            reason = str(plan.get("reason", ""))
-            logger.info("router_asking_user", question=question, reason=reason)
-
             answer = interaction.ask(question)
-
-            conversation_messages.append(
-                {
-                    "role": "user",
-                    "content": f"User was asked: {question}\nUser answered: {answer}",
-                }
-            )
-
-            # Inject answer back into goal context as a user turn in history
             attempt = SkillAttempt(
                 action="ask",
                 skill_name="(user)",
@@ -1170,7 +797,7 @@ def run_router(
                 _print_attempt(attempt)
             continue
 
-        # --- Run skill ---
+        # Run skill
         if action == "run":
             skill_name = str(plan.get("skill_name", "")).strip()
             params = {str(k): str(v) for k, v in (plan.get("params") or {}).items()}
@@ -1179,12 +806,11 @@ def run_router(
             matched = next((s for s in skills if s.name == skill_name), None)
             if not matched:
                 state.failed = True
-                state.failure_reason = f"Planner returned unknown skill: {skill_name}"
+                state.failure_reason = f"Planner returned unknown skill: {skill_name!r}"
                 break
 
             failed_count = sum(
-                1
-                for a in state.attempts
+                1 for a in state.attempts
                 if a.skill_name == skill_name and a.action == "run" and not a.success
             )
             if failed_count >= retry_limit:
@@ -1206,28 +832,20 @@ def run_router(
                 continue
 
             subdir = _make_subdir(run_root, state.iteration, skill_name)
-            logger.info("router_run_skill", skill=skill_name, subdir=str(subdir))
-
             exit_code, session, session_path = _run_skill(
                 skill=matched,
                 params=params,
                 subdir=subdir,
                 provider_name=provider_name,
                 model=model,
-                skill_timeout=skill_timeout,
                 auto_learn=auto_learn,
                 compact=compact,
                 prev_context=prev_context,
                 save_session=save_session,
             )
-
-            if session_path:
-                session_files.append(session_path)
-
-            session_output = _session_to_text(session)
             label = skill_name
 
-        # --- Generic task ---
+        # Free-form task
         elif action == "task":
             description = str(plan.get("description", "")).strip()
             context_hint = str(plan.get("context_hint", ""))
@@ -1235,14 +853,10 @@ def run_router(
 
             if not description:
                 state.failed = True
-                state.failure_reason = (
-                    "Planner issued 'task' action with no description"
-                )
+                state.failure_reason = "Planner issued 'task' action with no description"
                 break
 
             subdir = _make_subdir(run_root, state.iteration, "task")
-            logger.info("router_run_task", subdir=str(subdir))
-
             exit_code, session, session_path = _run_task(
                 description=description,
                 subdir=subdir,
@@ -1252,23 +866,20 @@ def run_router(
                 agent_cfg=agent_cfg,
                 save_session=save_session,
             )
-
-            if session_path:
-                session_files.append(session_path)
-
-            session_output = _session_to_text(session)
             label = f"(task) {description[:60]}"
 
         else:
             state.failed = True
-            state.failure_reason = f"Invalid planner action: {action}"
+            state.failure_reason = f"Invalid planner action: {action!r}"
             break
 
-        # --- Distill results (shared for "run" and "task") ---
+        if session_path:
+            session_files.append(session_path)
+
+        session_output = _session_to_text(session)
+
         try:
-            runner_summary = _call_runner_summary(
-                label, params, session_output, provider, model
-            )
+            runner_summary = _call_runner_summary(label, params, session_output, provider, model)
         except Exception as exc:
             runner_summary = f"Summary failed: {exc}"
 
@@ -1285,7 +896,7 @@ def run_router(
         except Exception as exc:
             new_context = f"Context extraction failed: {exc}"
 
-        # --- Evaluation phase ---
+        # Evaluation
         if evaluation_prompt_cfg is not None:
             try:
                 evaluation = _call_evaluation(
@@ -1296,15 +907,10 @@ def run_router(
                     model=model,
                     prompt_template=evaluation_prompt_cfg,
                 )
-                logger.info(
-                    "evaluation_satisfied",
-                    satisfied=evaluation.satisfied,
-                    reason=evaluation.reason,
-                )
+                logger.info("evaluation", satisfied=evaluation.satisfied, reason=evaluation.reason)
                 if evaluation.satisfied:
                     state.done = True
                     state.final_result = evaluation.reason
-                    logger.info("goal_satisfied_early", reason=evaluation.reason)
             except Exception as exc:
                 logger.warning("evaluation_failed", error=str(exc))
 
@@ -1324,27 +930,6 @@ def run_router(
         )
         state.attempts.append(attempt)
 
-        conversation_messages.append(
-            {
-                "role": "user",
-                "content": (
-                    f"## Result of previous action\n"
-                    f"Action: {action}\n"
-                    f"Skill/Task: {attempt.skill_name}\n"
-                    f"Exit code: {exit_code}\n"
-                    f"Success: {attempt.success}\n\n"
-                    f"## Summary\n{runner_summary}\n\n"
-                    f"## Updated History\n{_format_history(state.attempts)}\n\n"
-                    f"Decide what to do next."
-                ),
-            }
-        )
-        logger.info(
-            "attempt_added",
-            skill_name=attempt.skill_name,
-            iteration=attempt.iteration,
-            attempts_count=len(state.attempts),
-        )
         if verbose:
             _print_attempt(attempt)
 
@@ -1353,83 +938,17 @@ def run_router(
 
     if not state.done and not state.failed and state.iteration >= max_iterations:
         state.failed = True
-        state.failure_reason = (
-            f"Max iterations ({max_iterations}) reached without completion"
-        )
+        state.failure_reason = f"Max iterations ({max_iterations}) reached without completion"
 
-    if save_session:
-        logger.warning(
-            "!!! SAVE_SESSION_AGGREGATION_START !!!",
-            save_session_flag=save_session,
-            workdir=str(workdir_path),
-        )
-
-        from common.agent.session import Session
-
-        all_turns = []
-
-        for session_file in session_files:
-            try:
-                import yaml
-
-                data = yaml.safe_load(session_file.read_text())
-                if data and "turns" in data:
-                    session = Session.from_dict(data)
-                    all_turns.extend(session.turns)
-                    logger.info(
-                        "save_session_loaded",
-                        file=str(session_file),
-                        turns_count=len(session.turns),
-                    )
-            except Exception as e:
-                logger.warning(
-                    "save_session_failed", path=str(session_file), error=str(e)
-                )
-
-        logger.info("save_session_aggregation_complete", total_turns=len(all_turns))
-
-        if not all_turns:
-            logger.error("save_session_no_turns_found_in_subdirs")
-            from common.agent.session import Session
-
-            global_session = Session(
-                task_description=goal,
-                workdir=str(workdir_path),
-                provider=provider_name,
-                model=model or "default",
-                max_iterations=max_iterations,
-                turns=[],
-                end_time=dt.utcnow(),
-                end_reason="no session files found in subdirs",
-                exit_code=1,
-            )
-        else:
-            from common.agent.session import Session
-
-            end_reason = "completed" if state.done else "failed"
-            if state.failed:
-                end_reason = f"failed: {state.failure_reason}"
-            elif not state.done and not state.failed:
-                end_reason = "max iterations reached"
-
-            global_session = Session(
-                task_description=goal,
-                workdir=str(workdir_path),
-                provider=provider_name,
-                model=model or "default",
-                max_iterations=max_iterations,
-                turns=all_turns,
-                end_time=dt.utcnow(),
-                end_reason=end_reason,
-                exit_code=0 if state.done else 1,
-            )
-
-        global_session_path = run_root / "router.session.yaml"
-        global_session.save(global_session_path)
-        logger.info(
-            "router_session_saved",
-            path=str(global_session_path),
-            turns_count=len(all_turns),
+    if save_session and session_files:
+        _save_router_session(
+            goal=goal,
+            session_files=session_files,
+            run_root=run_root,
+            provider_name=provider_name,
+            model=model,
+            max_iterations=max_iterations,
+            state=state,
         )
 
     return state
