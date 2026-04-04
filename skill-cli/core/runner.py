@@ -15,6 +15,57 @@ from core.skill import Skill, discover_skills
 logger = structlog.get_logger(__name__)
 
 
+def _write_script_session(
+    skill_name: str,
+    script_name: str,
+    params: dict,
+    stdout: str,
+    stderr: str,
+    exit_code: int,
+    save_path: Path,
+) -> None:
+    """Write an artificial session.yaml for script skills."""
+    import yaml
+    from datetime import datetime, timezone
+
+    session_data = {
+        "task_description": f"Skill: {skill_name}",
+        "start_time": datetime.now(timezone.utc).isoformat(),
+        "end_time": datetime.now(timezone.utc).isoformat(),
+        "exit_code": exit_code,
+        "end_reason": "completed" if exit_code == 0 else "failed",
+        "metrics": {
+            "total_tool_calls": 1,
+            "error_count": 1 if exit_code != 0 else 0,
+        },
+        "turns": [
+            {
+                "role": "assistant",
+                "content": f"Run skill script: {skill_name}/{script_name}",
+                "tool_calls": [
+                    {
+                        "name": "script_execution",
+                        "arguments": {
+                            "skill": skill_name,
+                            "script": script_name,
+                            "params": params,
+                            "command": f"{skill_name}/{script_name}",
+                        },
+                        "output": stdout,
+                        "error": stderr if exit_code != 0 else None,
+                        "exit_code": exit_code,
+                    }
+                ],
+            }
+        ],
+    }
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(save_path, "w") as f:
+        yaml.dump(session_data, f, default_flow_style=False, sort_keys=False)
+    logger.info("script_session_written", path=str(save_path), skill=skill_name)
+
+
 @dataclass
 class SkillResult:
     skill_name: str
@@ -75,6 +126,7 @@ def execute_skill_script(
     workdir: Path,
     params: dict[str, str] | None = None,
     timeout: int | None = None,
+    save_session: Path | None = None,
 ) -> SkillResult:
     """Execute a skill script directly with SKILL_* environment parameters."""
     resolved = (skill_ref or "").strip().split()[0] if skill_ref else ""
@@ -148,6 +200,19 @@ def execute_skill_script(
             text=True,
             timeout=effective_timeout if effective_timeout else None,
         )
+
+        # Write artificial session file for script skills when requested
+        if save_session:
+            _write_script_session(
+                skill_name=skill.name,
+                script_name=script_path.name,
+                params=params or {},
+                stdout=result.stdout,
+                stderr=result.stderr,
+                exit_code=result.returncode,
+                save_path=save_session,
+            )
+
         return SkillResult(
             skill_name=skill.name,
             script_name=script_path.name,
@@ -172,6 +237,7 @@ def execute_skill_run(
     workdir: Path,
     params: dict[str, str] | None = None,
     timeout: int | None = None,
+    save_session: Path | None = None,
 ) -> SkillResult:
     """
     Execute the skill's run: frontmatter command.
@@ -220,14 +286,28 @@ def execute_skill_run(
             shell=True,
             cwd=workdir,
             env=env,
-            capture_output=False,
+            capture_output=True,
+            text=True,
             timeout=effective_timeout if effective_timeout else None,
         )
+
+        # Write artificial session file for run: skills when requested
+        if save_session:
+            _write_script_session(
+                skill_name=skill.name,
+                script_name="run:",
+                params=params or {},
+                stdout=result.stdout,
+                stderr=result.stderr,
+                exit_code=result.returncode,
+                save_path=save_session,
+            )
+
         return SkillResult(
             skill_name=skill.name,
             script_name="run:",
-            stdout="",
-            stderr="",
+            stdout=result.stdout,
+            stderr=result.stderr,
             exit_code=result.returncode,
         )
     except subprocess.TimeoutExpired:

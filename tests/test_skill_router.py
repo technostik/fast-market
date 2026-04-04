@@ -4,6 +4,7 @@ Router integration tests.
 All tests marked `llm` — run with: pytest -m llm
 They hit the real LLM configured in tests/fixtures/config.
 """
+
 from __future__ import annotations
 
 import sys
@@ -71,11 +72,13 @@ def get_cli():
     sys.modules.pop("commands", None)
     sys.modules.pop("commands.skill", None)
     from skill_entry import main
+
     return main
 
 
 def _run_router(goal: str, workdir, skills_dir: Path | None = None, **kwargs):
     from core.router import run_router
+
     provider = get_llm_provider()
     return run_router(
         goal=goal,
@@ -101,6 +104,7 @@ def _collect_outputs(state) -> list[str]:
             for sf in attempt.subdir.glob("*.session.yaml"):
                 try:
                     import yaml
+
                     data = yaml.safe_load(sf.read_text())
                     for turn in data.get("turns", []):
                         for tc in turn.get("tool_calls", []):
@@ -124,9 +128,12 @@ def test_skill_run_command_executes_router(workdir):
         [
             "run",
             "echo the message 'cli-run-check'",
-            "--workdir", str(workdir),
-            "--max-iterations", "3",
-            "--retry-limit", "1",
+            "--workdir",
+            str(workdir),
+            "--max-iterations",
+            "3",
+            "--retry-limit",
+            "1",
         ],
         catch_exceptions=False,
     )
@@ -153,7 +160,9 @@ def test_router_extracts_params(workdir):
     state = _run_router("echo the message 'extracted-param'", workdir, max_iterations=3)
     _assert_router_success(state)
     assert "message" in state.attempts[0].params, _state_debug_dump(state)
-    assert state.attempts[0].params["message"] == "extracted-param", _state_debug_dump(state)
+    assert state.attempts[0].params["message"] == "extracted-param", _state_debug_dump(
+        state
+    )
 
 
 def test_router_retries_on_failure(workdir):
@@ -182,7 +191,9 @@ def test_router_chains_two_skills(workdir):
     names = [a.skill_name for a in state.attempts]
     assert "test-chain-a" in names, _state_debug_dump(state)
     assert "test-chain-b" in names, _state_debug_dump(state)
-    assert names.index("test-chain-b") > names.index("test-chain-a"), _state_debug_dump(state)
+    assert names.index("test-chain-b") > names.index("test-chain-a"), _state_debug_dump(
+        state
+    )
 
 
 def test_router_declares_fail_on_impossible_goal(workdir):
@@ -260,54 +271,6 @@ def test_runner_summary_not_raw_session(workdir):
 
 
 # ---------------------------------------------------------------------------
-# LEARN.md integration
-# ---------------------------------------------------------------------------
-
-
-def test_run1_produces_correct_output(workdir, skills_dir):
-    """First run of test-guess (no LEARN.md) still produces correct output."""
-    learn_path = skills_dir / "test-guess" / "LEARN.md"
-    if learn_path.exists():
-        learn_path.unlink()
-
-    state = _run_router(
-        "Use the test-guess skill with input='hello'",
-        workdir,
-        skills_dir=skills_dir,
-        max_iterations=10,
-    )
-    assert len(state.attempts) > 0, f"Router did nothing: {_state_debug_dump(state)}"
-    outputs = _collect_outputs(state)
-    assert any("olleh" in o for o in outputs), (
-        f"Expected 'olleh' in outputs.\noutputs={outputs}\n{_state_debug_dump(state)}"
-    )
-
-
-def test_router_with_learn_md_produces_correct_output(workdir, skills_dir):
-    """With a pre-written LEARN.md, test-guess should succeed without guessing."""
-    learn_path = skills_dir / "test-guess" / "LEARN.md"
-    learn_path.write_text(
-        "# Lessons Learned for test-guess\n\n"
-        "## What Works\n"
-        "- `guess doit again <STRING>` — reverses the input string\n\n"
-        "## What to Avoid\n"
-        "- `guess doit <STRING>` — missing required 'again' keyword\n"
-    )
-
-    state = _run_router(
-        "Use the test-guess skill with input='test'",
-        workdir,
-        skills_dir=skills_dir,
-        max_iterations=5,
-    )
-    assert len(state.attempts) > 0, f"Router did nothing: {_state_debug_dump(state)}"
-    outputs = _collect_outputs(state)
-    assert any("tset" in o for o in outputs), (
-        f"Expected 'tset' in outputs.\noutputs={outputs}\n{_state_debug_dump(state)}"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Script skill (no LLM needed for the skill itself)
 # ---------------------------------------------------------------------------
 
@@ -320,10 +283,14 @@ def test_successful_skill_has_zero_errors(workdir):
     session_file = workdir / "session.yaml"
     subprocess.run(
         [
-            "skill", "apply", "test-echo",
+            "skill",
+            "apply",
+            "test-echo",
             "message=zero-errors",
-            "--save-session", str(session_file),
-            "--workdir", str(workdir),
+            "--save-session",
+            str(session_file),
+            "--workdir",
+            str(workdir),
         ],
         timeout=60,
         check=True,

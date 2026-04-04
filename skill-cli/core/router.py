@@ -140,8 +140,8 @@ Be honest — if the goal is not met, say so.
 
 @dataclass
 class SkillAttempt:
-    action: str           # "run", "task", "ask"
-    skill_name: str       # skill name, "(task)", or "(user)"
+    action: str  # "run", "task", "ask"
+    skill_name: str  # skill name, "(task)", or "(user)"
     params: dict[str, str]
     exit_code: int
     runner_summary: str
@@ -150,6 +150,7 @@ class SkillAttempt:
     success: bool
     iteration: int
     subdir: Path
+    raw_output: str = ""  # raw stdout/stderr from skill execution
 
 
 @dataclass
@@ -219,11 +220,11 @@ def _repair_json(s: str) -> str:
             if "{" in p and "}" in p:
                 start, end = p.find("{"), p.rfind("}")
                 if start != -1 and end > start:
-                    return p[start:end + 1]
+                    return p[start : end + 1]
     if not (s.startswith("{") and s.endswith("}")):
         start, end = s.find("{"), s.rfind("}")
         if start != -1 and end > start:
-            return s[start:end + 1]
+            return s[start : end + 1]
     return s
 
 
@@ -297,8 +298,12 @@ def _make_subdir(run_root: Path, iteration: int, label: str) -> Path:
 def _print_attempt(attempt: SkillAttempt) -> None:
     status = "success" if attempt.success else "failed"
     params = ", ".join(f"{k}={v}" for k, v in attempt.params.items())
-    subdir_name = attempt.subdir.name if attempt.subdir and attempt.subdir != Path("") else "N/A"
-    print(f"[router] step {attempt.iteration} [{attempt.action}]: {attempt.skill_name}({params}) -> {status}")
+    subdir_name = (
+        attempt.subdir.name if attempt.subdir and attempt.subdir != Path("") else "N/A"
+    )
+    print(
+        f"[router] step {attempt.iteration} [{attempt.action}]: {attempt.skill_name}({params}) -> {status}"
+    )
     print(f"[router] subdir: {subdir_name}")
     print(f"[router] summary: {attempt.runner_summary[:300]}")
 
@@ -363,7 +368,8 @@ def _call_context_extract(
         skill_name=label,
         params=params,
         session_output=session_output[:5000],
-        next_step_hint=next_step_hint or "Extract any useful data or results for the next step.",
+        next_step_hint=next_step_hint
+        or "Extract any useful data or results for the next step.",
     )
     req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=1000)
     response = provider.complete(req)
@@ -383,7 +389,9 @@ def _call_preparation(
     response = provider.complete(req)
     raw = (response.content or "").strip()
     if not raw:
-        raise ValueError(f"Preparation returned empty response. Model: {response.model}.")
+        raise ValueError(
+            f"Preparation returned empty response. Model: {response.model}."
+        )
     data = _parse_llm_json(raw, context="Preparation")
     return PreparationResult(
         plan=data.get("plan", ""),
@@ -411,7 +419,9 @@ def _call_evaluation(
     response = provider.complete(req)
     raw = (response.content or "").strip()
     if not raw:
-        raise ValueError(f"Evaluation returned empty response. Model: {response.model}.")
+        raise ValueError(
+            f"Evaluation returned empty response. Model: {response.model}."
+        )
     data = _parse_llm_json(raw, context="Evaluation")
     return EvaluationResult(
         satisfied=bool(data.get("satisfied", False)),
@@ -455,19 +465,25 @@ def _run_skill(
     session_path = None
 
     if skill.has_scripts:
+        if save_session:
+            session_path = subdir / f"{skill.name}.session.yaml"
         result = execute_skill_script(
             skill_ref=skill.name,
             workdir=subdir,
             params=effective_params,
+            save_session=session_path,
         )
         session_output = (result.stdout or "") + (result.stderr or "")
         exit_code = result.exit_code
 
     elif skill.run:
+        if save_session:
+            session_path = subdir / f"{skill.name}.session.yaml"
         result = execute_skill_run(
             skill=skill,
             workdir=subdir,
             params=effective_params,
+            save_session=session_path,
         )
         session_output = (result.stdout or "") + (result.stderr or "")
         exit_code = result.exit_code
@@ -657,9 +673,13 @@ def _save_router_session(
             if data and "turns" in data:
                 s = Session.from_dict(data)
                 all_turns.extend(s.turns)
-                logger.info("aggregated_session", file=str(session_file), turns=len(s.turns))
+                logger.info(
+                    "aggregated_session", file=str(session_file), turns=len(s.turns)
+                )
         except Exception as exc:
-            logger.warning("aggregate_session_failed", path=str(session_file), error=str(exc))
+            logger.warning(
+                "aggregate_session_failed", path=str(session_file), error=str(exc)
+            )
 
     if state.done:
         end_reason = "completed"
@@ -713,7 +733,9 @@ def run_router(
     skill_cli_setup_path = (
         Path(__file__).parent.parent / "commands" / "setup" / "__init__.py"
     )
-    spec = importlib.util.spec_from_file_location("skill_cli_setup", skill_cli_setup_path)
+    spec = importlib.util.spec_from_file_location(
+        "skill_cli_setup", skill_cli_setup_path
+    )
     skill_cli_setup = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(skill_cli_setup)
     init_skill_agent_config = skill_cli_setup.init_skill_agent_config
@@ -753,16 +775,21 @@ def run_router(
 
     # Load prompt overrides
     from cli.main import get_skill_prompt_manager
+
     prompt_manager = get_skill_prompt_manager()
     plan_prompt = prompt_manager.get("plan") if prompt_manager else None
-    preparation_prompt_cfg = prompt_manager.get("preparation") if prompt_manager else None
+    preparation_prompt_cfg = (
+        prompt_manager.get("preparation") if prompt_manager else None
+    )
 
     if skip_evaluation:
         evaluation_prompt_cfg = None
     elif evaluation_prompt is not None:
         evaluation_prompt_cfg = evaluation_prompt
     else:
-        evaluation_prompt_cfg = prompt_manager.get("evaluation") if prompt_manager else None
+        evaluation_prompt_cfg = (
+            prompt_manager.get("evaluation") if prompt_manager else None
+        )
 
     # --- Preparation ---
     try:
@@ -785,7 +812,9 @@ def run_router(
         state.iteration += 1
 
         try:
-            plan = _call_plan(state, provider, model, skills, prompt_template=plan_prompt)
+            plan = _call_plan(
+                state, provider, model, skills, prompt_template=plan_prompt
+            )
         except Exception as exc:
             state.failed = True
             state.failure_reason = f"Planner failed: {exc}"
@@ -820,6 +849,7 @@ def run_router(
                 success=True,
                 iteration=state.iteration,
                 subdir=Path(""),
+                raw_output="",
             )
             state.attempts.append(attempt)
             prev_context = attempt.context
@@ -833,6 +863,33 @@ def run_router(
             params = {str(k): str(v) for k, v in (plan.get("params") or {}).items()}
             context_hint = str(plan.get("context_hint", ""))
 
+            # Auto-chain: detect when previous skill output should be passed as a param
+            if state.attempts and context_hint:
+                import re as re_module
+
+                # Look for patterns like "output of X as param_name" or "X's output as param"
+                prev_attempt = state.attempts[-1]
+                prev_skill_name = prev_attempt.skill_name
+
+                # Check if context_hint mentions passing output to a param
+                match = re_module.search(
+                    rf"(?:output|result) of\s+({prev_skill_name}[-\w]*)\s+as\s+(\w+)",
+                    context_hint,
+                    re_module.IGNORECASE,
+                )
+                if match and prev_attempt.raw_output:
+                    # Extract stdout from raw output (first line usually)
+                    output_value = prev_attempt.raw_output.strip().split("\n")[0]
+                    target_param = match.group(2)
+                    params[target_param] = output_value
+                    logger.info(
+                        "auto_chain_param",
+                        from_skill=prev_skill_name,
+                        to_skill=skill_name,
+                        param=target_param,
+                        value=output_value[:100],
+                    )
+
             matched = next((s for s in skills if s.name == skill_name), None)
             if not matched:
                 state.failed = True
@@ -840,7 +897,8 @@ def run_router(
                 break
 
             failed_count = sum(
-                1 for a in state.attempts
+                1
+                for a in state.attempts
                 if a.skill_name == skill_name and a.action == "run" and not a.success
             )
             if failed_count >= retry_limit:
@@ -855,6 +913,7 @@ def run_router(
                     success=False,
                     iteration=state.iteration,
                     subdir=Path(""),
+                    raw_output="",
                 )
                 state.attempts.append(attempt)
                 if verbose:
@@ -883,7 +942,9 @@ def run_router(
 
             if not description:
                 state.failed = True
-                state.failure_reason = "Planner issued 'task' action with no description"
+                state.failure_reason = (
+                    "Planner issued 'task' action with no description"
+                )
                 break
 
             subdir = _make_subdir(run_root, state.iteration, "task")
@@ -907,7 +968,9 @@ def run_router(
             session_files.append(session_path)
 
         try:
-            runner_summary = _call_runner_summary(label, params, session_output, provider, model)
+            runner_summary = _call_runner_summary(
+                label, params, session_output, provider, model
+            )
         except Exception as exc:
             runner_summary = f"Summary failed: {exc}"
 
@@ -935,7 +998,11 @@ def run_router(
                     model=model,
                     prompt_template=evaluation_prompt_cfg,
                 )
-                logger.info("evaluation", satisfied=evaluation.satisfied, reason=evaluation.reason)
+                logger.info(
+                    "evaluation",
+                    satisfied=evaluation.satisfied,
+                    reason=evaluation.reason,
+                )
                 if evaluation.satisfied:
                     state.done = True
                     state.final_result = evaluation.reason
@@ -955,6 +1022,7 @@ def run_router(
             success=(exit_code == 0),
             iteration=state.iteration,
             subdir=subdir,
+            raw_output=session_output,
         )
         state.attempts.append(attempt)
 
@@ -966,7 +1034,9 @@ def run_router(
 
     if not state.done and not state.failed and state.iteration >= max_iterations:
         state.failed = True
-        state.failure_reason = f"Max iterations ({max_iterations}) reached without completion"
+        state.failure_reason = (
+            f"Max iterations ({max_iterations}) reached without completion"
+        )
 
     if save_session and session_files:
         _save_router_session(
