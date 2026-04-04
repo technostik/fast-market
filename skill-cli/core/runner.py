@@ -438,11 +438,21 @@ def execute_skill_prompt(
         end_reason = getattr(loop.session, "end_reason", "") or ""
         exit_code = 0 if "success" in end_reason else 1
 
+        stdout_parts = []
+        stderr_parts = []
+        if loop.session:
+            for turn in loop.session.turns:
+                for tc in turn.tool_calls:
+                    if tc.stdout:
+                        stdout_parts.append(tc.stdout)
+                    if tc.stderr:
+                        stderr_parts.append(tc.stderr)
+
         return SkillResult(
             skill_name=skill.name,
             script_name="prompt:",
-            stdout="",
-            stderr="",
+            stdout="\n".join(stdout_parts),
+            stderr="\n".join(stderr_parts),
             exit_code=exit_code,
             timed_out=False,
         )

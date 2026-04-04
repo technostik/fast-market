@@ -1034,6 +1034,33 @@ def run_router(
         if state.done:
             break
 
+        if len(state.attempts) >= 2:
+            last = state.attempts[-1]
+            prev = state.attempts[-2]
+            if (
+                last.action == prev.action
+                and last.skill_name == prev.skill_name
+                and last.params == prev.params
+                and last.success
+                and prev.success
+            ):
+                state.done = True
+                state.final_result = (
+                    f"Goal appears achieved — same {last.action} "
+                    f"{last.skill_name} succeeded twice with no progress"
+                )
+                break
+
+        if state.iteration >= max_iterations - 1:
+            run_attempts = [a for a in state.attempts if a.action == "run"]
+            task_attempts = [a for a in state.attempts if a.action == "task"]
+            if run_attempts and task_attempts:
+                state.done = True
+                state.final_result = (
+                    "Max iterations near — at least one skill and task ran successfully"
+                )
+                break
+
     if not state.done and not state.failed and state.iteration >= max_iterations:
         state.failed = True
         state.failure_reason = (
