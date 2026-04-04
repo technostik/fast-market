@@ -24,35 +24,22 @@ LEARN_ANALYSIS_PROMPT_TEMPLATE = """You are analyzing an agentic task session to
 ## Your job
 
 Write a LEARN.md file for the skill '{skill_name}' with NEW LESSONS LEARNED.
-A Lesson is what allow future run to avoid steps, errors or guesses and go directly to useful commands.
-This file will be injected into the system prompt of future task runs using this skill, so it must be:
-
-1. **Actionable** — specific commands, flags, paths, patterns that work
-2. **Concise** — maximum 30 lines total
-3. **Focused on failures** — what went wrong is more valuable than what worked
-4. **Tool-specific** — name the exact commands and arguments
+A Lesson is what allows future runs to avoid steps, errors or guesses and go directly to useful commands.
+This file will be injected into the system prompt of future task runs using this skill.
 
 ### LEARN.md structure (use exactly this format):
 
 {learn_result_template}
 
-Rules:
-- Each bullet must be concrete and specific to THIS skill/task
-- Do NOT include generic advice (e.g., "check outputs carefully")
-- Do NOT include anything already obvious from the SKILL.md instructions
-- ALWAYS extract lessons when there were command failures (non-zero exit codes), even if the task eventually succeeded
-- If the task succeeded on the first try with ZERO errors, write only a "What Works" section with the successful approach
-- If no commands were executed at all, write: `# Lessons Learned\n\nERROR: No commands executed\n\n_No lessons recorded for this run._`
+### Simple rules:
+- When task succeeded (exit code 0), the "What Works" section MUST contain the exact successful command, not advice like "use --help"
+- Generalize specific values — use <INPUT> instead of actual values
+- If the LLM claimed an answer in text without executing a command, capture that claimed answer as the lesson
 - Output ONLY the markdown content, no preamble, no code fences
-- ONLY new lessons learned should be included, not repeated content.
-- MANDATORY: When task succeeded (exit code 0), you MUST state the EXACT successful command in "What Works" — the full command with all arguments, not a description of the process. Example: "The correct command is `guess doit again <INPUT>`" not "Use `guess --help` to discover the command"
-- MANDATORY: If a command succeeded, the "What Works" section MUST contain the literal command string (e.g., `guess doit again hello`), not advice like "read help first"
-- Generalize specific values from errors — use placeholders like `<INPUT>` instead of concrete values like `baseline1`
-- Prioritize OUTCOME over PROCESS — capture WHAT WORKED (the command), not HOW YOU FOUND IT (reading help)
 
 ---
 
-## Session to Analayse
+## Session to Analyse
 Task: {task_description}
 Skill: {skill_name}
 Outcome: {outcome}
@@ -271,14 +258,15 @@ def format_session_log(session) -> str:
                 lines.append(f"  Exit: {tc.exit_code}")
                 if tc.stderr:
                     lines.append(f"  Stderr: {tc.stderr[:300]}")
-        elif (
+
+        if (
             hasattr(turn, "role")
             and turn.role == "assistant"
             and hasattr(turn, "content")
             and turn.content
+            and not turn.tool_calls
         ):
-            if i == len(session.turns) - 1:
-                lines.append(f"→ FINAL: {turn.content[:200]}")
+            lines.append(f"→ FINAL RESPONSE: {turn.content[:400]}")
 
     return "\n".join(lines)
 

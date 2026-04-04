@@ -234,7 +234,16 @@ class TaskLoop:
                 if not should_continue:
                     break
             elif is_termination_message(response.content):
-                self.session.end_time = datetime.utcnow()
+                messages.append({"role": "assistant", "content": response.content})
+                if self.session:
+                    self.session.add_turn(
+                        Turn(
+                            role="assistant",
+                            content=response.content,
+                            timestamp=datetime.utcnow(),
+                        )
+                    )
+                    self.session.end_time = datetime.utcnow()
                 self.session.end_reason = "success: model signaled task completion"
                 self._log("\n=== TASK COMPLETE ===")
                 if not self.silent:
@@ -243,6 +252,15 @@ class TaskLoop:
             else:
                 self._debug(f">>> No tool_calls, final response")
                 messages.append({"role": "assistant", "content": response.content})
+                if self.session:
+                    self.session.add_turn(
+                        Turn(
+                            role="assistant",
+                            content=response.content,
+                            timestamp=datetime.utcnow(),
+                        )
+                    )
+                    self.session.end_time = datetime.utcnow()
                 self.session.end_reason = "success: assistant returned final response"
                 if not self.silent:
                     print(response.content)
