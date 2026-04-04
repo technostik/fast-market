@@ -327,8 +327,8 @@ def analyze_session(
         request = LLMRequest(
             prompt=prompt,
             model=model,
-            temperature=0.1,
-            max_tokens=1200,
+            temperature=0.0,
+            max_tokens=4096,
         )
         response = provider.complete(request)
         content = (response.content or "").strip()
@@ -392,7 +392,7 @@ def compress_learn_content(
             prompt=prompt,
             model=model,
             temperature=0.0,
-            max_tokens=1000,
+            max_tokens=4096,
         )
         response = provider.complete(request)
         text = (response.content or "").strip()
@@ -496,8 +496,8 @@ def extract_skill_from_session(
     request = LLMRequest(
         prompt=prompt,
         model=model,
-        temperature=0.2,
-        max_tokens=1500,
+        temperature=0.0,
+        max_tokens=4096,
     )
     response = provider.complete(request)
     content = (response.content or "").strip()
@@ -541,8 +541,8 @@ def extract_skill_from_description(
     request = LLMRequest(
         prompt=prompt,
         model=model,
-        temperature=0.2,
-        max_tokens=1500,
+        temperature=0.0,
+        max_tokens=4096,
     )
     response = provider.complete(request)
     content = (response.content or "").strip()

@@ -71,8 +71,8 @@ Output ONLY the skill name, nothing else."""
     request = LLMRequest(
         prompt=prompt_text,
         model=model,
-        temperature=0.3,
-        max_tokens=50,
+        temperature=0.0,
+        max_tokens=4096,
     )
     response = provider.complete(request)
     name = (response.content or "").strip().lower()
@@ -118,8 +118,8 @@ Output ONLY a JSON object with the revised skill:
     request = LLMRequest(
         prompt=prompt_text,
         model=model,
-        temperature=0.3,
-        max_tokens=1500,
+        temperature=0.0,
+        max_tokens=4096,
     )
     response = provider.complete(request)
     content = (response.content or "").strip()
