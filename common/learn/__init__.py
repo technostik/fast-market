@@ -45,9 +45,10 @@ Rules:
 - If no commands were executed at all, write: `# Lessons Learned\n\nERROR: No commands executed\n\n_No lessons recorded for this run._`
 - Output ONLY the markdown content, no preamble, no code fences
 - ONLY new lessons learned should be included, not repeated content.
-- When a correct command pattern was discovered through trial-and-error or reading help, state it EXPLICITLY in "What Works" (e.g., "The correct invocation is `X Y Z <INPUT>`, not `X <INPUT>`")
-- Generalize specific values from errors — use placeholders like `<INPUT_VALUE>` instead of concrete values like `baseline1`
-- Prioritize capturing the *discovered answer* over the *process of finding it* — future runs should go directly to the correct command, not repeat the discovery process
+- MANDATORY: When task succeeded (exit code 0), you MUST state the EXACT successful command in "What Works" — the full command with all arguments, not a description of the process. Example: "The correct command is `guess doit again <INPUT>`" not "Use `guess --help` to discover the command"
+- MANDATORY: If a command succeeded, the "What Works" section MUST contain the literal command string (e.g., `guess doit again hello`), not advice like "read help first"
+- Generalize specific values from errors — use placeholders like `<INPUT>` instead of concrete values like `baseline1`
+- Prioritize OUTCOME over PROCESS — capture WHAT WORKED (the command), not HOW YOU FOUND IT (reading help)
 
 ---
 
@@ -290,6 +291,7 @@ def analyze_session(
     learn_analysis_prompt: str | None = None,
     learn_result_template: str | None = None,
     existing_learn_content: str | None = None,
+    temperature: float | None = None,
 ) -> tuple[str, str]:
     """Analyze a session and return LEARN.md content as markdown.
 
@@ -330,7 +332,7 @@ def analyze_session(
         request = LLMRequest(
             prompt=prompt,
             model=model,
-            temperature=0.0,
+            temperature=temperature if temperature is not None else 0.0,
             max_tokens=4096,
         )
         response = provider.complete(request)
@@ -362,6 +364,7 @@ def compress_learn_content(
     use_compacting: bool = False,
     learn_result_template: str | None = None,
     max_lines: int = MAX_LEARN_LINES,
+    temperature: float | None = None,
 ) -> str:
     """Compress LEARN.md content to keep it under MAX_LEARN_LINES.
 
@@ -372,6 +375,7 @@ def compress_learn_content(
         use_compacting: If True, use the compacting prompt for multi-session consolidation
         learn_result_template: The result template format to use in the prompt
         max_lines: Maximum number of lines in the output (for compacting)
+        temperature: Temperature for LLM calls (defaults to 0.0)
     """
     from common.llm.base import LLMRequest
 
@@ -394,7 +398,7 @@ def compress_learn_content(
         request = LLMRequest(
             prompt=prompt,
             model=model,
-            temperature=0.0,
+            temperature=temperature if temperature is not None else 0.0,
             max_tokens=4096,
         )
         response = provider.complete(request)
@@ -413,6 +417,7 @@ def update_learn_file(
     model: str | None = None,
     autocompact_lines: int | None = None,
     use_compacting: bool = False,
+    temperature: float | None = None,
 ) -> Path:
     """Write or update the LEARN.md file for a skill.
 
@@ -424,6 +429,7 @@ def update_learn_file(
         model: LLM model to use
         autocompact_lines: If set, compact when exceeding this many lines (instead of MAX_LEARN_LINES)
         use_compacting: If True, use compacting prompt for multi-session consolidation
+        temperature: Temperature for LLM calls (defaults to 0.0)
     """
     try:
         skill_dir = get_skills_dir() / skill_name
@@ -451,6 +457,7 @@ def update_learn_file(
                 model=model,
                 use_compacting=use_compacting,
                 max_lines=threshold,
+                temperature=temperature,
             )
             merged = merged.strip() + "\n"
 

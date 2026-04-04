@@ -13,6 +13,7 @@ from common.core.config import (
     save_tool_config,
     requires_common_config,
     load_common_config,
+    resolve_llm_config,
 )
 from common.core.paths import get_skills_dir
 from common.core.yaml_utils import dump_yaml
@@ -189,7 +190,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         try:
-            config = load_tool_config("skill")
+            config = resolve_llm_config("skill")
             providers = discover_providers(config)
             provider_name = get_default_provider_name(config)
             provider = providers.get(provider_name)
@@ -213,6 +214,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             use_compacting=True,
             learn_result_template=learn_result_template,
             max_lines=lines,
+            temperature=config.get("default_temperature"),
         )
 
         learn_path.write_text(compacted + "\n", encoding="utf-8")
@@ -323,7 +325,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         try:
-            config = load_tool_config("skill")
+            config = resolve_llm_config("skill")
             learn_analysis_prompt = get_learn_analysis_prompt(config)
             learn_result_template = get_learn_result_template(config)
 
@@ -345,6 +347,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 learn_analysis_prompt=learn_analysis_prompt,
                 learn_result_template=learn_result_template,
                 existing_learn_content=existing_learn_content,
+                temperature=config.get("default_temperature"),
             )
 
             if debug:
@@ -358,6 +361,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 merge=True,
                 provider=provider,
                 model=None,
+                temperature=config.get("default_temperature"),
             )
 
             if debug:

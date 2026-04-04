@@ -524,7 +524,13 @@ def _run_auto_learn_from_skill(
         )
     elif provider is not None:
         try:
-            config = load_tool_config("skill")
+            from common.core.config import resolve_llm_config
+            from common.learn import (
+                get_learn_analysis_prompt,
+                get_learn_result_template,
+            )
+
+            config = resolve_llm_config("skill")
             learn_analysis_prompt = get_learn_analysis_prompt(config)
             learn_result_template = get_learn_result_template(config)
 
@@ -540,6 +546,7 @@ def _run_auto_learn_from_skill(
                 learn_analysis_prompt=learn_analysis_prompt,
                 learn_result_template=learn_result_template,
                 existing_learn_content=existing_learn_content,
+                temperature=config.get("default_temperature"),
             )
             update_learn_file(
                 skill.name,
@@ -547,6 +554,7 @@ def _run_auto_learn_from_skill(
                 merge=True,
                 provider=provider,
                 model=model,
+                temperature=config.get("default_temperature"),
             )
 
             if session_path and session_path.exists():
