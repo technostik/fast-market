@@ -375,16 +375,6 @@ def execute_skill_prompt(
     system_commands = task_config_dict.get("system_commands", [])
     allowed_commands = list(fastmarket_tools.keys()) + system_commands
 
-    task_config = TaskConfig(
-        fastmarket_tools=fastmarket_tools,
-        system_commands=system_commands,
-        allowed_commands=allowed_commands,
-        max_iterations=effective_max_iterations
-        or task_config_dict.get("max_iterations", 20),
-        default_timeout=task_config_dict.get("default_timeout", 60),
-        llm_timeout=effective_llm_timeout,
-    )
-
     try:
         config = load_tool_config("apply")
         providers = discover_providers(config)
@@ -406,6 +396,17 @@ def execute_skill_prompt(
             stderr=f"LLM provider '{provider_name}' not available",
             exit_code=1,
         )
+
+    task_config = TaskConfig(
+        fastmarket_tools=fastmarket_tools,
+        system_commands=system_commands,
+        allowed_commands=allowed_commands,
+        max_iterations=effective_max_iterations
+        or task_config_dict.get("max_iterations", 20),
+        default_timeout=task_config_dict.get("default_timeout", 60),
+        llm_timeout=effective_llm_timeout,
+        temperature=config.get("default_temperature", 0.7),
+    )
 
     loop = TaskLoop(
         config=task_config,

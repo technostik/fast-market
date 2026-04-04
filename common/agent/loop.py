@@ -27,6 +27,7 @@ class TaskConfig:
     default_timeout: int = 60
     llm_timeout: int = 0  # 0 = no limit
     allowed_commands: list[str] = field(default_factory=list)
+    temperature: float = 0.7
 
 
 _TERMINATION_PATTERNS = (
@@ -205,6 +206,7 @@ class TaskLoop:
                 max_tokens=4096,
                 tools=tools,
                 timeout=self.config.llm_timeout,
+                temperature=self.config.temperature,
             )
 
             if self._debug_full:

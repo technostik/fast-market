@@ -45,6 +45,9 @@ Rules:
 - If no commands were executed at all, write: `# Lessons Learned\n\nERROR: No commands executed\n\n_No lessons recorded for this run._`
 - Output ONLY the markdown content, no preamble, no code fences
 - ONLY new lessons learned should be included, not repeated content.
+- When a correct command pattern was discovered through trial-and-error or reading help, state it EXPLICITLY in "What Works" (e.g., "The correct invocation is `X Y Z <INPUT>`, not `X <INPUT>`")
+- Generalize specific values from errors — use placeholders like `<INPUT_VALUE>` instead of concrete values like `baseline1`
+- Prioritize capturing the *discovered answer* over the *process of finding it* — future runs should go directly to the correct command, not repeat the discovery process
 
 ---
 

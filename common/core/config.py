@@ -221,7 +221,7 @@ def save_tool_config(tool_name: str, config: dict) -> None:
 def resolve_llm_config(tool_name: str) -> dict:
     """Return the effective LLM config for a tool.
 
-    Returns LLM config dict (providers + default_provider) from either
+    Returns LLM config dict (providers + default_provider + default_temperature) from either
     top-level keys or the 'llm' section for backward compatibility.
     Raises ConfigError if no llm config found at all.
     """
@@ -233,13 +233,18 @@ def resolve_llm_config(tool_name: str) -> dict:
         return {
             "providers": cfg.get("providers", {}),
             "default_provider": default_provider,
+            "default_temperature": cfg.get("default_temperature", 0.7),
         }
     llm = cfg.get("llm", {})
     if not llm:
         raise ConfigError("No LLM configured. Run: common-setup")
     if not llm.get("default_provider"):
         raise ConfigError("No default LLM provider set. Run: common-setup")
-    return llm
+    return {
+        "providers": llm.get("providers", {}),
+        "default_provider": llm["default_provider"],
+        "default_temperature": llm.get("default_temperature", 0.7),
+    }
 
 
 def _resolve_config_path(tool_name: str, path: str | None = None) -> Path:
