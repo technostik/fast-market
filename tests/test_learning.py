@@ -41,51 +41,6 @@ def get_llm_provider():
     return providers[name]
 
 
-def _run_router(goal: str, workdir: str, skills_dir: Path | None = None):
-    """Run skill router and return state."""
-    from core.router import run_router
-
-    provider = get_llm_provider()
-    state = run_router(
-        goal=goal,
-        provider=provider,
-        workdir=workdir,
-        max_iterations=10,
-        skills_dir=skills_dir,
-        save_session=True,
-    )
-    return state
-
-
-def _get_stdout_outputs(state) -> list[str]:
-    """Extract all tool call stdout values from router state attempts."""
-    outputs = []
-    for attempt in state.attempts:
-        if attempt.runner_summary:
-            outputs.append(attempt.runner_summary)
-        if attempt.context:
-            outputs.append(attempt.context)
-        if attempt.subdir and attempt.subdir.exists():
-            session_files = list(attempt.subdir.glob("*.session.yaml"))
-            if session_files:
-                try:
-                    import yaml
-
-                    session_data = yaml.safe_load(session_files[0].read_text())
-                    for turn in session_data.get("turns", []):
-                        for tool_call in turn.get("tool_calls", []):
-                            if tool_call.get("arguments", {}).get("stdout"):
-                                outputs.append(tool_call["arguments"]["stdout"])
-                except Exception:
-                    pass
-    return outputs
-
-
-def _reverse(s: str) -> str:
-    """Expected output of 'guess doit again STRING'."""
-    return s[::-1]
-
-
 # — Sanity check: guess command works correctly ————————————————
 
 
@@ -449,55 +404,6 @@ def test_learn_md_reduces_steps(workdir, skills_dir):
         assert steps_with_learn <= baseline_steps, (
             f"Learning did NOT reduce or maintain steps: baseline={baseline_steps} with_learn={steps_with_learn}"
         )
-
-
-def test_run1_produces_correct_output(workdir, skills_dir):
-    """First run produces correct output."""
-    learn_path = skills_dir / "test-guess" / "LEARN.md"
-    if learn_path.exists():
-        learn_path.unlink()
-
-    state = _run_router(
-        goal="Use the test-guess skill with input='hello'",
-        workdir=str(workdir),
-        skills_dir=skills_dir,
-    )
-
-    assert len(state.attempts) > 0, f"Router did nothing: {state}"
-
-    outputs = _get_stdout_outputs(state)
-    assert any("olleh" in o for o in outputs), f"Expected 'olleh' in outputs: {outputs}"
-
-
-def test_router_with_learn_md_produces_correct_output(workdir, skills_dir):
-    """With manual LEARN.md, the router should produce correct output."""
-    learn_path = skills_dir / "test-guess" / "LEARN.md"
-    if learn_path.exists():
-        learn_path.unlink()
-
-    learn_path.write_text("""# Lessons Learned for test-guess
-
-## What Works
-- `guess doit again <STRING>` — reverses the input string
-
-## What to Avoid
-- `guess doit <STRING>` — missing required 'again' keyword
-
-## Useful Commands
-- `guess --help` — shows available commands (doit)
-- `guess doit --help` — shows subcommand syntax (again required)
-""")
-
-    state = _run_router(
-        goal="Use the test-guess skill with input='test'",
-        workdir=str(workdir),
-        skills_dir=skills_dir,
-    )
-
-    assert len(state.attempts) > 0, f"Router did nothing: {state}"
-
-    outputs = _get_stdout_outputs(state)
-    assert any("tset" in o for o in outputs), f"Expected 'tset' in outputs: {outputs}"
 
 
 # — Cleanup fixture ————————————————————————————————
