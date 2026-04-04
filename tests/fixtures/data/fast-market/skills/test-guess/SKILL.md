@@ -5,6 +5,10 @@ parameters:
   - name: input
     description: The string to process
     required: true
+stop_condition: |
+  - You executed the correct command and got a result
+  - NOT just read the help, figured out the answer in your head, and returned it as text
+  - The task is only complete when you execute the command and see its output
 ---
 # test-guess
 
@@ -12,4 +16,3 @@ parameters:
 
 Use the `guess {input}` command to process the value of {input}.
 Find the correct invocation if you encounter errors.
-Output only the result of the guess command, nothing else.

@@ -21,6 +21,7 @@ class Skill:
     timeout: int | None = None
     llm_timeout: int | None = None
     autocompact_lines: int | None = None
+    stop_condition: str = ""
 
     @classmethod
     def from_path(cls, path: Path) -> Optional[Skill]:
@@ -46,6 +47,7 @@ class Skill:
                         timeout=frontmatter.get("timeout"),
                         llm_timeout=frontmatter.get("llm_timeout"),
                         autocompact_lines=frontmatter.get("autocompact"),
+                        stop_condition=frontmatter.get("stop_condition", ""),
                     )
                 except Exception:
                     pass

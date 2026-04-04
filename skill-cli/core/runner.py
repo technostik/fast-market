@@ -350,6 +350,9 @@ def execute_skill_prompt(
         learn_content = learn_path.read_text(encoding="utf-8")
         body = f"{body}\n\n---\n## Lessons from previous runs\n{learn_content}"
 
+    if skill.stop_condition:
+        body = f"{body}\n\n---\n## Completion Criteria\n{skill.stop_condition}"
+
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
         effective_timeout = 300
