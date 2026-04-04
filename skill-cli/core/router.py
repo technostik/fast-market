@@ -213,9 +213,11 @@ def _repair_json(s: str) -> str:
     if "```" in s:
         s = s.replace("```json", "```")
         parts = [p.strip() for p in s.split("```") if p.strip()]
-        candidates = [p for p in parts if p.startswith("{") and p.endswith("}")]
+        candidates = [
+            p for p in parts if p.lstrip().startswith("{") and p.rstrip().endswith("}")
+        ]
         if candidates:
-            return candidates[0]
+            return candidates[0].lstrip()
         for p in parts:
             if "{" in p and "}" in p:
                 start, end = p.find("{"), p.rfind("}")
@@ -328,7 +330,7 @@ def _call_plan(
         history=_format_history(state.attempts),
         success_criteria=state.success_criteria,
     )
-    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=600)
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=4096)
     response = provider.complete(req)
     raw = (response.content or "").strip()
     if not raw:
@@ -348,7 +350,7 @@ def _call_runner_summary(
         params=params,
         session_output=session_output[:4000],
     )
-    req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=500)
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=4096)
     response = provider.complete(req)
     summary = (response.content or "").strip()
     return summary or (session_output[:1000] if session_output else "(no summary)")
@@ -371,7 +373,7 @@ def _call_context_extract(
         next_step_hint=next_step_hint
         or "Extract any useful data or results for the next step.",
     )
-    req = LLMRequest(prompt=prompt, model=model, temperature=0.3, max_tokens=1000)
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=4096)
     response = provider.complete(req)
     return (response.content or "").strip()
 
@@ -385,7 +387,7 @@ def _call_preparation(
 ) -> PreparationResult:
     template = prompt_template or PREPARATION_PROMPT
     prompt = template.format(goal=goal, skills_list=build_skills_list(skills))
-    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=800)
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=4096)
     response = provider.complete(req)
     raw = (response.content or "").strip()
     if not raw:
@@ -415,7 +417,7 @@ def _call_evaluation(
         history=_format_history(state.attempts),
         last_summary=last_summary,
     )
-    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=400)
+    req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=4096)
     response = provider.complete(req)
     raw = (response.content or "").strip()
     if not raw:
