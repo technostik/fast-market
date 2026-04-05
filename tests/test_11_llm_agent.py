@@ -125,20 +125,6 @@ def _maybe_skip_provider(provider_name: str, selected_providers: list[str]) -> N
         pytest.skip(f"Provider '{provider_name}' not selected")
 
 
-def _safe_complete(provider, request: LLMRequest, provider_name: str):
-    try:
-        return provider.complete(request)
-    except Exception as exc:
-        pytest.skip(f"{provider_name} unavailable during request: {exc}")
-
-
-def _safe_run(loop: TaskLoop, task: str, execute_fn, provider_name: str) -> None:
-    try:
-        loop.run(task, execute_fn=execute_fn)
-    except Exception as exc:
-        pytest.skip(f"{provider_name} unavailable during loop run: {exc}")
-
-
 # Group 1 — Config & Provider Bootstrap
 
 def test_01_llm_config_has_providers(llm_config: dict):
@@ -197,10 +183,10 @@ def test_05_simple_completion(provider_name, selected_providers, provider_fixtur
     request = LLMRequest(
         system="You are a test assistant.",
         prompt="Say the single word PONG and nothing else.",
-        max_tokens=20,
+        max_tokens=4096,
         temperature=0,
     )
-    response = _safe_complete(provider_fixture, request, provider_name)
+    response = provider_fixture.complete(request)
     assert isinstance(response.content, str)
     assert response.content.strip()
     assert "PONG" in response.content.upper()
@@ -214,10 +200,10 @@ def test_06_tool_call_returned(provider_name, selected_providers, provider_fixtu
         system="You are a helpful assistant.",
         prompt="What is the weather in Paris? Use the get_weather tool.",
         tools=_weather_tools(),
-        max_tokens=200,
+        max_tokens=4096,
         temperature=0,
     )
-    response = _safe_complete(provider_fixture, request, provider_name)
+    response = provider_fixture.complete(request)
 
     assert response.tool_calls is not None
     assert len(response.tool_calls) == 1
@@ -233,15 +219,14 @@ def test_07_tool_result_closes_loop(provider_name, selected_providers, provider_
     _maybe_skip_provider(provider_name, selected_providers)
 
     user_prompt = "What is the weather in Paris? Use the get_weather tool."
-    initial = _safe_complete(provider_fixture,
+    initial = provider_fixture.complete(
         LLMRequest(
             system="You are a helpful assistant.",
             prompt=user_prompt,
             tools=_weather_tools(),
-            max_tokens=200,
+            max_tokens=4096,
             temperature=0,
-        ),
-        provider_name,
+        )
     )
     assert initial.tool_calls, "expected initial tool call"
 
@@ -270,15 +255,14 @@ def test_07_tool_result_closes_loop(provider_name, selected_providers, provider_
         },
     ]
 
-    follow_up = _safe_complete(provider_fixture,
+    follow_up = provider_fixture.complete(
         LLMRequest(
             system="You are a helpful assistant.",
             messages=messages,
             tools=_weather_tools(),
-            max_tokens=200,
+            max_tokens=4096,
             temperature=0,
-        ),
-        provider_name,
+        )
     )
 
     assert follow_up.tool_calls in (None, [])
@@ -290,16 +274,14 @@ def test_07_tool_result_closes_loop(provider_name, selected_providers, provider_
 def test_08_no_tool_call_when_not_needed(provider_name, selected_providers, provider_fixture):
     _maybe_skip_provider(provider_name, selected_providers)
 
-    response = _safe_complete(
-        provider_fixture,
+    response = provider_fixture.complete(
         LLMRequest(
             system="You are a helpful assistant.",
             prompt="What is 2 + 2? Answer with just the number.",
             tools=_weather_tools(),
-            max_tokens=30,
+            max_tokens=4096,
             temperature=0,
-        ),
-        provider_name,
+        )
     )
 
     assert response.tool_calls in (None, [])
@@ -501,7 +483,7 @@ def test_23_loop_completes_echo_task(provider_name, selected_providers, make_tas
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    _safe_run(loop, "Run the command 'echo hello_world' and tell me what you see.", echo_execute_fn, provider_name)
+    loop.run("Run the command 'echo hello_world' and tell me what you see.", execute_fn=echo_execute_fn)
     session = loop.session
 
     assert session is not None
@@ -517,11 +499,9 @@ def test_24_loop_requires_two_tool_calls(provider_name, selected_providers, make
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    _safe_run(
-        loop,
+    loop.run(
         "First run 'echo step_one', then run 'echo step_two'. Report both outputs.",
-        echo_execute_fn,
-        provider_name,
+        execute_fn=echo_execute_fn,
     )
     assert loop.session is not None
     assert loop.session.total_tool_calls >= 2
@@ -532,11 +512,9 @@ def test_25_loop_tool_result_fed_back(provider_name, selected_providers, make_ta
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    _safe_run(
-        loop,
+    loop.run(
         "First run 'echo step_one', then run 'echo step_two'. Report both outputs.",
-        echo_execute_fn,
-        provider_name,
+        execute_fn=echo_execute_fn,
     )
     session = loop.session
     assert session is not None
@@ -557,7 +535,7 @@ def test_26_loop_respects_max_iterations(provider_name, selected_providers, make
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name, max_iterations=2)
-    _safe_run(loop, "Keep running 'echo ping' in an infinite loop.", echo_execute_fn, provider_name)
+    loop.run("Keep running 'echo ping' in an infinite loop.", execute_fn=echo_execute_fn)
 
     assert loop.session is not None
     assert "round limit" in loop.session.end_reason.lower()
@@ -586,7 +564,7 @@ def test_27_loop_failed_command_continues(provider_name, selected_providers, mak
             timeout=10,
         )
 
-    _safe_run(loop, "Run 'echo ok' and report.", flaky_execute, provider_name)
+    loop.run("Run 'echo ok' and report.", execute_fn=flaky_execute)
     assert loop.session is not None
     assert loop.session.error_count >= 1
     assert loop.session.end_reason
@@ -597,7 +575,7 @@ def test_28_loop_termination_signal_detected(provider_name, selected_providers, 
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    _safe_run(loop, "Run 'echo done', then say 'task complete'.", echo_execute_fn, provider_name)
+    loop.run("Run 'echo done', then say 'task complete'.", execute_fn=echo_execute_fn)
 
     assert loop.session is not None
     assert "success" in loop.session.end_reason.lower()
@@ -609,7 +587,7 @@ def test_29_loop_session_structure_complete(provider_name, selected_providers, m
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    _safe_run(loop, "Run 'echo done', then finish.", echo_execute_fn, provider_name)
+    loop.run("Run 'echo done', then finish.", execute_fn=echo_execute_fn)
     session = loop.session
 
     assert session is not None
