@@ -11,6 +11,7 @@ from common.core.paths import (
     get_youtube_config_path,
     get_tool_config_path,
     get_common_subconfig_path,
+    get_agent_config_path,
 )
 from common.core.yaml_utils import dump_yaml
 
@@ -135,6 +136,20 @@ def load_youtube_config() -> dict:
 def save_youtube_config(config: dict) -> None:
     """Save to ~/.config/fast-market/common/youtube/config.yaml."""
     _save_yaml(get_youtube_config_path(), config)
+
+
+def load_agent_config() -> dict:
+    """Load ~/.config/fast-market/common/agent.yaml.
+
+    Returns empty dict if file does not exist.
+    This is the shared agent config for skill, task, and prompt CLIs.
+    """
+    return _load_yaml(get_agent_config_path())
+
+
+def save_agent_config(config: dict) -> None:
+    """Save to ~/.config/fast-market/common/agent.yaml."""
+    _save_yaml(get_agent_config_path(), config)
 
 
 def load_tool_config(tool_name: str, path: str | None = None) -> dict:

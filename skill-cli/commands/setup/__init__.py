@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import yaml
-
 from common.agent.prompts import (
     DEFAULT_AGENT_PROMPT_TEMPLATE,
     DEFAULT_EVALUATION_PROMPT,
@@ -10,45 +8,27 @@ from common.agent.prompts import (
     DEFAULT_PREPARATION_PROMPT,
     DEFAULT_SYSTEM_COMMANDS,
 )
-from common.core.config import _resolve_config_path
-from common.core.yaml_utils import dump_yaml
+from common.core.config import load_agent_config, save_agent_config
 from common.learn import (
     SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE as DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT,
 )
 
 
 def load_skill_agent_config() -> dict:
-    """Load skill agent config from file, returning the 'agent' sub-dict.
+    """Load agent config from the common file.
 
-    Returns {} if config file doesn't exist or has no 'agent' section.
+    Returns the full agent config dict (top-level keys like fastmarket_tools,
+    system_commands, agent_prompt, etc.). Returns {} if file doesn't exist.
     """
-    config_path = _resolve_config_path("skill")
-    if config_path.exists():
-        with open(config_path) as f:
-            data = yaml.safe_load(f) or {}
-        return data.get("agent", {})
-    return {}
+    return load_agent_config()
 
 
 def save_skill_agent_config(agent_config: dict) -> None:
-    """Save skill agent config to file.
+    """Save agent config to the common file.
 
-    Reads the full skill config, updates the 'agent' section, and writes back.
-    Preserves all other top-level keys in the config file.
+    Writes the full agent config dict directly to ~/.config/fast-market/common/agent.yaml.
     """
-    config_path = _resolve_config_path("skill")
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if config_path.exists():
-        with open(config_path) as f:
-            data = yaml.safe_load(f) or {}
-    else:
-        data = {}
-
-    data["agent"] = agent_config
-
-    with open(config_path, "w") as f:
-        f.write(dump_yaml(data, sort_keys=False))
+    save_agent_config(agent_config)
 
 
 def default_skill_agent_config() -> dict:
@@ -62,7 +42,7 @@ def default_skill_agent_config() -> dict:
             "active": "default",
             "templates": {
                 "default": {
-                    "description": "Default skill execution prompt",
+                    "description": "Default agent execution prompt",
                     "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
                 },
             },
@@ -84,9 +64,10 @@ def default_skill_agent_config() -> dict:
 
 
 def init_skill_agent_config(agent_dict: dict | None = None) -> dict:
-    """Initialize skill agent config with defaults if not present.
+    """Initialize agent config with defaults if not present.
 
-    Loads from file first, then applies defaults for any missing keys.
+    Loads from the common agent config file first, then applies defaults
+    for any missing keys.
     """
     if agent_dict is None:
         agent_dict = load_skill_agent_config()
@@ -107,7 +88,7 @@ def init_skill_agent_config(agent_dict: dict | None = None) -> dict:
             "active": "default",
             "templates": {
                 "default": {
-                    "description": "Default skill execution prompt",
+                    "description": "Default agent execution prompt",
                     "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
                 },
             },

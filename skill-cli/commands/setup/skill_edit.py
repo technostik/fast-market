@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from common.core.config import _resolve_config_path
+from common.core.config import get_agent_config_path
 from common.core.yaml_utils import dump_yaml
 from commands.setup import (
     load_skill_agent_config,
@@ -18,11 +18,11 @@ from common.cli.helpers import get_editor
 
 
 def edit_skill_agent_config() -> bool:
-    """Edit the full skill agent config file."""
-    config_path = _resolve_config_path("skill")
+    """Edit the full agent config file."""
+    config_path = get_agent_config_path()
     agent_config = init_skill_agent_config()
 
-    yaml_content = dump_yaml({"agent": agent_config}, sort_keys=False)
+    yaml_content = dump_yaml(agent_config, sort_keys=False)
 
     import tempfile
 
