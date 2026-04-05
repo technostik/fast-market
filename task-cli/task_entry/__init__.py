@@ -11,6 +11,7 @@ for p in [str(_ROOT), str(_COMMON_PARENT)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from common.agent.prompts import DEFAULT_AGENT_PROMPT_TEMPLATE
 from common.core.config import load_tool_config, ConfigError, requires_common_config
 from common.llm.registry import discover_providers
 from common.cli.base import create_cli_group
@@ -18,40 +19,7 @@ from common.cli.base import create_cli_group
 requires_common_config("apply", ["llm"])
 
 TASK_DEFAULT_PROMPTS = {
-    "agent": """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
-
-# Your Task
-{task_description}
-{params_section}
-
-# Working Directory
-All commands execute in: `{workdir}`
-
-You can read and write files in this directory. Relative paths are resolved from here.
-
----
-
-{command_docs}
-
----
-
-# How to Work
-
-1. **Understand the task**: Break it down into clear steps
-2. **Explore first**: Use `ls` and `cat` to understand what files exist
-3. **Execute incrementally**: Run one command, check the result, then decide next step
-4. **Handle errors**: If a command fails, read the error message and try a different approach
-5. **Stay focused**: Only use commands that advance the task
-6. **Finish clearly**: When done, summarize what you accomplished (without making tool calls)
-
-# Critical Rules
-
-- **Only use listed commands** - others will be rejected
-- **Work within the directory** - you cannot escape `{workdir}`
-- **Check outputs** - always verify command results before proceeding
-- **Be efficient** - prefer one good command over many guesses
-- **Ask for help** - if truly stuck, explain what you need
-""",
+    "agent": DEFAULT_AGENT_PROMPT_TEMPLATE,
 }
 
 

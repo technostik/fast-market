@@ -27,7 +27,7 @@ class TaskConfig:
     default_timeout: int = 60
     llm_timeout: int = 0  # 0 = no limit
     allowed_commands: list[str] = field(default_factory=list)
-    temperature: float = 0.7
+    temperature: float = 0.3
     command_docs: dict | None = None
     agent_prompt: dict | None = None
 
@@ -72,29 +72,6 @@ def build_execute_command_tool(allowed_commands: list[str]) -> dict:
             },
         },
     }
-
-
-def format_message_history(messages: list[dict]) -> str:
-    """Format message history for the prompt."""
-    formatted = []
-    for msg in messages:
-        role = msg["role"]
-        content = msg.get("content", "")
-        if role == "tool":
-            tc_id = msg.get("tool_call_id", "")
-            formatted.append(f"[TOOL RESULT for {tc_id}]\n{content}")
-        elif msg.get("tool_calls"):
-            tc_list = []
-            for tc in msg["tool_calls"]:
-                tc_list.append(
-                    f"- {tc['function']['name']}: {tc['function']['arguments']}"
-                )
-            formatted.append(
-                f"[ASSISTANT]\n{content}\n[TOOL CALLS]\n" + "\n".join(tc_list)
-            )
-        else:
-            formatted.append(f"[{role.upper()}]\n{content}")
-    return "\n\n".join(formatted)
 
 
 @dataclass
@@ -196,15 +173,13 @@ class TaskLoop:
             if self._debug_full:
                 self._debug(f">>> LLM REQUEST")
                 self._debug(f"System prompt: {len(system_prompt)} chars")
-                self._debug(
-                    f"User message: {len(format_message_history(messages))} chars"
-                )
+                self._debug(f"Messages: {len(messages)} in history")
                 self._debug(f"Tools: {len(tools)} defined")
 
             from common.llm.base import LLMRequest
 
             request = LLMRequest(
-                prompt=format_message_history(messages),
+                messages=messages,
                 model=self.model,
                 system=system_prompt,
                 max_tokens=4096,

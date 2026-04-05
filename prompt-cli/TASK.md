@@ -128,7 +128,7 @@ Pass configuration to the task:
 cat > config.json << 'EOF'
 {
   "model": "gpt-4",
-  "temperature": 0.7,
+  "temperature": 0.3,
   "max_results": 10
 }
 EOF

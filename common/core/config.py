@@ -11,6 +11,7 @@ from common.core.paths import (
     get_youtube_config_path,
     get_tool_config_path,
     get_common_subconfig_path,
+    get_agent_config_path,
 )
 from common.core.yaml_utils import dump_yaml
 
@@ -137,6 +138,20 @@ def save_youtube_config(config: dict) -> None:
     _save_yaml(get_youtube_config_path(), config)
 
 
+def load_agent_config() -> dict:
+    """Load ~/.config/fast-market/common/agent.yaml.
+
+    Returns empty dict if file does not exist.
+    This is the shared agent config for skill, task, and prompt CLIs.
+    """
+    return _load_yaml(get_agent_config_path())
+
+
+def save_agent_config(config: dict) -> None:
+    """Save to ~/.config/fast-market/common/agent.yaml."""
+    _save_yaml(get_agent_config_path(), config)
+
+
 def load_tool_config(tool_name: str, path: str | None = None) -> dict:
     """Load effective config for a tool.
 
@@ -233,7 +248,7 @@ def resolve_llm_config(tool_name: str) -> dict:
         return {
             "providers": cfg.get("providers", {}),
             "default_provider": default_provider,
-            "default_temperature": cfg.get("default_temperature", 0.7),
+            "default_temperature": cfg.get("default_temperature", 0.3),
         }
     llm = cfg.get("llm", {})
     if not llm:
@@ -243,7 +258,7 @@ def resolve_llm_config(tool_name: str) -> dict:
     return {
         "providers": llm.get("providers", {}),
         "default_provider": llm["default_provider"],
-        "default_temperature": llm.get("default_temperature", 0.7),
+        "default_temperature": llm.get("default_temperature", 0.3),
     }
 
 

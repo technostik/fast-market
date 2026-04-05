@@ -334,6 +334,7 @@ def execute_skill_prompt(
     save_session: Path | None = None,
     compact: bool = False,
     verbose: bool = False,
+    debug: str | None = None,
 ) -> SkillResult:
     """Execute skill body as a task description via common/agent TaskLoop."""
     from functools import partial
@@ -423,10 +424,17 @@ def execute_skill_prompt(
         or task_config_dict.get("max_iterations", 20),
         default_timeout=task_config_dict.get("default_timeout", 60),
         llm_timeout=effective_llm_timeout,
-        temperature=config.get("default_temperature", 0.7),
+        temperature=config.get("default_temperature", 0.3),
         command_docs=command_docs,
         agent_prompt=agent_prompt,
     )
+
+    if debug:
+        from common.llm.base import set_llm_log_file
+
+        log_path = workdir / "llm.log"
+        set_llm_log_file(log_path)
+        logger.info("llm_log_enabled", path=str(log_path))
 
     loop = TaskLoop(
         config=task_config,
@@ -434,6 +442,7 @@ def execute_skill_prompt(
         provider=provider_name,
         model=model,
         silent=not verbose,
+        debug=debug or "",
     )
 
     execute_fn = partial(

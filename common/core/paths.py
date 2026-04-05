@@ -111,6 +111,13 @@ def get_tool_config(tool_name: str) -> Path:
     return get_tool_config_path(tool_name)
 
 
+def get_agent_config_path() -> Path:
+    """~/.config/fast-market/common/agent.yaml"""
+    p = _xdg_config_home() / "fast-market" / "common" / "agent.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def get_fastmarket_dir() -> Path:
     """~/.local/share/fast-market/"""
     return get_data_dir()

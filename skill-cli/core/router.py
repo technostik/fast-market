@@ -10,6 +10,11 @@ from functools import partial
 from common import structlog
 from common.agent.loop import TaskConfig, TaskLoop
 from common.agent.executor import resolve_and_execute_command
+from common.agent.prompts import (
+    DEFAULT_EVALUATION_PROMPT,
+    DEFAULT_PLAN_PROMPT,
+    DEFAULT_PREPARATION_PROMPT,
+)
 from common.core.paths import get_skills_dir
 from common.llm.base import LLMRequest
 from core.skill import Skill, discover_skills
@@ -20,50 +25,9 @@ logger = structlog.get_logger(__name__)
 # Prompts
 # ---------------------------------------------------------------------------
 
-PLAN_PROMPT = """You are a skill orchestrator. Your job is to achieve a goal by
-selecting and sequencing skills, one at a time.
-
-## Goal
-{goal}
-
-## Success Criteria (what done looks like)
-{success_criteria}
-
-## Available Skills
-{skills_list}
-
-## History
-{history}
-
-## Instructions
-
-Decide what to do next. Return ONLY a JSON object — no preamble, no code fences.
-
-### Actions
-
-Run a specific skill:
-{{"action": "run", "skill_name": "the-skill-name", "params": {{"key": "value"}}, "reason": "one sentence why", "context_hint": "what the next skill will need"}}
-
-Run a free-form task with raw CLI tools (when no skill fits or a skill failed):
-{{"action": "task", "description": "detailed description", "reason": "one sentence why", "context_hint": "what the next step will need"}}
-
-Ask the user a question (only when genuinely ambiguous):
-{{"action": "ask", "question": "clear specific question", "reason": "one sentence why"}}
-
-Goal fully achieved:
-{{"action": "done", "reason": "one sentence summary of what was accomplished"}}
-
-Goal cannot be achieved:
-{{"action": "fail", "reason": "one sentence explanation of why"}}
-
-### Rules
-- Only use skills from the Available Skills list for "run" actions
-- Use "task" when no skill fits OR when a skill failed and you want to improvise
-- Use "ask" sparingly — only for genuine ambiguity, not when a skill fails
-- Never repeat the exact same skill+params that already failed
-- Params must be concrete values, not placeholders
-- If a skill produced output the next skill needs, it is available in history as context
-"""
+PLAN_PROMPT = DEFAULT_PLAN_PROMPT
+PREPARATION_PROMPT = DEFAULT_PREPARATION_PROMPT
+EVALUATION_PROMPT = DEFAULT_EVALUATION_PROMPT
 
 RUNNER_SUMMARY_PROMPT = """Write a concise summary (max 15 lines) for the orchestrator:
 - Did it succeed or fail? Use EXIT CODE of the LAST command: exit code 0 = success, non-zero = failure
@@ -98,39 +62,6 @@ Extract ONLY what a downstream step will need to do its job.
 Include: key data, results, extracted content, file contents if small (<200 lines).
 For large files: include the first 50 lines and note the full path.
 Be specific. No meta-commentary.
-"""
-
-PREPARATION_PROMPT = """You are a skill orchestrator. Before entering the planning loop,
-read the goal and available skills, then produce a structured execution plan.
-
-## Goal
-{goal}
-
-## Available Skills
-{skills_list}
-
-Return ONLY a JSON object — no preamble, no code fences:
-{{"plan": "step by step description", "success_criteria": "concrete observable description of what done looks like", "risks": "what could go wrong"}}
-"""
-
-EVALUATION_PROMPT = """You are evaluating whether the last step satisfied the goal.
-
-## Goal
-{goal}
-
-## Success Criteria
-{success_criteria}
-
-## History
-{history}
-
-## Last Step Result
-{last_summary}
-
-Return ONLY a JSON object — no preamble, no code fences:
-{{"satisfied": true or false, "reason": "one sentence assessment", "suggestion": "if not satisfied, what to try next"}}
-
-Be honest — if the goal is not met, say so.
 """
 
 # ---------------------------------------------------------------------------
@@ -602,7 +533,7 @@ def _run_task(
         max_iterations=agent_cfg.get("max_iterations", 20),
         default_timeout=agent_cfg.get("default_timeout", 60),
         llm_timeout=0,
-        temperature=agent_cfg.get("default_temperature", 0.7),
+        temperature=agent_cfg.get("default_temperature", 0.3),
         command_docs=command_docs,
         agent_prompt=agent_prompt,
     )

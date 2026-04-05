@@ -1,13 +1,17 @@
 default_provider: ollama
-default_temperature: 0.7
+default_temperature: 0.3
 providers:
-  anthropic:
-    api_key_env: ANTHROPIC_API_KEY
-    default_model: claude-sonnet-4-20250514
-  openai-compatible:
-    api_key_env: NONE
-    base_url: http://localhost:5005/v1
-    default_model: deepseek-chat
   ollama:
+    default_model: gemma4:e2b
     base_url: http://localhost:11434
-    default_model: qwen3.5
+  anthropic:
+    default_model: claude-sonnet-4-20250514
+    api_key_env: ANTHROPIC_API_KEY
+  openai-compatible:
+    default_model: deepseek-chat
+    base_url: http://localhost:5005/v1
+    api_key_env: NONE
+  xai:
+    default_model: grok-4-1-fast-non-reasoning
+    api_key_env: XAI_API_KEY
+

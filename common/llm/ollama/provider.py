@@ -52,6 +52,33 @@ class OllamaProvider(LazyLLMProvider):
         )
 
 
+def _convert_messages_to_ollama(messages: list[dict]) -> list[dict]:
+    """Convert OpenAI-style messages to Ollama's native format.
+
+    Ollama expects tool_calls[].function.arguments as a dict, not a JSON string.
+    """
+    result = []
+    for msg in messages:
+        converted = dict(msg)
+        if "tool_calls" in converted:
+            new_tool_calls = []
+            for tc in converted["tool_calls"]:
+                new_tc = dict(tc)
+                func_data = dict(tc.get("function", {}))
+                args = func_data.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+                func_data["arguments"] = args
+                new_tc["function"] = func_data
+                new_tool_calls.append(new_tc)
+            converted["tool_calls"] = new_tool_calls
+        result.append(converted)
+    return result
+
+
 class _RealOllamaProvider(LLMProvider):
     name = "ollama"
 
@@ -63,14 +90,14 @@ class _RealOllamaProvider(LLMProvider):
     def set_debug(self, debug: bool) -> None:
         self._debug = debug
 
-    def complete(self, request: LLMRequest) -> LLMResponse:
+    def _complete_raw(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model
 
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)
 
         if request.messages:
-            messages = list(request.messages)
+            messages = _convert_messages_to_ollama(request.messages)
             if request.system:
                 messages.insert(0, {"role": "system", "content": request.system})
         else:

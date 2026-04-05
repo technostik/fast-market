@@ -3,15 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 
-DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
+DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a command execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
 
 # Your Task
 {task_description}
 {params_section}
 
 # Working Directory
-All commands execute in: `{workdir}`
-
+All commands execute in a working directory: USE RELATIVE PATHS ONLY. DO NOT USE ABSOLUTE PATHS.
 You can read and write files in this directory. Relative paths are resolved from here.
 
 {env_vars_section}
@@ -25,9 +24,9 @@ You can read and write files in this directory. Relative paths are resolved from
 # How to Work
 
 1. **Understand the task**: Break it down into clear steps
-2. **Explore first**: Use `ls` and `cat` to understand what files exist
+2. **Explore first**: Use --help if you're unsure how to proceed
 3. **Execute incrementally**: Run one command, check the result, then decide next step
-4. **Handle errors**: If a command fails, read the error message and try a different approach
+4. **Handle errors**: If a command fails, read the error message to try to correct it before trying another command
 5. **Stay focused**: Only use commands that advance the task
 6. **Finish clearly**: When done, summarize what you accomplished (without making tool calls)
 
@@ -44,23 +43,27 @@ You can read and write files in this directory. Relative paths are resolved from
 DEFAULT_FASTMARKET_TOOLS = {
     "corpus": {
         "description": "Search and query your knowledge base with embeddings.",
-        "commands": ["index", "search", "list", "delete"],
+        "commands": ["get-from-id", "get-from-source", "get-last", "list", "search"],
     },
     "image": {
         "description": "Generate images from text prompts using AI image generation APIs.",
-        "commands": ["generate", "serve", "setup"],
+        "commands": ["generate"],
     },
     "message": {
         "description": "Send messages and alerts via Telegram.",
-        "commands": ["alert", "ask", "setup"],
+        "commands": ["alert", "ask"],
     },
     "task": {
         "description": "Execute agentic task",
-        "commands": ["run"],
+        "commands": ["apply"],
     },
     "youtube": {
         "description": "Search YouTube videos and manage comments via the YouTube Data API.",
-        "commands": ["search", "comments", "reply", "setup"],
+        "commands": ["search", "comments", "reply", "get-transcript", "get-last"],
+    },
+    "prompt": {
+        "description": "Generate prompts from text using AI prompt generation APIs.",
+        "commands": ["apply"],
     },
 }
 
@@ -84,6 +87,133 @@ DEFAULT_SYSTEM_COMMANDS = [
     "awk",
     "sed",
 ]
+
+
+DEFAULT_PREPARATION_PROMPT = """You are a skill orchestrator. Before entering the planning loop,
+read the goal and available skills, then produce a structured execution plan.
+
+## Goal
+{goal}
+
+## Available Skills
+{skills_list}
+
+## Your Task
+
+Analyze the goal and available skills. Produce a JSON object with your plan:
+
+```json
+{{
+  "plan": "step by step description of intended approach",
+  "success_criteria": "concrete, observable description of what done looks like",
+  "risks": "what could go wrong and how to handle it"
+}}
+```
+
+IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes.
+
+Be specific about the order of skills and what each step should accomplish.
+"""
+
+
+DEFAULT_EVALUATION_PROMPT = """You are evaluating whether the last step brought us closer to the goal.
+
+## Goal
+{goal}
+
+## Success Criteria
+{success_criteria}
+
+## History
+{history}
+
+## Last Step Result
+{last_summary}
+
+## Your Task
+
+Determine if the last step satisfied the success criteria. Return a JSON object:
+
+```json
+{{
+  "satisfied": true or false,
+  "reason": "one sentence explaining your assessment",
+  "suggestion": "if not satisfied, what to try next"
+}}
+```
+
+IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes.
+
+Be honest — if the goal isn't met, say so and suggest a different approach."""
+
+
+DEFAULT_PLAN_PROMPT = """You are a skill orchestrator. Your job is to achieve a goal by
+selecting and sequencing skills, one at a time.
+
+## Goal
+{goal}
+
+## Success Criteria (what done looks like)
+{success_criteria}
+
+## Available Skills
+{skills_list}
+
+## History
+{history}
+
+## Instructions
+
+Decide what to do next. You must return ONLY a JSON object.
+
+### Actions
+
+Run a specific skill:
+{{
+  "action": "run",
+  "skill_name": "the-skill-name",
+  "params": {{"key": "value"}},
+  "reason": "one sentence why",
+  "context_hint": "what the next skill will need from this result"
+}}
+
+Run a free-form task with raw CLI tools (use when no skill fits or a skill failed and you need to improvise):
+{{
+  "action": "task",
+  "description": "detailed description of what to accomplish",
+  "reason": "one sentence why no skill fits or why improvising is better",
+  "context_hint": "what the next step will need from this result"
+}}
+
+Ask the user a question when you have genuine ambiguity you cannot resolve yourself:
+{{
+  "action": "ask",
+  "question": "clear, specific question for the user",
+  "reason": "one sentence why you need this information"
+}}
+
+Goal fully achieved:
+{{
+  "action": "done",
+  "reason": "one sentence summary of what was accomplished"
+}}
+
+Goal cannot be achieved (repeated failures, missing capability):
+{{
+  "action": "fail",
+  "reason": "one sentence explanation of why"
+}}
+
+### Rules
+- Only use skills from the Available Skills list for "run" actions
+- Use "task" when no skill fits OR when a skill failed and you want to try a different approach with raw tools
+- Use "ask" sparingly — only when the goal is genuinely ambiguous, not just when a skill fails
+- If a previous attempt failed, try a different approach (different skill, different params, or "task")
+- Never repeat the exact same skill+params that already failed
+- Params must be concrete values, not placeholders
+- If a skill produced output that a next skill needs, it is available in history as context
+- IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes
+"""
 
 
 SYSTEM_COMMAND_DOCS = {
@@ -308,13 +438,25 @@ TOOLS_DOC_TEMPLATES = {
     "minimal": "{aliases}{fastmarket_tools_minimal}{system_commands_minimal}{other_commands_minimal}",
 }
 
+DEFAULT_COMMAND_DOCS_TEMPLATES = {
+    "full": {
+        "description": "Verbose with full documentation",
+        "template": "{aliases}{fastmarket_tools}{system_commands}",
+    },
+    "minimal": {
+        "description": "Brief with descriptions",
+        "template": "{fastmarket_tools_brief}{system_commands_minimal}",
+    },
+}
+
 
 def _build_minimal_tools_section(commands: list[str], section_name: str) -> str:
     """Build minimal section with just command names."""
     if not commands:
         return ""
     names = ", ".join(f"`{c}`" for c in sorted(commands))
-    return f"{section_name}: {names}\n"
+    heading = section_name.replace("**", "").replace("*", "")
+    return f"## {heading}\n\n{names}\n"
 
 
 def format_fastmarket_tool_minimal(cmd_name: str) -> str:
@@ -404,13 +546,6 @@ def _build_aliases_section() -> str:
 def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
     """Build the Fast-Market tools section of command documentation."""
     try:
-        from commands.task.command_registry import get_fastmarket_command_help
-    except ImportError:
-
-        def get_fastmarket_command_help(cmd):
-            return None
-
-    try:
         from common.core.aliases import get_reverse_aliases
     except ImportError:
 
@@ -424,10 +559,7 @@ def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
     docs = ["## Fast-Market Tools\n"]
 
     for cmd, config in sorted(fastmarket_tools_config.items()):
-        info = get_fastmarket_command_help(cmd)
         desc = config.get("description", "") if isinstance(config, dict) else ""
-        if info and not desc:
-            desc = info.description
         if not desc:
             desc = f"{cmd} command-line tool"
 
@@ -435,15 +567,22 @@ def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
         docs.append(desc)
         docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
 
+        if isinstance(config, dict) and config.get("commands"):
+            commands = config["commands"]
+            cmd_parts = []
+            for c in commands:
+                if isinstance(c, dict):
+                    name, cdesc = next(iter(c.items()))
+                    cmd_parts.append(f"`{name}` - {cdesc}")
+                else:
+                    cmd_parts.append(f"`{c}`")
+            docs.append(f"**Commands**: {', '.join(cmd_parts)}")
+
         cmd_aliases = reverse_aliases.get(cmd, [])
         if cmd_aliases:
             docs.append(
                 f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
             )
-        if info and info.examples:
-            docs.append("\n**Quick Examples**:")
-            for ex in info.examples:
-                docs.append(f"- `{ex}`")
         docs.append("")
 
     return "\n".join(docs)
@@ -507,12 +646,7 @@ def _init_task_config(config: dict | None = None) -> dict:
     if "command_docs" not in task:
         task["command_docs"] = {
             "active": "minimal",
-            "templates": {
-                "minimal": {
-                    "description": "Minimal tools documentation",
-                    "template": TOOLS_DOC_TEMPLATES["minimal"],
-                }
-            },
+            "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
         }
 
     return task
@@ -641,8 +775,14 @@ def build_command_documentation(
     for cmd in sorted(fastmarket_tools_config.keys()):
         config = fastmarket_tools_config[cmd]
         if isinstance(config, dict) and config.get("commands"):
-            cmds_list = ", ".join(f"`{c}`" for c in config["commands"])
-            fastmarket_tools_commands_parts.append(f"- `{cmd}`: {cmds_list}")
+            cmd_parts = []
+            for c in config["commands"]:
+                if isinstance(c, dict):
+                    name = next(iter(c.keys()))
+                    cmd_parts.append(f"`{name}`")
+                else:
+                    cmd_parts.append(f"`{c}`")
+            fastmarket_tools_commands_parts.append(f"- `{cmd}`: {', '.join(cmd_parts)}")
     fastmarket_tools_commands = ""
     if fastmarket_tools_commands_parts:
         fastmarket_tools_commands = (

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import click
 
-from common.core.config import _resolve_config_path
+from common.core.config import get_agent_config_path
 from common.core.yaml_utils import dump_yaml
 from commands.base import CommandManifest
 from commands.setup import (
@@ -10,6 +10,7 @@ from commands.setup import (
     DEFAULT_PLAN_PROMPT,
     DEFAULT_PREPARATION_PROMPT,
     DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT,
+    default_skill_agent_config,
     init_skill_agent_config,
     save_skill_agent_config,
 )
@@ -21,9 +22,9 @@ def register(plugin_manifests: dict | None = None):
     @click.option("--path", "-p", is_flag=True, help="Show config file path")
     @click.pass_context
     def setup_cmd(ctx, path):
-        """Manage skill-specific agent configuration."""
+        """Manage agent configuration."""
         if path:
-            config_path = _resolve_config_path("skill")
+            config_path = get_agent_config_path()
             click.echo(config_path)
             ctx.exit()
 
@@ -40,8 +41,8 @@ def register(plugin_manifests: dict | None = None):
 
     @setup_cmd.command("path")
     def path_cmd():
-        """Print path to skill config file."""
-        config_path = _resolve_config_path("skill")
+        """Print path to agent config file."""
+        config_path = get_agent_config_path()
         click.echo(config_path)
 
     @setup_cmd.group("allowed-commands")
@@ -148,12 +149,19 @@ def register(plugin_manifests: dict | None = None):
     @setup_cmd.command("set-workdir")
     @click.argument("path")
     def set_workdir(path):
-        """Set default workdir in skill config."""
-        from common.core.config import load_tool_config, save_tool_config
+        """Set default workdir in agent config."""
+        from common.core.config import load_agent_config, save_agent_config
 
-        config = load_tool_config("skill")
+        config = load_agent_config()
         config["workdir"] = path
-        save_tool_config("skill", config)
+        save_agent_config(config)
         click.echo(f"Default workdir set to: {path}")
+
+    @setup_cmd.command("reset")
+    def reset_cmd():
+        """Reset skill agent configuration to defaults."""
+        default_agent_config = default_skill_agent_config()
+        save_skill_agent_config(default_agent_config)
+        click.echo("Skill agent configuration reset to defaults.")
 
     return CommandManifest(name="setup", click_command=setup_cmd)

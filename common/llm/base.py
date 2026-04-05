@@ -1,9 +1,125 @@
 from __future__ import annotations
 
 import json as _json
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+_llm_log_file: Path | None = None
+_llm_log_lock = threading.Lock()
+_llm_log_counter = 0
+_llm_log_message_count = 0
+_llm_log_system_logged = False
+_llm_log_config_logged = False
+
+
+def set_llm_log_file(path: Path | None) -> None:
+    """Set the file path for raw LLM request/response logging."""
+    global \
+        _llm_log_file, \
+        _llm_log_message_count, \
+        _llm_log_system_logged, \
+        _llm_log_config_logged
+    _llm_log_file = path
+    _llm_log_message_count = 0
+    _llm_log_system_logged = False
+    _llm_log_config_logged = False
+    if path is not None:
+        path.write_text("")
+
+
+def _llm_log(text: str) -> None:
+    """Append text to the LLM log file if configured."""
+    if _llm_log_file is None:
+        return
+    with _llm_log_lock:
+        with open(_llm_log_file, "a") as f:
+            f.write(text + "\n")
+
+
+def _format_raw_request(request: "LLMRequest", iteration: int) -> str:
+    """Format a raw LLM request for logging.
+
+    Only logs new messages since the last request to avoid repetition.
+    System prompt and config are logged once on the first request.
+    """
+    global _llm_log_message_count, _llm_log_system_logged, _llm_log_config_logged
+
+    lines = [f"=== REQUEST {iteration} ==="]
+
+    if not _llm_log_config_logged:
+        lines.append(f"model: {request.model or '(default)'}")
+        lines.append(f"temperature: {request.temperature}")
+        lines.append(f"max_tokens: {request.max_tokens}")
+        lines.append(
+            f"tools: {_json.dumps(request.tools, indent=2) if request.tools else 'none'}"
+        )
+        _llm_log_config_logged = True
+
+    if request.system and not _llm_log_system_logged:
+        lines.append("")
+        lines.append("--- system ---")
+        lines.append(request.system)
+        lines.append("--- end system ---")
+        _llm_log_system_logged = True
+
+    if request.messages:
+        total = len(request.messages)
+        start = _llm_log_message_count
+        new_count = total - start
+        lines.append("")
+        lines.append(f"--- messages: {total} total, {new_count} new ---")
+        for i, msg in enumerate(request.messages[start:], start=start):
+            role = msg.get("role", "?")
+            content = msg.get("content") or ""
+            lines.append(f"  [{i}] role={role}")
+            if content:
+                lines.append(f"      content: {content}")
+            if msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    func = tc.get("function", {})
+                    lines.append(
+                        f"      tool_call: {func.get('name', '?')} "
+                        f"args={_json.dumps(func.get('arguments', {}))}"
+                    )
+            if msg.get("tool_call_id"):
+                lines.append(f"      tool_call_id: {msg['tool_call_id']}")
+        _llm_log_message_count = total
+        lines.append("--- end messages ---")
+    elif request.prompt:
+        lines.append("")
+        lines.append(f"--- prompt ({len(request.prompt)} chars) ---")
+        lines.append(request.prompt)
+        lines.append("--- end prompt ---")
+
+    lines.append(f"=== END REQUEST {iteration} ===")
+    return "\n".join(lines)
+
+
+def _format_raw_response(response: "LLMResponse", iteration: int) -> str:
+    """Format a raw LLM response for logging."""
+    lines = [
+        f"=== RESPONSE {iteration} ===",
+        f"model: {response.model}",
+    ]
+
+    if response.content:
+        lines.append(f"content: {response.content}")
+
+    if response.tool_calls:
+        lines.append("tool_calls:")
+        for tc in response.tool_calls:
+            lines.append(
+                f"  - id: {tc.id} name: {tc.name} args: {_json.dumps(tc.arguments)}"
+            )
+
+    if response.usage:
+        lines.append(f"usage: {_json.dumps(response.usage)}")
+
+    lines.append(f"=== END RESPONSE {iteration} ===")
+    return "\n".join(lines)
 
 
 @dataclass
@@ -21,8 +137,8 @@ class LLMRequest:
 
     prompt: str = ""
     model: str | None = None
-    temperature: float = 0.7
-    max_tokens: int = 2048
+    temperature: float = 0.3
+    max_tokens: int = 4096
     system: str | None = None
     tools: list[dict] | None = None
     timeout: int = 0  # 0 = no limit
@@ -52,8 +168,20 @@ class LLMProvider(ABC):
 
     name: str
 
-    @abstractmethod
     def complete(self, request: LLMRequest) -> LLMResponse:
+        """Complete a request, with raw logging."""
+        global _llm_log_counter
+        with _llm_log_lock:
+            _llm_log_counter += 1
+            iteration = _llm_log_counter
+        _llm_log(_format_raw_request(request, iteration))
+        response = self._complete_raw(request)
+        _llm_log(_format_raw_response(response, iteration))
+        return response
+
+    @abstractmethod
+    def _complete_raw(self, request: LLMRequest) -> LLMResponse:
+        """Implement this instead of complete()."""
         raise NotImplementedError
 
     @abstractmethod
@@ -84,7 +212,8 @@ class LazyLLMProvider(LLMProvider):
         """Actual initialization logic to be implemented by subclasses."""
         raise NotImplementedError
 
-    def complete(self, request: LLMRequest) -> LLMResponse:
+    def _complete_raw(self, request: LLMRequest) -> LLMResponse:
+        """Delegate to the real provider's complete() which handles logging."""
         self._ensure_initialized()
         if self._provider is None:
             raise RuntimeError(
@@ -92,6 +221,10 @@ class LazyLLMProvider(LLMProvider):
                 f"Set the required API key environment variable or run 'prompt setup' to configure."
             )
         return self._provider.complete(request)
+
+    def complete(self, request: LLMRequest) -> LLMResponse:
+        """Override to skip the logging wrapper — LazyLLMProvider delegates to _provider."""
+        return self._complete_raw(request)
 
     def list_models(self) -> list[str]:
         self._ensure_initialized()

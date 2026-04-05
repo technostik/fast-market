@@ -13,8 +13,8 @@ class Prompt:
     description: str = ""
     model_provider: str = ""
     model_name: str = ""
-    temperature: float = 0.7
-    max_tokens: int = 2048
+    temperature: float = 0.3
+    max_tokens: int = 4096
     metadata: dict = field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
