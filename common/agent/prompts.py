@@ -43,23 +43,27 @@ You can read and write files in this directory. Relative paths are resolved from
 DEFAULT_FASTMARKET_TOOLS = {
     "corpus": {
         "description": "Search and query your knowledge base with embeddings.",
-        "commands": ["index", "search", "list", "delete"],
+        "commands": ["get-from-id", "get-from-source", "get-last", "list", "search"],
     },
     "image": {
         "description": "Generate images from text prompts using AI image generation APIs.",
-        "commands": ["generate", "serve", "setup"],
+        "commands": ["generate"],
     },
     "message": {
         "description": "Send messages and alerts via Telegram.",
-        "commands": ["alert", "ask", "setup"],
+        "commands": ["alert", "ask"],
     },
     "task": {
         "description": "Execute agentic task",
-        "commands": ["run"],
+        "commands": ["apply"],
     },
     "youtube": {
         "description": "Search YouTube videos and manage comments via the YouTube Data API.",
-        "commands": ["search", "comments", "reply", "setup"],
+        "commands": ["search", "comments", "reply", "get-transcript", "get-last"],
+    },
+    "prompt": {
+        "description": "Generate prompts from text using AI prompt generation APIs.",
+        "commands": ["apply"],
     },
 }
 
@@ -451,7 +455,8 @@ def _build_minimal_tools_section(commands: list[str], section_name: str) -> str:
     if not commands:
         return ""
     names = ", ".join(f"`{c}`" for c in sorted(commands))
-    return f"{section_name}: {names}\n"
+    heading = section_name.replace("**", "").replace("*", "")
+    return f"## {heading}\n\n{names}\n"
 
 
 def format_fastmarket_tool_minimal(cmd_name: str) -> str:
@@ -541,13 +546,6 @@ def _build_aliases_section() -> str:
 def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
     """Build the Fast-Market tools section of command documentation."""
     try:
-        from commands.task.command_registry import get_fastmarket_command_help
-    except ImportError:
-
-        def get_fastmarket_command_help(cmd):
-            return None
-
-    try:
         from common.core.aliases import get_reverse_aliases
     except ImportError:
 
@@ -561,10 +559,7 @@ def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
     docs = ["## Fast-Market Tools\n"]
 
     for cmd, config in sorted(fastmarket_tools_config.items()):
-        info = get_fastmarket_command_help(cmd)
         desc = config.get("description", "") if isinstance(config, dict) else ""
-        if info and not desc:
-            desc = info.description
         if not desc:
             desc = f"{cmd} command-line tool"
 
@@ -573,18 +568,21 @@ def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
         docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
 
         if isinstance(config, dict) and config.get("commands"):
-            cmds_list = ", ".join(f"`{c}`" for c in config["commands"])
-            docs.append(f"**Commands**: {cmds_list}")
+            commands = config["commands"]
+            cmd_parts = []
+            for c in commands:
+                if isinstance(c, dict):
+                    name, cdesc = next(iter(c.items()))
+                    cmd_parts.append(f"`{name}` - {cdesc}")
+                else:
+                    cmd_parts.append(f"`{c}`")
+            docs.append(f"**Commands**: {', '.join(cmd_parts)}")
 
         cmd_aliases = reverse_aliases.get(cmd, [])
         if cmd_aliases:
             docs.append(
                 f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
             )
-        if info and info.examples:
-            docs.append("\n**Quick Examples**:")
-            for ex in info.examples:
-                docs.append(f"- `{ex}`")
         docs.append("")
 
     return "\n".join(docs)
@@ -777,8 +775,14 @@ def build_command_documentation(
     for cmd in sorted(fastmarket_tools_config.keys()):
         config = fastmarket_tools_config[cmd]
         if isinstance(config, dict) and config.get("commands"):
-            cmds_list = ", ".join(f"`{c}`" for c in config["commands"])
-            fastmarket_tools_commands_parts.append(f"- `{cmd}`: {cmds_list}")
+            cmd_parts = []
+            for c in config["commands"]:
+                if isinstance(c, dict):
+                    name = next(iter(c.keys()))
+                    cmd_parts.append(f"`{name}`")
+                else:
+                    cmd_parts.append(f"`{c}`")
+            fastmarket_tools_commands_parts.append(f"- `{cmd}`: {', '.join(cmd_parts)}")
     fastmarket_tools_commands = ""
     if fastmarket_tools_commands_parts:
         fastmarket_tools_commands = (
