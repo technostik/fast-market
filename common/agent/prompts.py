@@ -3,14 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 
-DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
+DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a command execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
 
 # Your Task
 {task_description}
 {params_section}
 
 # Working Directory
-All commands execute in a workding directory : USE RELATIVE PATHS ONLY. DO NOT USE ABSOLUTE PATHS.
+All commands execute in a working directory: USE RELATIVE PATHS ONLY. DO NOT USE ABSOLUTE PATHS.
 You can read and write files in this directory. Relative paths are resolved from here.
 
 {env_vars_section}
@@ -83,6 +83,133 @@ DEFAULT_SYSTEM_COMMANDS = [
     "awk",
     "sed",
 ]
+
+
+DEFAULT_PREPARATION_PROMPT = """You are a skill orchestrator. Before entering the planning loop,
+read the goal and available skills, then produce a structured execution plan.
+
+## Goal
+{goal}
+
+## Available Skills
+{skills_list}
+
+## Your Task
+
+Analyze the goal and available skills. Produce a JSON object with your plan:
+
+```json
+{{
+  "plan": "step by step description of intended approach",
+  "success_criteria": "concrete, observable description of what done looks like",
+  "risks": "what could go wrong and how to handle it"
+}}
+```
+
+IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes.
+
+Be specific about the order of skills and what each step should accomplish.
+"""
+
+
+DEFAULT_EVALUATION_PROMPT = """You are evaluating whether the last step brought us closer to the goal.
+
+## Goal
+{goal}
+
+## Success Criteria
+{success_criteria}
+
+## History
+{history}
+
+## Last Step Result
+{last_summary}
+
+## Your Task
+
+Determine if the last step satisfied the success criteria. Return a JSON object:
+
+```json
+{{
+  "satisfied": true or false,
+  "reason": "one sentence explaining your assessment",
+  "suggestion": "if not satisfied, what to try next"
+}}
+```
+
+IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes.
+
+Be honest — if the goal isn't met, say so and suggest a different approach."""
+
+
+DEFAULT_PLAN_PROMPT = """You are a skill orchestrator. Your job is to achieve a goal by
+selecting and sequencing skills, one at a time.
+
+## Goal
+{goal}
+
+## Success Criteria (what done looks like)
+{success_criteria}
+
+## Available Skills
+{skills_list}
+
+## History
+{history}
+
+## Instructions
+
+Decide what to do next. You must return ONLY a JSON object.
+
+### Actions
+
+Run a specific skill:
+{{
+  "action": "run",
+  "skill_name": "the-skill-name",
+  "params": {{"key": "value"}},
+  "reason": "one sentence why",
+  "context_hint": "what the next skill will need from this result"
+}}
+
+Run a free-form task with raw CLI tools (use when no skill fits or a skill failed and you need to improvise):
+{{
+  "action": "task",
+  "description": "detailed description of what to accomplish",
+  "reason": "one sentence why no skill fits or why improvising is better",
+  "context_hint": "what the next step will need from this result"
+}}
+
+Ask the user a question when you have genuine ambiguity you cannot resolve yourself:
+{{
+  "action": "ask",
+  "question": "clear, specific question for the user",
+  "reason": "one sentence why you need this information"
+}}
+
+Goal fully achieved:
+{{
+  "action": "done",
+  "reason": "one sentence summary of what was accomplished"
+}}
+
+Goal cannot be achieved (repeated failures, missing capability):
+{{
+  "action": "fail",
+  "reason": "one sentence explanation of why"
+}}
+
+### Rules
+- Only use skills from the Available Skills list for "run" actions
+- Use "task" when no skill fits OR when a skill failed and you want to try a different approach with raw tools
+- Use "ask" sparingly — only when the goal is genuinely ambiguous, not just when a skill fails
+- If a previous attempt failed, try a different approach (different skill, different params, or "task")
+- Never repeat the exact same skill+params that already failed
+- Params must be concrete values, not placeholders
+- If a skill produced output that a next skill needs, it is available in history as context
+- IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes
+"""
 
 
 SYSTEM_COMMAND_DOCS = {

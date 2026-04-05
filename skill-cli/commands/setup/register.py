@@ -10,6 +10,7 @@ from commands.setup import (
     DEFAULT_PLAN_PROMPT,
     DEFAULT_PREPARATION_PROMPT,
     DEFAULT_SKILL_FROM_DESCRIPTION_PROMPT,
+    default_skill_agent_config,
     init_skill_agent_config,
     save_skill_agent_config,
 )
@@ -155,5 +156,12 @@ def register(plugin_manifests: dict | None = None):
         config["workdir"] = path
         save_tool_config("skill", config)
         click.echo(f"Default workdir set to: {path}")
+
+    @setup_cmd.command("reset")
+    def reset_cmd():
+        """Reset skill agent configuration to defaults."""
+        default_agent_config = default_skill_agent_config()
+        save_skill_agent_config(default_agent_config)
+        click.echo("Skill agent configuration reset to defaults.")
 
     return CommandManifest(name="setup", click_command=setup_cmd)

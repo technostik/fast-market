@@ -14,8 +14,8 @@ from commands.setup import (
     save_config,
     init_task_config,
 )
+from common.agent.prompts import DEFAULT_AGENT_PROMPT_TEMPLATE
 from common.cli.helpers import get_editor
-from commands.setup import DEFAULT_AGENT_PROMPT_TEMPLATE
 
 
 def create_task_prompts_group() -> click.Group:
