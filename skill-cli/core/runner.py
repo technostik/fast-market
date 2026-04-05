@@ -436,6 +436,7 @@ def execute_skill_prompt(
         workdir=workdir,
         allowed=set(task_config.allowed_commands),
         timeout=task_config.default_timeout,
+        env_params=params,
     )
 
     try:

@@ -14,6 +14,8 @@ All commands execute in: `{workdir}`
 
 You can read and write files in this directory. Relative paths are resolved from here.
 
+{env_vars_section}
+
 ---
 
 {command_docs}
@@ -671,16 +673,33 @@ def build_system_prompt(
     )
 
     params_section = ""
+    env_vars_section = ""
     if task_params:
         params_section = "\n# Task Parameters (Already Resolved)\n"
         for key, value in sorted(task_params.items()):
             display_value = value if len(value) < 200 else value[:197] + "..."
             params_section += f"- **{key}**: {display_value}\n"
 
+        env_vars_section = "# Environment Variables\n"
+        env_vars_section += "Task parameters are available as environment variables in shell commands.\n"
+        env_vars_section += (
+            "Parameter names are CAPITALIZED and prefixed with `SKILL_`.\n"
+        )
+        env_vars_section += (
+            "For example, parameter `message` becomes `$SKILL_MESSAGE`.\n"
+        )
+        env_vars_section += "\nAvailable environment variables:\n"
+        for key in sorted(task_params.keys()):
+            env_vars_section += (
+                f"- `$SKILL_{str(key).upper()}` (from parameter `{key}`)\n"
+            )
+        env_vars_section += "\n"
+
     template = prompt_config.get("template", DEFAULT_AGENT_PROMPT_TEMPLATE)
     return template.format(
         task_description=task_description,
         params_section=params_section,
+        env_vars_section=env_vars_section,
         workdir=str(workdir),
         command_docs=command_docs,
     )

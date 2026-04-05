@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -129,6 +130,7 @@ def execute_command(
     workdir: Path,
     allowed: set[str],
     timeout: int = 60,
+    env_params: dict[str, str] | None = None,
 ) -> CommandResult:
     """Execute a whitelisted command in the workdir."""
     is_allowed, error_msg = is_command_allowed(cmd_str, allowed)
@@ -176,10 +178,15 @@ def execute_command(
     )
 
     try:
+        env = os.environ.copy()
+        if env_params:
+            for key, value in env_params.items():
+                env[f"SKILL_{str(key).upper()}"] = str(value)
         result = rt_subprocess.run(
             cmd_str if use_shell else tokens,
             shell=use_shell,
             cwd=workdir,
+            env=env,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -212,6 +219,7 @@ def resolve_and_execute_command(
     workdir: Path,
     allowed: set[str],
     timeout: int = 60,
+    env_params: dict[str, str] | None = None,
 ) -> CommandResult:
     """Execute a command with alias resolution.
 
@@ -228,7 +236,9 @@ def resolve_and_execute_command(
             alias=alias_used,
         )
 
-    result = _execute_whitelisted_command(resolved_cmd, workdir, allowed, timeout)
+    result = _execute_whitelisted_command(
+        resolved_cmd, workdir, allowed, timeout, env_params
+    )
 
     if result.exit_code != 0 and alias_used:
         result.stderr = f"{result.stderr}\n(from alias '{alias_used}')".strip()
@@ -263,6 +273,7 @@ def _execute_whitelisted_command(
     workdir: Path,
     allowed: set[str],
     timeout: int,
+    env_params: dict[str, str] | None = None,
 ) -> CommandResult:
     """Execute a whitelisted command (internal)."""
     is_allowed, error_msg = is_command_allowed(cmd_str, allowed)
@@ -310,10 +321,15 @@ def _execute_whitelisted_command(
     )
 
     try:
+        env = os.environ.copy()
+        if env_params:
+            for key, value in env_params.items():
+                env[f"SKILL_{str(key).upper()}"] = str(value)
         result = rt_subprocess.run(
             cmd_str if use_shell else tokens,
             shell=use_shell,
             cwd=workdir,
+            env=env,
             capture_output=True,
             text=True,
             timeout=timeout,

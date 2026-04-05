@@ -69,3 +69,37 @@ def test_prompt_params_injected_when_no_placeholder(workdir, skills_dir):
     assert "INJECTED_42" in combined_stdout, (
         f"Expected 'INJECTED_42' in stdout but got:\n{combined_stdout}"
     )
+
+
+@pytest.mark.llm
+def test_skill_params_available_as_env_vars(workdir, skills_dir):
+    """
+    Skill parameters must be available as $SKILL_XXX environment variables
+    (with CAPITALIZED names) in shell commands executed by the LLM.
+
+    The test skill 'test-env-var-echo' instructs the LLM to echo
+    $SKILL_SECRET_TOKEN to stdout.
+    """
+    from core.skill import Skill
+    from core.runner import execute_skill_prompt
+
+    skill = Skill.from_path(skills_dir / "test-env-var-echo")
+    assert skill is not None, "test-env-var-echo skill not found"
+
+    result = execute_skill_prompt(
+        skill=skill,
+        workdir=workdir,
+        params={"secret_token": "TOKEN_ABC_123"},
+        max_iterations=3,
+    )
+
+    assert result.exit_code == 0, (
+        f"execute_skill_prompt failed: exit_code={result.exit_code}\n"
+        f"stdout={result.stdout}\n"
+        f"stderr={result.stderr}"
+    )
+
+    combined_stdout = result.stdout
+    assert "TOKEN_ABC_123" in combined_stdout, (
+        f"Expected 'TOKEN_ABC_123' in stdout (from $SKILL_SECRET_TOKEN) but got:\n{combined_stdout}"
+    )
