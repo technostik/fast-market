@@ -63,7 +63,7 @@ DEFAULT_FASTMARKET_TOOLS = {
     },
     "prompt": {
         "description": "Generate prompts from text using AI prompt generation APIs.",
-        "commands": ["apply"],
+        "commands": ["apply", "list"],
     },
 }
 
