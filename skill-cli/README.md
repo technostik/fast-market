@@ -81,6 +81,12 @@ Step-by-step instructions.
 - `timeout` — Execution timeout in seconds (0 = no timeout)
 - `llm_timeout` — LLM call timeout in seconds
 - `autocompact` — Auto-compact LEARN.md when exceeding this many lines
+- `stop_condition` — Custom completion criteria that tells the LLM when the task is done. Injected into the task body to prevent early termination. Example:
+  ```yaml
+  stop_condition: |
+    - You executed the command and got a result
+    - NOT just figured out the answer in your head and returned it as text
+  ```
 
 ## CLI Reference
 

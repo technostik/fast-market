@@ -21,21 +21,22 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--with-scripts", "-s", is_flag=True, help="Create scripts directory")
     def create_cmd(name, description, with_scripts):
         """Create a new skill scaffold."""
-        skills_dir = get_skills_dir()
-        skill_path = skills_dir / name
+        from common.prompt import get_cached_manager
 
-        if skill_path.exists():
-            click.echo(f"Error: Skill '{name}' already exists", err=True)
-            sys.exit(1)
+        manager = get_cached_manager("skill")
+        if manager:
+            template = manager.get("create-skill-template")
+        else:
+            template = None
 
-        skill_path.mkdir(parents=True, exist_ok=True)
+        if not template:
+            template = """---
+name: {skill_name}
+description: {skill_description}
 
-        template = f"""---
-name: {name}
-description: {description or "No description provided"}
 ---
 
-# {name} Skill
+# {skill_name} Skill
 
 ## When to use this skill
 Describe when this skill should be used.
@@ -46,7 +47,21 @@ Provide step-by-step instructions for using this skill.
 ## Examples
 Include examples of how to use this skill.
 """
-        (skill_path / "SKILL.md").write_text(template, encoding="utf-8")
+
+        skills_dir = get_skills_dir()
+        skill_path = skills_dir / name
+
+        if skill_path.exists():
+            click.echo(f"Error: Skill '{name}' already exists", err=True)
+            sys.exit(1)
+
+        skill_path.mkdir(parents=True, exist_ok=True)
+
+        skill_template = template.format(
+            skill_name=name,
+            skill_description=description or "No description provided",
+        )
+        (skill_path / "SKILL.md").write_text(skill_template, encoding="utf-8")
 
         if with_scripts:
             (skill_path / "scripts").mkdir()

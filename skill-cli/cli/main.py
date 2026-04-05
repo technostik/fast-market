@@ -287,6 +287,23 @@ Rules:
 - Extract patterns from commands, not just list them
 - If the task failed, focus on what would make it succeed
 - Output ONLY the JSON, no preamble, no code fences.""",
+    "create-skill-template": """---
+name: {skill_name}
+description: {skill_description}
+
+---
+
+# {skill_name} Skill
+
+## When to use this skill
+Describe when this skill should be used.
+
+## Instructions
+Provide step-by-step instructions for using this skill.
+
+## Examples
+Include examples of how to use this skill.
+""",
 }
 
 

@@ -45,6 +45,12 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - `timeout` — Execution timeout in seconds (0 = no timeout)
 - `llm_timeout` — LLM call timeout in seconds
 - `autocompact` — Auto-compact LEARN.md when exceeding this many lines
+- `stop_condition` — Custom completion criteria that tells the LLM when the task is done. Injected into the task body and helps prevent early termination. Example:
+  ```yaml
+  stop_condition: |
+    - You executed the command and got a result
+    - NOT just figured out the answer in your head and returned it as text
+  ```
 
 ## 🔗 Dependencies & Integration
 - Imports from: `common.core.paths`, `common.skill.skill`, `common.learn`, `click`
