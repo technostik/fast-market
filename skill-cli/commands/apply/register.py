@@ -82,6 +82,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Use compacting prompt to consolidate multiple learnings",
     )
+    @click.option(
+        "--verbose",
+        "-v",
+        is_flag=True,
+        help="Show tool calls and their results during execution",
+    )
     def apply_cmd(
         skill_ref,
         params,
@@ -96,6 +102,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         save_session,
         auto_learn,
         compact,
+        verbose,
     ):
         """Apply (execute) a skill by name.
 
@@ -116,6 +123,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             auto_learn=auto_learn,
             save_session=save_session,
             compact=compact,
+            verbose=verbose,
         )
 
     return CommandManifest(name="apply", click_command=apply_cmd)

@@ -142,6 +142,7 @@ def apply_skill_impl(
     auto_learn: bool = False,
     save_session: str | None = None,
     compact: bool = False,
+    verbose: bool = False,
 ) -> None:
     from core.runner import (
         execute_skill_prompt,
@@ -310,6 +311,7 @@ def apply_skill_impl(
             model=model_name,
             save_session=_resolve_save_session_path(save_session, workdir_path),
             compact=compact,
+            verbose=verbose,
         )
 
         if auto_learn:

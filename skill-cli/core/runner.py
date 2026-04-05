@@ -333,6 +333,7 @@ def execute_skill_prompt(
     model: str | None = None,
     save_session: Path | None = None,
     compact: bool = False,
+    verbose: bool = False,
 ) -> SkillResult:
     """Execute skill body as a task description via common/agent TaskLoop."""
     from functools import partial
@@ -428,7 +429,7 @@ def execute_skill_prompt(
         workdir=workdir,
         provider=provider_name,
         model=model,
-        silent=True,
+        silent=not verbose,
     )
 
     execute_fn = partial(
