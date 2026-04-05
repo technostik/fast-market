@@ -88,7 +88,7 @@ task:
   default_timeout: 60
   active_prompt: default  # Custom prompt name
 
-tools_doc_prompt: default  # Tools doc prompt name
+command_docs_prompt: default  # Command docs prompt name
 ```
 
 Manage with:
@@ -104,19 +104,19 @@ prompt setup --edit-task-prompt my-prompt
 prompt setup --show-task-prompt my-prompt
 prompt setup --import-task-prompt file.yaml
 
-# Tools doc prompt management
-prompt setup --list-tools-doc-prompts
-prompt setup --set-tools-doc-prompt my-tools-doc
-prompt setup --edit-tools-doc-prompt my-tools-doc
-prompt setup --show-tools-doc-prompt my-tools-doc
-prompt setup --import-tools-doc-prompt file.yaml
+# Command docs prompt management
+prompt setup --list-command-docs-prompts
+prompt setup --set-command-docs-prompt my-command-docs
+prompt setup --edit-command-docs-prompt my-command-docs
+prompt setup --show-command-docs-prompt my-command-docs
+prompt setup --import-command-docs-prompt file.yaml
 
 # Preview
 prompt setup --show-task-tools   # Preview inner tool documentation
 ```
 
 - Task prompts stored in `~/.local/share/fast-market/task_prompts/`
-- Tools doc prompts stored in `~/.local/share/fast-market/tools_doc_prompts/`
+- Command docs prompts stored in `~/.local/share/fast-market/command_docs_prompts/`
 
 ## Usage
 

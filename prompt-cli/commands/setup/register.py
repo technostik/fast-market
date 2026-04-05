@@ -15,7 +15,7 @@ from commands.setup.providers import create_providers_group
 from commands.setup.task_commands import create_task_commands_group
 from commands.setup.task import create_task_group
 from commands.setup.task_prompts import create_task_prompts_group
-from commands.setup.tools_doc_prompts import create_tools_doc_prompts_group
+from commands.setup.command_docs_prompts import create_command_docs_prompts_group
 from commands.setup.task_edit import edit_task_config
 from commands.task.prompts import build_command_documentation
 
@@ -25,7 +25,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     task_commands = create_task_commands_group()
     task = create_task_group()
     task_prompts = create_task_prompts_group()
-    tools_doc_prompts = create_tools_doc_prompts_group()
+    command_docs_prompts = create_command_docs_prompts_group()
 
     @click.group("setup", invoke_without_command=True)
     @click.option(
@@ -76,6 +76,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
     setup_cmd.add_command(task_commands)
     setup_cmd.add_command(task)
     setup_cmd.add_command(task_prompts)
-    setup_cmd.add_command(tools_doc_prompts)
+    setup_cmd.add_command(command_docs_prompts)
 
     return CommandManifest(name="setup", click_command=setup_cmd)

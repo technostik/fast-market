@@ -98,13 +98,13 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 5. Use `prompt setup --show-task-tools` to preview the inner tool documentation
 6. Task prompts are stored in `~/.local/share/fast-market/task_prompts/`
 
-**To manage tools doc prompts:**
-1. Use `prompt setup tools-doc-prompts list` to see available prompts
-2. Use `prompt setup tools-doc-prompts set <name>` to activate a prompt
-3. Use `prompt setup tools-doc-prompts show <name>` to view a prompt template
-4. Use `prompt setup tools-doc-prompts edit <name>` to customize a prompt
-5. Use `prompt setup tools-doc-prompts import <file>` to import from YAML
-6. Tools doc prompts are stored in `~/.local/share/fast-market/tools_doc_prompts/`
+**To manage command docs prompts:**
+1. Use `prompt setup command-docs-prompts list` to see available prompts
+2. Use `prompt setup command-docs-prompts set <name>` to activate a prompt
+3. Use `prompt setup command-docs-prompts show <name>` to view a prompt template
+4. Use `prompt setup command-docs-prompts edit <name>` to customize a prompt
+5. Use `prompt setup command-docs-prompts import <file>` to import from YAML
+6. Command docs prompts are stored in `~/.local/share/fast-market/command_docs_prompts/`
 7. Default template uses placeholders: `{aliases}`, `{fastmarket_tools}`, `{system_commands}`, `{other_commands}`, `{skills}`
 
 **To manage skills:**

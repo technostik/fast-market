@@ -9,7 +9,7 @@ from common.agent.prompts import (
     render_command_documentation,
     build_command_documentation,
     get_active_agent_prompt_config,
-    get_active_tools_doc_prompt_config,
+    get_active_command_docs_prompt_config,
     format_standard_command_doc,
     _build_aliases_section,
     _build_fastmarket_tools_section,
@@ -27,5 +27,8 @@ __all__ = [
     "render_command_documentation",
     "build_command_documentation",
     "get_active_agent_prompt_config",
-    "get_active_tools_doc_prompt_config",
+    "get_active_command_docs_prompt_config",
 ]
+
+# Backward compatibility alias
+get_active_tools_doc_prompt_config = get_active_command_docs_prompt_config
