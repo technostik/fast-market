@@ -13,6 +13,7 @@ from common.llm.base import (
     ToolCall,
     _format_debug_request,
     _format_debug_response,
+    format_message_history,
 )
 
 logger = structlog.get_logger(__name__)
@@ -71,10 +72,15 @@ class OpenAICompatibleProvider(LazyLLMProvider):
             self._provider = None
             return
 
+        flatten_messages = provider_config.get("flatten_messages", False)
+
         client = OpenAI(api_key=api_key or "", base_url=base_url)
 
         self._provider = _RealOpenAICompatibleProvider(
-            client=client, base_url=base_url, default_model=default_model
+            client=client,
+            base_url=base_url,
+            default_model=default_model,
+            flatten_messages=flatten_messages,
         )
         logger.info(
             "openai_compatible_provider_initialized",
@@ -86,10 +92,13 @@ class OpenAICompatibleProvider(LazyLLMProvider):
 class _RealOpenAICompatibleProvider(LLMProvider):
     name = "openai-compatible"
 
-    def __init__(self, client, base_url: str, default_model: str):
+    def __init__(
+        self, client, base_url: str, default_model: str, flatten_messages: bool = False
+    ):
         self.client = client
         self.base_url = base_url
         self.default_model = default_model
+        self.flatten_messages = flatten_messages
         self._debug = False
 
     def set_debug(self, debug: bool) -> None:
@@ -101,7 +110,14 @@ class _RealOpenAICompatibleProvider(LLMProvider):
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)
 
-        if request.messages:
+        flatten = self.flatten_messages or request.flatten_messages
+
+        if request.messages and flatten:
+            prompt = format_message_history(request.messages)
+            if request.system:
+                prompt = f"[SYSTEM]\n{request.system}\n\n{prompt}"
+            messages = [{"role": "user", "content": prompt}]
+        elif request.messages:
             messages = list(request.messages)
             if request.system:
                 messages.insert(0, {"role": "system", "content": request.system})
