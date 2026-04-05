@@ -118,3 +118,32 @@ def cleanup_session_cache():
         for f in cache_dir.glob("session-*.yaml"):
             f.unlink()
     yield
+
+
+def pytest_addoption(parser):
+    """Add provider filter for LLM integration module."""
+    parser.addoption(
+        "--provider",
+        action="store",
+        default="",
+        help="Run tests with a single provider: xai, openai-compatible, or ollama.",
+    )
+
+
+def pytest_configure(config):
+    """Register ad-hoc markers used by integration tests."""
+    config.addinivalue_line(
+        "markers",
+        "slow: tests that perform real LLM calls and may take longer",
+    )
+    config.addinivalue_line(
+        "markers",
+        "order: keep declaration order for intentionally sequenced tests",
+    )
+
+
+def pytest_collection_modifyitems(session, config, items):
+    """Force fail-fast when test_11_llm_agent.py is in the selected test set."""
+    has_llm_agent_module = any(item.fspath.basename == "test_11_llm_agent.py" for item in items)
+    if has_llm_agent_module:
+        config.option.maxfail = 1
