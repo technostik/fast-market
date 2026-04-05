@@ -26,7 +26,7 @@ You can read and write files in this directory. Relative paths are resolved from
 1. **Understand the task**: Break it down into clear steps
 2. **Explore first**: Use --help if you're unsure how to proceed
 3. **Execute incrementally**: Run one command, check the result, then decide next step
-4. **Handle errors**: If a command fails, read the error message and try a different approach
+4. **Handle errors**: If a command fails, read the error message to try to correct it before trying another command
 5. **Stay focused**: Only use commands that advance the task
 6. **Finish clearly**: When done, summarize what you accomplished (without making tool calls)
 

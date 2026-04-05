@@ -12,14 +12,20 @@ _llm_log_lock = threading.Lock()
 _llm_log_counter = 0
 _llm_log_message_count = 0
 _llm_log_system_logged = False
+_llm_log_config_logged = False
 
 
 def set_llm_log_file(path: Path | None) -> None:
     """Set the file path for raw LLM request/response logging."""
-    global _llm_log_file, _llm_log_message_count, _llm_log_system_logged
+    global \
+        _llm_log_file, \
+        _llm_log_message_count, \
+        _llm_log_system_logged, \
+        _llm_log_config_logged
     _llm_log_file = path
     _llm_log_message_count = 0
     _llm_log_system_logged = False
+    _llm_log_config_logged = False
     if path is not None:
         path.write_text("")
 
@@ -37,17 +43,20 @@ def _format_raw_request(request: "LLMRequest", iteration: int) -> str:
     """Format a raw LLM request for logging.
 
     Only logs new messages since the last request to avoid repetition.
-    System prompt is logged once on the first request.
+    System prompt and config are logged once on the first request.
     """
-    global _llm_log_message_count, _llm_log_system_logged
+    global _llm_log_message_count, _llm_log_system_logged, _llm_log_config_logged
 
-    lines = [
-        f"=== REQUEST {iteration} ===",
-        f"model: {request.model or '(default)'}",
-        f"temperature: {request.temperature}",
-        f"max_tokens: {request.max_tokens}",
-        f"tools: {_json.dumps(request.tools, indent=2) if request.tools else 'none'}",
-    ]
+    lines = [f"=== REQUEST {iteration} ==="]
+
+    if not _llm_log_config_logged:
+        lines.append(f"model: {request.model or '(default)'}")
+        lines.append(f"temperature: {request.temperature}")
+        lines.append(f"max_tokens: {request.max_tokens}")
+        lines.append(
+            f"tools: {_json.dumps(request.tools, indent=2) if request.tools else 'none'}"
+        )
+        _llm_log_config_logged = True
 
     if request.system and not _llm_log_system_logged:
         lines.append("")
