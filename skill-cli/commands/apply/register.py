@@ -88,6 +88,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Show tool calls and their results during execution",
     )
+    @click.option(
+        "--debug",
+        type=click.Choice(["preview", "full"]),
+        default=None,
+        help="Debug mode: 'preview' shows LLM request/response, 'full' shows everything",
+    )
     def apply_cmd(
         skill_ref,
         params,
@@ -103,6 +109,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         auto_learn,
         compact,
         verbose,
+        debug,
     ):
         """Apply (execute) a skill by name.
 
@@ -124,6 +131,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             save_session=save_session,
             compact=compact,
             verbose=verbose,
+            debug=debug,
         )
 
     return CommandManifest(name="apply", click_command=apply_cmd)

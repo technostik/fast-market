@@ -166,7 +166,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             max_iterations=max_iterations or task_config_dict.get("max_iterations", 20),
             default_timeout=timeout or task_config_dict.get("default_timeout", 60),
             llm_timeout=llm_timeout,
-            temperature=common_config.get("default_temperature", 0.7),
+            temperature=common_config.get("default_temperature", 0.3),
             command_docs=command_docs,
             agent_prompt=agent_prompt,
         )

@@ -233,7 +233,7 @@ def resolve_llm_config(tool_name: str) -> dict:
         return {
             "providers": cfg.get("providers", {}),
             "default_provider": default_provider,
-            "default_temperature": cfg.get("default_temperature", 0.7),
+            "default_temperature": cfg.get("default_temperature", 0.3),
         }
     llm = cfg.get("llm", {})
     if not llm:
@@ -243,7 +243,7 @@ def resolve_llm_config(tool_name: str) -> dict:
     return {
         "providers": llm.get("providers", {}),
         "default_provider": llm["default_provider"],
-        "default_temperature": llm.get("default_temperature", 0.7),
+        "default_temperature": llm.get("default_temperature", 0.3),
     }
 
 

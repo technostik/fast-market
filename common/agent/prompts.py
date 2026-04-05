@@ -10,8 +10,7 @@ DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a task execution agent. You have acce
 {params_section}
 
 # Working Directory
-All commands execute in: `{workdir}`
-
+All commands execute in a workding directory : USE RELATIVE PATHS ONLY. DO NOT USE ABSOLUTE PATHS.
 You can read and write files in this directory. Relative paths are resolved from here.
 
 {env_vars_section}
@@ -25,7 +24,7 @@ You can read and write files in this directory. Relative paths are resolved from
 # How to Work
 
 1. **Understand the task**: Break it down into clear steps
-2. **Explore first**: Use `ls` and `cat` to understand what files exist
+2. **Explore first**: Use --help if you're unsure how to proceed
 3. **Execute incrementally**: Run one command, check the result, then decide next step
 4. **Handle errors**: If a command fails, read the error message and try a different approach
 5. **Stay focused**: Only use commands that advance the task
@@ -434,6 +433,10 @@ def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
         docs.append(f"### {cmd}")
         docs.append(desc)
         docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
+
+        if isinstance(config, dict) and config.get("commands"):
+            cmds_list = ", ".join(f"`{c}`" for c in config["commands"])
+            docs.append(f"**Commands**: {cmds_list}")
 
         cmd_aliases = reverse_aliases.get(cmd, [])
         if cmd_aliases:

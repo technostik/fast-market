@@ -602,7 +602,7 @@ def _run_task(
         max_iterations=agent_cfg.get("max_iterations", 20),
         default_timeout=agent_cfg.get("default_timeout", 60),
         llm_timeout=0,
-        temperature=agent_cfg.get("default_temperature", 0.7),
+        temperature=agent_cfg.get("default_temperature", 0.3),
         command_docs=command_docs,
         agent_prompt=agent_prompt,
     )

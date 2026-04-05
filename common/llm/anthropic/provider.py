@@ -70,6 +70,53 @@ def _convert_tools_to_anthropic(tools: list[dict]) -> list[dict]:
     return anthropic_tools
 
 
+def _convert_messages_to_anthropic(messages: list[dict]) -> list[dict]:
+    """Convert OpenAI-style messages (with tool roles) to Anthropic format.
+
+    Anthropic does not support a 'tool' role. Tool results must be sent as
+    user messages with content blocks of type 'tool_result'.
+    """
+    result = []
+    for msg in messages:
+        role = msg.get("role", "")
+        if role == "tool":
+            tool_result_block = {
+                "type": "tool_result",
+                "tool_use_id": msg.get("tool_call_id", ""),
+                "content": msg.get("content", ""),
+            }
+            if result and result[-1]["role"] == "user":
+                result[-1]["content"].append(tool_result_block)
+            else:
+                result.append({"role": "user", "content": [tool_result_block]})
+        elif role == "assistant":
+            if msg.get("tool_calls"):
+                content_blocks = []
+                if msg.get("content"):
+                    content_blocks.append({"type": "text", "text": msg["content"]})
+                for tc in msg["tool_calls"]:
+                    func_data = tc.get("function", {})
+                    args = func_data.get("arguments", "{}")
+                    if isinstance(args, dict):
+                        args = json.dumps(args)
+                    content_blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.get("id", ""),
+                            "name": func_data.get("name", ""),
+                            "input": json.loads(args)
+                            if isinstance(args, str)
+                            else args,
+                        }
+                    )
+                result.append({"role": "assistant", "content": content_blocks})
+            else:
+                result.append({"role": "assistant", "content": msg.get("content", "")})
+        else:
+            result.append({"role": role, "content": msg.get("content", "")})
+    return result
+
+
 class _RealAnthropicProvider(LLMProvider):
     name = "anthropic"
 
@@ -81,14 +128,14 @@ class _RealAnthropicProvider(LLMProvider):
     def set_debug(self, debug: bool) -> None:
         self._debug = debug
 
-    def complete(self, request: LLMRequest) -> LLMResponse:
+    def _complete_raw(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model
 
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)
 
         if request.messages:
-            messages = list(request.messages)
+            messages = _convert_messages_to_anthropic(request.messages)
         else:
             messages = [{"role": "user", "content": request.prompt}]
 

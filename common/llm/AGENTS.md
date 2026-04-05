@@ -57,8 +57,8 @@ from common.llm.base import LLMRequest
 request = LLMRequest(
     prompt="Your prompt here",
     model="claude-sonnet-4-20250514",
-    temperature=0.7,
-    max_tokens=2048,
+    temperature=0.3,
+    max_tokens=4096,
 )
 
 response = provider.complete(request)

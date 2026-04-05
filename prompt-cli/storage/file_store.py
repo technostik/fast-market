@@ -62,8 +62,8 @@ class FilePromptStore:
                 description=post.metadata.get("description", ""),
                 model_provider=post.metadata.get("model_provider", ""),
                 model_name=post.metadata.get("model_name", ""),
-                temperature=post.metadata.get("temperature", 0.7),
-                max_tokens=post.metadata.get("max_tokens", 2048),
+                temperature=post.metadata.get("temperature", 0.3),
+                max_tokens=post.metadata.get("max_tokens", 4096),
                 metadata=post.metadata.get("metadata", {}),
                 created_at=datetime.fromisoformat(post.metadata["created_at"])
                 if post.metadata.get("created_at")

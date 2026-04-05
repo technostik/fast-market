@@ -134,8 +134,8 @@ name: my-prompt
 description: A useful prompt
 model_provider: anthropic
 model_name: claude-sonnet-4-20250514
-temperature: 0.7
-max_tokens: 2048
+temperature: 0.3
+max_tokens: 4096
 created_at: "2026-03-20T10:00:00"
 updated_at: "2026-03-20T10:00:00"
 ---

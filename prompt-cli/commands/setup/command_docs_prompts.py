@@ -20,7 +20,6 @@ from commands.task.prompts import TOOLS_DOC_TEMPLATES
 
 def create_command_docs_prompts_group() -> click.Group:
     @click.group("command-docs-prompts")
-    @click.group("tools-doc-prompts")  # Backward compatibility alias
     def command_docs_prompts():
         """Manage command documentation prompt templates.
 

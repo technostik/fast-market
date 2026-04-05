@@ -639,8 +639,8 @@ class Prompt:
     description: str = ""
     model_provider: str = ""     # Default provider (empty = use global default)
     model_name: str = ""         # Specific model
-    temperature: float = 0.7
-    max_tokens: int = 2048
+    temperature: float = 0.3
+    max_tokens: int = 4096
     metadata: dict = field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -670,8 +670,8 @@ CREATE TABLE prompts (
     description TEXT,
     model_provider TEXT,
     model_name TEXT,
-    temperature REAL DEFAULT 0.7,
-    max_tokens INTEGER DEFAULT 2048,
+    temperature REAL DEFAULT 0.3,
+    max_tokens INTEGER DEFAULT 4096,
     metadata_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT,
     updated_at TEXT
@@ -702,8 +702,8 @@ from dataclasses import dataclass
 class LLMRequest:
     prompt: str
     model: str | None = None
-    temperature: float = 0.7
-    max_tokens: int = 2048
+    temperature: float = 0.3
+    max_tokens: int = 4096
     system: str | None = None
 
 @dataclass

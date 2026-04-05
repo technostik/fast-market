@@ -90,7 +90,7 @@ class _RealGroqProvider(LLMProvider):
     def set_debug(self, debug: bool) -> None:
         self._debug = debug
 
-    def complete(self, request: LLMRequest) -> LLMResponse:
+    def _complete_raw(self, request: LLMRequest) -> LLMResponse:
         model = request.model or self.default_model
 
         if self._debug:
