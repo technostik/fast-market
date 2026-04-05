@@ -390,6 +390,8 @@ def execute_skill_prompt(
     fastmarket_tools = task_config_dict.get("fastmarket_tools", {})
     system_commands = task_config_dict.get("system_commands", [])
     allowed_commands = list(fastmarket_tools.keys()) + system_commands
+    command_docs = task_config_dict.get("command_docs")
+    agent_prompt = task_config_dict.get("agent_prompt")
 
     try:
         config = load_tool_config("apply")
@@ -422,6 +424,8 @@ def execute_skill_prompt(
         default_timeout=task_config_dict.get("default_timeout", 60),
         llm_timeout=effective_llm_timeout,
         temperature=config.get("default_temperature", 0.7),
+        command_docs=command_docs,
+        agent_prompt=agent_prompt,
     )
 
     loop = TaskLoop(

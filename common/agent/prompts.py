@@ -504,8 +504,8 @@ def _init_task_config(config: dict | None = None) -> dict:
             },
         }
 
-    if "tools_doc" not in task:
-        task["tools_doc"] = {
+    if "command_docs" not in task:
+        task["command_docs"] = {
             "active": "minimal",
             "templates": {
                 "minimal": {
@@ -518,13 +518,26 @@ def _init_task_config(config: dict | None = None) -> dict:
     return task
 
 
-def get_active_tools_doc_prompt_config() -> dict:
-    """Get the active tools doc prompt configuration from task config."""
+def get_command_docs_prompt_config(command_docs_config: dict | None = None) -> dict:
+    """Get the command docs prompt configuration.
+
+    If command_docs_config is provided, use it directly. Otherwise, load from task config file.
+    """
+    if command_docs_config is not None:
+        active_name = command_docs_config.get("active", "minimal")
+        templates = command_docs_config.get("templates", {})
+        template_config = templates.get(active_name, templates.get("minimal", {}))
+        return {
+            "name": active_name,
+            "description": template_config.get("description", ""),
+            "template": template_config.get("template", TOOLS_DOC_TEMPLATES["minimal"]),
+        }
+
     config = _load_task_config()
     task = _init_task_config(config)
-    tools_doc = task.get("tools_doc", {})
-    active_name = tools_doc.get("active", "minimal")
-    templates = tools_doc.get("templates", {})
+    command_docs = task.get("command_docs", {})
+    active_name = command_docs.get("active", "minimal")
+    templates = command_docs.get("templates", {})
 
     template_config = templates.get(active_name, templates.get("minimal", {}))
     return {
@@ -534,12 +547,31 @@ def get_active_tools_doc_prompt_config() -> dict:
     }
 
 
-def get_active_agent_prompt_config() -> dict:
-    """Get the active agent prompt configuration.
+def get_active_command_docs_prompt_config() -> dict:
+    """Get the active command docs prompt configuration from task config."""
+    return get_command_docs_prompt_config(None)
 
-    First tries to use cached PromptManager from common.prompt, then falls back
-    to config-based approach.
+
+def get_active_agent_prompt_config() -> dict:
+    """Get the active agent prompt configuration from task config file."""
+    return get_agent_prompt_config(None)
+
+
+def get_agent_prompt_config(agent_prompt_config: dict | None = None) -> dict:
+    """Get the agent prompt configuration.
+
+    If agent_prompt_config is provided, use it directly. Otherwise, load from task config file.
     """
+    if agent_prompt_config is not None:
+        active_name = agent_prompt_config.get("active", "default")
+        templates = agent_prompt_config.get("templates", {})
+        template_config = templates.get(active_name, templates.get("default", {}))
+        return {
+            "name": active_name,
+            "description": template_config.get("description", ""),
+            "template": template_config.get("template", DEFAULT_AGENT_PROMPT_TEMPLATE),
+        }
+
     from common.prompt import get_cached_manager
 
     manager = get_cached_manager("task")
@@ -652,9 +684,10 @@ def build_command_documentation(
 def render_command_documentation(
     fastmarket_tools_config: dict,
     system_commands: list[str],
+    command_docs_config: dict | None = None,
 ) -> str:
     """Build formatted documentation using active template."""
-    prompt_config = get_active_tools_doc_prompt_config()
+    prompt_config = get_command_docs_prompt_config(command_docs_config)
     placeholders = build_command_documentation(fastmarket_tools_config, system_commands)
     return prompt_config["template"].format(**placeholders)
 
@@ -665,11 +698,13 @@ def build_system_prompt(
     system_commands: list[str],
     workdir: Path,
     task_params: dict[str, str] | None = None,
+    command_docs_config: dict | None = None,
+    agent_prompt_config: dict | None = None,
 ) -> str:
     """Build system prompt for task execution agent."""
-    prompt_config = get_active_agent_prompt_config()
+    prompt_config = get_agent_prompt_config(agent_prompt_config)
     command_docs = render_command_documentation(
-        fastmarket_tools_config, system_commands
+        fastmarket_tools_config, system_commands, command_docs_config
     )
 
     params_section = ""

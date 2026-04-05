@@ -302,8 +302,8 @@ def init_skill_agent_config(agent_dict: dict | None = None) -> dict:
             },
         }
 
-    if "tools_doc" not in agent_dict:
-        agent_dict["tools_doc"] = {
+    if "command_docs" not in agent_dict:
+        agent_dict["command_docs"] = {
             "active": "minimal",
             "templates": {
                 "minimal": {

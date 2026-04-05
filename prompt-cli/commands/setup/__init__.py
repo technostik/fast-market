@@ -222,8 +222,8 @@ def init_task_config(config: dict) -> dict:
             },
         }
 
-    if "tools_doc" not in task:
-        task["tools_doc"] = {
+    if "command_docs" not in task:
+        task["command_docs"] = {
             "active": "minimal",
             "templates": {
                 "full": {
@@ -237,8 +237,8 @@ def init_task_config(config: dict) -> dict:
             },
         }
     else:
-        td = task.get("tools_doc", {})
-        templates = td.get("templates", {})
+        cd = task.get("command_docs", {})
+        templates = cd.get("templates", {})
         if "minimal" in templates:
             minimal_tpl = templates["minimal"].get("template", "")
             needs_migration = (

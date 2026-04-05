@@ -157,6 +157,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         fastmarket_tools = task_config_dict.get("fastmarket_tools", {})
         system_commands = task_config_dict.get("system_commands", [])
         allowed_commands = list(fastmarket_tools.keys()) + system_commands
+        command_docs = task_config_dict.get("command_docs")
+        agent_prompt = task_config_dict.get("agent_prompt")
         task_config = TaskConfig(
             fastmarket_tools=fastmarket_tools,
             system_commands=system_commands,
@@ -165,6 +167,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             default_timeout=timeout or task_config_dict.get("default_timeout", 60),
             llm_timeout=llm_timeout,
             temperature=common_config.get("default_temperature", 0.7),
+            command_docs=command_docs,
+            agent_prompt=agent_prompt,
         )
 
         resolved_workdir = (

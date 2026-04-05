@@ -151,8 +151,8 @@ def init_task_config(config: dict | None = None) -> dict:
             },
         }
 
-    if "tools_doc" not in task:
-        task["tools_doc"] = {
+    if "command_docs" not in task:
+        task["command_docs"] = {
             "active": "minimal",
             "templates": {
                 "minimal": {

@@ -592,6 +592,8 @@ def _run_task(
     fastmarket_tools = agent_cfg.get("fastmarket_tools", {})
     system_commands = agent_cfg.get("system_commands", [])
     allowed = list(fastmarket_tools.keys()) + system_commands
+    command_docs = agent_cfg.get("command_docs")
+    agent_prompt = agent_cfg.get("agent_prompt")
 
     task_config = TaskConfig(
         fastmarket_tools=fastmarket_tools,
@@ -601,6 +603,8 @@ def _run_task(
         default_timeout=agent_cfg.get("default_timeout", 60),
         llm_timeout=0,
         temperature=agent_cfg.get("default_temperature", 0.7),
+        command_docs=command_docs,
+        agent_prompt=agent_prompt,
     )
 
     loop = TaskLoop(

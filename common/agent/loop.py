@@ -28,6 +28,8 @@ class TaskConfig:
     llm_timeout: int = 0  # 0 = no limit
     allowed_commands: list[str] = field(default_factory=list)
     temperature: float = 0.7
+    command_docs: dict | None = None
+    agent_prompt: dict | None = None
 
 
 _TERMINATION_PATTERNS = (
@@ -163,6 +165,8 @@ class TaskLoop:
             system_commands=self.config.system_commands,
             workdir=self.workdir,
             task_params=task_params,
+            command_docs_config=self.config.command_docs,
+            agent_prompt_config=self.config.agent_prompt,
         )
 
         messages = [

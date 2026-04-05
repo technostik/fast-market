@@ -131,21 +131,23 @@ def _validate_agent_config(agent: dict) -> list[str]:
                             f"agent_prompt.templates.{name} must have 'template' field"
                         )
 
-    if "tools_doc" in agent:
-        td = agent["tools_doc"]
-        if not isinstance(td, dict):
-            errors.append("tools_doc must be a mapping")
+    if "command_docs" in agent:
+        cd = agent["command_docs"]
+        if not isinstance(cd, dict):
+            errors.append("command_docs must be a mapping")
         else:
-            templates = td.get("templates", {})
+            templates = cd.get("templates", {})
             if not isinstance(templates, dict):
-                errors.append("tools_doc.templates must be a mapping")
+                errors.append("command_docs.templates must be a mapping")
             else:
                 for name, tpl in templates.items():
                     if not isinstance(tpl, dict):
-                        errors.append(f"tools_doc.templates.{name} must be a mapping")
+                        errors.append(
+                            f"command_docs.templates.{name} must be a mapping"
+                        )
                     elif "template" not in tpl:
                         errors.append(
-                            f"tools_doc.templates.{name} must have 'template' field"
+                            f"command_docs.templates.{name} must have 'template' field"
                         )
 
     return errors
