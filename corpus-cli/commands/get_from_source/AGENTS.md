@@ -6,14 +6,18 @@ Retrieves a document by source plugin and ID, auto-syncing if not already indexe
 
 ## Behaviour
 
-1. Checks if document exists in store by (source, source_id)
-2. If found → returns document immediately
-3. If not found → auto-syncs:
+1. Auto-detects source from ID if not provided:
+   - YouTube URLs or 11-char IDs → youtube
+   - File paths (contains `/` or ends with `.md`) → obsidian
+   - Single plugin available → auto-selects it
+2. Checks if document exists in store by (source, source_id)
+3. If found → returns document immediately
+4. If not found → auto-syncs:
    - Fetches metadata/details from source
    - Fetches full document content
    - Stores document, chunks, and embeddings
    - Updates sync cursor
-4. Outputs document in requested format
+5. Outputs document in requested format
 
 ## Source-Specific ID Formats
 
@@ -34,6 +38,7 @@ Retrieves a document by source plugin and ID, auto-syncing if not already indexe
 ## Error Handling
 
 Fails loudly with explicit messages:
+- Could not auto-detect source (with available sources listed)
 - Invalid YouTube URL/ID
 - Video/note not found
 - Rate limiting, network errors

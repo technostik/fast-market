@@ -31,11 +31,25 @@ def _extract_youtube_id(id_input: str) -> str | None:
     return None
 
 
+def _detect_source(id_input: str, plugin_manifests: dict) -> str | None:
+    if _extract_youtube_id(id_input):
+        if "youtube" in plugin_manifests:
+            return "youtube"
+    if "/" in id_input or id_input.endswith(".md"):
+        if "obsidian" in plugin_manifests:
+            return "obsidian"
+    if len(plugin_manifests) == 1:
+        return next(iter(plugin_manifests.keys()))
+    return None
+
+
 def register(plugin_manifests: dict) -> CommandManifest:
     source_choices = list(plugin_manifests.keys())
 
     @click.command("get-from-source")
-    @click.argument("source", type=click.Choice(source_choices))
+    @click.argument(
+        "source", type=click.Choice(source_choices), required=False, default=None
+    )
     @click.argument("id")
     @click.option(
         "--what",
@@ -57,6 +71,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def get_from_source_cmd(ctx, source, id, what, fmt, **kwargs):
         """Retrieve a document by source and ID, auto-syncing if not already indexed.
 
+        Source is auto-detected from the ID if not provided:
+        - YouTube URLs or 11-char IDs → youtube
+        - File paths (contains / or ends with .md) → obsidian
+
         Supports flexible ID formats:
 
         \b
@@ -65,6 +83,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
         Obsidian: vault-relative path (e.g., notes/foo.md)
         """
         engine, plugins, store = build_engine(ctx.obj["verbose"])
+
+        if source is None:
+            source = _detect_source(id, plugin_manifests)
+            if source is None:
+                click.echo(
+                    f"Could not auto-detect source for: {id}\n"
+                    f"Available sources: {', '.join(plugin_manifests.keys())}",
+                    err=True,
+                )
+                sys.exit(1)
+
         plugin = plugins[source]
 
         if source == "youtube":
