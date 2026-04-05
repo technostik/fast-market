@@ -341,9 +341,21 @@ def execute_skill_prompt(
     from common.core.config import load_tool_config
     from common.llm.registry import discover_providers, get_default_provider_name
 
-    body = skill.get_body()
+    original_body = skill.get_body()
+    body = original_body
+    consumed_params: set[str] = set()
     for key, value in (params or {}).items():
-        body = body.replace(f"{{{key}}}", str(value))
+        placeholder = f"{{{key}}}"
+        if placeholder in body:
+            body = body.replace(placeholder, str(value))
+            consumed_params.add(key)
+
+    unconsumed = {k: v for k, v in (params or {}).items() if k not in consumed_params}
+    if unconsumed:
+        lines = ["\n\n## Task Parameters"]
+        for key in sorted(unconsumed):
+            lines.append(f"- {key}: {unconsumed[key]}")
+        body = body + "\n".join(lines)
 
     learn_path = skill.path / "LEARN.md"
     if learn_path.exists():
