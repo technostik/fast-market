@@ -24,29 +24,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         from common.prompt import get_cached_manager
 
         manager = get_cached_manager("skill")
-        if manager:
-            template = manager.get("create-skill-template")
-        else:
-            template = None
+        if manager is None:
+            click.echo("Error: Prompt manager not available", err=True)
+            sys.exit(1)
 
-        if not template:
-            template = """---
-name: {skill_name}
-description: {skill_description}
-
----
-
-# {skill_name} Skill
-
-## When to use this skill
-Describe when this skill should be used.
-
-## Instructions
-Provide step-by-step instructions for using this skill.
-
-## Examples
-Include examples of how to use this skill.
-"""
+        template = manager.get("create-skill-template")
 
         skills_dir = get_skills_dir()
         skill_path = skills_dir / name
