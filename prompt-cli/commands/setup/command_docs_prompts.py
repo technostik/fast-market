@@ -148,7 +148,3 @@ def create_command_docs_prompts_group() -> click.Group:
             temp_path.unlink(missing_ok=True)
 
     return command_docs_prompts
-
-
-# Backward compatibility alias
-create_tools_doc_prompts_group = create_command_docs_prompts_group
