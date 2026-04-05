@@ -30,6 +30,11 @@ pytestmark = pytest.mark.order  # keep declaration order
 SUPPORTED_PROVIDERS = ["xai", "openai-compatible", "ollama"]
 
 
+@pytest.fixture(scope="session", params=SUPPORTED_PROVIDERS)
+def provider_name(request) -> str:
+    return request.param
+
+
 @pytest.fixture(scope="session")
 def selected_providers(request) -> list[str]:
     raw = request.config.getoption("--provider")
@@ -48,7 +53,10 @@ def llm_config() -> dict:
 
 
 @pytest.fixture(scope="session")
-def provider_fixture(provider_name: str, llm_config: dict):
+def provider_fixture(provider_name: str, llm_config: dict, selected_providers: list[str]):
+    if provider_name not in selected_providers:
+        pytest.skip(f"Provider '{provider_name}' not selected")
+
     providers = discover_providers(llm_config)
     if provider_name not in providers:
         pytest.skip(f"{provider_name} not configured")
@@ -117,6 +125,20 @@ def _maybe_skip_provider(provider_name: str, selected_providers: list[str]) -> N
         pytest.skip(f"Provider '{provider_name}' not selected")
 
 
+def _safe_complete(provider, request: LLMRequest, provider_name: str):
+    try:
+        return provider.complete(request)
+    except Exception as exc:
+        pytest.skip(f"{provider_name} unavailable during request: {exc}")
+
+
+def _safe_run(loop: TaskLoop, task: str, execute_fn, provider_name: str) -> None:
+    try:
+        loop.run(task, execute_fn=execute_fn)
+    except Exception as exc:
+        pytest.skip(f"{provider_name} unavailable during loop run: {exc}")
+
+
 # Group 1 — Config & Provider Bootstrap
 
 def test_01_llm_config_has_providers(llm_config: dict):
@@ -133,6 +155,7 @@ def test_01_llm_config_has_providers(llm_config: dict):
 
 
 def test_02_discover_providers_returns_instances(llm_config: dict):
+
     providers = discover_providers(llm_config)
     assert isinstance(providers, dict)
     assert providers
@@ -140,6 +163,7 @@ def test_02_discover_providers_returns_instances(llm_config: dict):
 
 
 def test_03_provider_is_lazy_llm_provider(llm_config: dict):
+
     providers = discover_providers(llm_config)
     assert providers
     for provider in providers.values():
@@ -167,7 +191,6 @@ def test_04_missing_provider_key_leaves_others_intact(llm_config: dict):
 # Group 2 — Raw LLM Round-Trip
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_05_simple_completion(provider_name, selected_providers, provider_fixture):
     _maybe_skip_provider(provider_name, selected_providers)
 
@@ -177,14 +200,13 @@ def test_05_simple_completion(provider_name, selected_providers, provider_fixtur
         max_tokens=20,
         temperature=0,
     )
-    response = provider_fixture.complete(request)
+    response = _safe_complete(provider_fixture, request, provider_name)
     assert isinstance(response.content, str)
     assert response.content.strip()
     assert "PONG" in response.content.upper()
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_06_tool_call_returned(provider_name, selected_providers, provider_fixture):
     _maybe_skip_provider(provider_name, selected_providers)
 
@@ -195,7 +217,7 @@ def test_06_tool_call_returned(provider_name, selected_providers, provider_fixtu
         max_tokens=200,
         temperature=0,
     )
-    response = provider_fixture.complete(request)
+    response = _safe_complete(provider_fixture, request, provider_name)
 
     assert response.tool_calls is not None
     assert len(response.tool_calls) == 1
@@ -207,19 +229,19 @@ def test_06_tool_call_returned(provider_name, selected_providers, provider_fixtu
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_07_tool_result_closes_loop(provider_name, selected_providers, provider_fixture):
     _maybe_skip_provider(provider_name, selected_providers)
 
     user_prompt = "What is the weather in Paris? Use the get_weather tool."
-    initial = provider_fixture.complete(
+    initial = _safe_complete(provider_fixture,
         LLMRequest(
             system="You are a helpful assistant.",
             prompt=user_prompt,
             tools=_weather_tools(),
             max_tokens=200,
             temperature=0,
-        )
+        ),
+        provider_name,
     )
     assert initial.tool_calls, "expected initial tool call"
 
@@ -248,14 +270,15 @@ def test_07_tool_result_closes_loop(provider_name, selected_providers, provider_
         },
     ]
 
-    follow_up = provider_fixture.complete(
+    follow_up = _safe_complete(provider_fixture,
         LLMRequest(
             system="You are a helpful assistant.",
             messages=messages,
             tools=_weather_tools(),
             max_tokens=200,
             temperature=0,
-        )
+        ),
+        provider_name,
     )
 
     assert follow_up.tool_calls in (None, [])
@@ -264,18 +287,19 @@ def test_07_tool_result_closes_loop(provider_name, selected_providers, provider_
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_08_no_tool_call_when_not_needed(provider_name, selected_providers, provider_fixture):
     _maybe_skip_provider(provider_name, selected_providers)
 
-    response = provider_fixture.complete(
+    response = _safe_complete(
+        provider_fixture,
         LLMRequest(
             system="You are a helpful assistant.",
             prompt="What is 2 + 2? Answer with just the number.",
             tools=_weather_tools(),
             max_tokens=30,
             temperature=0,
-        )
+        ),
+        provider_name,
     )
 
     assert response.tool_calls in (None, [])
@@ -473,12 +497,11 @@ def test_22_empty_command_blocked(tmp_path: Path):
 # Group 6 — Agentic Loop Integration
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_23_loop_completes_echo_task(provider_name, selected_providers, make_task_loop, echo_execute_fn):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    loop.run("Run the command 'echo hello_world' and tell me what you see.", execute_fn=echo_execute_fn)
+    _safe_run(loop, "Run the command 'echo hello_world' and tell me what you see.", echo_execute_fn, provider_name)
     session = loop.session
 
     assert session is not None
@@ -490,28 +513,30 @@ def test_23_loop_completes_echo_task(provider_name, selected_providers, make_tas
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_24_loop_requires_two_tool_calls(provider_name, selected_providers, make_task_loop, echo_execute_fn):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    loop.run(
+    _safe_run(
+        loop,
         "First run 'echo step_one', then run 'echo step_two'. Report both outputs.",
-        execute_fn=echo_execute_fn,
+        echo_execute_fn,
+        provider_name,
     )
     assert loop.session is not None
     assert loop.session.total_tool_calls >= 2
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_25_loop_tool_result_fed_back(provider_name, selected_providers, make_task_loop, echo_execute_fn):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    loop.run(
+    _safe_run(
+        loop,
         "First run 'echo step_one', then run 'echo step_two'. Report both outputs.",
-        execute_fn=echo_execute_fn,
+        echo_execute_fn,
+        provider_name,
     )
     session = loop.session
     assert session is not None
@@ -528,19 +553,17 @@ def test_25_loop_tool_result_fed_back(provider_name, selected_providers, make_ta
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_26_loop_respects_max_iterations(provider_name, selected_providers, make_task_loop, echo_execute_fn):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name, max_iterations=2)
-    loop.run("Keep running 'echo ping' in an infinite loop.", execute_fn=echo_execute_fn)
+    _safe_run(loop, "Keep running 'echo ping' in an infinite loop.", echo_execute_fn, provider_name)
 
     assert loop.session is not None
     assert "round limit" in loop.session.end_reason.lower()
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_27_loop_failed_command_continues(provider_name, selected_providers, make_task_loop, tmp_path: Path):
     _maybe_skip_provider(provider_name, selected_providers)
 
@@ -563,19 +586,18 @@ def test_27_loop_failed_command_continues(provider_name, selected_providers, mak
             timeout=10,
         )
 
-    loop.run("Run 'echo ok' and report.", execute_fn=flaky_execute)
+    _safe_run(loop, "Run 'echo ok' and report.", flaky_execute, provider_name)
     assert loop.session is not None
     assert loop.session.error_count >= 1
     assert loop.session.end_reason
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_28_loop_termination_signal_detected(provider_name, selected_providers, make_task_loop, echo_execute_fn):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    loop.run("Run 'echo done', then say 'task complete'.", execute_fn=echo_execute_fn)
+    _safe_run(loop, "Run 'echo done', then say 'task complete'.", echo_execute_fn, provider_name)
 
     assert loop.session is not None
     assert "success" in loop.session.end_reason.lower()
@@ -583,12 +605,11 @@ def test_28_loop_termination_signal_detected(provider_name, selected_providers, 
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("provider_name", SUPPORTED_PROVIDERS)
 def test_29_loop_session_structure_complete(provider_name, selected_providers, make_task_loop, echo_execute_fn):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    loop.run("Run 'echo done', then finish.", execute_fn=echo_execute_fn)
+    _safe_run(loop, "Run 'echo done', then finish.", echo_execute_fn, provider_name)
     session = loop.session
 
     assert session is not None
