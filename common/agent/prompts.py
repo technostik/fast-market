@@ -5,8 +5,6 @@ from pathlib import Path
 
 DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a command execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
 
-# Your Task
-{task_description}
 {params_section}
 
 # Working Directory
