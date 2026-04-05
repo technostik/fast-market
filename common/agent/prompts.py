@@ -434,6 +434,17 @@ TOOLS_DOC_TEMPLATES = {
     "minimal": "{aliases}{fastmarket_tools_minimal}{system_commands_minimal}{other_commands_minimal}",
 }
 
+DEFAULT_COMMAND_DOCS_TEMPLATES = {
+    "full": {
+        "description": "Verbose with full documentation",
+        "template": "{aliases}{fastmarket_tools}{system_commands}",
+    },
+    "minimal": {
+        "description": "Brief with descriptions",
+        "template": "{fastmarket_tools_brief}{system_commands_minimal}",
+    },
+}
+
 
 def _build_minimal_tools_section(commands: list[str], section_name: str) -> str:
     """Build minimal section with just command names."""
@@ -637,12 +648,7 @@ def _init_task_config(config: dict | None = None) -> dict:
     if "command_docs" not in task:
         task["command_docs"] = {
             "active": "minimal",
-            "templates": {
-                "minimal": {
-                    "description": "Minimal tools documentation",
-                    "template": TOOLS_DOC_TEMPLATES["minimal"],
-                }
-            },
+            "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
         }
 
     return task

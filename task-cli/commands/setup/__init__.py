@@ -7,6 +7,7 @@ import yaml
 
 from common.agent.prompts import (
     DEFAULT_AGENT_PROMPT_TEMPLATE,
+    DEFAULT_COMMAND_DOCS_TEMPLATES,
     DEFAULT_FASTMARKET_TOOLS,
     DEFAULT_SYSTEM_COMMANDS,
 )
@@ -79,12 +80,7 @@ def init_task_config(config: dict | None = None) -> dict:
     if "command_docs" not in task:
         task["command_docs"] = {
             "active": "minimal",
-            "templates": {
-                "minimal": {
-                    "description": "Brief with descriptions",
-                    "template": "{fastmarket_tools_brief}{system_commands_minimal}",
-                },
-            },
+            "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
         }
 
     if "learn_analysis_prompt" not in task:

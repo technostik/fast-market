@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from common.agent.prompts import (
     DEFAULT_AGENT_PROMPT_TEMPLATE,
+    DEFAULT_COMMAND_DOCS_TEMPLATES,
     DEFAULT_EVALUATION_PROMPT,
     DEFAULT_FASTMARKET_TOOLS,
     DEFAULT_PLAN_PROMPT,
@@ -49,12 +50,7 @@ def default_skill_agent_config() -> dict:
         },
         "command_docs": {
             "active": "minimal",
-            "templates": {
-                "minimal": {
-                    "description": "Brief with descriptions",
-                    "template": "{fastmarket_tools_brief}{system_commands_minimal}",
-                },
-            },
+            "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
         },
         "preparation_prompt": DEFAULT_PREPARATION_PROMPT,
         "evaluation_prompt": DEFAULT_EVALUATION_PROMPT,
@@ -97,12 +93,7 @@ def init_skill_agent_config(agent_dict: dict | None = None) -> dict:
     if "command_docs" not in agent_dict:
         agent_dict["command_docs"] = {
             "active": "minimal",
-            "templates": {
-                "minimal": {
-                    "description": "Brief with descriptions",
-                    "template": "{fastmarket_tools_brief}{system_commands_minimal}",
-                },
-            },
+            "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
         }
 
     agent_dict.setdefault("preparation_prompt", DEFAULT_PREPARATION_PROMPT)
