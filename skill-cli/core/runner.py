@@ -429,6 +429,13 @@ def execute_skill_prompt(
         agent_prompt=agent_prompt,
     )
 
+    if debug:
+        from common.llm.base import set_llm_log_file
+
+        log_path = workdir / "llm.log"
+        set_llm_log_file(log_path)
+        logger.info("llm_log_enabled", path=str(log_path))
+
     loop = TaskLoop(
         config=task_config,
         workdir=workdir,
