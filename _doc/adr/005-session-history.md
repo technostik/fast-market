@@ -47,3 +47,6 @@ class TaskLoop:
                 model=self.model,
                 system=system_prompt,
                 max_tokens=4096,
+
+
+format_message_history kept as backward compatibility layer
