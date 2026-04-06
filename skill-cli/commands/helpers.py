@@ -300,6 +300,15 @@ def apply_skill_impl(
             click.echo(f"  {preview}")
             return
 
+        auto_learn_session_path = None
+        if auto_learn and not save_session:
+            auto_learn_session_path = workdir_path / ".auto_learn.session.yaml"
+
+        resolved_save_session = (
+            _resolve_save_session_path(save_session, workdir_path)
+            or auto_learn_session_path
+        )
+
         result = execute_skill_prompt(
             skill=skill,
             workdir=workdir_path,
@@ -310,7 +319,7 @@ def apply_skill_impl(
             auto_learn=False,  # Handle auto-learn in skill-cli after task completes
             provider=provider_name,
             model=model_name,
-            save_session=_resolve_save_session_path(save_session, workdir_path),
+            save_session=resolved_save_session,
             compact=compact,
             verbose=verbose,
             debug=debug,
@@ -325,17 +334,17 @@ def apply_skill_impl(
             timed_out_seconds = int(str(timed_out_seconds).rstrip("s"))
 
             session = None
-            session_path = None
-            if save_session:
-                session_path = _resolve_save_session_path(save_session, workdir_path)
-                if session_path and session_path.exists():
-                    import yaml
+            session_path = auto_learn_session_path or _resolve_save_session_path(
+                save_session, workdir_path
+            )
+            if session_path and session_path.exists():
+                import yaml
 
-                    session_data = yaml.safe_load(session_path.read_text())
-                    if session_data:
-                        from common.agent.session import Session
+                session_data = yaml.safe_load(session_path.read_text())
+                if session_data:
+                    from common.agent.session import Session
 
-                        session = Session.from_dict(session_data)
+                    session = Session.from_dict(session_data)
 
             llm_provider = None
             if provider_name:
