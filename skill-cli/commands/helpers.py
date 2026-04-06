@@ -161,7 +161,8 @@ def apply_skill_impl(
     workdir_path = Path(workdir).expanduser().resolve()
 
     if isolated:
-        workdir_path = make_run_root(workdir_path)
+        skill_name_for_dir = skill_ref.split("/", 1)[0]
+        workdir_path = make_run_root(workdir_path, skill_name_for_dir)
 
     if fmt != "json":
         click.echo(f"workdir: {workdir_path}")
