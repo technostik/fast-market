@@ -23,6 +23,7 @@ from common.agent.prompts import (
 from common.agent.session import Session, ToolCallEvent, Turn
 from common.core.config import load_tool_config
 from common.llm.base import LLMRequest, LazyLLMProvider
+from common.llm.recorder import RecordingProvider
 from common.llm.registry import discover_providers
 
 pytestmark = pytest.mark.order  # keep declaration order
@@ -53,7 +54,9 @@ def llm_config() -> dict:
 
 
 @pytest.fixture(scope="session")
-def provider_fixture(provider_name: str, llm_config: dict, selected_providers: list[str]):
+def provider_fixture(
+    provider_name: str, llm_config: dict, selected_providers: list[str]
+):
     if provider_name not in selected_providers:
         pytest.skip(f"Provider '{provider_name}' not selected")
 
@@ -127,6 +130,7 @@ def _maybe_skip_provider(provider_name: str, selected_providers: list[str]) -> N
 
 # Group 1 — Config & Provider Bootstrap
 
+
 def test_01_llm_config_has_providers(llm_config: dict):
     assert isinstance(llm_config, dict)
 
@@ -141,7 +145,6 @@ def test_01_llm_config_has_providers(llm_config: dict):
 
 
 def test_02_discover_providers_returns_instances(llm_config: dict):
-
     providers = discover_providers(llm_config)
     assert isinstance(providers, dict)
     assert providers
@@ -149,7 +152,6 @@ def test_02_discover_providers_returns_instances(llm_config: dict):
 
 
 def test_03_provider_is_lazy_llm_provider(llm_config: dict):
-
     providers = discover_providers(llm_config)
     assert providers
     for provider in providers.values():
@@ -175,6 +177,7 @@ def test_04_missing_provider_key_leaves_others_intact(llm_config: dict):
 
 
 # Group 2 — Raw LLM Round-Trip
+
 
 @pytest.mark.slow
 def test_05_simple_completion(provider_name, selected_providers, provider_fixture):
@@ -215,7 +218,9 @@ def test_06_tool_call_returned(provider_name, selected_providers, provider_fixtu
 
 
 @pytest.mark.slow
-def test_07_tool_result_closes_loop(provider_name, selected_providers, provider_fixture):
+def test_07_tool_result_closes_loop(
+    provider_name, selected_providers, provider_fixture
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     user_prompt = "What is the weather in Paris? Use the get_weather tool."
@@ -271,7 +276,9 @@ def test_07_tool_result_closes_loop(provider_name, selected_providers, provider_
 
 
 @pytest.mark.slow
-def test_08_no_tool_call_when_not_needed(provider_name, selected_providers, provider_fixture):
+def test_08_no_tool_call_when_not_needed(
+    provider_name, selected_providers, provider_fixture
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     response = provider_fixture.complete(
@@ -289,8 +296,13 @@ def test_08_no_tool_call_when_not_needed(provider_name, selected_providers, prov
 
 # Group 3 — Message History Fidelity
 
+
 def test_09_tool_call_id_round_trip():
-    tool_call = ToolCallEvent(tool_call_id="tc_123", tool_name="execute_command", arguments={"command": "echo hi"})
+    tool_call = ToolCallEvent(
+        tool_call_id="tc_123",
+        tool_name="execute_command",
+        arguments={"command": "echo hi"},
+    )
     turn = Turn(role="assistant", content="Calling tool", tool_calls=[tool_call])
 
     as_dict = turn.to_dict()
@@ -355,9 +367,15 @@ def test_11_session_metrics_accuracy():
             Turn(
                 role="assistant",
                 tool_calls=[
-                    ToolCallEvent("1", "execute_command", {"command": "echo a"}, exit_code=0),
-                    ToolCallEvent("2", "execute_command", {"command": "bad"}, exit_code=1),
-                    ToolCallEvent("3", "execute_command", {"command": "echo b"}, exit_code=0),
+                    ToolCallEvent(
+                        "1", "execute_command", {"command": "echo a"}, exit_code=0
+                    ),
+                    ToolCallEvent(
+                        "2", "execute_command", {"command": "bad"}, exit_code=1
+                    ),
+                    ToolCallEvent(
+                        "3", "execute_command", {"command": "echo b"}, exit_code=0
+                    ),
                 ],
             )
         ],
@@ -371,9 +389,12 @@ def test_11_session_metrics_accuracy():
 
 # Group 4 — Tool Documentation Construction
 
+
 def test_12_build_command_documentation_keys():
     docs = build_command_documentation(
-        fastmarket_tools_config={"corpus": {"description": "test", "commands": ["search"]}},
+        fastmarket_tools_config={
+            "corpus": {"description": "test", "commands": ["search"]}
+        },
         system_commands=["echo", "ls"],
     )
     required = {
@@ -390,7 +411,9 @@ def test_12_build_command_documentation_keys():
 
 def test_13_fastmarket_tools_appear_in_docs():
     docs = build_command_documentation(
-        fastmarket_tools_config={"mytool": {"description": "A cool tool", "commands": ["run", "list"]}},
+        fastmarket_tools_config={
+            "mytool": {"description": "A cool tool", "commands": ["run", "list"]}
+        },
         system_commands=[],
     )
     assert "mytool" in docs["fastmarket_tools"]
@@ -444,6 +467,7 @@ def test_17_system_prompt_includes_task_params():
 
 # Group 5 — Executor Safety
 
+
 def test_18_allowed_command_executes(tmp_path: Path):
     result = execute_command("echo hello", workdir=tmp_path, allowed={"echo"})
     assert result.exit_code == 0
@@ -478,12 +502,18 @@ def test_22_empty_command_blocked(tmp_path: Path):
 
 # Group 6 — Agentic Loop Integration
 
+
 @pytest.mark.slow
-def test_23_loop_completes_echo_task(provider_name, selected_providers, make_task_loop, echo_execute_fn):
+def test_23_loop_completes_echo_task(
+    provider_name, selected_providers, make_task_loop, echo_execute_fn
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
-    loop.run("Run the command 'echo hello_world' and tell me what you see.", execute_fn=echo_execute_fn)
+    loop.run(
+        "Run the command 'echo hello_world' and tell me what you see.",
+        execute_fn=echo_execute_fn,
+    )
     session = loop.session
 
     assert session is not None
@@ -495,7 +525,9 @@ def test_23_loop_completes_echo_task(provider_name, selected_providers, make_tas
 
 
 @pytest.mark.slow
-def test_24_loop_requires_two_tool_calls(provider_name, selected_providers, make_task_loop, echo_execute_fn):
+def test_24_loop_requires_two_tool_calls(
+    provider_name, selected_providers, make_task_loop, echo_execute_fn
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
@@ -508,7 +540,155 @@ def test_24_loop_requires_two_tool_calls(provider_name, selected_providers, make
 
 
 @pytest.mark.slow
-def test_25_loop_tool_result_fed_back(provider_name, selected_providers, make_task_loop, echo_execute_fn):
+def test_24_record_loop_for_replay(
+    provider_name, selected_providers, make_task_loop, echo_execute_fn
+):
+    """Run test_24 but record the LLM session to a JSONL file for replay against a proxy."""
+    _maybe_skip_provider(provider_name, selected_providers)
+
+    from common.core.config import load_tool_config
+    from common.llm.registry import discover_providers
+
+    config = load_tool_config("apply")
+    providers = discover_providers(config)
+
+    if provider_name not in providers:
+        pytest.skip(f"{provider_name} not configured")
+
+    real_provider = providers[provider_name]
+    real_provider._ensure_initialized()
+    if real_provider._provider is None:
+        pytest.skip(f"{provider_name} not available")
+
+    output_dir = Path(__file__).parent.parent / "recordings"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / f"test_24_{provider_name}.jsonl"
+
+    recording_provider = RecordingProvider(real_provider._provider, output_file)
+
+    loop = make_task_loop(provider_name)
+
+    from common.agent.loop import TaskLoop
+    from common.agent.prompts import build_system_prompt
+    from common.llm.base import LLMRequest
+
+    task_description = (
+        "First run 'echo step_one', then run 'echo step_two'. Report both outputs."
+    )
+
+    config = load_tool_config("apply")
+    system_prompt = build_system_prompt(
+        task_description=task_description,
+        fastmarket_tools_config={},
+        system_commands=["echo", "ls", "cat", "touch"],
+        workdir=Path("/tmp"),
+        task_params={},
+        command_docs_config=None,
+        agent_prompt_config=None,
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"## Task\n{task_description}\n\nBegin executing commands to complete this task.",
+        }
+    ]
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "execute_command",
+                "description": "Execute a whitelisted CLI command in the working directory",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "Shell command to execute",
+                        },
+                        "explanation": {
+                            "type": "string",
+                            "description": "Brief explanation of why you're running this command",
+                        },
+                    },
+                    "required": ["command"],
+                },
+            },
+        }
+    ]
+
+    def fake_execute(cmd: str) -> CommandResult:
+        return CommandResult(
+            command=cmd,
+            stdout=f"executed: {cmd}",
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+        )
+
+    iteration = 0
+    max_iter = 10
+
+    while iteration < max_iter:
+        iteration += 1
+
+        request = LLMRequest(
+            messages=messages,
+            model=None,
+            system=system_prompt,
+            max_tokens=4096,
+            tools=tools,
+            timeout=0,
+            temperature=0.3,
+        )
+
+        response = recording_provider.complete(request)
+
+        if response.tool_calls:
+            import json as _json
+
+            assistant_msg = {
+                "role": "assistant",
+                "content": response.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "function": {
+                            "name": tc.name,
+                            "arguments": _json.dumps(tc.arguments)
+                            if isinstance(tc.arguments, dict)
+                            else str(tc.arguments),
+                        },
+                    }
+                    for tc in response.tool_calls
+                ],
+            }
+            messages.append(assistant_msg)
+
+            for tc in response.tool_calls:
+                command = tc.arguments.get("command", "")
+                result = fake_execute(command)
+                tool_msg = {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": f"Command: {command}\nExit code: {result.exit_code}\nStdout:\n{result.stdout}\nStderr:\n{result.stderr}",
+                }
+                messages.append(tool_msg)
+        else:
+            messages.append({"role": "assistant", "content": response.content})
+            break
+
+    print(
+        f"\nRecorded {recording_provider.get_call_count()} API calls to {output_file}"
+    )
+    assert recording_provider.get_call_count() >= 2
+
+
+@pytest.mark.slow
+def test_25_loop_tool_result_fed_back(
+    provider_name, selected_providers, make_task_loop, echo_execute_fn
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
@@ -531,18 +711,24 @@ def test_25_loop_tool_result_fed_back(provider_name, selected_providers, make_ta
 
 
 @pytest.mark.slow
-def test_26_loop_respects_max_iterations(provider_name, selected_providers, make_task_loop, echo_execute_fn):
+def test_26_loop_respects_max_iterations(
+    provider_name, selected_providers, make_task_loop, echo_execute_fn
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name, max_iterations=2)
-    loop.run("Keep running 'echo ping' in an infinite loop.", execute_fn=echo_execute_fn)
+    loop.run(
+        "Keep running 'echo ping' in an infinite loop.", execute_fn=echo_execute_fn
+    )
 
     assert loop.session is not None
     assert "round limit" in loop.session.end_reason.lower()
 
 
 @pytest.mark.slow
-def test_27_loop_failed_command_continues(provider_name, selected_providers, make_task_loop, tmp_path: Path):
+def test_27_loop_failed_command_continues(
+    provider_name, selected_providers, make_task_loop, tmp_path: Path
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
@@ -571,7 +757,9 @@ def test_27_loop_failed_command_continues(provider_name, selected_providers, mak
 
 
 @pytest.mark.slow
-def test_28_loop_termination_signal_detected(provider_name, selected_providers, make_task_loop, echo_execute_fn):
+def test_28_loop_termination_signal_detected(
+    provider_name, selected_providers, make_task_loop, echo_execute_fn
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)
@@ -583,7 +771,9 @@ def test_28_loop_termination_signal_detected(provider_name, selected_providers, 
 
 
 @pytest.mark.slow
-def test_29_loop_session_structure_complete(provider_name, selected_providers, make_task_loop, echo_execute_fn):
+def test_29_loop_session_structure_complete(
+    provider_name, selected_providers, make_task_loop, echo_execute_fn
+):
     _maybe_skip_provider(provider_name, selected_providers)
 
     loop = make_task_loop(provider_name)

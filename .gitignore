@@ -5,6 +5,8 @@ token.json
 NOTES.md
 tests/fixtures/data/fast-market/skills/test-guess/LEARN.md
 session
+recordings
+.opencode
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
