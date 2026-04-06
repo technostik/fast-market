@@ -34,16 +34,25 @@ def resolve_arguments(template: str, args: dict[str, str]) -> str:
             logger.info("substitution_literal", placeholder=key, chars=len(value))
             resolved[key] = value
 
-    required = set(re.findall(r"\{(\w+)\}", template))
+    required = set(re.findall(r"\{(\w+)\}|\{['\"](\w+)['\"]\}", template))
+    required = {k1 or k2 for k1, k2 in required}
     missing = required - set(resolved)
     if missing:
         raise ValueError(f"Missing required arguments: {', '.join(sorted(missing))}")
 
-    result = template.format(**resolved)
-    logger.info("substitution_complete", placeholders=len(resolved), result_chars=len(result))
+    try:
+        result = template.format(**resolved)
+    except KeyError as exc:
+        raise ValueError(f"Unresolved placeholder: {exc}") from exc
+    except Exception as exc:
+        raise ValueError(f"Template formatting failed: {exc}") from exc
+    logger.info(
+        "substitution_complete", placeholders=len(resolved), result_chars=len(result)
+    )
     return result
 
 
 def extract_placeholders(template: str) -> list[str]:
     """Extract placeholder names from template."""
-    return sorted(set(re.findall(r"\{(\w+)\}", template)))
+    matches = re.findall(r"\{(\w+)\}|\{['\"](\w+)['\"]\}", template)
+    return sorted(set(k1 or k2 for k1, k2 in matches))
