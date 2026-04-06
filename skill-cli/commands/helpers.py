@@ -144,11 +144,13 @@ def apply_skill_impl(
     compact: bool = False,
     verbose: bool = False,
     debug: str | None = None,
+    isolated: bool = False,
 ) -> None:
     from core.runner import (
         execute_skill_prompt,
         execute_skill_run,
         execute_skill_script,
+        make_run_root,
         resolve_skill_script,
     )
 
@@ -157,6 +159,9 @@ def apply_skill_impl(
         workdir = common_config.get("workdir") or "."
 
     workdir_path = Path(workdir).expanduser().resolve()
+
+    if isolated:
+        workdir_path = make_run_root(workdir_path)
 
     if fmt != "json":
         click.echo(f"workdir: {workdir_path}")

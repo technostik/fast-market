@@ -94,6 +94,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Debug mode: 'preview' shows LLM request/response, 'full' shows everything",
     )
+    @click.option(
+        "--isolated",
+        "-I",
+        is_flag=True,
+        help="Run in a unique isolated subdirectory to avoid interference",
+    )
     def apply_cmd(
         skill_ref,
         params,
@@ -110,6 +116,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         compact,
         verbose,
         debug,
+        isolated,
     ):
         """Apply (execute) a skill by name.
 
@@ -132,6 +139,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             compact=compact,
             verbose=verbose,
             debug=debug,
+            isolated=isolated,
         )
 
     return CommandManifest(name="apply", click_command=apply_cmd)

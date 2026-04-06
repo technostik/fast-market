@@ -128,7 +128,7 @@ class TaskLoop:
         self.session.add_turn(
             Turn(
                 role="user",
-                content=f"## Task\n{task_description}\n\nBegin executing commands to complete this task.",
+                content=f"## Task\n{task_description}\n\nBegin executing commands with tools_calls to complete this task.",
                 timestamp=datetime.utcnow(),
             )
         )

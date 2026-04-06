@@ -4,7 +4,9 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime as dt
 from pathlib import Path
+from uuid import uuid4
 
 from common import structlog
 from common.core.config import load_tool_config
@@ -13,6 +15,18 @@ from common.core.yaml_utils import dump_yaml
 from core.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
+
+
+def make_run_root(workdir: Path) -> Path:
+    """Create a unique isolated subdirectory inside workdir.
+
+    Returns the created path: {workdir}/{YYYYMMDDTHHMMSS}_{uuid6}/
+    """
+    run_id = dt.utcnow().strftime("%Y%m%dT%H%M%S") + "_" + uuid4().hex[:6]
+    run_root = workdir / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    logger.info("created_run_root", run_root=str(run_root), run_id=run_id)
+    return run_root
 
 
 def _write_script_session(

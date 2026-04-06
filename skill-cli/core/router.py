@@ -17,6 +17,7 @@ from common.agent.prompts import (
 )
 from common.core.paths import get_skills_dir
 from common.llm.base import LLMRequest
+from core.runner import make_run_root
 from core.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
@@ -694,9 +695,7 @@ def run_router(
     skills = discover_skills(skills_dir or get_skills_dir())
 
     workdir_path = Path(workdir).expanduser().resolve()
-    run_id = dt.utcnow().strftime("%Y%m%dT%H%M%S") + "_" + uuid.uuid4().hex[:6]
-    run_root = workdir_path / run_id
-    run_root.mkdir(parents=True, exist_ok=True)
+    run_root = make_run_root(workdir_path)
 
     state = RouterState(
         goal=goal,
