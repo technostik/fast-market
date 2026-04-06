@@ -73,6 +73,36 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         # Read from stdin if requested
         if stdin or prompt_name_or_content == "-":
+            # Check if this is a named prompt (not "-")
+            if stdin and prompt_name_or_content != "-":
+                # User provided a named prompt with --stdin flag
+                # Try to load the saved prompt to show its placeholders
+                store = PromptStore()
+                maybe_saved_prompt = store.get_prompt(prompt_name_or_content)
+
+                if maybe_saved_prompt:
+                    from core.substitution import extract_placeholders
+
+                    placeholders = extract_placeholders(maybe_saved_prompt.content)
+                    if placeholders:
+                        placeholder_list = " ".join(
+                            f"{p}=-" for p in placeholders
+                        )
+                        click.echo(
+                            f"Error: --stdin is not compatible with applying a named prompt.\n"
+                            f"Named prompt '{prompt_name_or_content}' has placeholders: {', '.join(placeholders)}\n"
+                            f"Instead use: prompt apply {prompt_name_or_content} {placeholder_list}",
+                            err=True,
+                        )
+                    else:
+                        click.echo(
+                            f"Error: --stdin is not compatible with applying a named prompt.\n"
+                            f"Instead use: prompt apply {prompt_name_or_content}",
+                            err=True,
+                        )
+                    sys.exit(1)
+                # If not a saved prompt, treat as direct prompt + stdin (allowed, stdin overrides)
+
             if not sys.stdin.isatty():
                 prompt_content = sys.stdin.read().strip()
                 if not prompt_content:

@@ -31,10 +31,9 @@ You can read and write files in this directory. Relative paths are resolved from
 # Critical Rules
 
 - **Only use listed commands** - others will be rejected
-- **Work within the directory** - you cannot escape `{workdir}`
 - **Check outputs** - always verify command results before proceeding
 - **Be efficient** - prefer one good command over many guesses
-- **Ask for help** - if truly stuck, explain what you need
+- **Minimal context** - write intermediate results to files instead of your own context, keep token minimal
 """
 
 

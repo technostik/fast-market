@@ -106,6 +106,14 @@ def test_prompt_cli_apply_literal_and_stdin(
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "RESULT::Summarize: streamed text"
 
+    # Test --stdin with named prompt raises error with placeholders
+    result = runner.invoke(
+        main, ["apply", "summarize", "--stdin"], input="streamed text"
+    )
+    assert result.exit_code == 1, result.output
+    assert "--stdin is not compatible with applying a named prompt" in result.output
+    assert "content=-" in result.output
+
 
 def test_prompt_cli_apply_from_file_json(
     runner: CliRunner, tmp_path: Path, monkeypatch

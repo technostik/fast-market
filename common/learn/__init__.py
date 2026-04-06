@@ -19,13 +19,15 @@ logger = structlog.get_logger(__name__)
 MAX_LEARN_LINES = 80
 
 
-LEARN_ANALYSIS_PROMPT_TEMPLATE = """You are analyzing an agentic task session to extract lessons for future runs of the same skill.
+LEARN_ANALYSIS_PROMPT_TEMPLATE = """You are analyzing an agentic task session to extract NEW lessons for future runs of the same skill.
 
 ## Your job
 
 Write a LEARN.md file for the skill '{skill_name}' with NEW LESSONS LEARNED.
 A Lesson is what allows future runs to avoid steps, errors or guesses and go directly to useful commands.
 This file will be injected into the system prompt of future task runs using this skill.
+
+IMPORTANT : Only write NEW lessons that are not already present in the existing LEARN.md file.
 
 ### LEARN.md structure (use exactly this format):
 
