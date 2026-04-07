@@ -270,9 +270,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 click.echo("No steps yet.\n")
 
             # Choose action
-            options = ["s", "e", "d", "m", "a", "c", "q"]
+            options = ["s", "e", "d", "m", "a", "c", "p", "q"]
             action = prompt_with_options(
-                "Choose action — [S]how / [E]dit / [D]elete / [M]ove / [A]dd / [C]hange (LLM) / [Q]uit: ",
+                "Choose action — [S]how / [E]dit / [D]elete / [M]ove / [A]dd / [C]hange step (LLM) / [P]lan change (LLM) / [Q]uit: ",
                 options,
             )
 
@@ -352,8 +352,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
                 click.echo("Step added.\n")
 
+            elif action == "p":
+                # Plan-wide LLM change — doesn't need a step number
+                _llm_change_plan(plan_path, data, steps)
+
             else:
-                # Need a step number
+                # Need a step number (for s, e, d, m, c)
                 if not steps:
                     click.echo("No steps to modify. Add one first.\n")
                     continue
@@ -454,6 +458,58 @@ def _llm_change_step(plan_path: Path, data: dict, steps: list, step_idx: int) ->
     result = _run_llm_chat_loop(llm, None, context, data, plan_path, step_idx)
     if result:
         steps[step_idx] = result
+        for i, s in enumerate(steps, 1):
+            s["step"] = i
+        save_plan(plan_path, data)
+        click.echo(f"Plan saved to {plan_path}")
+
+
+def _llm_change_plan(plan_path: Path, data: dict, steps: list) -> None:
+    """Interactive LLM chat to modify the entire plan."""
+    from common.core.config import requires_common_config, load_tool_config
+    from common.llm.registry import discover_providers, get_default_provider_name
+    from core.skill import discover_skills
+    from common.core.paths import get_skills_dir
+
+    requires_common_config("skill", ["llm"])
+    try:
+        config = load_tool_config("skill")
+        providers = discover_providers(config)
+        provider_name = get_default_provider_name(config)
+        llm = providers.get(provider_name)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        return
+
+    if not llm:
+        click.echo(f"Error: provider '{provider_name}' not available.", err=True)
+        return
+
+    skills = discover_skills(get_skills_dir())
+    # step_idx=None means whole plan
+    context = _build_llm_context(data, skills, step_idx=None)
+
+    click.echo(f"\nLLM Chat — modifying entire plan")
+    click.echo("Describe what you want to change.")
+    click.echo("Type 'done' to finalize, 'abort' to cancel.\n")
+
+    result = _run_llm_chat_loop_for_plan(llm, None, context, data, plan_path)
+    if result:
+        # Replace the entire plan
+        if isinstance(result, dict):
+            if "plan" in result:
+                # Full plan format: replace plan key
+                data.update({k: v for k, v in result.items() if k != "plan"})
+                steps.clear()
+                steps.extend(result["plan"])
+            else:
+                # Just a dict of step-like keys: replace data entirely
+                data.clear()
+                data.update(result)
+                # Re-fetch steps
+                steps.clear()
+                steps.extend(data.get("plan", []))
+        # Re-number
         for i, s in enumerate(steps, 1):
             s["step"] = i
         save_plan(plan_path, data)
@@ -690,6 +746,122 @@ def _run_llm_chat_loop(
                 parsed = yaml_lib.safe_load(cleaned)
                 if not isinstance(parsed, dict):
                     click.echo("Error: LLM did not output a valid YAML mapping.", err=True)
+                    messages.pop()
+                    continue
+
+                if prompt_confirm("Accept and save these changes?"):
+                    return parsed
+                else:
+                    click.echo("Changes not saved. Continue chatting, type 'abort' to cancel.\n")
+                    messages.pop()
+                    continue
+
+            except Exception as e:
+                click.echo(f"Error parsing YAML: {e}", err=True)
+                click.echo("Continue chatting, or type 'abort' to cancel.\n")
+                messages.pop()
+                continue
+
+        messages.append({"role": "user", "content": user_input})
+        req = LLMRequest(
+            system=system_prompt,
+            messages=[{"role": "system", "content": context}] + messages,
+            model=model,
+            temperature=0.7,
+        )
+
+        click.echo("Thinking...", err=True)
+        try:
+            resp = llm.complete(req)
+            click.echo(f"\nAssistant: {resp.content}\n")
+            messages.append({"role": "assistant", "content": resp.content})
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            messages.pop()
+
+    return None
+# Appended to run-plan/register.py
+
+def _run_llm_chat_loop_for_plan(
+    llm,
+    model: str | None,
+    context: str,
+    plan_data: dict,
+    plan_path: Path,
+) -> dict | None:
+    """Run an interactive chat loop with the LLM for editing the entire plan.
+    Returns the modified plan dict if accepted, or None if cancelled.
+    """
+    from common.llm.base import LLMRequest
+    from prompt_toolkit import prompt
+    from core.repl import REPL_STYLE
+
+    messages = []
+    system_prompt = (
+        "You are helping a user edit a run plan (YAML file) for the fast-market skill runner. "
+        "The user will describe the changes they want. "
+        "Propose YAML modifications and explain your reasoning.\n\n"
+        "CRITICAL: When the user says 'done', output ONLY the full modified plan YAML. "
+        "The plan must have these top-level keys: 'goal' and 'plan' (list of steps). "
+        "Each step must have 'step' (number), 'action' (run/task/ask). "
+        "For 'run' steps: 'skill' and optionally 'params', 'inject', 'context_hint'. "
+        "For 'task' steps: 'description' and optionally 'instructions', 'context_hint'. "
+        "For 'ask' steps: 'question'.\n\n"
+        "NEVER wrap values in quotes unless they contain YAML-special characters. "
+        "If a value contains colons (:), commas, apostrophes, or parentheses, "
+        "you MUST wrap it in double quotes. "
+        "NEVER use markdown code fences (```yaml ... ```). "
+        "Output raw YAML only — no explanation, no preamble, no backticks."
+    )
+
+    while True:
+        try:
+            user_input = prompt("You> ", style=REPL_STYLE).strip()
+        except (KeyboardInterrupt, EOFError):
+            click.echo("\nAborted — no changes saved.")
+            return None
+
+        if not user_input:
+            continue
+
+        if user_input.lower() in ("quit", "exit", "q", "abort"):
+            click.echo("Aborted — no changes saved.")
+            return None
+
+        if user_input.lower() == "done":
+            messages.append({"role": "user", "content": "done — output ONLY the full modified plan YAML. Nothing else."})
+            req = LLMRequest(
+                system=system_prompt,
+                messages=[{"role": "system", "content": context}] + messages,
+                model=model,
+                temperature=0.3,
+            )
+            resp = llm.complete(req)
+            final_yaml = resp.content.strip()
+
+            click.echo("\n" + "=" * 60)
+            click.echo("Final proposed YAML:")
+            click.echo("=" * 60)
+            click.echo(final_yaml)
+            click.echo("=" * 60)
+
+            try:
+                import yaml as yaml_lib
+
+                cleaned = _clean_llm_yaml(final_yaml)
+                if not cleaned:
+                    click.echo("Error: no YAML content found.", err=True)
+                    messages.pop()
+                    continue
+
+                parsed = yaml_lib.safe_load(cleaned)
+                if not isinstance(parsed, dict):
+                    click.echo("Error: LLM did not output a valid YAML mapping.", err=True)
+                    messages.pop()
+                    continue
+
+                if not parsed.get("plan"):
+                    click.echo("Error: plan must have a 'plan' key with a list of steps.", err=True)
                     messages.pop()
                     continue
 
