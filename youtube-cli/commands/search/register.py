@@ -90,6 +90,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--language", default="en", help="Language code (default: en)")
     @click.option("--combine", is_flag=True, help="Use OR for keywords")
     @click.option(
+        "--language-filter",
+        "-l",
+        is_flag=True,
+        help="Strictly filter results to the specified language (uses extra API quota)",
+    )
+    @click.option(
         "--format",
         "-f",
         "fmt",
@@ -114,6 +120,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         order,
         language,
         combine,
+        language_filter,
         fmt,
         output,
         stdin,
@@ -153,6 +160,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         order=order,
                         language=language,
                         combine_keywords=combine,
+                        language_filter=language_filter,
                     )
                     videos = [v.to_dict() for v in videos]
 

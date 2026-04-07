@@ -192,8 +192,19 @@ class YouTubeClient:
         order: str = "relevance",
         language: str = "en",
         combine_keywords: bool = False,
+        language_filter: bool = False,
     ) -> list[Video]:
-        """Search for videos on YouTube."""
+        """Search for videos on YouTube.
+        
+        Args:
+            query: Search query string
+            max_results: Maximum number of results to return
+            order: Sort order (relevance, date, rating, title, viewCount)
+            language: Language code for relevance ranking (ISO 639-1, e.g., 'en', 'fr', 'es')
+            combine_keywords: If True, replaces spaces with ' | ' for OR logic
+            language_filter: If True, strictly filter results to only videos with 
+                           matching audio language. Requires additional API calls.
+        """
         try:
             if combine_keywords:
                 modified_query = query.replace(" ", " | ")
@@ -235,8 +246,9 @@ class YouTubeClient:
                     logger.debug("item_filtered_no_video_id", item=item)
 
             if video_ids:
+                # Include contentDetails to get language information
                 video_details_request = self.youtube.videos().list(
-                    part="snippet,statistics",
+                    part="snippet,statistics,contentDetails",
                     id=",".join(video_ids[:50]),
                 )
                 video_details_response = video_details_request.execute()
@@ -251,6 +263,24 @@ class YouTubeClient:
                         continue
                     video_id = item["id"]["videoId"]
                     details = video_details_map.get(video_id)
+                    
+                    # Apply strict language filter if requested
+                    if language_filter and details:
+                        snippet = details.get("snippet", {})
+                        audio_lang = snippet.get("defaultAudioLanguage", "")
+                        default_lang = snippet.get("defaultLanguage", "")
+                        
+                        # Check if either language matches the requested language
+                        if audio_lang != language and default_lang != language:
+                            logger.debug(
+                                "language_filter_skipped",
+                                video_id=video_id,
+                                audio_language=audio_lang,
+                                default_language=default_lang,
+                                requested_language=language,
+                            )
+                            continue
+                    
                     video = Video.from_search_result(item, details)
                     videos.append(video)
 
@@ -259,6 +289,7 @@ class YouTubeClient:
                 query=query,
                 results=len(videos),
                 requested=max_results,
+                language_filter=language_filter,
             )
             return videos[:max_results]
         except HttpError as e:
