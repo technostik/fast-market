@@ -74,6 +74,72 @@
         .title { display: block; margin-top: 6px; word-break: break-all; }
         .loading { text-align: center; padding: 20px; color: var(--text-dim); }
         .empty { text-align: center; padding: 40px; color: var(--text-dim); }
+        
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 20px;
+            max-width: 90%;
+            max-height: 90%;
+            overflow: auto;
+            position: relative;
+        }
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: var(--accent);
+            border: none;
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .modal-close:hover { background: #1a4a80; }
+        .modal h2 { margin-top: 0; margin-bottom: 15px; }
+        .modal-section { margin-bottom: 20px; }
+        .modal-section h3 { color: var(--text-dim); font-size: 0.9rem; margin-bottom: 8px; }
+        .modal-meta { color: var(--text-dim); font-size: 0.85rem; line-height: 1.6; }
+        .modal-meta span { margin-right: 15px; }
+        .modal-output {
+            background: var(--bg);
+            padding: 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow: auto;
+        }
+        .session-viewer {
+            background: var(--bg);
+            padding: 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            max-height: 500px;
+            overflow: auto;
+        }
+        .session-loading { color: var(--text-dim); font-style: italic; }
+        .session-not-found { color: var(--warning); font-style: italic; }
+        .session-error { color: var(--error); font-style: italic; }
+        .log-entry { cursor: pointer; transition: background 0.2s; }
+        .log-entry:hover { background: #1e2a4a; }
     </style>
 </head>
 <body>
@@ -104,6 +170,15 @@
     </div>
 
     <div id="logs" class="logs"></div>
+
+    <!-- Modal for full log details -->
+    <div id="logModal" class="modal-overlay">
+        <div class="modal">
+            <button class="modal-close" id="modalClose">✕</button>
+            <h2>Log Details</h2>
+            <div id="modalContent"></div>
+        </div>
+    </div>
 
     <script>
         const logsEl = document.getElementById('logs');
@@ -167,7 +242,7 @@
                 }
 
                 return `
-                    <div class="${borderClass}">
+                    <div class="${borderClass}" data-log-id="${log.id}" data-is-mismatch="${isMismatch}">
                         <div class="log-header">
                             <span class="timestamp">${ts.toLocaleString()}</span>
                             ${!isMismatch && exitCode !== undefined ? `<span class="exit-code ${exitClass}">${exitCode}</span>` : ''}
@@ -184,6 +259,17 @@
                     </div>
                 `;
             }).join('');
+
+            // Add click handlers to log entries
+            document.querySelectorAll('.log-entry').forEach(entry => {
+                entry.addEventListener('click', (e) => {
+                    // Don't open modal if clicking on links
+                    if (e.target.tagName === 'A') return;
+                    const logId = entry.dataset.logId;
+                    const isMismatch = entry.dataset.isMismatch === 'true';
+                    openLogModal(logId, isMismatch);
+                });
+            });
         }
 
         async function load() {
@@ -195,6 +281,128 @@
                 logsEl.innerHTML = '<div class="empty">Error loading logs: ' + e.message + '</div>';
             }
         }
+
+        // Modal functions
+        const modal = document.getElementById('logModal');
+        const modalContent = document.getElementById('modalContent');
+        const modalClose = document.getElementById('modalClose');
+
+        async function openLogModal(logId, isMismatch) {
+            modal.classList.add('active');
+            modalContent.innerHTML = '<div class="loading">Loading log details...</div>';
+
+            try {
+                // Fetch full log details
+                const params = new URLSearchParams({ mismatch: isMismatch });
+                const logResp = await fetch(`/api/logs/${logId}?${params}`);
+                if (!logResp.ok) throw new Error('Failed to fetch log details');
+                const log = await logResp.json();
+
+                let html = `
+                    <div class="modal-section">
+                        <h3>Metadata</h3>
+                        <div class="modal-meta">
+                            <span><strong>Log ID:</strong> ${log.id}</span><br>
+                            <span><strong>Rule:</strong> ${log.rule_id}</span>
+                            <span><strong>Source:</strong> ${log.source_id}</span>
+                            ${log.action_id ? `<span><strong>Action:</strong> ${log.action_id}</span>` : ''}
+                            ${log.item_id ? `<span><strong>Item:</strong> ${log.item_id}</span>` : ''}<br>
+                            <span><strong>Title:</strong> ${log.item_title}</span><br>
+                            <span><strong>Time:</strong> ${new Date(log.triggered_at || log.evaluated_at).toLocaleString()}</span>
+                            ${log.exit_code !== undefined ? `<span><strong>Exit Code:</strong> <span class="exit-code ${log.exit_code === 0 ? 'success' : 'error'}">${log.exit_code}</span></span>` : ''}
+                            ${log.failed_conditions ? `<br><span><strong>Failed Conditions:</strong> <span style="color: var(--warning);">${JSON.stringify(log.failed_conditions)}</span></span>` : ''}
+                        </div>
+                    </div>
+                `;
+
+                if (log.item_url) {
+                    html += `
+                        <div class="modal-section">
+                            <h3>Item URL</h3>
+                            <div class="modal-meta"><a href="${log.item_url}" target="_blank" style="color: var(--warning);">${log.item_url}</a></div>
+                        </div>
+                    `;
+                }
+
+                if (log.item_extra) {
+                    html += `
+                        <div class="modal-section">
+                            <h3>Item Extra Data</h3>
+                            <pre class="modal-output">${JSON.stringify(log.item_extra, null, 2)}</pre>
+                        </div>
+                    `;
+                }
+
+                if (log.output) {
+                    html += `
+                        <div class="modal-section">
+                            <h3>Output</h3>
+                            <pre class="modal-output">${log.output}</pre>
+                        </div>
+                    `;
+                }
+
+                // Try to fetch session.yaml for trigger logs (not mismatch)
+                if (!isMismatch) {
+                    html += `
+                        <div class="modal-section">
+                            <h3>Session File</h3>
+                            <div id="sessionViewer" class="session-viewer">
+                                <div class="session-loading">Searching for session.yaml...</div>
+                            </div>
+                        </div>
+                    `;
+                    modalContent.innerHTML = html;
+
+                    // Fetch session.yaml asynchronously
+                    fetchSessionYaml(logId);
+                } else {
+                    modalContent.innerHTML = html;
+                }
+
+            } catch (e) {
+                modalContent.innerHTML = `<div class="session-error">Error loading log details: ${e.message}</div>`;
+            }
+        }
+
+        async function fetchSessionYaml(logId) {
+            const sessionViewer = document.getElementById('sessionViewer');
+            if (!sessionViewer) return;
+
+            try {
+                const sessionResp = await fetch(`/api/logs/${logId}/session`);
+                const sessionData = await sessionResp.json();
+
+                if (sessionData.found) {
+                    // Simple YAML highlighting without external library
+                    const yamlContent = JSON.stringify(sessionData.content, null, 2);
+                    sessionViewer.innerHTML = `<div style="margin-bottom: 8px; color: var(--text-dim);">Found: ${sessionData.path}</div><pre>${yamlContent}</pre>`;
+                } else {
+                    sessionViewer.innerHTML = `<div class="session-not-found">Session file not found: ${sessionData.reason}</div>`;
+                }
+            } catch (e) {
+                sessionViewer.innerHTML = `<div class="session-error">Error loading session file: ${e.message}</div>`;
+            }
+        }
+
+        function closeModal() {
+            modal.classList.remove('active');
+        }
+
+        modalClose.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                closeModal();
+            }
+        });
+
+        fetchFilters();
+        load();
 
         refreshBtn.addEventListener('click', load);
         filterType.addEventListener('change', load);
@@ -210,9 +418,6 @@
                 clearInterval(followInterval);
             }
         });
-
-        fetchFilters();
-        load();
     </script>
 </body>
 </html>

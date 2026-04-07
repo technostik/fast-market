@@ -511,6 +511,22 @@ class MonitorStorage:
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_trigger_log(row) for row in rows]
 
+    def get_trigger_log(self, log_id: str) -> TriggerLog | None:
+        """Get a single trigger log by ID."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM trigger_logs WHERE id = ?", (log_id,)
+            ).fetchone()
+            return self._row_to_trigger_log(row) if row else None
+
+    def get_rule_mismatch_log(self, log_id: str) -> RuleMismatchLog | None:
+        """Get a single rule mismatch log by ID."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM rule_mismatch_logs WHERE id = ?", (log_id,)
+            ).fetchone()
+            return self._row_to_mismatch_log(row) if row else None
+
     def get_trigger_logs_with_metadata(
         self,
         since: datetime | None = None,

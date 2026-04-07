@@ -211,6 +211,14 @@ def validate_config(
         for field in unknown_fields:
             warnings.append(f"Rule #{i}: Unknown field '{field}'")
 
+        # Check required fields
+        if "id" not in rule or not rule.get("id"):
+            errors.append(f"Rule #{i}: 'id' is required")
+        if "conditions" not in rule:
+            errors.append(f"Rule #{i}: 'conditions' is required")
+        if "action_ids" not in rule or not rule.get("action_ids"):
+            errors.append(f"Rule #{i}: 'action_ids' is required")
+
         if "id" in rule:
             rule_id = rule["id"]
             if rule_id in source_ids:
@@ -226,19 +234,51 @@ def validate_config(
         if "conditions" in rule:
             from core.rule_parser import RuleParser, RuleParseError
 
-            parser = RuleParser()
-            try:
-                conditions_dict = parser.parse(rule["conditions"])
-                invalid_fields = _find_invalid_condition_fields(conditions_dict)
-                for field_info in invalid_fields:
-                    warnings.append(f"Rule #{i}: Unknown condition field '{field_info}'")
-            except RuleParseError as e:
-                errors.append(f"Rule #{i}: Invalid DSL condition: {e}")
+            conditions = rule["conditions"]
+            
+            # Handle boolean conditions: true = always match, false = never match
+            if isinstance(conditions, bool):
+                if conditions is False:
+                    warnings.append(
+                        f"Rule #{i}: 'conditions: false' will never match. "
+                        f"Consider removing this rule or setting 'enabled: false'."
+                    )
+            elif not isinstance(conditions, str):
+                errors.append(
+                    f"Rule #{i}: 'conditions' must be a string DSL expression or boolean (true/false). "
+                    f"Got {type(conditions).__name__}."
+                )
+            else:
+                parser = RuleParser()
+                try:
+                    conditions_dict = parser.parse(conditions)
+                    invalid_fields = _find_invalid_condition_fields(conditions_dict)
+                    for field_info in invalid_fields:
+                        warnings.append(f"Rule #{i}: Unknown condition field '{field_info}'")
+                except RuleParseError as e:
+                    errors.append(f"Rule #{i}: Invalid DSL condition: {e}")
 
         if "schedule" in rule and rule["schedule"]:
-            unknown_schedule_fields = set(rule["schedule"].keys()) - KNOWN_SCHEDULE_FIELDS
-            for field in unknown_schedule_fields:
-                warnings.append(f"Rule #{i}: Unknown schedule field '{field}'")
+            schedule = rule["schedule"]
+            # Handle both dict format ({cron: "0 * * * *"}) and string format ("0 * * * *")
+            if isinstance(schedule, str):
+                # String schedule is treated as cron expression
+                from core.time_scheduler import validate_cron_expression
+
+                if not validate_cron_expression(schedule):
+                    errors.append(
+                        f"Rule #{i}: Invalid cron expression in schedule: '{schedule}'. "
+                        f"Use 'schedule: \"0 * * * *\"' for cron or 'schedule:\\n  cron: \"0 * * * *\"' for explicit format."
+                    )
+            elif isinstance(schedule, dict):
+                unknown_schedule_fields = set(schedule.keys()) - KNOWN_SCHEDULE_FIELDS
+                for field in unknown_schedule_fields:
+                    warnings.append(f"Rule #{i}: Unknown schedule field '{field}'")
+            else:
+                errors.append(
+                    f"Rule #{i}: Invalid schedule format. Expected cron string (e.g., 'schedule: \"0 * * * *\"') "
+                    f"or dict with cron/interval (e.g., 'schedule:\\n  cron: \"0 * * * *\"')."
+                )
 
     return errors, warnings
 

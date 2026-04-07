@@ -217,6 +217,94 @@ def get_source_debug(source_id: str) -> dict:
     }
 
 
+@app.get("/api/logs/{log_id}")
+def get_log_detail(log_id: str, mismatch: bool = Query(False)) -> dict:
+    """Get full details for a specific log entry."""
+    storage = _get_storage()
+
+    if mismatch:
+        log = storage.get_rule_mismatch_log(log_id)
+        if not log:
+            raise HTTPException(status_code=404, detail="Log not found")
+        return {
+            "id": log.id,
+            "rule_id": log.rule_id,
+            "source_id": log.source_id,
+            "item_id": log.item_id,
+            "item_title": log.item_title,
+            "failed_conditions": log.failed_conditions,
+            "evaluated_at": log.evaluated_at.isoformat(),
+        }
+
+    log = storage.get_trigger_log(log_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+
+    return {
+        "id": log.id,
+        "rule_id": log.rule_id,
+        "source_id": log.source_id,
+        "action_id": log.action_id,
+        "item_id": log.item_id,
+        "item_title": log.item_title,
+        "item_url": log.item_url,
+        "item_extra": log.item_extra,
+        "triggered_at": log.triggered_at.isoformat(),
+        "exit_code": log.exit_code,
+        "output": log.output,
+        "script_content": None,  # Can be added if stored in DB
+    }
+
+
+@app.get("/api/logs/{log_id}/session")
+def get_log_session(log_id: str) -> dict:
+    """Search for and return session.yaml content if it exists in the workdir."""
+    from common.core.config import load_tool_config
+
+    storage = _get_storage()
+
+    # Get the log to find the workdir
+    log = storage.get_trigger_log(log_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+
+    # Load config to get workdir
+    config = load_tool_config("monitor")
+    common_config = config.get("common", {})
+    workdir_path = common_config.get("workdir")
+
+    if not workdir_path:
+        return {"found": False, "reason": "No workdir configured"}
+
+    workdir = Path(workdir_path).expanduser().resolve()
+
+    if not workdir.exists():
+        return {"found": False, "reason": f"Workdir does not exist: {workdir}"}
+
+    # Search for session.yaml in workdir
+    session_file = workdir / "session.yaml"
+    if not session_file.exists():
+        # Try to find any *.session.yaml files
+        session_files = list(workdir.glob("*.session.yaml"))
+        if not session_files:
+            return {"found": False, "reason": "No session.yaml found in workdir"}
+        # Use the most recent one
+        session_file = max(session_files, key=lambda p: p.stat().st_mtime)
+
+    from ruamel.yaml import YAML
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with open(session_file) as f:
+        session_content = yaml.load(f)
+
+    return {
+        "found": True,
+        "path": str(session_file),
+        "content": session_content,
+    }
+
+
 @app.get("/api/config")
 def get_config() -> dict:
     cfg_path = get_tool_config_path("monitor").parent / "monitor.yaml"

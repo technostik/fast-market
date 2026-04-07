@@ -204,17 +204,37 @@ def _sync_config_logic(
             actions_to_add.append(new_action)
 
     for rule in config.get("rules", []):
-        rule_id = rule["id"]
-        conditions_str = rule["conditions"]
-        try:
-            conditions = parser.parse(conditions_str)
-        except RuleParseError as e:
-            return {"error": f"Failed to parse rule '{rule_id}': {e}"}
+        rule_id = rule.get("id", f"rule_#{config.get('rules', []).index(rule)}")
+        
+        # Validate required fields
+        if "conditions" not in rule:
+            return {"error": f"Rule '{rule_id}' is missing required field: 'conditions'"}
+        if "action_ids" not in rule or not rule.get("action_ids"):
+            return {"error": f"Rule '{rule_id}' is missing required field: 'action_ids'"}
+        
+        # Handle conditions: convert boolean to proper format
+        conditions_value = rule["conditions"]
+        if isinstance(conditions_value, bool):
+            # true = always match (empty all), false = never match (empty any)
+            conditions = {"all": []} if conditions_value else {"any": []}
+        elif isinstance(conditions_value, str):
+            try:
+                conditions = parser.parse(conditions_value)
+            except RuleParseError as e:
+                return {"error": f"Failed to parse rule '{rule_id}': {e}"}
+        else:
+            return {
+                "error": f"Rule '{rule_id}' has invalid 'conditions' type. "
+                f"Expected string DSL expression or boolean (true/false), got {type(conditions_value).__name__}."
+            }
 
         schedule = None
         if rule.get("schedule"):
             sched = rule["schedule"]
-            if isinstance(sched, dict):
+            if isinstance(sched, str):
+                # String schedule is treated as cron expression
+                schedule = {"cron": sched}
+            elif isinstance(sched, dict):
                 if "cron" in sched:
                     schedule = {"cron": sched["cron"]}
                 elif "interval" in sched:
