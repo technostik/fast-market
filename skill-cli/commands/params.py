@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 from click.shell_completion import CompletionItem
 
@@ -247,3 +249,67 @@ class SessionFileType(click.ParamType):
 
     def convert(self, value, param, ctx):
         return value
+
+
+class RunPlanFileType(click.ParamType):
+    name = "RUN_PLAN"
+
+    def _get_workdir(self):
+        """Get the workdir from common config or fallback to cwd."""
+        try:
+            from common.core.config import load_common_config
+            common_config = load_common_config()
+            workdir_path = common_config.get("workdir")
+            return (
+                Path(workdir_path).expanduser().resolve()
+                if workdir_path
+                else Path.cwd()
+            )
+        except Exception:
+            return Path.cwd()
+
+    def _find_run_plans(self, workdir: Path):
+        """Find all run.yaml/run.yml files recursively."""
+        plans = []
+        for pattern in ["run.yaml", "run.yml"]:
+            plans.extend(workdir.rglob(pattern))
+        return sorted(set(plans))
+
+    def shell_complete(self, ctx, param, incomplete):
+        cwd = self._get_workdir()
+        if not cwd.exists() or not cwd.is_dir():
+            return []
+
+        plans = self._find_run_plans(cwd)
+        items = []
+
+        for plan_path in plans:
+            try:
+                rel = plan_path.relative_to(cwd).as_posix()
+            except ValueError:
+                rel = str(plan_path)
+
+            if not rel.startswith(incomplete):
+                continue
+
+            # Try to read goal for help text
+            help_text = ""
+            try:
+                import yaml
+                data = yaml.safe_load(plan_path.read_text())
+                if isinstance(data, dict) and data.get("goal"):
+                    help_text = data["goal"]
+            except Exception:
+                pass
+
+            items.append(CompletionItem(rel, help=help_text))
+
+        return items
+
+    def convert(self, value, param, ctx):
+        # If it's a relative path, resolve against workdir
+        path = Path(value)
+        if not path.is_absolute():
+            workdir = self._get_workdir()
+            path = workdir / path
+        return path.resolve()

@@ -1,0 +1,726 @@
+from __future__ import annotations
+
+import json
+import tempfile
+from pathlib import Path
+
+import click
+import yaml
+
+from commands.base import CommandManifest
+from commands.params import RunPlanFileType
+from common.cli.helpers import get_editor, open_editor
+from common.core.config import load_common_config
+from core.repl import prompt_with_options, prompt_free_text, prompt_confirm
+
+
+def find_run_yaml_files(search_dir: Path, recursive: bool = True) -> list[Path]:
+    """Find all run.yaml and run.yml files in directory and subdirectories."""
+    run_files = []
+
+    if recursive:
+        for pattern in ["run.yaml", "run.yml"]:
+            run_files.extend(search_dir.rglob(pattern))
+    else:
+        for pattern in ["run.yaml", "run.yml"]:
+            run_files.extend(search_dir.glob(pattern))
+
+    return sorted(set(run_files))
+
+
+def load_plan(path: Path) -> dict:
+    """Load a run.yaml plan file."""
+    data = yaml.safe_load(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid plan YAML format: {path}")
+    if "plan" not in data:
+        data["plan"] = []
+    return data
+
+
+def save_plan(path: Path, data: dict) -> None:
+    """Save a run.yaml plan file."""
+    path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True))
+
+
+def format_step(step: dict, index: int) -> str:
+    """Format a step for display."""
+    action = step.get("action", "unknown")
+    lines = [f"  [{index}] {action.upper()}"]
+
+    if action == "run":
+        skill = step.get("skill", "?")
+        lines.append(f"      Skill: {skill}")
+        params = step.get("params", {})
+        if params:
+            for k, v in params.items():
+                lines.append(f"      {k}: {v}")
+        if step.get("inject"):
+            lines.append(f"      Inject: {step['inject'][:60]}...")
+    elif action == "task":
+        desc = step.get("description", "")
+        lines.append(f"      {desc[:80]}{'...' if len(desc) > 80 else ''}")
+        if step.get("instructions"):
+            lines.append(f"      Instructions: {step['instructions'][:60]}...")
+    elif action == "ask":
+        question = step.get("question", "")
+        lines.append(f"      {question[:80]}{'...' if len(question) > 80 else ''}")
+
+    if step.get("context_hint"):
+        lines.append(f"      Context: {step['context_hint'][:60]}...")
+
+    return "\n".join(lines)
+
+
+def show_step_detail(step: dict, index: int) -> None:
+    """Show detailed view of a step."""
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"Step {index}: {step.get('action', 'unknown').upper()}")
+    click.echo(f"{'=' * 60}")
+
+    for key, value in step.items():
+        if key != "step":
+            click.echo(f"  {key}: {value}")
+    click.echo()
+
+
+def edit_step_in_editor(step: dict) -> dict | None:
+    """Open step in editor and return modified step, or None if user cancels."""
+    import subprocess
+    import os
+
+    editor = get_editor()
+
+    # Create a temp file the editor can write to (more reliable than NamedTemporaryFile)
+    fd, temp_path_str = tempfile.mkstemp(suffix=".yaml", prefix="run_plan_")
+    temp_path = Path(temp_path_str)
+    try:
+        os.write(fd, yaml.dump(step, default_flow_style=False, sort_keys=False, allow_unicode=True).encode("utf-8"))
+        os.close(fd)
+    except Exception:
+        os.close(fd)
+        temp_path.unlink(missing_ok=True)
+        click.echo("Error creating temp file for editor.", err=True)
+        return None
+
+    # Save original content for comparison
+    original_content = temp_path.read_text(encoding="utf-8")
+
+    # Open the editor
+    try:
+        import shlex
+        cmd_parts = shlex.split(editor) + [str(temp_path)]
+        result = subprocess.run(cmd_parts)
+    except FileNotFoundError:
+        click.echo(f"Editor '{editor}' not found.", err=True)
+        temp_path.unlink(missing_ok=True)
+        return None
+
+    try:
+        if not temp_path.exists():
+            click.echo("Error: editor deleted the file.", err=True)
+            return None
+
+        new_content = temp_path.read_text(encoding="utf-8")
+
+        # If nothing changed, return the original step
+        if new_content.strip() == original_content.strip():
+            return step
+
+        modified = yaml.safe_load(new_content)
+        if not isinstance(modified, dict):
+            click.echo("Error: edited file is not a valid YAML mapping. Changes discarded.", err=True)
+            return None
+        return modified
+    except Exception as e:
+        click.echo(f"Error reading edited file: {e}. Changes discarded.", err=True)
+        return None
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def register(plugin_manifests: dict) -> CommandManifest:
+    @click.group("run-plan")
+    def run_plan():
+        """Manage run plans."""
+        pass
+
+    @run_plan.command("list")
+    @click.argument(
+        "directory",
+        type=click.Path(exists=True, file_okay=True, dir_okay=True, path_type=Path),
+        default=None,
+        required=False,
+    )
+    @click.option(
+        "--format",
+        "-F",
+        "fmt",
+        type=click.Choice(["text", "json"]),
+        default="text",
+        help="Output format",
+    )
+    @click.option(
+        "--recursive",
+        "-r",
+        is_flag=True,
+        default=True,
+        help="Search recursively in subdirectories (default: true)",
+    )
+    @click.option(
+        "--no-recursive",
+        is_flag=True,
+        default=False,
+        help="Search only in the current directory",
+    )
+    def list_cmd(directory, fmt, recursive, no_recursive):
+        """List all run.yaml plan files in the working directory."""
+        if directory is not None:
+            search_dir = directory
+        else:
+            common_config = load_common_config()
+            workdir = common_config.get("workdir")
+            if workdir:
+                search_dir = Path(workdir)
+            else:
+                search_dir = Path.cwd()
+
+        if not search_dir.exists():
+            click.echo(f"Error: Directory {search_dir} does not exist", err=True)
+            return
+
+        if search_dir.is_file():
+            if search_dir.name in ("run.yaml", "run.yml"):
+                run_files = [search_dir]
+            else:
+                run_files = []
+        else:
+            is_recursive = recursive and not no_recursive
+            run_files = find_run_yaml_files(search_dir, recursive=is_recursive)
+
+        if fmt == "json":
+            click.echo(
+                json.dumps(
+                    [
+                        {
+                            "path": str(f),
+                            "relative_path": str(f.relative_to(Path.cwd())) if f.is_relative_to(Path.cwd()) else str(f),
+                        }
+                        for f in run_files
+                    ],
+                    indent=2,
+                )
+            )
+            return
+
+        if not run_files:
+            click.echo(f"No run.yaml files found in {search_dir}")
+            return
+
+        click.echo(f"Found {len(run_files)} run plan(s) in {search_dir}:\n")
+        for i, run_file in enumerate(run_files, 1):
+            click.echo(f"  {i}. {run_file}")
+
+            try:
+                with open(run_file) as f:
+                    data = yaml.safe_load(f)
+                    if isinstance(data, dict) and "goal" in data:
+                        goal = data["goal"]
+                        if goal:
+                            click.echo(f"     Goal: {goal}")
+
+                    if isinstance(data, dict) and "plan" in data:
+                        plan_steps = data["plan"]
+                        if isinstance(plan_steps, list):
+                            click.echo(f"     Steps: {len(plan_steps)}")
+            except Exception:
+                pass
+
+            click.echo()
+
+    # -----------------------------------------------------------------------
+    # EDIT subcommand — step wizard
+    # -----------------------------------------------------------------------
+    @run_plan.command("edit")
+    @click.argument("plan", type=RunPlanFileType())
+    def edit_cmd(plan):
+        """Interactive wizard to edit a run plan's steps."""
+        plan_path = Path(plan)
+        if not plan_path.exists():
+            click.echo(f"Error: Plan file not found: {plan_path}", err=True)
+            raise SystemExit(1)
+
+        data = load_plan(plan_path)
+        goal = data.get("goal", "")
+        steps = data.get("plan", [])
+
+        click.echo(f"Editing plan: {plan_path}")
+        if goal:
+            click.echo(f"Goal: {goal}")
+        click.echo(f"Steps: {len(steps)}\n")
+
+        while True:
+            # Display current steps
+            if steps:
+                click.echo("Current steps:")
+                for i, step in enumerate(steps, 1):
+                    click.echo(format_step(step, i))
+                click.echo()
+            else:
+                click.echo("No steps yet.\n")
+
+            # Choose action
+            options = ["s", "e", "d", "m", "a", "c", "q"]
+            action = prompt_with_options(
+                "Choose action — [S]how / [E]dit / [D]elete / [M]ove / [A]dd / [C]hange (LLM) / [Q]uit: ",
+                options,
+            )
+
+            if action == "q":
+                # Save and exit
+                if steps:
+                    save_plan(plan_path, data)
+                    click.echo(f"\nPlan saved to {plan_path}")
+                else:
+                    click.echo("\nNo changes to save.")
+                return
+
+            elif action == "a":
+                # Add new step
+                step_type = prompt_with_options(
+                    "Step type — [R]un skill / [T]ask / [A]sk user: ",
+                    ["r", "t", "a"],
+                    default="t",
+                )
+
+                new_step: dict = {"action": {"r": "run", "t": "task", "a": "ask"}[step_type]}
+
+                if step_type == "r":
+                    skill_name = prompt_free_text("Skill name: ")
+                    if not skill_name:
+                        click.echo("Aborted.")
+                        continue
+                    new_step["skill"] = skill_name
+
+                    params_str = prompt_free_text("Parameters (KEY=VALUE,KEY2=VALUE2 or empty): ")
+                    if params_str:
+                        params = {}
+                        for pair in params_str.split(","):
+                            if "=" in pair:
+                                k, v = pair.split("=", 1)
+                                params[k.strip()] = v.strip()
+                        if params:
+                            new_step["params"] = params
+
+                    inject = prompt_free_text("Inject instructions (optional, enter to skip): ")
+                    if inject:
+                        new_step["inject"] = inject
+
+                elif step_type == "t":
+                    desc = prompt_free_text("Task description: ")
+                    if not desc:
+                        click.echo("Aborted.")
+                        continue
+                    new_step["description"] = desc
+
+                    instr = prompt_free_text("Additional instructions (optional): ")
+                    if instr:
+                        new_step["instructions"] = instr
+
+                elif step_type == "a":
+                    question = prompt_free_text("Question to ask user: ")
+                    if not question:
+                        click.echo("Aborted.")
+                        continue
+                    new_step["question"] = question
+
+                # Where to insert
+                if steps:
+                    pos = prompt_free_text(f"Insert at position (1-{len(steps)+1}, default {len(steps)+1}): ")
+                    try:
+                        pos_idx = int(pos) - 1 if pos else len(steps)
+                        pos_idx = max(0, min(pos_idx, len(steps)))
+                    except ValueError:
+                        pos_idx = len(steps)
+                    steps.insert(pos_idx, new_step)
+                else:
+                    steps.append(new_step)
+
+                # Re-number steps
+                for i, s in enumerate(steps, 1):
+                    s["step"] = i
+
+                click.echo("Step added.\n")
+
+            else:
+                # Need a step number
+                if not steps:
+                    click.echo("No steps to modify. Add one first.\n")
+                    continue
+
+                step_num = prompt_free_text(f"Step number (1-{len(steps)}): ")
+                try:
+                    idx = int(step_num) - 1
+                    if idx < 0 or idx >= len(steps):
+                        click.echo(f"Invalid step number. Must be 1-{len(steps)}.\n")
+                        continue
+                except ValueError:
+                    click.echo("Invalid number.\n")
+                    continue
+
+                if action == "s":
+                    show_step_detail(steps[idx], idx + 1)
+
+                elif action == "e":
+                    original_step = steps[idx]
+                    modified = edit_step_in_editor(original_step)
+                    if modified is None:
+                        click.echo("Edit cancelled.\n")
+                    elif modified is original_step:
+                        click.echo("No changes detected.\n")
+                    elif "action" not in modified or modified["action"] not in ("run", "task", "ask"):
+                        click.echo("Error: 'action' must be one of: run, task, ask. Changes discarded.", err=True)
+                    else:
+                        steps[idx] = modified
+                        # Re-number
+                        for i, s in enumerate(steps, 1):
+                            s["step"] = i
+                        # Save immediately
+                        save_plan(plan_path, data)
+                        click.echo(f"Step {idx + 1} updated and saved.\n")
+
+                elif action == "d":
+                    if prompt_confirm(f"Delete step {idx + 1}?"):
+                        steps.pop(idx)
+                        # Re-number
+                        for i, s in enumerate(steps, 1):
+                            s["step"] = i
+                        click.echo("Step deleted.\n")
+
+                elif action == "m":
+                    target = prompt_free_text(f"Move to position (1-{len(steps)}): ")
+                    try:
+                        target_idx = int(target) - 1
+                        if target_idx < 0 or target_idx >= len(steps):
+                            click.echo(f"Invalid position. Must be 1-{len(steps)}.\n")
+                            continue
+                        step_to_move = steps.pop(idx)
+                        steps.insert(target_idx, step_to_move)
+                        # Re-number
+                        for i, s in enumerate(steps, 1):
+                            s["step"] = i
+                        click.echo(f"Step moved to position {target_idx + 1}.\n")
+                    except ValueError:
+                        click.echo("Invalid number.\n")
+
+                elif action == "c":
+                    _llm_change_step(plan_path, data, steps, idx)
+
+    return CommandManifest(name="run-plan", click_command=run_plan)
+
+
+# ---------------------------------------------------------------------------
+# LLM-assisted single-step change (used from edit wizard)
+# ---------------------------------------------------------------------------
+
+def _llm_change_step(plan_path: Path, data: dict, steps: list, step_idx: int) -> None:
+    """Interactive LLM chat to modify a single step."""
+    from common.core.config import requires_common_config, load_tool_config
+    from common.llm.registry import discover_providers, get_default_provider_name
+    from core.skill import discover_skills
+    from common.core.paths import get_skills_dir
+
+    requires_common_config("skill", ["llm"])
+    try:
+        config = load_tool_config("skill")
+        providers = discover_providers(config)
+        provider_name = get_default_provider_name(config)
+        llm = providers.get(provider_name)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        return
+
+    if not llm:
+        click.echo(f"Error: provider '{provider_name}' not available.", err=True)
+        return
+
+    skills = discover_skills(get_skills_dir())
+    context = _build_llm_context(data, skills, step_idx)
+
+    click.echo(f"\nLLM Chat — modifying step {step_idx + 1}: {steps[step_idx].get('action').upper()}")
+    click.echo("Describe what you want to change.")
+    click.echo("Type 'done' to finalize, 'abort' to cancel.\n")
+
+    result = _run_llm_chat_loop(llm, None, context, data, plan_path, step_idx)
+    if result:
+        steps[step_idx] = result
+        for i, s in enumerate(steps, 1):
+            s["step"] = i
+        save_plan(plan_path, data)
+        click.echo(f"Plan saved to {plan_path}")
+
+
+def _build_llm_context(plan_data: dict, skills: list, step_idx: int | None) -> str:
+    """Build rich context for the LLM to understand the plan and available tools."""
+    lines = []
+    lines.append("# Run Plan Context")
+    lines.append("")
+
+    # Goal
+    if plan_data.get("goal"):
+        lines.append(f"## Goal")
+        lines.append(plan_data["goal"])
+        lines.append("")
+
+    # Current plan
+    lines.append("## Current Plan")
+    lines.append("```yaml")
+    lines.append(yaml.dump(plan_data, default_flow_style=False, sort_keys=False, allow_unicode=True).rstrip())
+    lines.append("```")
+    lines.append("")
+
+    # Specific step being edited
+    if step_idx is not None and step_idx < len(plan_data.get("plan", [])):
+        step = plan_data["plan"][step_idx]
+        lines.append(f"## Step {step_idx + 1} (being edited)")
+        lines.append("```yaml")
+        lines.append(yaml.dump(step, default_flow_style=False, sort_keys=False, allow_unicode=True).rstrip())
+        lines.append("```")
+        lines.append("")
+
+    # Available skills
+    if skills:
+        lines.append("## Available Skills")
+        lines.append("These skills can be used in 'run' steps. Each skill has parameters and instructions.")
+        lines.append("")
+        for skill in skills:
+            lines.append(f"### {skill.name}")
+            lines.append(f"Description: {skill.description or 'N/A'}")
+            if skill.parameters:
+                lines.append("Parameters:")
+                for p in skill.parameters:
+                    req = " (required)" if p.get("required") else ""
+                    lines.append(f"  - {p['name']}{req}: {p.get('description', '')}")
+            if skill.path and (skill.path / "scripts").exists():
+                scripts = [f.name for f in (skill.path / "scripts").iterdir() if f.is_file()]
+                lines.append(f"Scripts: {', '.join(scripts)}")
+            lines.append("")
+
+    # Instructions for the LLM
+    lines.append("## Your Role")
+    lines.append("You are an assistant helping the user modify their run plan.")
+    lines.append("The user will describe what they want to change, and you will:")
+    lines.append("1. Understand their intent")
+    lines.append("2. Propose the modified YAML for the step (or new steps to add)")
+    lines.append("3. Explain your changes")
+    lines.append("4. Wait for their feedback or approval")
+    lines.append("")
+    lines.append("When the user says 'done', output ONLY the final modified step(s) as YAML.")
+    lines.append("Do not output anything else at that point.")
+    lines.append("")
+    lines.append("Step types: 'run' (execute a skill), 'task' (free-form instructions), 'ask' (prompt user)")
+    lines.append("For 'run' steps, use the exact skill names listed above.")
+
+    return "\n".join(lines)
+
+
+def _clean_llm_yaml(raw: str) -> str | None:
+    """Robustly clean LLM output to produce parseable YAML.
+    
+    Handles: markdown code fences, stray text outside YAML, unquoted values
+    with colons, and other common LLM formatting issues.
+    """
+    import re
+
+    text = raw.strip()
+    if not text:
+        return None
+
+    # 1. Strip markdown code fences (at start or embedded)
+    if "```" in text:
+        # Try to extract content between ```yaml and ```
+        fence_pattern = re.compile(r"```(?:yaml)?\s*\n(.*?)\n\s*```", re.DOTALL)
+        match = fence_pattern.search(text)
+        if match:
+            text = match.group(1).strip()
+        else:
+            # Fallback: strip all ``` lines
+            lines = [l for l in text.splitlines() if l.strip() not in ("```", "```yaml")]
+            text = "\n".join(lines)
+
+    # 2. Try to parse directly first (fast path)
+    import yaml
+    try:
+        result = yaml.safe_load(text)
+        if isinstance(result, dict):
+            return text
+    except Exception:
+        pass
+
+    # 3. Extract YAML-like content: find first and last YAML-looking lines
+    known_keys = ["action:", "step:", "skill:", "description:", "question:",
+                  "context_hint:", "params:", "inject:", "instructions:"]
+    
+    lines = text.splitlines()
+    first_yaml = -1
+    last_yaml = -1
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if any(stripped.startswith(k) for k in known_keys):
+            if first_yaml == -1:
+                first_yaml = i
+            last_yaml = i
+        elif re.match(r"^[a-z_][a-z_0-9]*:", stripped):
+            if first_yaml == -1:
+                first_yaml = i
+            last_yaml = i
+
+    if first_yaml == -1:
+        return None
+
+    yaml_text = "\n".join(lines[first_yaml:last_yaml + 1])
+
+    # 4. Fix unquoted values containing colons
+    fixed_lines = []
+    for line in yaml_text.splitlines():
+        m = re.match(r"^(\s*)([a-z_][a-z_0-9]*:\s*)(.*)", line)
+        if m:
+            indent, key_part, value = m.groups()
+            value = value.strip()
+            if (value.startswith('"') and value.endswith('"')) or \
+               (value.startswith("'") and value.endswith("'")):
+                fixed_lines.append(line)
+                continue
+            if ":" in value:
+                value = value.replace('"', '\\"')
+                value = f'"{value}"'
+            fixed_lines.append(f"{indent}{key_part}{value}")
+        else:
+            fixed_lines.append(line)
+
+    yaml_text = "\n".join(fixed_lines)
+
+    # 5. Final validation
+    try:
+        result = yaml.safe_load(yaml_text)
+        if isinstance(result, dict):
+            return yaml_text
+    except Exception:
+        pass
+
+    return None
+
+
+def _run_llm_chat_loop(
+    llm,
+    model: str | None,
+    context: str,
+    plan_data: dict,
+    plan_path: Path,
+    step_idx: int | None,
+) -> dict | None:
+    """Run an interactive chat loop with the LLM for plan editing.
+    Returns the modified step dict if accepted, or None if cancelled.
+    """
+    from common.llm.base import LLMRequest
+    from prompt_toolkit import prompt
+    from core.repl import REPL_STYLE
+
+    messages = []
+    system_prompt = (
+        "You are helping a user edit a run plan (YAML file) for the fast-market skill runner. "
+        "The user will describe the changes they want. "
+        "Propose YAML modifications and explain your reasoning.\n\n"
+        "CRITICAL: When the user says 'done', output ONLY the final YAML block. "
+        "NEVER wrap values in quotes unless they contain YAML-special characters. "
+        "However, if a value contains colons (:), commas, apostrophes, or parentheses, "
+        "you MUST wrap it in double quotes. "
+        "NEVER use markdown code fences (```yaml ... ```). "
+        "Output raw YAML only — no explanation, no preamble, no backticks.\n\n"
+        "Example of CORRECT output:\n"
+        "action: task\n"
+        'description: "Use some tool on the video: https://example.com"\n\n'
+        "Example of INCORRECT output (will cause parse errors):\n"
+        "description: Use some tool on the video: https://example.com"
+    )
+
+    while True:
+        try:
+            user_input = prompt("You> ", style=REPL_STYLE).strip()
+        except (KeyboardInterrupt, EOFError):
+            click.echo("\nAborted — no changes saved.")
+            return None
+
+        if not user_input:
+            continue
+
+        if user_input.lower() in ("quit", "exit", "q", "abort"):
+            click.echo("Aborted — no changes saved.")
+            return None
+
+        if user_input.lower() == "done":
+            messages.append({"role": "user", "content": "done — output ONLY the final modified YAML. Nothing else."})
+            req = LLMRequest(
+                system=system_prompt,
+                messages=[{"role": "system", "content": context}] + messages,
+                model=model,
+                temperature=0.3,
+            )
+            resp = llm.complete(req)
+            final_yaml = resp.content.strip()
+
+            click.echo("\n" + "=" * 60)
+            click.echo("Final proposed YAML:")
+            click.echo("=" * 60)
+            click.echo(final_yaml)
+            click.echo("=" * 60)
+
+            try:
+                import yaml as yaml_lib
+                import re as _re
+
+                cleaned = _clean_llm_yaml(final_yaml)
+                if not cleaned:
+                    click.echo("Error: no YAML content found.", err=True)
+                    messages.pop()
+                    continue
+
+                parsed = yaml_lib.safe_load(cleaned)
+                if not isinstance(parsed, dict):
+                    click.echo("Error: LLM did not output a valid YAML mapping.", err=True)
+                    messages.pop()
+                    continue
+
+                if prompt_confirm("Accept and save these changes?"):
+                    return parsed
+                else:
+                    click.echo("Changes not saved. Continue chatting, type 'abort' to cancel.\n")
+                    messages.pop()
+                    continue
+
+            except Exception as e:
+                click.echo(f"Error parsing YAML: {e}", err=True)
+                click.echo("Continue chatting, or type 'abort' to cancel.\n")
+                messages.pop()
+                continue
+
+        messages.append({"role": "user", "content": user_input})
+        req = LLMRequest(
+            system=system_prompt,
+            messages=[{"role": "system", "content": context}] + messages,
+            model=model,
+            temperature=0.7,
+        )
+
+        click.echo("Thinking...", err=True)
+        try:
+            resp = llm.complete(req)
+            click.echo(f"\nAssistant: {resp.content}\n")
+            messages.append({"role": "assistant", "content": resp.content})
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            messages.pop()
+
+    return None

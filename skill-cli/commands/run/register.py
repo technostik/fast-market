@@ -119,6 +119,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Enable shared context string that skills can read/write to cooperate",
     )
+    @click.option(
+        "--interactive",
+        "-I",
+        is_flag=True,
+        default=False,
+        help="Interactive mode — approve, skip, edit, or replan each step before execution",
+    )
+    @click.option(
+        "--export-successful",
+        "-E",
+        type=click.Path(),
+        default=None,
+        help="Export only the successfully executed steps to a YAML plan file",
+    )
     def run_cmd(
         task,
         provider,
@@ -137,6 +151,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         run_isolated,
         skill_isolated,
         shared_context,
+        interactive,
+        export_successful,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
@@ -148,6 +164,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         - Default: skills use the workdir directly (cooperation enabled)
         - --run-isolated: create one isolated dir for the entire run
         - --skill-isolated: create one run dir + subdirectory per skill
+
+        Interactive mode (--interactive):
+        - Before each step, you can approve, skip, edit, or replan
+        - Use --export-successful to save the steps that worked
         """
         if workdir is None:
             common_config = load_common_config()
@@ -187,6 +207,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Provider: {provider_name}, model: {model or 'default'}", err=True)
         click.echo(f"Isolation mode: {isolation_mode}", err=True)
         click.echo(f"Shared context: {'enabled' if shared_ctx else 'disabled'}", err=True)
+        click.echo(f"Interactive mode: {'enabled' if interactive else 'disabled'}", err=True)
 
         state = run_router(
             goal=task,
@@ -206,6 +227,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             shared_context=shared_ctx,
             export_plan_path=export,
             import_plan_path=import_plan,
+            interactive=interactive,
+            export_successful_path=export_successful,
         )
         click.echo("\n" + "=" * 50, err=True)
         if state.done:

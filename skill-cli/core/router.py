@@ -8,6 +8,8 @@ from pathlib import Path
 from functools import partial
 from typing import Any
 
+import click
+
 from common import structlog
 from common.agent.loop import TaskConfig, TaskLoop
 from common.agent.executor import resolve_and_execute_command
@@ -175,6 +177,95 @@ class CLIInteractionPlugin(InteractionPlugin):
 
 
 # ---------------------------------------------------------------------------
+# Interactive approval plugin
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ApprovalResult:
+    """Result of an interactive step approval."""
+    action: str  # "accept", "skip", "edit", "replan", "quit"
+    modified_plan: dict | None = None
+
+
+class InteractiveApprovalPlugin:
+    """Prompts user for approval before each step execution."""
+
+    def approve(self, plan: dict, history: list[SkillAttempt]) -> ApprovalResult:
+        action = plan.get("action", "unknown")
+
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"Next step: {action.upper()}")
+        click.echo(f"{'=' * 60}")
+
+        if action == "run":
+            click.echo(f"  Skill: {plan.get('skill_name')}")
+            if plan.get("params"):
+                for k, v in plan["params"].items():
+                    click.echo(f"  {k}: {v}")
+            if plan.get("inject"):
+                click.echo(f"  Inject: {plan['inject'][:80]}{'...' if len(plan['inject']) > 80 else ''}")
+        elif action == "task":
+            desc = plan.get("description", "")
+            click.echo(f"  {desc[:100]}{'...' if len(desc) > 100 else ''}")
+            if plan.get("instructions"):
+                click.echo(f"  Instructions: {plan['instructions'][:80]}{'...' if len(plan['instructions']) > 80 else ''}")
+        elif action == "ask":
+            click.echo(f"  Question: {plan.get('question', '')}")
+
+        if plan.get("context_hint"):
+            click.echo(f"  Context: {plan['context_hint'][:80]}{'...' if len(plan['context_hint']) > 80 else ''}")
+
+        if plan.get("reason"):
+            click.echo(f"  Reason: {plan['reason'][:80]}{'...' if len(plan['reason']) > 80 else ''}")
+
+        click.echo()
+
+        from core.repl import prompt_with_options, prompt_free_text
+        from common.cli.helpers import open_editor
+        import tempfile
+        import yaml as yaml_lib
+
+        choice = prompt_with_options(
+            "Action — [A]ccept / [S]kip / [E]dit / [R]eplan / [Q]uit: ",
+            ["a", "s", "e", "r", "q"],
+            default="a",
+        )
+
+        if choice == "q":
+            return ApprovalResult(action="quit")
+        elif choice == "s":
+            return ApprovalResult(action="skip")
+        elif choice == "r":
+            return ApprovalResult(action="replan")
+        elif choice == "e":
+            # Open plan dict in editor
+            editable = {k: v for k, v in plan.items()}
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+                yaml_lib.dump(editable, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                temp_path = Path(f.name)
+
+            try:
+                import subprocess
+                open_editor(temp_path)
+                modified = yaml_lib.safe_load(temp_path.read_text())
+                if not isinstance(modified, dict) or "action" not in modified:
+                    click.echo("Error: invalid YAML. Keeping original.", err=True)
+                    return ApprovalResult(action="accept")
+                return ApprovalResult(action="accept", modified_plan=modified)
+            except subprocess.CalledProcessError:
+                click.echo("Editor error. Keeping original.", err=True)
+                return ApprovalResult(action="accept")
+            except Exception as e:
+                click.echo(f"Error: {e}. Keeping original.", err=True)
+                return ApprovalResult(action="accept")
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+        return ApprovalResult(action="accept")
+
+
+# ---------------------------------------------------------------------------
 # JSON helpers
 # ---------------------------------------------------------------------------
 
@@ -306,6 +397,7 @@ def _call_plan(
     model: str | None,
     skills: list[Skill],
     prompt_template: str | None = None,
+    extra_context: str | None = None,
 ) -> dict:
     """Ask the planner what to do next. Returns dict with 'action' key."""
     template = prompt_template or PLAN_PROMPT
@@ -315,6 +407,8 @@ def _call_plan(
         history=_format_history(state.attempts),
         success_criteria=state.success_criteria,
     )
+    if extra_context:
+        prompt += f"\n\n{extra_context}"
     req = LLMRequest(prompt=prompt, model=model, temperature=0.0, max_tokens=4096)
     response = provider.complete(req)
     raw = (response.content or "").strip()
@@ -824,6 +918,54 @@ def _export_execution_log(state: RouterState, filepath: str) -> None:
         logger.info("execution_log_exported", path=str(path))
 
 
+def _export_successful_plan(state: RouterState, filepath: str) -> None:
+    """Export only the successful steps as a clean plan YAML."""
+    import yaml
+
+    successful_steps = []
+    step_num = 0
+
+    for attempt in state.attempts:
+        if attempt.success or attempt.action == "ask":
+            step_num += 1
+            step_dict = {
+                "step": step_num,
+                "action": attempt.action,
+            }
+
+            if attempt.action == "run":
+                step_dict["skill"] = attempt.skill_name
+                if attempt.params:
+                    step_dict["params"] = attempt.params
+            elif attempt.action == "task":
+                # Extract description from runner_summary or raw_output
+                desc = attempt.runner_summary or f"Task: {attempt.skill_name}"
+                step_dict["description"] = desc
+            elif attempt.action == "ask":
+                step_dict["question"] = attempt.params.get("question", "")
+
+            successful_steps.append(step_dict)
+
+    if not successful_steps:
+        return
+
+    data = {
+        "goal": state.goal,
+        "success_criteria": state.success_criteria,
+        "final_result": state.final_result if state.done else state.failure_reason,
+        "plan": successful_steps,
+    }
+
+    yaml_content = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    if filepath == "-":
+        print(yaml_content)
+    else:
+        path = Path(filepath)
+        path.write_text(yaml_content)
+        logger.info("successful_plan_exported", path=str(path))
+
+
 def _import_plan_from_yaml(filepath: str, workdir: str = ".") -> SkillPlan:
     """Import a skill plan from YAML file."""
     import yaml
@@ -895,6 +1037,8 @@ def run_router(
     shared_context: Any = None,
     export_plan_path: str | None = None,
     import_plan_path: str | None = None,
+    interactive: bool = False,
+    export_successful_path: str | None = None,
 ) -> RouterState:
     """Orchestrate skills and tasks to achieve a goal.
 
@@ -1108,6 +1252,102 @@ def run_router(
             state.failed = True
             state.failure_reason = str(plan.get("reason", "Router declared failure"))
             break
+
+        # Interactive approval hook
+        if interactive and action in ("run", "task"):
+            approval = InteractiveApprovalPlugin().approve(plan, state.attempts)
+
+            if approval.action == "quit":
+                state.done = True
+                state.final_result = "User quit during interactive mode"
+                break
+
+            if approval.action == "skip":
+                click.echo(f"[interactive] Step skipped by user", err=True)
+                attempt = SkillAttempt(
+                    action=action,
+                    skill_name=plan.get("skill_name", "(task)") if action == "run" else "(task)",
+                    params={str(k): str(v) for k, v in (plan.get("params") or {}).items()},
+                    exit_code=0,
+                    runner_summary="Skipped by user in interactive mode",
+                    context="",
+                    context_hint=plan.get("context_hint", ""),
+                    success=True,
+                    iteration=state.iteration,
+                    subdir=Path(""),
+                    raw_output="",
+                )
+                state.attempts.append(attempt)
+                continue
+
+            if approval.action == "replan":
+                click.echo(f"[interactive] Asking planner for an alternative...", err=True)
+                # Call planner again with rejection feedback
+                try:
+                    plan = _call_plan(
+                        state, provider, model, skills,
+                        prompt_template=plan_prompt,
+                        extra_context="User rejected the previous proposed step. Please propose a different approach.",
+                    )
+                    action = plan.get("action", "").strip()
+                    # Re-track the new planned step
+                    if action not in ("done", "fail"):
+                        planned_step = SkillPlanStep(
+                            step=state.iteration,
+                            action=action,
+                            skill_name=plan.get("skill_name", ""),
+                            params={str(k): str(v) for k, v in (plan.get("params") or {}).items()},
+                            inject=plan.get("inject", ""),
+                            description=plan.get("description", ""),
+                            instructions=plan.get("instructions", ""),
+                            question=plan.get("question", ""),
+                            context_hint=plan.get("context_hint", ""),
+                        )
+                        planned_steps.append(planned_step)
+                    # Handle terminal actions again
+                    if action == "done":
+                        state.done = True
+                        state.final_result = str(plan.get("reason", "Goal achieved"))
+                        break
+                    if action == "fail":
+                        state.failed = True
+                        state.failure_reason = str(plan.get("reason", "Router declared failure"))
+                        break
+                    if action == "ask":
+                        question = str(plan.get("question", "What should I do next?"))
+                        answer = interaction.ask(question)
+                        attempt = SkillAttempt(
+                            action="ask",
+                            skill_name="(user)",
+                            params={"question": question},
+                            exit_code=0,
+                            runner_summary=f"User answered: {answer}",
+                            context=f"User was asked: {question}\nUser answered: {answer}",
+                            context_hint="",
+                            success=True,
+                            iteration=state.iteration,
+                            subdir=Path(""),
+                            raw_output="",
+                        )
+                        state.attempts.append(attempt)
+                        prev_context = attempt.context
+                        if verbose:
+                            _print_attempt(attempt)
+                        continue
+                    # Fall through to execute the new plan
+                    click.echo(f"[interactive] New plan: {action}", err=True)
+                except Exception as exc:
+                    click.echo(f"[interactive] Replan failed: {exc}. Proceeding with original.", err=True)
+
+            if approval.action == "edit" and approval.modified_plan:
+                plan = approval.modified_plan
+                action = plan.get("action", "").strip()
+                click.echo(f"[interactive] Step modified by user", err=True)
+
+            if approval.action == "accept":
+                if approval.modified_plan:
+                    plan = approval.modified_plan
+                click.echo(f"[interactive] Step accepted", err=True)
 
         # Ask user
         if action == "ask":
@@ -1412,6 +1652,17 @@ def run_router(
             logger.warning("execution_export_failed", error=str(exc))
             if verbose:
                 print(f"\n[router] Warning: Failed to export execution log: {exc}")
+
+    # Export successful plan if requested (especially useful in interactive mode)
+    if export_successful_path:
+        try:
+            _export_successful_plan(state, str(export_successful_path))
+            if verbose:
+                print(f"\n[router] Successful plan exported to: {export_successful_path}")
+        except Exception as exc:
+            logger.warning("successful_plan_export_failed", error=str(exc))
+            if verbose:
+                print(f"\n[router] Warning: Failed to export successful plan: {exc}")
 
     if save_session and session_files:
         # When isolation_mode is "none", use workdir_path as the session save location
