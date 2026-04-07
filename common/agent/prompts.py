@@ -11,10 +11,13 @@ from common.agent.executor import (
 
 DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a command execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
 
+# Task
+{task_description}
+
 {params_section}
 
 # Working Directory
-All commands execute in a working directory: USE RELATIVE PATHS ONLY. DO NOT USE ABSOLUTE PATHS.
+All commands execute in a working directory: {workdir}. USE RELATIVE PATHS ONLY. DO NOT USE ABSOLUTE PATHS.
 You can read and write files in this directory. Relative paths are resolved from here.
 
 {env_vars_section}
