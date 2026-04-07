@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from common.agent.executor import (
+    DEFAULT_FASTMARKET_TOOLS,
+    DEFAULT_SYSTEM_COMMANDS,
+    default_fastmarket_tools_dict,
+)
+
 
 DEFAULT_AGENT_PROMPT_TEMPLATE = """You are a command execution agent. You have access to a sandboxed command-line environment to accomplish tasks.
 
@@ -35,55 +41,6 @@ You can read and write files in this directory. Relative paths are resolved from
 - **Be efficient** - prefer one good command over many guesses
 - **Minimal context** - write intermediate results to files instead of your own context, keep token minimal
 """
-
-
-DEFAULT_FASTMARKET_TOOLS = {
-    "corpus": {
-        "description": "Search and query your knowledge base with embeddings.",
-        "commands": ["get-from-id", "get-from-source", "get-last", "list", "search"],
-    },
-    "image": {
-        "description": "Generate images from text prompts using AI image generation APIs.",
-        "commands": ["generate"],
-    },
-    "message": {
-        "description": "Send messages and alerts via Telegram.",
-        "commands": ["alert", "ask"],
-    },
-    "task": {
-        "description": "Execute agentic task",
-        "commands": ["apply"],
-    },
-    "youtube": {
-        "description": "Search YouTube videos and manage comments via the YouTube Data API.",
-        "commands": ["search", "comments", "reply", "get-transcript", "get-last"],
-    },
-    "prompt": {
-        "description": "Generate prompts from text using AI prompt generation APIs.",
-        "commands": ["apply", "list"],
-    },
-}
-
-DEFAULT_SYSTEM_COMMANDS = [
-    "ls",
-    "cat",
-    "jq",
-    "grep",
-    "find",
-    "echo",
-    "head",
-    "tail",
-    "wc",
-    "mkdir",
-    "touch",
-    "rm",
-    "cp",
-    "mv",
-    "sort",
-    "uniq",
-    "awk",
-    "sed",
-]
 
 
 DEFAULT_PREPARATION_PROMPT = """You are a skill orchestrator. Before entering the planning loop,
@@ -321,14 +278,21 @@ SYSTEM_COMMAND_DOCS = {
         ],
         "notes": "Input must be valid JSON. Use cat or command output as input.",
     },
-    "echo": {
-        "description": "Print text to stdout",
-        "usage": "echo [TEXT]",
-        "examples": [
-            "echo 'Hello World'   # Print text",
-            "echo $VAR            # Note: shell variables don't work in this sandbox",
+    "printf": {
+        "description": "Print formatted text to stdout",
+        "usage": "printf FORMAT [ARGUMENTS...]",
+        "key_options": [
+            "\\n  : Newline",
+            "\\t  : Tab",
+            "%s  : String argument",
+            "%d  : Integer argument",
         ],
-        "notes": "Useful for creating simple text files or testing",
+        "examples": [
+            "printf 'Hello World\\n'   # Print text with newline",
+            "printf 'Line 1\\nLine 2\\n'  # Multiple lines",
+            "printf 'URL: %s\\n' 'https://example.com'  # With arguments",
+        ],
+        "notes": "More portable than echo -e. Always interprets escape sequences.",
     },
     "mkdir": {
         "description": "Create directories",
@@ -626,7 +590,7 @@ def _init_task_config(config: dict | None = None) -> dict:
 
     task = config.get("task", config)
 
-    task.setdefault("fastmarket_tools", dict(DEFAULT_FASTMARKET_TOOLS))
+    task.setdefault("fastmarket_tools", default_fastmarket_tools_dict())
     task.setdefault("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
 
     if "agent_prompt" not in task:

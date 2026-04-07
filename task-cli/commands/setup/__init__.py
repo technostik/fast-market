@@ -10,6 +10,7 @@ from common.agent.prompts import (
     DEFAULT_COMMAND_DOCS_TEMPLATES,
     DEFAULT_FASTMARKET_TOOLS,
     DEFAULT_SYSTEM_COMMANDS,
+    default_fastmarket_tools_dict,
 )
 from common.core.config import _resolve_config_path, load_tool_config, save_tool_config
 from common.core.yaml_utils import dump_yaml
@@ -60,7 +61,7 @@ def init_task_config(config: dict | None = None) -> dict:
     if not isinstance(task, dict):
         raise ValueError("task config must be a mapping")
 
-    task.setdefault("fastmarket_tools", dict(DEFAULT_FASTMARKET_TOOLS))
+    task.setdefault("fastmarket_tools", default_fastmarket_tools_dict())
     task.setdefault("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
     task.setdefault("max_iterations", 20)
     task.setdefault("default_timeout", 60)

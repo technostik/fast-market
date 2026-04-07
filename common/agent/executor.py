@@ -37,18 +37,27 @@ class CommandResult:
         }
 
 
-_DEFAULT_ALLOWED = {
+# ============================================================================
+# Command Whitelist - Single Source of Truth
+# ============================================================================
+
+# Fast-Market tools (CLIs created in this project)
+DEFAULT_FASTMARKET_TOOLS = {
     "corpus",
     "image",
     "youtube",
     "message",
     "prompt",
+}
+
+# System commands (classic Linux shell commands)
+DEFAULT_SYSTEM_COMMANDS = {
     "ls",
     "cat",
     "jq",
     "grep",
     "find",
-    "echo",
+    "printf",
     "head",
     "tail",
     "wc",
@@ -62,6 +71,14 @@ _DEFAULT_ALLOWED = {
     "awk",
     "sed",
 }
+
+# Combined whitelist for backward compatibility
+_DEFAULT_ALLOWED = DEFAULT_FASTMARKET_TOOLS | DEFAULT_SYSTEM_COMMANDS
+
+
+def default_fastmarket_tools_dict() -> dict:
+    """Create a default fastmarket_tools dict with tool names as keys and None as values."""
+    return {name: None for name in DEFAULT_FASTMARKET_TOOLS}
 
 
 def _parse_command_tokens(cmd_str: str) -> tuple[bool, list[str], str | None]:
@@ -81,7 +98,7 @@ def is_command_allowed(cmd_str: str, allowed: set[str]) -> tuple[bool, str | Non
     """Check if command is in whitelist (first token must match basename).
 
     Returns (is_allowed, error_message).
-    If is_allowed is False, error_message explains why.
+    If is_allowed is False, error_message explains why and lists allowed commands.
     """
     success, tokens, error_msg = _parse_command_tokens(cmd_str)
     if not success:
@@ -91,7 +108,12 @@ def is_command_allowed(cmd_str: str, allowed: set[str]) -> tuple[bool, str | Non
     first_token = tokens[0]
     cmd_name = Path(first_token).name
     if cmd_name not in allowed:
-        return False, f"Command '{cmd_name}' not in whitelist"
+        allowed_sorted = ", ".join(sorted(allowed))
+        return (
+            False,
+            f"Command '{cmd_name}' is not in the allowed whitelist. "
+            f"Allowed commands: {allowed_sorted}",
+        )
     return True, None
 
 

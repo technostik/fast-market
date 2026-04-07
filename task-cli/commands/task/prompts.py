@@ -15,6 +15,7 @@ from common.agent.prompts import (
     _build_fastmarket_tools_section,
     _build_system_commands_section,
     _build_minimal_tools_section,
+    default_fastmarket_tools_dict,
 )
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "build_command_documentation",
     "get_active_agent_prompt_config",
     "get_active_command_docs_prompt_config",
+    "default_fastmarket_tools_dict",
 ]
 
 # Backward compatibility alias

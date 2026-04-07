@@ -8,6 +8,7 @@ from common.agent.prompts import (
     DEFAULT_PLAN_PROMPT,
     DEFAULT_PREPARATION_PROMPT,
     DEFAULT_SYSTEM_COMMANDS,
+    default_fastmarket_tools_dict,
 )
 from common.core.config import load_agent_config, save_agent_config
 from common.learn import (
@@ -35,7 +36,7 @@ def save_skill_agent_config(agent_config: dict) -> None:
 def default_skill_agent_config() -> dict:
     """Return a fresh default agent config, ignoring any file on disk."""
     return {
-        "fastmarket_tools": dict(DEFAULT_FASTMARKET_TOOLS),
+        "fastmarket_tools": default_fastmarket_tools_dict(),
         "system_commands": list(DEFAULT_SYSTEM_COMMANDS),
         "max_iterations": 20,
         "default_timeout": 60,
@@ -74,7 +75,7 @@ def init_skill_agent_config(agent_dict: dict | None = None) -> dict:
     if not isinstance(agent_dict, dict):
         raise ValueError("agent config must be a mapping")
 
-    agent_dict.setdefault("fastmarket_tools", dict(DEFAULT_FASTMARKET_TOOLS))
+    agent_dict.setdefault("fastmarket_tools", default_fastmarket_tools_dict())
     agent_dict.setdefault("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
     agent_dict.setdefault("max_iterations", 20)
     agent_dict.setdefault("default_timeout", 60)
