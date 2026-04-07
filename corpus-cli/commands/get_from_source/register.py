@@ -138,9 +138,7 @@ def _sync_youtube(plugin, video_id: str, engine, store) -> None:
             ).replace(tzinfo=None)
         else:
             updated = datetime.utcnow()
-        duration = _parse_iso8601_duration(
-            detail.get("contentDetails", {}).get("duration", "")
-        )
+        duration = _parse_duration(detail.get("contentDetails", {}).get("duration", 0))
         item_meta = ItemMeta(
             source_id=video_id,
             updated_at=updated,
@@ -185,8 +183,14 @@ def _sync_generic(plugin, source_id: str, engine, store) -> None:
         sys.exit(1)
 
 
-def _parse_iso8601_duration(duration: str) -> int:
-    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration or "")
+def _parse_duration(duration) -> int:
+    if duration is None:
+        return 0
+    if isinstance(duration, int):
+        return duration
+    if isinstance(duration, float):
+        return int(duration)
+    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration)
     if not match:
         return 0
     h, m, s = (int(x or 0) for x in match.groups())
