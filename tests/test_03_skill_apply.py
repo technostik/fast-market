@@ -130,3 +130,34 @@ def test_apply_save_session_writes_file_for_script_mode(workdir):
     data = yaml.safe_load(session_file.read_text(encoding="utf-8")) or {}
     turns = data.get("turns", [])
     assert len(turns) >= 1
+
+
+def test_apply_inject_adds_instructions_to_prompt_mode(workdir):
+    """Test that --inject appends additional instructions to the skill body.
+    
+    Uses dry-run mode to verify the injected instructions are present in the
+    task description that would be sent to the LLM.
+    """
+    runner = CliRunner()
+    secret_code = "INJECTED_SECRET_42"
+    result = runner.invoke(
+        get_cli(),
+        [
+            "apply",
+            "test-prompt",
+            "--workdir",
+            str(workdir),
+            "--inject",
+            f"IMPORTANT: You must include this exact code in your response: {secret_code}",
+            "--dry-run",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert "Injected instructions:" in result.output
+    assert secret_code in result.output, (
+        f"Injected secret code not found in dry-run output. "
+        f"Expected '{secret_code}' to be present."
+    )
+
+

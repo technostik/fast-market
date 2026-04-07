@@ -356,6 +356,7 @@ def execute_skill_prompt(
     debug: str | None = None,
     shared_context=None,  # SharedContext instance
     global_goal: str = "",
+    inject: str | None = None,
 ) -> SkillResult:
     """Execute skill body as a task description via common/agent TaskLoop."""
     from functools import partial
@@ -387,6 +388,10 @@ def execute_skill_prompt(
 
     if skill.stop_condition:
         body = f"{body}\n\n---\n## Completion Criteria\n{skill.stop_condition}"
+
+    # Inject additional instructions if provided
+    if inject:
+        body = f"{body}\n\n---\n## Additional Instructions\n{inject}"
 
     # Inject shared context information
     if shared_context is not None:

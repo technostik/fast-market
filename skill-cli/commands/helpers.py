@@ -145,6 +145,7 @@ def apply_skill_impl(
     verbose: bool = False,
     debug: str | None = None,
     isolated: bool = False,
+    inject: str | None = None,
 ) -> None:
     from core.runner import (
         execute_skill_prompt,
@@ -301,6 +302,10 @@ def apply_skill_impl(
                 click.echo(f"[DRY RUN] Provider: {provider_name}")
             if model_name:
                 click.echo(f"[DRY RUN] Model: {model_name}")
+            if inject:
+                click.echo("[DRY RUN] Injected instructions:")
+                inject_preview = inject[:200] + ("..." if len(inject) > 200 else "")
+                click.echo(f"  {inject_preview}")
             click.echo("[DRY RUN] Task description:")
             preview = body[:200] + ("..." if len(body) > 200 else "")
             click.echo(f"  {preview}")
@@ -329,6 +334,7 @@ def apply_skill_impl(
             compact=compact,
             verbose=verbose,
             debug=debug,
+            inject=inject,
         )
 
         if auto_learn:

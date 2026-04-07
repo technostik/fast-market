@@ -100,6 +100,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Run in a unique isolated subdirectory to avoid interference",
     )
+    @click.option(
+        "--inject",
+        type=str,
+        default=None,
+        help="Additional instructions to inject at the end of the skill description",
+    )
     def apply_cmd(
         skill_ref,
         params,
@@ -117,6 +123,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         verbose,
         debug,
         isolated,
+        inject,
     ):
         """Apply (execute) a skill by name.
 
@@ -140,6 +147,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             verbose=verbose,
             debug=debug,
             isolated=isolated,
+            inject=inject,
         )
 
     return CommandManifest(name="apply", click_command=apply_cmd)

@@ -136,3 +136,19 @@ execute_skill_prompt() in core/runner.py uses common/agent.TaskLoop directly
 from commands/setup/__init__.py. The agent config is stored under the "agent"
 key in ~/.config/fast-market/skill/config.yaml, separate from other skill tool
 settings (workdir, auto_learn_prompt).
+
+### Injecting Additional Instructions
+
+The `execute_skill_prompt()` function accepts an optional `inject` parameter (string).
+When provided, the injected instructions are appended to the skill's task description
+as an "## Additional Instructions" section, after:
+- The original skill body content
+- Parameter substitutions and unconsumed parameters section
+- LEARN.md previous lessons (if present)
+- Stop condition (if defined)
+- **Injected instructions** (if provided via `--inject`)
+- Shared context (if enabled)
+
+This allows users to add context-specific guidance without modifying the skill file itself.
+The injection is visible in dry-run output under "[DRY RUN] Injected instructions:".
+

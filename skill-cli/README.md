@@ -159,7 +159,19 @@ skill apply <skill-name> -C                      # Use compacting prompt to cons
 skill apply <skill-name> --format json           # JSON output
 skill apply <skill-name> -P openai -m gpt-4      # LLM provider/model
 skill apply <skill-name> --save-session file.yaml  # Save session to file
+skill apply <skill-name> --inject "..."          # Inject additional instructions
 ```
+
+**Injecting Instructions:**
+
+Use `--inject` to append additional instructions to the skill's task description. This is useful for adding context-specific guidance without modifying the skill file:
+
+```bash
+skill apply my-skill --inject "Focus on performance optimization and include benchmarks in your response"
+```
+
+The injected instructions appear as an "Additional Instructions" section in the task sent to the LLM, after the skill's original content and any previous lessons.
+
 
 ### skill run
 
