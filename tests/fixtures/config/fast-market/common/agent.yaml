@@ -1,0 +1,9 @@
+fastmarket_tools: {}
+system_commands:
+  - ls
+  - cat
+  - echo
+  - grep
+  - guess
+max_iterations: 20
+default_timeout: 60
