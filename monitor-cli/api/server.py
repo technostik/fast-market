@@ -259,6 +259,7 @@ def get_log_detail(log_id: str, mismatch: bool = Query(False)) -> dict:
 @app.get("/api/logs/{log_id}/session")
 def get_log_session(log_id: str) -> dict:
     """Search for and return session.yaml content if it exists in the workdir."""
+    import re
     from common.core.config import load_tool_config
 
     storage = _get_storage()
@@ -268,13 +269,22 @@ def get_log_session(log_id: str) -> dict:
     if not log:
         raise HTTPException(status_code=404, detail="Log not found")
 
-    # Load config to get workdir
-    config = load_tool_config("monitor")
-    common_config = config.get("common", {})
-    workdir_path = common_config.get("workdir")
+    # Try to extract workdir from the log output (first line format: "workdir: /path/to/workdir")
+    workdir_path = None
+    if log.output:
+        first_line = log.output.split("\n")[0].strip()
+        match = re.match(r"^workdir:\s*(.+)$", first_line)
+        if match:
+            workdir_path = match.group(1).strip()
+
+    # Fallback to config if not found in output
+    if not workdir_path:
+        config = load_tool_config("monitor")
+        common_config = config.get("common", {})
+        workdir_path = common_config.get("workdir")
 
     if not workdir_path:
-        return {"found": False, "reason": "No workdir configured"}
+        return {"found": False, "reason": "No workdir detected in log output or config"}
 
     workdir = Path(workdir_path).expanduser().resolve()
 
@@ -291,17 +301,13 @@ def get_log_session(log_id: str) -> dict:
         # Use the most recent one
         session_file = max(session_files, key=lambda p: p.stat().st_mtime)
 
-    from ruamel.yaml import YAML
-
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    with open(session_file) as f:
-        session_content = yaml.load(f)
+    # Read raw YAML content
+    raw_content = session_file.read_text(encoding="utf-8")
 
     return {
         "found": True,
         "path": str(session_file),
-        "content": session_content,
+        "content": raw_content,
     }
 
 

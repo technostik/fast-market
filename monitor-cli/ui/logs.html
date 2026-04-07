@@ -374,9 +374,7 @@
                 const sessionData = await sessionResp.json();
 
                 if (sessionData.found) {
-                    // Simple YAML highlighting without external library
-                    const yamlContent = JSON.stringify(sessionData.content, null, 2);
-                    sessionViewer.innerHTML = `<div style="margin-bottom: 8px; color: var(--text-dim);">Found: ${sessionData.path}</div><pre>${yamlContent}</pre>`;
+                    sessionViewer.innerHTML = `<div style="margin-bottom: 8px; color: var(--text-dim);">Found: ${sessionData.path}</div><pre>${sessionData.content}</pre>`;
                 } else {
                     sessionViewer.innerHTML = `<div class="session-not-found">Session file not found: ${sessionData.reason}</div>`;
                 }
