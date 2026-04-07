@@ -17,11 +17,15 @@ Export the execution plan and log to YAML files.
 skill run "Create marketing content for my video" --export plan.yaml
 ```
 
+**Export location:**
+- With `--run-isolated` or `--skill-isolated`: Files are placed in the isolated run directory (e.g., `skill_run_abc123/plan.yaml`)
+- Without isolation: Files are placed in the workdir
+- With absolute path: Files are placed at the specified absolute location
+- Use `--export -` to export to stdout instead of a file
+
 This creates two files:
 - `plan.yaml` - The planned skill execution sequence
 - `plan.execution.yaml` - The actual execution log with results
-
-Use `--export -` to export to stdout instead of a file.
 
 ### `--import`
 Import a pre-defined skill execution plan from a YAML file.
@@ -168,15 +172,27 @@ skill run "Create a blog post from my video" \
   --verbose
 ```
 
+**With isolation modes:**
+```bash
+# Files go into isolated run directory
+skill run "Create a blog post" \
+  --run-isolated \
+  --export blog-plan.yaml
+
+# You'll find files at:
+# workdir/skill_run_abc123/blog-plan.yaml
+# workdir/skill_run_abc123/blog-plan.execution.yaml
+```
+
 Review the plan, then you can modify it and re-import:
 
 ```bash
 # Edit the plan
-nano blog-plan.yaml
+nano workdir/skill_run_abc123/blog-plan.yaml
 
 # Execute the modified plan
 skill run "Execute modified plan" \
-  --import blog-plan.yaml \
+  --import workdir/skill_run_abc123/blog-plan.yaml \
   --export final-plan.yaml
 ```
 

@@ -952,13 +952,27 @@ def run_router(
         shared_context=shared_context,
     )
 
-    # Handle export paths (relative to workdir)
+    # Handle export paths - files go into run_root (or workdir if no isolation)
+    export_target = run_root if run_root is not None else workdir_path
+    plan_export_path = None
     execution_export_path = None
+    
     if export_plan_path:
-        execution_export_path = Path(export_plan_path)
-        if execution_export_path.stem:
-            # Change extension for execution log
-            execution_export_path = execution_export_path.parent / f"{execution_export_path.stem}.execution{execution_export_path.suffix}"
+        if export_plan_path == "-":
+            # Special case: export to stdout
+            plan_export_path = "-"
+            execution_export_path = "-"
+        else:
+            # If export_plan_path is just a filename or relative path, use export_target
+            export_path = Path(export_plan_path)
+            if export_path.is_absolute():
+                # If absolute path provided, use it as-is
+                plan_export_path = export_path
+                execution_export_path = export_path.parent / f"{export_path.stem}.execution{export_path.suffix}"
+            else:
+                # Relative path or filename - place in export_target
+                plan_export_path = export_target / export_path
+                execution_export_path = export_target / f"{export_path.stem}.execution{export_path.suffix}"
 
     # Import plan if provided
     if import_plan_path:
@@ -1372,7 +1386,7 @@ def run_router(
         )
 
     # Export plan if requested (after execution is complete)
-    if export_plan_path and planned_steps:
+    if plan_export_path and planned_steps:
         try:
             final_plan = SkillPlan(
                 goal=goal,
@@ -1380,16 +1394,16 @@ def run_router(
                 success_criteria=state.success_criteria,
                 preparation_plan=state.preparation,
             )
-            _export_plan_to_file(final_plan, export_plan_path)
+            _export_plan_to_file(final_plan, str(plan_export_path))
             if verbose:
-                print(f"\n[router] Plan exported to: {export_plan_path}")
+                print(f"\n[router] Plan exported to: {plan_export_path}")
         except Exception as exc:
             logger.warning("plan_export_failed", error=str(exc))
             if verbose:
                 print(f"\n[router] Warning: Failed to export plan: {exc}")
 
     # Export execution log if requested
-    if export_plan_path and execution_export_path:
+    if execution_export_path:
         try:
             _export_execution_log(state, str(execution_export_path))
             if verbose:
