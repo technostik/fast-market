@@ -29,6 +29,9 @@ def load_tools_description(agent_config: dict) -> str:
     if fastmarket_tools:
         lines.append("## FastMarket Tools")
         for name, info in fastmarket_tools.items():
+            if info is None:
+                lines.append(f"- **{name}**: No description")
+                continue
             desc = info.get("description", "No description")
             cmds = info.get("commands", [])
             lines.append(f"- **{name}**: {desc}")
