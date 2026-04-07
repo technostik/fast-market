@@ -113,12 +113,12 @@ selecting and sequencing skills, one at a time.
 ## Available Skills
 {skills_list}
 
-## History
+## History of past actions
 {history}
 
 ## Instructions
 
-Decide what to do next. You must return ONLY a JSON object.
+Decide what to do next to achieve the goal, given the history. You must return ONLY a JSON object.
 
 ### Actions
 
@@ -164,6 +164,7 @@ Goal cannot be achieved (repeated failures, missing capability):
 - Use "ask" sparingly — only when the goal is genuinely ambiguous, not just when a skill fails
 - If a previous attempt failed, try a different approach (different skill, different params, or "task")
 - Never repeat the exact same skill+params that already failed
+- **Never repeat a skill+params combination that already succeeded** — if it succeeded once, the work is done; move on to the next step
 - Params must be concrete values, not placeholders
 - If a skill produced output that a next skill needs, it is available in history as context
 - IMPORTANT: Use proper JSON escaping. If you need to use quotes inside a string, escape them with backslash (\") or use single quotes only when the outer string uses double quotes

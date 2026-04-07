@@ -78,6 +78,11 @@ def get_cli():
 
 def _run_router(goal: str, workdir, skills_dir: Path | None = None, **kwargs):
     from core.router import run_router
+    from common.llm.base import set_llm_log_file
+
+    # Enable LLM logging to debug planner decisions
+    log_file = workdir / "llm_debug.log"
+    set_llm_log_file(log_file)
 
     provider = get_llm_provider()
     return run_router(
@@ -186,6 +191,7 @@ def test_router_chains_two_skills(workdir):
         "then run test-chain-b with the output of test-chain-a as chain_input",
         workdir,
         max_iterations=5,
+        verbose=True,
     )
     _assert_router_success(state)
     names = [a.skill_name for a in state.attempts]

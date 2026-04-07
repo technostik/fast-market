@@ -226,7 +226,7 @@ def _format_history(attempts: list[SkillAttempt]) -> str:
 
 def _make_subdir(run_root: Path, iteration: int, label: str, isolation_mode: str = "skill") -> Path:
     """Create a subdirectory for a skill/task execution.
-    
+
     isolation_mode:
     - "none": return empty Path (use workdir directly)
     - "run": return run_root (all skills share the same dir)
@@ -687,12 +687,12 @@ def run_router(
     shared_context: Any = None,
 ) -> RouterState:
     """Orchestrate skills and tasks to achieve a goal.
-    
+
     isolation_mode:
     - "none": skills use workdir directly (cooperation enabled)
     - "run": create one isolated dir for the entire run
     - "skill": create run dir + subdirectory per skill (default, backward compatible)
-    
+
     shared_context:
     - SharedContext instance that skills can read/write to cooperate
     """
@@ -725,7 +725,7 @@ def run_router(
     skills = discover_skills(skills_dir or get_skills_dir())
 
     workdir_path = Path(workdir).expanduser().resolve()
-    
+
     # Create run_root based on isolation mode
     if isolation_mode == "none":
         run_root = None  # Will use workdir_path directly
@@ -773,6 +773,9 @@ def run_router(
         state.success_criteria = preparation.success_criteria
         state.preparation = preparation.plan
         logger.info("preparation_done", criteria=preparation.success_criteria)
+        if verbose:
+            print(f"\n[router] Preparation plan:\n{preparation.plan}")
+            print(f"[router] Success criteria: {preparation.success_criteria}")
     except Exception as exc:
         state.failed = True
         state.failure_reason = f"Preparation failed: {exc}"
@@ -785,6 +788,11 @@ def run_router(
     while state.iteration < max_iterations and not state.done and not state.failed:
         state.iteration += 1
 
+        if verbose:
+            history_preview = _format_history(state.attempts)
+            print(f"\n[router] History sent to planner ({len(history_preview)} chars):")
+            print(history_preview[:500] + ("..." if len(history_preview) > 500 else ""))
+
         try:
             plan = _call_plan(
                 state, provider, model, skills, prompt_template=plan_prompt
@@ -796,6 +804,16 @@ def run_router(
 
         action = plan.get("action", "").strip()
         logger.debug("router_plan", iteration=state.iteration, action=action)
+        if verbose:
+            print(f"\n[router] Iteration {state.iteration}: planner chose action='{action}'")
+            if action == "run":
+                print(f"  skill_name: {plan.get('skill_name')}")
+                print(f"  params: {plan.get('params')}")
+                print(f"  reason: {plan.get('reason')}")
+            elif action == "task":
+                print(f"  description: {plan.get('description')}")
+            elif action in ("done", "fail"):
+                print(f"  reason: {plan.get('reason')}")
 
         # Terminal actions
         if action == "done":
@@ -870,6 +888,33 @@ def run_router(
                 state.failure_reason = f"Planner returned unknown skill: {skill_name!r}"
                 break
 
+            # Prevent repeating a successful skill with the same params
+            prev_success_match = any(
+                a.skill_name == skill_name
+                and a.action == "run"
+                and a.success
+                and a.params == params
+                for a in state.attempts
+            )
+            if prev_success_match:
+                attempt = SkillAttempt(
+                    action="run",
+                    skill_name=skill_name,
+                    params=params,
+                    exit_code=1,
+                    runner_summary=f"Skipped: {skill_name} with these params already succeeded — planner should choose next skill",
+                    context="",
+                    context_hint=context_hint,
+                    success=False,
+                    iteration=state.iteration,
+                    subdir=Path(""),
+                    raw_output="",
+                )
+                state.attempts.append(attempt)
+                if verbose:
+                    _print_attempt(attempt)
+                continue
+
             failed_count = sum(
                 1
                 for a in state.attempts
@@ -901,7 +946,7 @@ def run_router(
             else:
                 subdir_for_record = _make_subdir(run_root, state.iteration, skill_name, isolation_mode)
                 workdir_for_skill = subdir_for_record
-                
+
             exit_code, session_output, session_path = _run_skill(
                 skill=matched,
                 params=params,
@@ -937,7 +982,7 @@ def run_router(
             else:
                 subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
                 workdir_for_task = subdir_for_record
-                
+
             exit_code, session_output, session_path = _run_task(
                 description=description,
                 subdir=workdir_for_task,
