@@ -112,6 +112,7 @@ class RouterState:
     success_criteria: str = ""
     preparation: str = ""
     run_root: Path | None = None
+    isolation_mode: str = "skill"  # "none", "run", or "skill"
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +222,19 @@ def _format_history(attempts: list[SkillAttempt]) -> str:
     return "\n".join(lines)
 
 
-def _make_subdir(run_root: Path, iteration: int, label: str) -> Path:
+def _make_subdir(run_root: Path, iteration: int, label: str, isolation_mode: str = "skill") -> Path:
+    """Create a subdirectory for a skill/task execution.
+    
+    isolation_mode:
+    - "none": return empty Path (use workdir directly)
+    - "run": return run_root (all skills share the same dir)
+    - "skill": create and return a unique subdir per skill (current behavior)
+    """
+    if isolation_mode == "none":
+        return Path("")
+    if isolation_mode == "run":
+        return run_root
+    # isolation_mode == "skill"
     name = f"{iteration:02d}_{label}"
     subdir = run_root / name
     subdir.mkdir(parents=True, exist_ok=True)
@@ -664,8 +677,15 @@ def run_router(
     skip_evaluation: bool = False,
     save_session: bool = False,
     skills_dir: Path | None = None,
+    isolation_mode: str = "skill",
 ) -> RouterState:
-    """Orchestrate skills and tasks to achieve a goal."""
+    """Orchestrate skills and tasks to achieve a goal.
+    
+    isolation_mode:
+    - "none": skills use workdir directly (cooperation enabled)
+    - "run": create one isolated dir for the entire run
+    - "skill": create run dir + subdirectory per skill (default, backward compatible)
+    """
     import importlib.util
 
     # Load skill agent config via importlib to avoid sys.path ordering issues
@@ -695,7 +715,12 @@ def run_router(
     skills = discover_skills(skills_dir or get_skills_dir())
 
     workdir_path = Path(workdir).expanduser().resolve()
-    run_root = make_run_root(workdir_path)
+    
+    # Create run_root based on isolation mode
+    if isolation_mode == "none":
+        run_root = None  # Will use workdir_path directly
+    else:
+        run_root = make_run_root(workdir_path)
 
     state = RouterState(
         goal=goal,
@@ -703,6 +728,7 @@ def run_router(
         iteration=0,
         max_iterations=max_iterations,
         run_root=run_root,
+        isolation_mode=isolation_mode,
     )
 
     if not skills:
@@ -857,11 +883,18 @@ def run_router(
                     _print_attempt(attempt)
                 continue
 
-            subdir = _make_subdir(run_root, state.iteration, skill_name)
+            # Determine workdir based on isolation mode
+            if isolation_mode == "none":
+                workdir_for_skill = workdir_path
+                subdir_for_record = Path("")
+            else:
+                subdir_for_record = _make_subdir(run_root, state.iteration, skill_name, isolation_mode)
+                workdir_for_skill = subdir_for_record
+                
             exit_code, session_output, session_path = _run_skill(
                 skill=matched,
                 params=params,
-                subdir=subdir,
+                subdir=workdir_for_skill,
                 provider_name=provider_name,
                 model=model,
                 auto_learn=auto_learn,
@@ -884,10 +917,17 @@ def run_router(
                 )
                 break
 
-            subdir = _make_subdir(run_root, state.iteration, "task")
+            # Determine workdir based on isolation mode
+            if isolation_mode == "none":
+                workdir_for_task = workdir_path
+                subdir_for_record = Path("")
+            else:
+                subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
+                workdir_for_task = subdir_for_record
+                
             exit_code, session_output, session_path = _run_task(
                 description=description,
-                subdir=subdir,
+                subdir=workdir_for_task,
                 provider_name=provider_name,
                 model=model,
                 prev_context=prev_context,
@@ -958,7 +998,7 @@ def run_router(
             context_hint=context_hint,
             success=(exit_code == 0),
             iteration=state.iteration,
-            subdir=subdir,
+            subdir=subdir_for_record,
             raw_output=session_output,
         )
         state.attempts.append(attempt)
@@ -1003,10 +1043,12 @@ def run_router(
         )
 
     if save_session and session_files:
+        # When isolation_mode is "none", use workdir_path as the session save location
+        session_root = run_root if run_root is not None else workdir_path
         _save_router_session(
             goal=goal,
             session_files=session_files,
-            run_root=run_root,
+            run_root=session_root,
             provider_name=provider_name,
             model=model,
             max_iterations=max_iterations,

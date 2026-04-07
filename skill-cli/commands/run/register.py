@@ -87,6 +87,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Save each skill's session to {subdir}/{skill_name}.session.yaml",
     )
+    @click.option(
+        "--run-isolated",
+        is_flag=True,
+        default=False,
+        help="Create an isolated run directory for the entire run",
+    )
+    @click.option(
+        "--skill-isolated",
+        is_flag=True,
+        default=False,
+        help="Create isolated subdirectory for each skill within the run",
+    )
     def run_cmd(
         task,
         provider,
@@ -100,16 +112,31 @@ def register(plugin_manifests: dict) -> CommandManifest:
         no_ask,
         no_eval,
         save_session,
+        run_isolated,
+        skill_isolated,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
         The router plans each step using an LLM, then executes skills or
         free-form tasks directly (no subprocess). Results and context are
         passed in-memory between steps.
+
+        Isolation modes:
+        - Default: skills use the workdir directly (cooperation enabled)
+        - --run-isolated: create one isolated dir for the entire run
+        - --skill-isolated: create one run dir + subdirectory per skill
         """
         if workdir is None:
             common_config = load_common_config()
             workdir = common_config.get("workdir") or "."
+
+        # Determine isolation mode
+        if skill_isolated:
+            isolation_mode = "skill"
+        elif run_isolated:
+            isolation_mode = "run"
+        else:
+            isolation_mode = "none"
 
         requires_common_config("skill", ["llm"])
         try:
@@ -129,6 +156,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         click.echo(f"Router started: '{task}'", err=True)
         click.echo(f"Provider: {provider_name}, model: {model or 'default'}", err=True)
+        click.echo(f"Isolation mode: {isolation_mode}", err=True)
 
         state = run_router(
             goal=task,
@@ -144,6 +172,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             interaction=interaction,
             skip_evaluation=no_eval,
             save_session=save_session,
+            isolation_mode=isolation_mode,
         )
         click.echo("\n" + "=" * 50, err=True)
         if state.done:
