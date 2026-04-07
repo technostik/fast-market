@@ -354,6 +354,8 @@ def execute_skill_prompt(
     compact: bool = False,
     verbose: bool = False,
     debug: str | None = None,
+    shared_context=None,  # SharedContext instance
+    global_goal: str = "",
 ) -> SkillResult:
     """Execute skill body as a task description via common/agent TaskLoop."""
     from functools import partial
@@ -385,6 +387,26 @@ def execute_skill_prompt(
 
     if skill.stop_condition:
         body = f"{body}\n\n---\n## Completion Criteria\n{skill.stop_condition}"
+
+    # Inject shared context information
+    if shared_context is not None:
+        context_content = shared_context.read()
+        context_section = "\n\n---\n## Shared Context\n"
+        context_section += f"**Global task**: {global_goal}\n\n"
+        if context_content:
+            context_section += f"**Current context state**:\n{context_content}\n\n"
+        else:
+            context_section += "**Current context state**: (empty)\n\n"
+        context_section += (
+            "You can read/write the shared context using the `shared_context` tool.\n"
+            "- Use `shared_context(action='read')` to see current state\n"
+            "- Use `shared_context(action='write', content='...')` to replace the context\n"
+            "- Use `shared_context(action='append', content='...')` to add to the context\n"
+            "- Use `shared_context(action='clear')` to reset the context\n\n"
+            "**Instructions**: Write key results, extracted data, or intermediate outputs to the shared context "
+            "so downstream skills can use them. Read the context to understand what previous steps produced."
+        )
+        body = body + context_section
 
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
@@ -462,6 +484,7 @@ def execute_skill_prompt(
         model=model,
         silent=not verbose,
         debug=debug or "",
+        shared_context=shared_context,
     )
 
     execute_fn = partial(

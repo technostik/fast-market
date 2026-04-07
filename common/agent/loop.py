@@ -84,6 +84,7 @@ class TaskLoop:
     debug: str = ""  # "" = off, "normal" = inner dialog, "full" = everything
     silent: bool = False
     session: Optional[Session] = None
+    shared_context: Optional[Any] = None  # SharedContext instance
 
     @property
     def _debug_enabled(self) -> bool:
@@ -159,6 +160,11 @@ class TaskLoop:
             list(self.config.fastmarket_tools.keys()) + self.config.system_commands
         )
         tools = [build_execute_command_tool(allowed_commands)]
+        
+        # Add shared_context tool if enabled
+        if self.shared_context is not None:
+            from common.agent.shared_context import build_shared_context_tool
+            tools.append(build_shared_context_tool())
 
         self._log(f"Starting task with {max_iter} max iterations...")
         if task_params:
@@ -333,35 +339,44 @@ class TaskLoop:
             if self._debug_full:
                 self._debug(f"    Full args: {tool_call.arguments}")
 
-            result = execute_fn(command.strip())
-
-            tool_event.result = {"timed_out": result.timed_out}
-            tool_event.exit_code = result.exit_code
-            tool_event.stdout = result.stdout or ""
-            tool_event.stderr = result.stderr or ""
-
-            if self._debug_full:
-                self._debug(f"    Exit: {result.exit_code}")
-                if result.stdout:
-                    self._debug(f"    Stdout: {result.stdout[:100]}...")
-                if result.stderr:
-                    self._debug(f"    Stderr: {result.stderr[:100]}...")
+            # Handle shared_context tool
+            if tool_call.name == "shared_context" and self.shared_context is not None:
+                from common.agent.shared_context import execute_shared_context
+                tool_result_text = execute_shared_context(self.shared_context, tool_call.arguments)
+                tool_event.stdout = tool_result_text
+                tool_event.stderr = ""
+                tool_event.exit_code = 0
+                tool_event.result = {}
             else:
-                output_preview = (result.stdout or result.stderr or "").strip()[:100]
-                self._debug(
-                    f"    -> Exit {result.exit_code}, Output: {output_preview[:80]}..."
-                )
+                result = execute_fn(command.strip())
 
-            if not self.silent:
-                self._print_tool_result(tool_event)
+                tool_event.result = {"timed_out": result.timed_out}
+                tool_event.exit_code = result.exit_code
+                tool_event.stdout = result.stdout or ""
+                tool_event.stderr = result.stderr or ""
 
-            tool_result = self._format_tool_result(command, result)
+                if self._debug_full:
+                    self._debug(f"    Exit: {result.exit_code}")
+                    if result.stdout:
+                        self._debug(f"    Stdout: {result.stdout[:100]}...")
+                    if result.stderr:
+                        self._debug(f"    Stderr: {result.stderr[:100]}...")
+                else:
+                    output_preview = (result.stdout or result.stderr or "").strip()[:100]
+                    self._debug(
+                        f"    -> Exit {result.exit_code}, Output: {output_preview[:80]}..."
+                    )
+
+                if not self.silent:
+                    self._print_tool_result(tool_event)
+
+                tool_result_text = self._format_tool_result(command, result)
 
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": tool_call.id,
-                    "content": tool_result,
+                    "content": tool_result_text,
                 }
             )
 
@@ -407,7 +422,11 @@ Timed out: {result.timed_out}"""
         if turn.tool_calls:
             print("\nTOOL CALLS:")
             for tc in turn.tool_calls:
-                print(f"  - {tc.tool_name}: {tc.arguments.get('command', '')}")
+                if tc.tool_name == "shared_context":
+                    action = tc.arguments.get("action", "")
+                    print(f"  - {tc.tool_name}({action})")
+                else:
+                    print(f"  - {tc.tool_name}: {tc.arguments.get('command', '')}")
                 if tc.explanation:
                     print(f"    Reason: {tc.explanation}")
 

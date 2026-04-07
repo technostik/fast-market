@@ -99,6 +99,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Create isolated subdirectory for each skill within the run",
     )
+    @click.option(
+        "--shared-context",
+        is_flag=True,
+        default=False,
+        help="Enable shared context string that skills can read/write to cooperate",
+    )
     def run_cmd(
         task,
         provider,
@@ -114,6 +120,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         save_session,
         run_isolated,
         skill_isolated,
+        shared_context,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
@@ -154,9 +161,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         interaction = _NoAskPlugin() if no_ask else CLIInteractionPlugin()
 
+        # Create shared context if enabled
+        shared_ctx = None
+        if shared_context:
+            from common.agent.shared_context import SharedContext
+            shared_ctx = SharedContext()
+
         click.echo(f"Router started: '{task}'", err=True)
         click.echo(f"Provider: {provider_name}, model: {model or 'default'}", err=True)
         click.echo(f"Isolation mode: {isolation_mode}", err=True)
+        click.echo(f"Shared context: {'enabled' if shared_ctx else 'disabled'}", err=True)
 
         state = run_router(
             goal=task,
@@ -173,6 +187,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             skip_evaluation=no_eval,
             save_session=save_session,
             isolation_mode=isolation_mode,
+            shared_context=shared_ctx,
         )
         click.echo("\n" + "=" * 50, err=True)
         if state.done:

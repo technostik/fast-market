@@ -165,18 +165,40 @@ skill apply <skill-name> --save-session file.yaml  # Save session to file
 
 Orchestrate multiple skills to accomplish complex tasks (requires LLM).
 
-Each skill execution runs in an isolated subdirectory within the workdir:
-`{workdir}/{iteration:02d}_{skill_name}/`
-
-This prevents file collisions between skill executions and keeps the working directory clean.
-
 ```bash
 skill run "your task description"                 # Run with default LLM
 skill run "task" -P openai -m gpt-4               # Specific provider
 skill run "task" -w /path                         # Working directory
 skill run "task" -i 20                           # Max iterations
 skill run "task" -v                              # Verbose output
+skill run "task" --run-isolated                  # Isolated dir for entire run
+skill run "task" --skill-isolated                # Isolated subdir per skill
+skill run "task" --shared-context                # Enable shared context tool
 ```
+
+**Isolation Modes:**
+
+- **Default**: Skills execute directly in the workdir. Skills can see and modify each other's files, enabling file-based cooperation.
+- **`--run-isolated`**: Creates one isolated directory for the entire run. All skills share this directory.
+- **`--skill-isolated`**: Creates isolated subdirectory for each skill. Skills cannot see each other's files.
+
+**Shared Context (`--shared-context`):**
+
+When enabled, skills gain access to a `shared_context` tool they can use to cooperate:
+
+```
+shared_context(action="read")                      # See current context
+shared_context(action="write", content="...")      # Replace context
+shared_context(action="append", content="...")     # Add to context
+shared_context(action="clear")                     # Reset context
+```
+
+Each skill receives in its prompt:
+- The global task goal
+- Current context state (what previous skills wrote)
+- Instructions to write key results for downstream skills
+
+This enables skills to pass structured information and coordinate beyond file outputs.
 
 ### skill path
 

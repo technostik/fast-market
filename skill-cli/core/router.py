@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime as dt
 from pathlib import Path
 from functools import partial
+from typing import Any
 
 from common import structlog
 from common.agent.loop import TaskConfig, TaskLoop
@@ -113,6 +114,7 @@ class RouterState:
     preparation: str = ""
     run_root: Path | None = None
     isolation_mode: str = "skill"  # "none", "run", or "skill"
+    shared_context: Any = None  # SharedContext instance or None
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +394,8 @@ def _run_skill(
     compact: bool,
     prev_context: str,
     save_session: bool = False,
+    shared_context=None,  # SharedContext instance
+    global_goal: str = "",
 ) -> tuple[int, str, Path | None]:
     """Execute a skill using the same dispatch as `skill apply`.
 
@@ -448,6 +452,8 @@ def _run_skill(
             model=model,
             save_session=session_path,
             auto_learn=False,  # handled below with the right provider instance
+            shared_context=shared_context,
+            global_goal=global_goal,
         )
         session_output = (result.stdout or "") + (result.stderr or "")
         exit_code = result.exit_code
@@ -678,6 +684,7 @@ def run_router(
     save_session: bool = False,
     skills_dir: Path | None = None,
     isolation_mode: str = "skill",
+    shared_context: Any = None,
 ) -> RouterState:
     """Orchestrate skills and tasks to achieve a goal.
     
@@ -685,6 +692,9 @@ def run_router(
     - "none": skills use workdir directly (cooperation enabled)
     - "run": create one isolated dir for the entire run
     - "skill": create run dir + subdirectory per skill (default, backward compatible)
+    
+    shared_context:
+    - SharedContext instance that skills can read/write to cooperate
     """
     import importlib.util
 
@@ -729,6 +739,7 @@ def run_router(
         max_iterations=max_iterations,
         run_root=run_root,
         isolation_mode=isolation_mode,
+        shared_context=shared_context,
     )
 
     if not skills:
@@ -901,6 +912,8 @@ def run_router(
                 compact=compact,
                 prev_context=prev_context,
                 save_session=save_session,
+                shared_context=state.shared_context,
+                global_goal=state.goal,
             )
             label = skill_name
 

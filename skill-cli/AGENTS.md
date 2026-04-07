@@ -31,12 +31,33 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - Work standalone, delegate LLM operations to common/learn
 
 ## skill run coordination model
-- Each skill execution runs in an isolated subdirectory: `{workdir}/{iteration:02d}_{skill_name}/`
-- The planner receives history including subdir paths and copied files info
+
+### Isolation Modes
+The router supports three isolation modes for skill execution directories:
+
+- **Default (`isolation_mode="none"`)**: All skills execute directly in the workdir. Skills can see and modify each other's files, enabling file-based cooperation.
+- **`--run-isolated`**: Creates one isolated directory `{workdir}/run_{uuid}/` for the entire run. All skills share this directory.
+- **`--skill-isolated`** (current default behavior): Creates `{workdir}/run_{uuid}/` with subdirectories `{iteration:02d}_{skill_name}/` for each skill. Skills cannot see each other's files.
+
+### Context Passing
 - Two-part distillation: `runner_summary` (≤15 lines for planner) + `context` (transferable to next skill)
 - Planner can provide `context_hint` to guide context extraction
-- Planner can specify `copy_from` to copy files from previous subdirs
 - The router passes `_router_context` param to skills with the previous skill's context
+
+### Shared Context (optional)
+When `--shared-context` is enabled, skills gain access to a `shared_context` tool that provides a cooperative string all skills can read and write:
+
+- **read** — Returns current context content
+- **write** — Replaces the entire context
+- **append** — Adds content to the existing context
+- **clear** — Empties the context
+
+The router injects into each skill's prompt:
+- The global task goal
+- Current context state
+- Instructions to write key results so downstream skills can use them
+
+This enables skills to cooperate by passing structured information beyond file outputs.
 
 ## SKILL.md Frontmatter Options
 - `name` — Skill name (defaults to directory name)
