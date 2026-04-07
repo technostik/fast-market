@@ -87,6 +87,41 @@ class SkillAttempt:
 
 
 @dataclass
+class SkillPlanStep:
+    """A single step in a skill execution plan."""
+    step: int
+    action: str  # "run", "task", "ask"
+    skill_name: str = ""  # for action="run"
+    params: dict[str, str] = None  # for action="run"
+    inject: str = ""  # injected instructions for action="run"
+    description: str = ""  # for action="task"
+    instructions: str = ""  # additional instructions for action="task"
+    question: str = ""  # for action="ask"
+    context_hint: str = ""  # hint about context needed
+
+
+@dataclass
+class SkillPlan:
+    """A complete execution plan exported from the router."""
+    goal: str
+    steps: list[SkillPlanStep] = None
+    success_criteria: str = ""
+    preparation_plan: str = ""
+
+
+@dataclass
+class SkillExecutionLog:
+    """A log of actual skill executions during a run."""
+    goal: str
+    attempts: list[dict] = None  # simplified attempt info
+    start_time: str = ""
+    end_time: str = ""
+    status: str = ""  # "completed", "failed", "max_iterations"
+    final_result: str = ""
+    failure_reason: str = ""
+
+
+@dataclass
 class PreparationResult:
     plan: str
     success_criteria: str
@@ -115,6 +150,9 @@ class RouterState:
     run_root: Path | None = None
     isolation_mode: str = "skill"  # "none", "run", or "skill"
     shared_context: Any = None  # SharedContext instance or None
+    imported_plan: SkillPlan | None = None  # imported plan if provided
+    exported_plan_path: Path | None = None  # where to export the plan
+    export_execution_path: Path | None = None  # where to export execution log
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +434,7 @@ def _run_skill(
     save_session: bool = False,
     shared_context=None,  # SharedContext instance
     global_goal: str = "",
+    inject: str | None = None,  # Injected instructions
 ) -> tuple[int, str, Path | None]:
     """Execute a skill using the same dispatch as `skill apply`.
 
@@ -454,6 +493,7 @@ def _run_skill(
             auto_learn=False,  # handled below with the right provider instance
             shared_context=shared_context,
             global_goal=global_goal,
+            inject=inject,
         )
         session_output = (result.stdout or "") + (result.stderr or "")
         exit_code = result.exit_code
@@ -663,6 +703,174 @@ def _save_router_session(
 
 
 # ---------------------------------------------------------------------------
+# YAML Export/Import functions
+# ---------------------------------------------------------------------------
+
+
+def _plan_to_yaml(plan: SkillPlan) -> str:
+    """Convert a SkillPlan to user-readable YAML string."""
+    import yaml
+
+    data = {
+        "goal": plan.goal,
+        "success_criteria": plan.success_criteria,
+        "preparation_plan": plan.preparation_plan,
+        "plan": [],
+    }
+
+    for step in plan.steps:
+        step_dict = {
+            "step": step.step,
+            "action": step.action,
+        }
+
+        if step.action == "run":
+            step_dict["skill"] = step.skill_name
+            if step.params:
+                step_dict["params"] = step.params
+            if step.inject:
+                step_dict["inject"] = step.inject
+            if step.context_hint:
+                step_dict["context_hint"] = step.context_hint
+
+        elif step.action == "task":
+            step_dict["description"] = step.description
+            if step.instructions:
+                step_dict["instructions"] = step.instructions
+            if step.context_hint:
+                step_dict["context_hint"] = step.context_hint
+
+        elif step.action == "ask":
+            step_dict["question"] = step.question
+
+        data["plan"].append(step_dict)
+
+    return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
+def _execution_log_to_yaml(state: RouterState) -> str:
+    """Convert RouterState to a user-readable execution log YAML."""
+    import yaml
+
+    if state.done:
+        status = "completed"
+    elif state.failed:
+        status = "failed"
+    else:
+        status = "max_iterations"
+
+    data = {
+        "goal": state.goal,
+        "status": status,
+        "final_result": state.final_result if state.done else state.failure_reason,
+        "preparation": state.preparation,
+        "success_criteria": state.success_criteria,
+        "total_steps": len(state.attempts),
+        "execution": [],
+    }
+
+    for attempt in state.attempts:
+        attempt_dict = {
+            "step": attempt.iteration,
+            "action": attempt.action,
+            "skill": attempt.skill_name,
+            "params": attempt.params,
+            "success": attempt.success,
+            "exit_code": attempt.exit_code,
+            "summary": attempt.runner_summary,
+        }
+
+        if attempt.raw_output:
+            # Truncate for readability
+            output = attempt.raw_output.strip()
+            if len(output) > 500:
+                output = output[:500] + "... [truncated]"
+            attempt_dict["output_preview"] = output
+
+        data["execution"].append(attempt_dict)
+
+    return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
+def _export_plan_to_file(plan: SkillPlan, filepath: str) -> None:
+    """Export plan to YAML file or stdout."""
+    import sys
+
+    yaml_content = _plan_to_yaml(plan)
+
+    if filepath == "-":
+        # Export to stdout
+        print(yaml_content)
+    else:
+        # Export to file
+        path = Path(filepath)
+        path.write_text(yaml_content)
+        logger.info("plan_exported", path=str(path))
+
+
+def _export_execution_log(state: RouterState, filepath: str) -> None:
+    """Export execution log to YAML file or stdout."""
+    import sys
+
+    yaml_content = _execution_log_to_yaml(state)
+
+    if filepath == "-":
+        # Export to stdout
+        print(yaml_content)
+    else:
+        # Export to file
+        path = Path(filepath)
+        path.write_text(yaml_content)
+        logger.info("execution_log_exported", path=str(path))
+
+
+def _import_plan_from_yaml(filepath: str, workdir: str = ".") -> SkillPlan:
+    """Import a skill plan from YAML file."""
+    import yaml
+
+    path = Path(filepath)
+    if not path.exists():
+        raise FileNotFoundError(f"Plan file not found: {filepath}")
+
+    data = yaml.safe_load(path.read_text())
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid plan YAML format in {filepath}")
+
+    goal = data.get("goal", "")
+    if not goal:
+        raise ValueError(f"Plan missing 'goal' field in {filepath}")
+
+    plan_steps = []
+    plan_data = data.get("plan", [])
+
+    for i, step_dict in enumerate(plan_data, 1):
+        action = step_dict.get("action", "")
+        if action not in ("run", "task", "ask"):
+            raise ValueError(f"Step {i} has invalid action: {action}")
+
+        step = SkillPlanStep(
+            step=i,
+            action=action,
+            skill_name=step_dict.get("skill", ""),
+            params=step_dict.get("params", {}),
+            inject=step_dict.get("inject", ""),
+            description=step_dict.get("description", ""),
+            instructions=step_dict.get("instructions", ""),
+            question=step_dict.get("question", ""),
+            context_hint=step_dict.get("context_hint", ""),
+        )
+        plan_steps.append(step)
+
+    return SkillPlan(
+        goal=goal,
+        steps=plan_steps,
+        success_criteria=data.get("success_criteria", ""),
+        preparation_plan=data.get("preparation_plan", ""),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main router loop
 # ---------------------------------------------------------------------------
 
@@ -685,6 +893,8 @@ def run_router(
     skills_dir: Path | None = None,
     isolation_mode: str = "skill",
     shared_context: Any = None,
+    export_plan_path: str | None = None,
+    import_plan_path: str | None = None,
 ) -> RouterState:
     """Orchestrate skills and tasks to achieve a goal.
 
@@ -742,6 +952,27 @@ def run_router(
         shared_context=shared_context,
     )
 
+    # Handle export paths (relative to workdir)
+    execution_export_path = None
+    if export_plan_path:
+        execution_export_path = Path(export_plan_path)
+        if execution_export_path.stem:
+            # Change extension for execution log
+            execution_export_path = execution_export_path.parent / f"{execution_export_path.stem}.execution{execution_export_path.suffix}"
+
+    # Import plan if provided
+    if import_plan_path:
+        try:
+            state.imported_plan = _import_plan_from_yaml(import_plan_path, workdir)
+            logger.info("plan_imported", path=import_plan_path, steps=len(state.imported_plan.steps))
+            if verbose:
+                print(f"\n[router] Imported plan from: {import_plan_path}")
+                print(f"[router] Plan has {len(state.imported_plan.steps)} steps")
+        except Exception as exc:
+            state.failed = True
+            state.failure_reason = f"Failed to import plan: {exc}"
+            return state
+
     if not skills:
         state.failed = True
         state.failure_reason = "No skills available"
@@ -783,6 +1014,7 @@ def run_router(
 
     session_files: list[Path] = []
     prev_context = ""
+    planned_steps: list[SkillPlanStep] = []
 
     # --- Planning loop ---
     while state.iteration < max_iterations and not state.done and not state.failed:
@@ -793,14 +1025,36 @@ def run_router(
             print(f"\n[router] History sent to planner ({len(history_preview)} chars):")
             print(history_preview[:500] + ("..." if len(history_preview) > 500 else ""))
 
-        try:
-            plan = _call_plan(
-                state, provider, model, skills, prompt_template=plan_prompt
-            )
-        except Exception as exc:
-            state.failed = True
-            state.failure_reason = f"Planner failed: {exc}"
-            break
+        # Use imported plan if available, otherwise call planner
+        if state.imported_plan:
+            # Use imported plan step
+            step_index = len(state.attempts)
+            if step_index < len(state.imported_plan.steps):
+                plan_step = state.imported_plan.steps[step_index]
+                plan = {
+                    "action": plan_step.action,
+                    "skill_name": plan_step.skill_name,
+                    "params": plan_step.params,
+                    "context_hint": plan_step.context_hint,
+                    "description": plan_step.description,
+                    "question": plan_step.question,
+                    "reason": f"From imported plan (step {plan_step.step})",
+                }
+                if verbose:
+                    print(f"\n[router] Using imported plan step {plan_step.step}: {plan_step.action}")
+            else:
+                # Plan exhausted, mark as done
+                plan = {"action": "done", "reason": "Imported plan exhausted"}
+        else:
+            # Call the planner
+            try:
+                plan = _call_plan(
+                    state, provider, model, skills, prompt_template=plan_prompt
+                )
+            except Exception as exc:
+                state.failed = True
+                state.failure_reason = f"Planner failed: {exc}"
+                break
 
         action = plan.get("action", "").strip()
         logger.debug("router_plan", iteration=state.iteration, action=action)
@@ -814,6 +1068,21 @@ def run_router(
                 print(f"  description: {plan.get('description')}")
             elif action in ("done", "fail"):
                 print(f"  reason: {plan.get('reason')}")
+
+        # Track planned step for export
+        if action not in ("done", "fail"):
+            planned_step = SkillPlanStep(
+                step=state.iteration,
+                action=action,
+                skill_name=plan.get("skill_name", ""),
+                params={str(k): str(v) for k, v in (plan.get("params") or {}).items()},
+                inject=plan.get("inject", ""),
+                description=plan.get("description", ""),
+                instructions=plan.get("instructions", ""),
+                question=plan.get("question", ""),
+                context_hint=plan.get("context_hint", ""),
+            )
+            planned_steps.append(planned_step)
 
         # Terminal actions
         if action == "done":
@@ -854,6 +1123,7 @@ def run_router(
             skill_name = str(plan.get("skill_name", "")).strip()
             params = {str(k): str(v) for k, v in (plan.get("params") or {}).items()}
             context_hint = str(plan.get("context_hint", ""))
+            inject_instructions = plan.get("inject")
 
             # Auto-chain: detect when previous skill output should be passed as a param
             if state.attempts and context_hint:
@@ -959,6 +1229,7 @@ def run_router(
                 save_session=save_session,
                 shared_context=state.shared_context,
                 global_goal=state.goal,
+                inject=inject_instructions,
             )
             label = skill_name
 
@@ -1099,6 +1370,34 @@ def run_router(
         state.failure_reason = (
             f"Max iterations ({max_iterations}) reached without completion"
         )
+
+    # Export plan if requested (after execution is complete)
+    if export_plan_path and planned_steps:
+        try:
+            final_plan = SkillPlan(
+                goal=goal,
+                steps=planned_steps,
+                success_criteria=state.success_criteria,
+                preparation_plan=state.preparation,
+            )
+            _export_plan_to_file(final_plan, export_plan_path)
+            if verbose:
+                print(f"\n[router] Plan exported to: {export_plan_path}")
+        except Exception as exc:
+            logger.warning("plan_export_failed", error=str(exc))
+            if verbose:
+                print(f"\n[router] Warning: Failed to export plan: {exc}")
+
+    # Export execution log if requested
+    if export_plan_path and execution_export_path:
+        try:
+            _export_execution_log(state, str(execution_export_path))
+            if verbose:
+                print(f"\n[router] Execution log exported to: {execution_export_path}")
+        except Exception as exc:
+            logger.warning("execution_export_failed", error=str(exc))
+            if verbose:
+                print(f"\n[router] Warning: Failed to export execution log: {exc}")
 
     if save_session and session_files:
         # When isolation_mode is "none", use workdir_path as the session save location

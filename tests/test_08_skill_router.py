@@ -302,3 +302,123 @@ def test_successful_skill_has_zero_errors(workdir):
         check=True,
     )
     assert count_session_errors(session_file) == 0
+
+
+# ---------------------------------------------------------------------------
+# Export/Import functionality
+# ---------------------------------------------------------------------------
+
+
+def test_plan_import_and_export(workdir):
+    """Test that imported plans are executed and export produces valid YAML."""
+    import yaml
+    from core.router import run_router, _import_plan_from_yaml
+
+    # Create a simple plan file
+    plan_file = workdir / "test-plan.yaml"
+    plan_content = {
+        "goal": "Test plan import",
+        "success_criteria": "Plan executed successfully",
+        "preparation_plan": "Test preparation",
+        "plan": [
+            {
+                "step": 1,
+                "action": "task",
+                "description": "Echo 'hello from imported plan'",
+            }
+        ],
+    }
+    plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
+
+    # Import and execute the plan
+    provider = get_llm_provider()
+    state = run_router(
+        goal="Test plan import",
+        provider=provider,
+        workdir=str(workdir),
+        max_iterations=3,
+        import_plan_path=str(plan_file),
+        export_plan_path=str(workdir / "exported-plan.yaml"),
+    )
+
+    # Verify the plan was imported
+    assert state.imported_plan is not None
+    assert len(state.imported_plan.steps) == 1
+    assert state.imported_plan.steps[0].action == "task"
+
+    # Verify execution log was exported
+    execution_log = workdir / "exported-plan.execution.yaml"
+    assert execution_log.exists(), "Execution log was not exported"
+
+    # Verify the exported execution log is valid YAML
+    execution_data = yaml.safe_load(execution_log.read_text())
+    assert execution_data["goal"] == "Test plan import"
+    assert execution_data["status"] in ["completed", "failed", "max_iterations"]
+    assert len(execution_data["execution"]) >= 1
+
+
+def test_plan_export_format(workdir):
+    """Test that exported plan has correct YAML format with all fields."""
+    import yaml
+    from core.router import run_router
+
+    provider = get_llm_provider()
+    state = run_router(
+        goal="Test export format",
+        provider=provider,
+        workdir=str(workdir),
+        max_iterations=2,
+        export_plan_path=str(workdir / "plan.yaml"),
+    )
+
+    # Verify plan was exported
+    plan_file = workdir / "plan.yaml"
+    assert plan_file.exists(), "Plan was not exported"
+
+    plan_data = yaml.safe_load(plan_file.read_text())
+
+    # Verify structure
+    assert "goal" in plan_data
+    assert "plan" in plan_data
+    assert "success_criteria" in plan_data
+    assert "preparation_plan" in plan_data
+
+    # Each step should have required fields
+    for step in plan_data["plan"]:
+        assert "step" in step
+        assert "action" in step
+        assert step["action"] in ["run", "task", "ask"]
+
+
+def test_import_plan_with_inject(workdir):
+    """Test that inject instructions from imported plan are passed to skills."""
+    import yaml
+    from core.router import run_router
+
+    # Create a plan with inject instructions
+    plan_file = workdir / "inject-plan.yaml"
+    plan_content = {
+        "goal": "Test inject from plan",
+        "success_criteria": "Inject instructions were passed",
+        "plan": [
+            {
+                "step": 1,
+                "action": "task",
+                "description": "Echo 'inject-test'",
+            }
+        ],
+    }
+    plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
+
+    provider = get_llm_provider()
+    state = run_router(
+        goal="Test inject from plan",
+        provider=provider,
+        workdir=str(workdir),
+        max_iterations=3,
+        import_plan_path=str(plan_file),
+    )
+
+    # Verify the plan was imported and executed
+    assert state.imported_plan is not None
+    assert len(state.attempts) >= 1

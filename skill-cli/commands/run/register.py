@@ -88,6 +88,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Save each skill's session to {subdir}/{skill_name}.session.yaml",
     )
     @click.option(
+        "--export",
+        "-e",
+        type=click.Path(),
+        default=None,
+        help="Export planned skills to YAML file (use '-' for stdout)",
+    )
+    @click.option(
+        "--import",
+        "import_plan",
+        type=click.Path(exists=True),
+        default=None,
+        help="Import skill execution plan from YAML file instead of auto-planning",
+    )
+    @click.option(
         "--run-isolated",
         is_flag=True,
         default=False,
@@ -118,6 +132,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         no_ask,
         no_eval,
         save_session,
+        export,
+        import_plan,
         run_isolated,
         skill_isolated,
         shared_context,
@@ -188,6 +204,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             save_session=save_session,
             isolation_mode=isolation_mode,
             shared_context=shared_ctx,
+            export_plan_path=export,
+            import_plan_path=import_plan,
         )
         click.echo("\n" + "=" * 50, err=True)
         if state.done:
