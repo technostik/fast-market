@@ -221,6 +221,84 @@ youtube search "tutorial" -n 3 --format json \
 echo '[{"video": "dQw4w9WgXcQ"}]' | youtube comments --stdin --field video
 ```
 
+### batch-comments
+
+Extract comments from multiple videos listed in a JSON/YAML file.
+
+```bash
+youtube batch-comments INPUT_FILE [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-n, --limit` | Maximum comments per video | 5 |
+| `--order` | Sort order: relevance, time | relevance |
+| `-f, --format` | Output: json, yaml, text | text |
+| `-o, --output` | Save results to file | None |
+| `--field` | JSON field to extract video IDs | video_id |
+
+**Examples:**
+```bash
+# Extract comments from search results
+youtube search "python tutorial" -n 3 --format json -o videos.json
+youtube batch-comments videos.json -n 5 --format json -o comments.json
+```
+
+### batch-reply
+
+Generate LLM-powered replies to comments from a batch-comments output file.
+
+```bash
+youtube batch-reply INPUT_FILE --prompt "PROMPT" [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-p, --prompt` | Prompt template for generating replies | required |
+| `-f, --format` | Output: json, yaml, text | json |
+| `-o, --output` | Save results to file | None |
+
+**Examples:**
+```bash
+# Generate friendly replies
+youtube batch-reply comments.json \
+  -p "Write a friendly, helpful reply to this YouTube comment" \
+  --format json -o replies.json
+
+# replies.json format:
+# [
+#   {
+#     "video_url": "https://www.youtube.com/watch?v=...",
+#     "original_comment": { ... full original comment object ... },
+#     "reply": "Generated reply text..."
+#   }
+# ]
+```
+
+### batch-post
+
+Post LLM-generated replies to YouTube comments from a batch-reply output file.
+
+```bash
+youtube batch-post INPUT_FILE [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--dry-run` | Preview replies without posting | False |
+| `-d, --delay` | Seconds to wait between each post | 0 |
+| `-f, --format` | Output: json, yaml, text | json |
+| `-o, --output` | Update input file with reply status | None |
+
+**Examples:**
+```bash
+# Preview what would be posted
+youtube batch-post replies.json --dry-run
+
+# Post replies with 2s delay between each
+youtube batch-post replies.json --delay 2 -o posted_results.json
+```
+
 ### reply
 
 Post replies to YouTube comments.
@@ -268,6 +346,15 @@ youtube comments VIDEO_ID -n 5 --format json \
 All commands support JSON/YAML streaming for pipeline composition:
 
 ```bash
+# Full batch workflow: search → extract comments → generate replies → post
+youtube search "tutorial" -n 3 --format json -o videos.json
+youtube batch-comments videos.json -n 5 --format json -o comments.json
+youtube batch-reply comments.json \
+  -p "Write a friendly, helpful reply" \
+  --format json -o replies.json
+youtube batch-post replies.json --dry-run              # Preview first
+youtube batch-post replies.json --delay 2 -o results.json
+
 # Multi-stage pipeline
 youtube search "tutorial" -n 5 --format json \
   | youtube comments --stdin -n 3 \
@@ -303,6 +390,12 @@ youtube-agent/
 │   └── engine.py        # YouTube client factory
 ├── commands/            # Plugin-style commands
 │   ├── base.py          # CommandManifest
+│   ├── batch_comments/
+│   │   └── register.py  # Batch comments extraction
+│   ├── batch_reply/
+│   │   └── register.py  # LLM-powered reply generation
+│   ├── batch_post/
+│   │   └── register.py  # Batch posting to YouTube
 │   ├── search/
 │   │   └── register.py  # Search implementation
 │   ├── comments/

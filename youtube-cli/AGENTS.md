@@ -51,6 +51,39 @@ Provides a modular CLI interface for YouTube Data API v3 operations with plugin-
 - To support additional auth methods:
   - Extend `YouTubeOAuth` in `common.auth.youtube`
 
+## 🔄 Batch Command Pipeline
+The project includes a batch workflow for managing YouTube comments at scale:
+
+```
+search → batch-comments → batch-reply → batch-post
+```
+
+### batch-comments
+Extracts comments from multiple videos listed in a JSON/YAML file.
+- **Input**: File path to video list (same format as `search` output)
+- **Output**: Flat array of comments, each augmented with `video_url`
+- **Options**: `--limit` (per video, default 5), `--order`, `--format`, `--output`
+
+### batch-reply
+Generates LLM-powered replies for each comment in the input.
+- **Input**: Output from `batch-comments`
+- **Output**: Array with `video_url`, `original_comment` (full object), `reply` (LLM text)
+- **Options**: `--prompt` (required), `--format`, `--output`
+- **Processing**: Sequential LLM calls (one per comment)
+
+### batch-post
+Posts generated replies to YouTube comments.
+- **Input**: Output from `batch-reply`
+- **Output**: Array augmented with `post_status`, `reply_id`, `moderation_status`, `error`
+- **Options**: `--dry-run`, `--delay` (seconds between posts), `--format`, `--output`
+- **Behavior**: Continues on error, collects error report on stderr
+
+### Output Convention
+- All commands output **data to stdout** (pipeable between commands)
+- Progress/status messages go to **stderr**
+- With `-o` flag, data is saved to file instead of stdout
+- Error messages always on stderr
+
 ## 📚 Related Documentation
 - See `common/AGENTS.md` for shared utilities patterns
 - See `README.md` for CLI usage examples
