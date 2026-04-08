@@ -17,10 +17,13 @@ from core.repl import prompt_with_options, prompt_free_text, prompt_confirm
 # ---------------------------------------------------------------------------
 # Default prompt for shellify — declared here, overridable via prompt service
 # ---------------------------------------------------------------------------
-SHELLIFY_PROMPT_DEFAULT = """You are converting an agentic skill into a deterministic shell script (`run.sh`).
+SHELLIFY_PROMPT_DEFAULT = """You are an agentic shell-script engineer. Your job is to create or replace `scripts/run.sh` for a skill.
 
-# Goal
-Transform the skill description and instructions into a robust, reproducible `run.sh` bash script that accomplishes the same task using shell commands and CLI tools.
+You have access to a working directory where you can:
+- **Read files** (cat, head, ls) to explore SKILL.md, LEARN.md, and any existing `scripts/run.sh`
+- **Execute commands** to discover tool behavior with `--help` or dry runs
+- **Write files** to create and iterate on `scripts/run.sh`
+- **Think** before acting — plan your approach step by step
 
 # Skill Description
 {skill_description}
@@ -33,23 +36,30 @@ Transform the skill description and instructions into a robust, reproducible `ru
 
 {learn_section}
 
-# Output Requirements
+{existing_script_section}
 
-Produce ONLY a valid bash script. The script must:
+{instructions_section}
+
+# Your Task
+
+Create a robust, reproducible `scripts/run.sh` bash script that implements this skill's goal.
+
+## Rules for the Script
 
 1. **Start with `#!/usr/bin/env bash`** and use `set -euo pipefail`
-2. **Use environment variables for parameters** — each skill parameter is available as `$SKILL_{{PARAM_NAME_UPPER}}` (e.g., parameter `video_url` becomes `$SKILL_VIDEO_URL`)
-3. **Validate required parameters** — check that required parameters are set and exit with a helpful error message if not
-4. **Use common CLI tools** — prefer standard tools like `curl`, `jq`, `sed`, `awk`, `grep`, `yt-dlp`, `ffmpeg`, etc. over reimplementing logic
-5. **Be incremental and robust** — use intermediate files, handle errors gracefully, provide progress output
-6. **Be self-contained** — include all necessary commands in one script
-7. **Output results to the current working directory** — do not use hardcoded absolute paths
+2. **Use environment variables for parameters** — each skill parameter is available as `$SKILL_{{PARAM_NAME_UPPER}}` (e.g., `video_url` → `$SKILL_VIDEO_URL`)
+3. **Validate required parameters** — exit with a helpful error if missing
+4. **Use CLI tools** — prefer `curl`, `jq`, `sed`, `awk`, `grep`, `yt-dlp`, `ffmpeg`, etc.
+5. **Be incremental and robust** — use intermediate files, handle errors gracefully
+6. **Be self-contained** — all commands in one script
+7. **Output to current directory** — no hardcoded absolute paths
+8. **Provide progress output** — echo status messages so the user can follow along
 
-# Parameter Handling
+## Parameter Handling
 
-- For a parameter named `foo`, the environment variable is `$SKILL_FOO`
-- For optional parameters with defaults, use `${{SKILL_FOO:-default_value}}`
-- Validate required parameters early:
+- For a parameter named `foo`, the env var is `$SKILL_FOO`
+- For optional params with defaults: `${{SKILL_FOO:-default_value}}`
+- Validate required params early:
   ```bash
   if [ -z "${{SKILL_REQUIRED_PARAM:-}}" ]; then
     echo "Error: SKILL_REQUIRED_PARAM is required" >&2
@@ -57,24 +67,19 @@ Produce ONLY a valid bash script. The script must:
   fi
   ```
 
-# Tool Selection
+## Workflow
 
-- Use the simplest tool that gets the job done
-- Prefer `curl` over `wget` for HTTP requests
-- Use `jq` for JSON processing
-- Use `yt-dlp` for YouTube/video downloads if applicable
-- Use `ffmpeg` for media processing if applicable
+1. **Explore** — Read SKILL.md, LEARN.md, and any existing `scripts/run.sh` to understand context
+2. **Research** — Use `--help` on tools to discover flags and options
+3. **Write** — Create `scripts/run.sh` in the current directory
+4. **Verify** — Test the script works (or dry-run if it has side effects)
+5. **Iterate** — Fix issues until the script is robust
 
-# Shell Script
+When {reset_mode}, write a completely new script. When iterating on an existing one, use it as context but feel free to completely rewrite.
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
+## Finishing
 
-# Your script here
-```
-
-Output ONLY the script content, with no extra explanation.
+When the script is ready and you've written it to `scripts/run.sh`, indicate the task is complete.
 """
 
 
@@ -690,7 +695,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Created skill: {name}", err=True)
 
     # -----------------------------------------------------------------------
-    # SHELLIFY subcommand — convert a skill into scripts/run.sh
+    # SHELLIFY subcommand — convert a skill into scripts/run.sh (agentic)
     # -----------------------------------------------------------------------
     @plan.command("shellify")
     @click.argument("skill", type=_SkillNameType())
@@ -700,30 +705,59 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="LLM model to use for generation.",
     )
-    def shellify_cmd(skill, model):
-        """Convert a skill into scripts/run.sh using the LLM.
+    @click.option(
+        "--instruction",
+        "-i",
+        "instruction",
+        default=None,
+        help="Additional instructions for the LLM to guide shellification.",
+    )
+    @click.option(
+        "--reset",
+        is_flag=True,
+        default=False,
+        help="Force recreation: ignore existing scripts/run.sh and start fresh.",
+    )
+    @click.option(
+        "--verbose",
+        "-v",
+        is_flag=True,
+        default=False,
+        help="Show agent progress.",
+    )
+    @click.option(
+        "--max-iterations",
+        "-n",
+        type=int,
+        default=25,
+        help="Maximum agent iterations (default: 25).",
+    )
+    @click.option(
+        "--no-agent",
+        is_flag=True,
+        default=False,
+        help="Use a simple one-shot LLM call instead of the agentic loop.",
+    )
+    def shellify_cmd(skill, model, instruction, reset, verbose, max_iterations, no_agent):
+        """Convert a skill into scripts/run.sh using an agentic LLM loop.
 
         Reads SKILL.md and LEARN.md (if present) from the skill directory,
-        sends them to the LLM with the shellify prompt, and writes the
-        resulting bash script to scripts/run.sh in the skill directory.
+        then uses an agentic loop with tool access to create scripts/run.sh.
+        The agent can explore files, test commands with --help, and iterate.
+
+        Use --no-agent for a simple one-shot LLM call (faster, less robust).
         """
         from common.core.config import requires_common_config, load_tool_config
-        from common.llm.registry import discover_providers, get_default_provider_name
+        from common.llm.registry import get_default_provider_name
         from core.skill import Skill, discover_skills
         from common.core.paths import get_skills_dir
 
         requires_common_config("skill", ["llm"])
         try:
             config = load_tool_config("skill")
-            providers = discover_providers(config)
             provider_name = get_default_provider_name(config)
-            llm = providers.get(provider_name)
         except Exception as exc:
             click.echo(f"Error: {exc}", err=True)
-            raise SystemExit(1)
-
-        if not llm:
-            click.echo(f"Error: provider '{provider_name}' not available.", err=True)
             raise SystemExit(1)
 
         # Resolve the skill
@@ -742,14 +776,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         # Get the prompt
         from cli.main import get_skill_prompt_manager
         prompt_manager = get_skill_prompt_manager()
-        prompt_text = prompt_manager.get("shellify") if prompt_manager else SHELLIFY_PROMPT_DEFAULT
+        prompt_template = prompt_manager.get("shellify") if prompt_manager else SHELLIFY_PROMPT_DEFAULT
 
         # Run the shellify logic
         success = _shellify_skill(
             skill=skill_obj,
-            llm=llm,
+            provider=provider_name,
             model=model,
-            prompt=prompt_text,
+            prompt_template=prompt_template,
+            instruction=instruction,
+            reset=reset,
+            verbose=verbose,
+            max_iterations=max_iterations,
+            no_agent=no_agent,
         )
 
         if not success:
@@ -877,30 +916,105 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
 
 # ---------------------------------------------------------------------------
-# Shellify — convert a skill into scripts/run.sh
+# Shellify — convert a skill into scripts/run.sh (uses generic agent_call)
 # ---------------------------------------------------------------------------
+
+def _shellify_no_agent(
+    skill,
+    provider: str,
+    model: str | None,
+    prompt_template: str,
+    skill_description: str,
+    skill_parameters: str,
+    skill_body: str,
+    learn_section: str,
+    existing_script_section: str,
+    instructions_section: str,
+    reset_mode_str: str,
+    verbose: bool,
+) -> bool:
+    """Simple one-shot LLM call to generate run.sh (no agentic loop)."""
+    from common.core.config import load_tool_config
+    from common.llm.registry import discover_providers
+    from common.llm.base import LLMRequest
+
+    formatted_prompt = prompt_template.format(
+        skill_description=skill_description,
+        skill_parameters=skill_parameters,
+        skill_body=skill_body,
+        learn_section=learn_section,
+        existing_script_section=existing_script_section,
+        instructions_section=instructions_section,
+        reset_mode=reset_mode_str,
+    )
+
+    click.echo(f"Shellifying skill '{skill.name}' (one-shot)...", err=True)
+
+    config = load_tool_config("skill")
+    providers = discover_providers(config)
+    llm = providers.get(provider)
+    if not llm:
+        click.echo(f"Error: provider '{provider}' not available.", err=True)
+        return False
+
+    req = LLMRequest(
+        system="You convert agentic skills into deterministic bash scripts.",
+        messages=[{"role": "user", "content": formatted_prompt}],
+        model=model,
+        temperature=0.2,
+    )
+    resp = llm.complete(req)
+    script_content = resp.content.strip()
+
+    # Strip markdown code fences if present
+    if script_content.startswith("```bash"):
+        script_content = script_content[len("```bash") :].strip()
+    if script_content.startswith("```"):
+        script_content = script_content[len("```") :].strip()
+    if script_content.endswith("```"):
+        script_content = script_content[: -len("```")].strip()
+
+    # Write to scripts/run.sh
+    run_sh_path = skill.path / "scripts" / "run.sh"
+    run_sh_path.write_text(script_content + "\n", encoding="utf-8")
+
+    try:
+        run_sh_path.chmod(0o755)
+    except Exception:
+        pass
+
+    click.echo(f"Generated {run_sh_path}", err=True)
+    return True
+
 
 def _shellify_skill(
     skill,
-    llm,
+    provider: str,
     model: str | None = None,
-    prompt: str | None = None,
+    prompt_template: str | None = None,
+    instruction: str | None = None,
+    reset: bool = False,
+    verbose: bool = False,
+    max_iterations: int = 25,
+    no_agent: bool = False,
 ) -> bool:
-    """Convert a skill into scripts/run.sh using the LLM.
+    """Convert a skill into scripts/run.sh using an agentic loop.
 
     Args:
         skill: Skill object with parameters, description, and path.
-        llm: LLM provider instance.
+        provider: LLM provider name.
         model: Optional model name override.
-        prompt: Optional shellify prompt template (uses default if None).
+        prompt_template: Optional shellify prompt template.
+        instruction: Additional user instructions appended to prompt.
+        reset: If True, ignore existing scripts/run.sh (fresh start).
+        verbose: Show agent progress to stderr.
+        max_iterations: Maximum agent iterations.
+        no_agent: If True, use a simple one-shot LLM call instead.
 
     Returns True on success, False on failure.
     """
-    from common.llm.base import LLMRequest
-
-    # Get the prompt template
-    if prompt is None:
-        prompt = SHELLIFY_PROMPT_DEFAULT
+    from common.agent.call import agent_call
+    from common.core.paths import get_skills_dir
 
     # Read skill content
     skill_body = skill.get_body()
@@ -927,47 +1041,132 @@ def _shellify_skill(
     else:
         learn_section = "# Lessons from Previous Runs\n\nNone — this is a fresh skill with no previous runs."
 
+    # Read existing scripts/run.sh if present (and not resetting)
+    run_sh_path = skill.path / "scripts" / "run.sh"
+    if not reset and run_sh_path.exists():
+        existing_content = run_sh_path.read_text(encoding="utf-8")
+        existing_script_section = (
+            f"# Existing scripts/run.sh (current version for reference)\n\n"
+            f"```bash\n{existing_content}\n```"
+        )
+        reset_mode_str = "resetting (--reset flag)"
+    elif reset:
+        existing_script_section = "# No existing script — starting fresh (--reset flag)."
+        reset_mode_str = "resetting (--reset flag)"
+    else:
+        existing_script_section = "# No existing scripts/run.sh — starting from scratch."
+        reset_mode_str = "iterating on the existing script"
+
+    # Additional instructions
+    if instruction:
+        instructions_section = f"# Additional Instructions\n\n{instruction}"
+    else:
+        instructions_section = "# Additional Instructions\n\nNone."
+
     # Build the prompt
-    formatted_prompt = prompt.format(
+    if prompt_template is None:
+        prompt_template = SHELLIFY_PROMPT_DEFAULT
+
+    formatted_prompt = prompt_template.format(
         skill_description=skill_description,
         skill_parameters=skill_parameters,
         skill_body=skill_body,
         learn_section=learn_section,
+        existing_script_section=existing_script_section,
+        instructions_section=instructions_section,
+        reset_mode=reset_mode_str,
     )
 
-    # Call the LLM
-    click.echo(f"Shellifying skill '{skill.name}'...", err=True)
-    req = LLMRequest(
-        system="You convert agentic skills into deterministic bash scripts.",
-        messages=[{"role": "user", "content": formatted_prompt}],
-        model=model,
-        temperature=0.2,
-    )
-    resp = llm.complete(req)
-    script_content = resp.content.strip()
-
-    # Strip markdown code fences if present
-    if script_content.startswith("```bash"):
-        script_content = script_content[len("```bash") :].strip()
-    if script_content.startswith("```"):
-        script_content = script_content[len("```") :].strip()
-    if script_content.endswith("```"):
-        script_content = script_content[: -len("```")].strip()
-
-    # Write to scripts/run.sh
+    # Ensure scripts/ directory exists
     scripts_dir = skill.path / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
-    run_sh = scripts_dir / "run.sh"
-    run_sh.write_text(script_content + "\n", encoding="utf-8")
 
-    # Make executable
+    # ------------------------------------------------------------------
+    # No-agent mode: simple one-shot LLM call
+    # ------------------------------------------------------------------
+    if no_agent:
+        return _shellify_no_agent(
+            skill=skill,
+            provider=provider,
+            model=model,
+            prompt_template=prompt_template,
+            skill_description=skill_description,
+            skill_parameters=skill_parameters,
+            skill_body=skill_body,
+            learn_section=learn_section,
+            existing_script_section=existing_script_section,
+            instructions_section=instructions_section,
+            reset_mode_str=reset_mode_str,
+            verbose=verbose,
+        )
+
+    # ------------------------------------------------------------------
+    # Agentic mode
+    # ------------------------------------------------------------------
+    click.echo(f"Shellifying skill '{skill.name}' (agentic)...", err=True)
+    if verbose:
+        click.echo(f"  Workdir: {skill.path}", err=True)
+        click.echo(f"  Provider: {provider}, Model: {model or 'default'}", err=True)
+        click.echo(f"  Max iterations: {max_iterations}", err=True)
+        if reset:
+            click.echo("  Mode: reset — ignoring existing run.sh", err=True)
+        if instruction:
+            click.echo(f"  Instructions: {instruction[:80]}...", err=True)
+
+    # System commands the agent can use for exploration and file operations
+    system_commands = [
+        "ls", "cat", "head", "tail", "grep", "find", "wc",
+        "mkdir", "touch", "cp", "mv", "rm",
+        "printf", "sed", "awk",
+        "curl", "jq",
+    ]
+
+    task_description = formatted_prompt
+
     try:
-        run_sh.chmod(0o755)
-    except Exception:
-        pass
+        session = agent_call(
+            task_description=task_description,
+            workdir=skill.path,
+            system_commands=system_commands,
+            max_iterations=max_iterations,
+            provider=provider,
+            model=model,
+            verbose=verbose,
+        )
 
-    click.echo(f"Generated {run_sh}", err=True)
-    return True
+        # Check if the agent wrote scripts/run.sh
+        if run_sh_path.exists():
+            # Make executable
+            try:
+                run_sh_path.chmod(0o755)
+            except Exception:
+                pass
+
+            click.echo(f"Generated {run_sh_path}", err=True)
+            if verbose:
+                turns = len(session.turns) if session.turns else 0
+                tool_calls = sum(
+                    1 for t in (session.turns or [])
+                    if hasattr(t, "tool_calls") and t.tool_calls
+                )
+                click.echo(
+                    f"  Agent: {turns} turns, {tool_calls} with tool calls, "
+                    f"end reason: {getattr(session, 'end_reason', 'unknown')}",
+                    err=True,
+                )
+            return True
+        else:
+            click.echo(
+                f"Warning: agent did not create {run_sh_path}",
+                err=True,
+            )
+            if verbose:
+                click.echo(f"  End reason: {getattr(session, 'end_reason', 'unknown')}", err=True)
+            return False
+
+    except Exception as exc:
+        click.echo(f"Error during shellification: {exc}", err=True)
+        return False
 
 
 # ---------------------------------------------------------------------------

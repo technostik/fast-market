@@ -24,92 +24,134 @@ class TestShellifyPrompt:
     def test_shellify_prompt_has_placeholders(self):
         """The prompt should have all required placeholders."""
         mod = _get_shellify_module()
-        for key in ["{skill_description}", "{skill_parameters}", "{skill_body}", "{learn_section}"]:
+        for key in ["{skill_description}", "{skill_parameters}", "{skill_body}", "{learn_section}",
+                     "{existing_script_section}", "{instructions_section}", "{reset_mode}"]:
             assert key in mod.SHELLIFY_PROMPT_DEFAULT
 
 
 class TestShellifyCommand:
     """Test the shellify CLI command logic."""
 
-    def test_shellify_generates_script(self, skills_dir, tmp_path):
-        """shellify should call LLM and write scripts/run.sh."""
+    def test_shellify_uses_agent_call(self, skills_dir):
+        """shellify should use agent_call() with tool access."""
         from core.skill import Skill
 
         shellify_mod = _get_shellify_module()
 
-        # Create a mock LLM response
-        mock_llm = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = """#!/usr/bin/env bash
-set -euo pipefail
+        with patch("common.agent.call.agent_call") as mock_agent_call:
+            mock_session = MagicMock()
+            mock_session.turns = []
+            mock_agent_call.return_value = mock_session
 
-echo "Hello from shellified skill"
-"""
-        mock_llm.complete.return_value = mock_response
+            skill = Skill.from_path(skills_dir / "test-echo")
+            assert skill is not None
 
-        # Get a test skill
-        skill = Skill.from_path(skills_dir / "test-echo")
-        assert skill is not None
+            # Create scripts dir so run.sh path exists
+            scripts_dir = skill.path / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            run_sh = scripts_dir / "run.sh"
+            run_sh.write_text("#!/usr/bin/env bash\necho test\n", encoding="utf-8")
 
-        # Call the shellify function
-        result = shellify_mod._shellify_skill(
-            skill=skill,
-            llm=mock_llm,
-            model=None,
-            prompt=None,  # use default
-        )
+            result = shellify_mod._shellify_skill(
+                skill=skill,
+                provider="test-provider",
+                model=None,
+                prompt_template=None,
+                instruction=None,
+                reset=False,
+                verbose=False,
+                max_iterations=5,
+            )
 
-        assert result is True
-        script_path = skill.path / "scripts" / "run.sh"
-        assert script_path.exists()
-        content = script_path.read_text()
-        assert "#!/usr/bin/env bash" in content
-        assert "set -euo pipefail" in content
+            assert result is True
+            mock_agent_call.assert_called_once()
+            call_kwargs = mock_agent_call.call_args[1]
+            assert call_kwargs["workdir"] == skill.path
+            assert call_kwargs["max_iterations"] == 5
+            assert "task_description" in call_kwargs
 
-    def test_shellify_strips_markdown_fences(self, skills_dir):
-        """shellify should strip markdown code fences from LLM output."""
+    def test_shellify_resets_existing(self, skills_dir):
+        """shellify with reset=True should tell agent to start fresh."""
         from core.skill import Skill
 
         shellify_mod = _get_shellify_module()
 
-        mock_llm = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = """```bash
-#!/usr/bin/env bash
-set -euo pipefail
-echo "stripped"
-```
-"""
-        mock_llm.complete.return_value = mock_response
+        with patch("common.agent.call.agent_call") as mock_agent_call:
+            mock_session = MagicMock()
+            mock_session.turns = []
+            mock_agent_call.return_value = mock_session
 
-        skill = Skill.from_path(skills_dir / "test-echo")
-        result = shellify_mod._shellify_skill(
-            skill=skill,
-            llm=mock_llm,
-            model=None,
-            prompt=None,
-        )
+            skill = Skill.from_path(skills_dir / "test-echo")
+            scripts_dir = skill.path / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            run_sh = scripts_dir / "run.sh"
+            run_sh.write_text("#!/usr/bin/env bash\nold script\n", encoding="utf-8")
 
-        assert result is True
-        script_path = skill.path / "scripts" / "run.sh"
-        content = script_path.read_text()
-        assert "```" not in content
-        assert "#!/usr/bin/env bash" in content
+            shellify_mod._shellify_skill(
+                skill=skill,
+                provider="test-provider",
+                reset=True,
+                verbose=False,
+                max_iterations=5,
+            )
 
-    def test_shellify_makes_script_executable(self, skills_dir):
-        """shellify should make run.sh executable."""
-        import os
+            call_kwargs = mock_agent_call.call_args[1]
+            task_desc = call_kwargs["task_description"]
+            assert "--reset flag" in task_desc or "resetting" in task_desc
+
+    def test_shellify_passes_instruction(self, skills_dir):
+        """shellify should include user instruction in the prompt."""
         from core.skill import Skill
 
         shellify_mod = _get_shellify_module()
 
-        mock_llm = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = "#!/usr/bin/env bash\necho test\n"
-        mock_llm.complete.return_value = mock_response
+        with patch("common.agent.call.agent_call") as mock_agent_call:
+            mock_session = MagicMock()
+            mock_session.turns = []
+            mock_agent_call.return_value = mock_session
 
-        skill = Skill.from_path(skills_dir / "test-echo")
-        shellify_mod._shellify_skill(skill=skill, llm=mock_llm, model=None, prompt=None)
+            skill = Skill.from_path(skills_dir / "test-echo")
+            scripts_dir = skill.path / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
 
-        script_path = skill.path / "scripts" / "run.sh"
-        assert os.access(script_path, os.X_OK)
+            shellify_mod._shellify_skill(
+                skill=skill,
+                provider="test-provider",
+                instruction="Use curl with retries",
+                reset=False,
+                verbose=False,
+                max_iterations=5,
+            )
+
+            call_kwargs = mock_agent_call.call_args[1]
+            task_desc = call_kwargs["task_description"]
+            assert "Use curl with retries" in task_desc
+
+    def test_shellify_includes_existing_script_as_context(self, skills_dir):
+        """shellify should include existing run.sh in the prompt when not resetting."""
+        from core.skill import Skill
+
+        shellify_mod = _get_shellify_module()
+
+        with patch("common.agent.call.agent_call") as mock_agent_call:
+            mock_session = MagicMock()
+            mock_session.turns = []
+            mock_agent_call.return_value = mock_session
+
+            skill = Skill.from_path(skills_dir / "test-echo")
+            scripts_dir = skill.path / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            run_sh = scripts_dir / "run.sh"
+            run_sh.write_text("#!/usr/bin/env bash\necho 'existing'\n", encoding="utf-8")
+
+            shellify_mod._shellify_skill(
+                skill=skill,
+                provider="test-provider",
+                reset=False,
+                verbose=False,
+                max_iterations=5,
+            )
+
+            call_kwargs = mock_agent_call.call_args[1]
+            task_desc = call_kwargs["task_description"]
+            assert "existing scripts/run.sh" in task_desc.lower() or "current version" in task_desc.lower()
