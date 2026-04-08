@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 
 def _get_shellify_module():
-    """Import the run-plan register module (hyphenated name)."""
-    return importlib.import_module("commands.run-plan.register")
+    """Import the shellify module (hyphenated name)."""
+    return importlib.import_module("commands.run-plan.shellify")
 
 
 class TestShellifyPrompt:
