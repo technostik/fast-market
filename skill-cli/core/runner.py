@@ -92,6 +92,7 @@ class SkillResult:
     stderr: str
     exit_code: int
     timed_out: bool = False
+    internal_steps: int = 0  # TaskLoop turns (for prompt skills)
 
 
 def resolve_skill_script(
@@ -514,6 +515,7 @@ def execute_skill_prompt(
 
         end_reason = getattr(loop.session, "end_reason", "") or ""
         exit_code = 0 if "success" in end_reason else 1
+        internal_steps = len(loop.session.turns) if loop.session else 0
 
         stdout_parts = []
         stderr_parts = []
@@ -532,6 +534,7 @@ def execute_skill_prompt(
             stderr="\n".join(stderr_parts),
             exit_code=exit_code,
             timed_out=False,
+            internal_steps=internal_steps,
         )
 
     except Exception as exc:
@@ -551,6 +554,7 @@ def execute_skill_prompt(
             stderr=str(exc),
             exit_code=1,
             timed_out=False,
+            internal_steps=0,
         )
 
 

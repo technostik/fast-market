@@ -87,6 +87,7 @@ class SkillAttempt:
     iteration: int
     subdir: Path
     raw_output: str = ""  # raw stdout/stderr from skill execution
+    internal_steps: int = 0  # TaskLoop turns within this attempt
 
 
 @dataclass
@@ -101,6 +102,7 @@ class SkillPlanStep:
     instructions: str = ""  # additional instructions for action="task"
     question: str = ""  # for action="ask"
     context_hint: str = ""  # hint about context needed
+    name: str = ""  # task name for auto-skill conversion
 
 
 @dataclass
@@ -617,10 +619,10 @@ def _run_skill(
     shared_context=None,  # SharedContext instance
     global_goal: str = "",
     inject: str | None = None,  # Injected instructions
-) -> tuple[int, str, Path | None]:
+) -> tuple[int, str, Path | None, int]:
     """Execute a skill using the same dispatch as `skill apply`.
 
-    Returns (exit_code, session_output_text, session_path).
+    Returns (exit_code, session_output_text, session_path, internal_steps).
     Delegates to runner.py — script/run:/prompt dispatch is not duplicated here.
     """
     from core.runner import (
@@ -635,6 +637,7 @@ def _run_skill(
         effective_params["_router_context"] = prev_context
 
     session_path = None
+    internal_steps = 0
 
     if skill.has_scripts:
         if save_session:
@@ -647,6 +650,7 @@ def _run_skill(
         )
         session_output = (result.stdout or "") + (result.stderr or "")
         exit_code = result.exit_code
+        internal_steps = result.internal_steps
 
     elif skill.run:
         if save_session:
@@ -659,6 +663,7 @@ def _run_skill(
         )
         session_output = (result.stdout or "") + (result.stderr or "")
         exit_code = result.exit_code
+        internal_steps = result.internal_steps
 
     else:
         # Prompt skill — session file lives inside subdir
@@ -679,6 +684,7 @@ def _run_skill(
         )
         session_output = (result.stdout or "") + (result.stderr or "")
         exit_code = result.exit_code
+        internal_steps = result.internal_steps
 
         if auto_learn and session_path and session_path.exists():
             _try_auto_learn_from_path(
@@ -700,7 +706,7 @@ def _run_skill(
         exit_code=exit_code,
         mode="script" if skill.has_scripts else ("run" if skill.run else "prompt"),
     )
-    return exit_code, session_output, session_path
+    return exit_code, session_output, session_path, internal_steps
 
 
 def _try_auto_learn_from_path(
@@ -754,8 +760,8 @@ def _run_task(
     prev_context: str,
     agent_cfg: dict,
     save_session: bool = False,
-) -> tuple[int, str, Path | None]:
-    """Execute a free-form task in-process. Returns (exit_code, output, session_path)."""
+) -> tuple[int, str, Path | None, int]:
+    """Execute a free-form task in-process. Returns (exit_code, output, session_path, internal_steps)."""
     full_description = description
     if prev_context:
         full_description = (
@@ -800,6 +806,9 @@ def _run_task(
     end_reason = getattr(loop.session, "end_reason", "") or ""
     exit_code = 0 if "success" in end_reason else 1
 
+    # Count internal steps (turns in the session)
+    internal_steps = len(loop.session.turns) if loop.session else 0
+
     # Collect output from session turns
     session_output = _session_to_text(loop.session)
 
@@ -809,7 +818,7 @@ def _run_task(
         loop.session.save(session_path)
         logger.info("task_session_saved", path=str(session_path))
 
-    return exit_code, session_output, session_path
+    return exit_code, session_output, session_path, internal_steps
 
 
 def _session_to_text(session) -> str:
@@ -1149,6 +1158,7 @@ def _import_plan_from_yaml(filepath: str, workdir: str = ".", params: dict[str, 
             instructions=step_dict.get("instructions", ""),
             question=step_dict.get("question", ""),
             context_hint=step_dict.get("context_hint", ""),
+            name=step_dict.get("name", ""),
         )
         plan_steps.append(step)
 
@@ -1169,7 +1179,9 @@ def _import_plan_from_yaml(filepath: str, workdir: str = ".", params: dict[str, 
 class RunStatistics:
     """Statistics about a completed router run."""
     total_duration_seconds: float
-    total_steps: int
+    total_steps: int  # router steps + all internal steps
+    router_steps: int  # top-level router iterations
+    internal_steps: int  # TaskLoop turns within tasks and prompt skills
     successful_steps: int
     failed_steps: int
     skipped_steps: int
@@ -1181,7 +1193,10 @@ class RunStatistics:
 
 def calculate_run_statistics(state: RouterState) -> RunStatistics:
     """Calculate statistics from a completed router run."""
-    total_steps = len(state.attempts)
+    router_steps = len(state.attempts)
+    internal_steps = sum(a.internal_steps for a in state.attempts)
+    total_steps = router_steps + internal_steps
+    
     successful_steps = sum(1 for a in state.attempts if a.success)
     failed_steps = sum(1 for a in state.attempts if not a.success and a.exit_code != 0)
     skipped_steps = sum(1 for a in state.attempts if a.exit_code == 0 and not a.success and "skipped" in a.runner_summary.lower())
@@ -1200,6 +1215,8 @@ def calculate_run_statistics(state: RouterState) -> RunStatistics:
     return RunStatistics(
         total_duration_seconds=total_duration,
         total_steps=total_steps,
+        router_steps=router_steps,
+        internal_steps=internal_steps,
         successful_steps=successful_steps,
         failed_steps=failed_steps,
         skipped_steps=skipped_steps,
@@ -1226,6 +1243,10 @@ def format_statistics(stats: RunStatistics) -> str:
         "=" * 60,
         f"Total run time:          {time_str}",
         f"Total steps executed:    {stats.total_steps}",
+        f"  Router steps:          {stats.router_steps}",
+        f"  Internal steps:        {stats.internal_steps}",
+        "-" * 60,
+        f"Results:",
         f"  Successful:            {stats.successful_steps}",
         f"  Failed:                {stats.failed_steps}",
         f"  Skipped:               {stats.skipped_steps}",
@@ -1434,6 +1455,7 @@ def run_router(
                     "context_hint": plan_step.context_hint,
                     "description": plan_step.description,
                     "question": plan_step.question,
+                    "name": plan_step.name,
                     "reason": f"From imported plan (step {plan_step.step})",
                 }
                 if verbose:
@@ -1514,6 +1536,7 @@ def run_router(
                     iteration=state.iteration,
                     subdir=Path(""),
                     raw_output="",
+                    internal_steps=0,
                 )
                 state.attempts.append(attempt)
                 continue
@@ -1566,6 +1589,7 @@ def run_router(
                             iteration=state.iteration,
                             subdir=Path(""),
                             raw_output="",
+                            internal_steps=0,
                         )
                         state.attempts.append(attempt)
                         prev_context = attempt.context
@@ -1603,6 +1627,7 @@ def run_router(
                 iteration=state.iteration,
                 subdir=Path(""),
                 raw_output="",
+                internal_steps=0,
             )
             state.attempts.append(attempt)
             prev_context = attempt.context
@@ -1616,6 +1641,7 @@ def run_router(
             params = {str(k): str(v) for k, v in (plan.get("params") or {}).items()}
             context_hint = str(plan.get("context_hint", ""))
             inject_instructions = plan.get("inject")
+            skill_internal_steps = 0
 
             # Auto-chain: detect when previous skill output should be passed as a param
             if state.attempts and context_hint:
@@ -1671,6 +1697,7 @@ def run_router(
                     iteration=state.iteration,
                     subdir=Path(""),
                     raw_output="",
+                    internal_steps=0,
                 )
                 state.attempts.append(attempt)
                 if verbose:
@@ -1695,6 +1722,7 @@ def run_router(
                     iteration=state.iteration,
                     subdir=Path(""),
                     raw_output="",
+                    internal_steps=0,
                 )
                 state.attempts.append(attempt)
                 if verbose:
@@ -1709,7 +1737,7 @@ def run_router(
                 subdir_for_record = _make_subdir(run_root, state.iteration, skill_name, isolation_mode)
                 workdir_for_skill = subdir_for_record
 
-            exit_code, session_output, session_path = _run_skill(
+            exit_code, session_output, session_path, skill_internal_steps = _run_skill(
                 skill=matched,
                 params=params,
                 subdir=workdir_for_skill,
@@ -1730,6 +1758,7 @@ def run_router(
             description = str(plan.get("description", "")).strip()
             context_hint = str(plan.get("context_hint", ""))
             params = {}
+            task_internal_steps = 0
 
             if not description:
                 state.failed = True
@@ -1755,6 +1784,15 @@ def run_router(
 
                 if auto_skill_obj:
                     # Execute as skill instead of task
+                    action = "run"  # Change action to "run" for correct statistics
+                    skill_name = auto_skill_obj.name
+                    
+                    # Update the last planned step to reflect skill execution instead of task
+                    if planned_steps:
+                        last_planned_step = planned_steps[-1]
+                        last_planned_step.action = "run"
+                        last_planned_step.skill_name = auto_skill_obj.name
+                    
                     if isolation_mode == "none":
                         workdir_for_skill = workdir_path
                         subdir_for_record = Path("")
@@ -1762,7 +1800,7 @@ def run_router(
                         subdir_for_record = _make_subdir(run_root, state.iteration, auto_skill_obj.name, isolation_mode)
                         workdir_for_skill = subdir_for_record
 
-                    exit_code, session_output, session_path = _run_skill(
+                    exit_code, session_output, session_path, skill_internal_steps = _run_skill(
                         skill=auto_skill_obj,
                         params=params,
                         subdir=workdir_for_skill,
@@ -1793,7 +1831,7 @@ def run_router(
                     subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
                     workdir_for_task = subdir_for_record
 
-                exit_code, session_output, session_path = _run_task(
+                exit_code, session_output, session_path, task_internal_steps = _run_task(
                     description=description,
                     subdir=workdir_for_task,
                     provider_name=provider_name,
@@ -1856,6 +1894,13 @@ def run_router(
 
         prev_context = new_context
 
+        # Determine internal steps based on action type
+        internal_steps = 0
+        if action == "run":
+            internal_steps = skill_internal_steps
+        elif action == "task":
+            internal_steps = task_internal_steps
+
         attempt = SkillAttempt(
             action=action,
             skill_name=skill_name if action == "run" else label,
@@ -1868,6 +1913,7 @@ def run_router(
             iteration=state.iteration,
             subdir=subdir_for_record,
             raw_output=session_output,
+            internal_steps=internal_steps,
         )
         state.attempts.append(attempt)
 
