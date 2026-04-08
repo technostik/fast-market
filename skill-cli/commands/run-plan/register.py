@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -82,6 +83,33 @@ def show_step_detail(step: dict, index: int) -> None:
         if key != "step":
             click.echo(f"  {key}: {value}")
     click.echo()
+
+
+def _extract_placeholders(data: dict) -> dict:
+    """Extract all {{key}} and {{key:default}} placeholders from a plan dict."""
+    found = {}
+
+    def _scan(obj):
+        if isinstance(obj, str):
+            for m in re.finditer(r"\{\{([^}]+)\}\}", obj):
+                inner = m.group(1)
+                if ":" in inner:
+                    key, default = inner.split(":", 1)
+                    key = key.strip()
+                    found.setdefault(key, {"required": False, "default": default})
+                else:
+                    key = inner.strip()
+                    if key not in found:
+                        found[key] = {"required": True, "default": None}
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                _scan(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _scan(item)
+
+    _scan(data)
+    return found
 
 
 def edit_step_in_editor(step: dict) -> dict | None:
@@ -173,7 +201,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Search only in the current directory",
     )
-    def list_cmd(directory, fmt, recursive, no_recursive):
+    @click.option(
+        "--show-params",
+        "-P",
+        is_flag=True,
+        default=False,
+        help="Show placeholders and defaults for each plan",
+    )
+    def list_cmd(directory, fmt, recursive, no_recursive, show_params):
         """List all run.yaml plan files in the working directory."""
         if directory is not None:
             search_dir = directory
@@ -233,10 +268,44 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         plan_steps = data["plan"]
                         if isinstance(plan_steps, list):
                             click.echo(f"     Steps: {len(plan_steps)}")
+
+                    if show_params and isinstance(data, dict):
+                        placeholders = _extract_placeholders(data)
+                        if placeholders:
+                            for name, info in sorted(placeholders.items()):
+                                status = "required" if info["required"] else "optional"
+                                default_str = f" (default: {info['default']})" if info["default"] else ""
+                                click.echo(f"     Param: {name}  [{status}]{default_str}")
             except Exception:
                 pass
 
             click.echo()
+
+    @run_plan.command("params")
+    @click.argument("plan", type=RunPlanFileType())
+    def params_cmd(plan):
+        """Show plan parameters (placeholders and defaults)."""
+        plan_path = Path(plan)
+        if not plan_path.exists():
+            click.echo(f"Error: Plan file not found: {plan_path}", err=True)
+            raise SystemExit(1)
+
+        data = load_plan(plan_path)
+        placeholders = _extract_placeholders(data)
+
+        if not placeholders:
+            click.echo(f"Plan: {plan_path}")
+            click.echo("No parameters found — plan has no {{placeholders}}.")
+            return
+
+        click.echo(f"Plan: {plan_path}")
+        if data.get("goal"):
+            click.echo(f"Goal: {data['goal']}")
+        click.echo(f"\nParameters:")
+        for name, info in sorted(placeholders.items()):
+            status = "required" if info["required"] else "optional"
+            default_str = f" (default: {info['default']})" if info["default"] else ""
+            click.echo(f"  {name}  [{status}]{default_str}")
 
     # -----------------------------------------------------------------------
     # EDIT subcommand — step wizard

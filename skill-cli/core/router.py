@@ -966,8 +966,57 @@ def _export_successful_plan(state: RouterState, filepath: str) -> None:
         logger.info("successful_plan_exported", path=str(path))
 
 
-def _import_plan_from_yaml(filepath: str, workdir: str = ".") -> SkillPlan:
-    """Import a skill plan from YAML file."""
+def _substitute_placeholders(obj: Any, params: dict[str, str]) -> Any:
+    """Recursively replace {{key}} and {{key:default}} placeholders in string values.
+    
+    Supports two forms:
+    - {{key}} — mandatory, errors if not in params
+    - {{key:default}} — optional, uses 'default' if key not in params
+    """
+    import re
+
+    if isinstance(obj, str):
+        def _replace(m):
+            inner = m.group(1)  # e.g. "key" or "key:default"
+            if ":" in inner:
+                key, default = inner.split(":", 1)
+                return params.get(key.strip(), default) if params else default
+            else:
+                return params.get(inner, m.group(0)) if params else m.group(0)
+        return re.sub(r"\{\{([^}]+)\}\}", _replace, obj)
+    if isinstance(obj, dict):
+        return {k: _substitute_placeholders(v, params) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_substitute_placeholders(item, params) for item in obj]
+    return obj
+
+
+def _find_missing_placeholders(obj: Any, path: str = "") -> list[str]:
+    """Find remaining unsubstituted mandatory {{key}} placeholders.
+    
+    Only reports {{key}} without defaults as missing.
+    {{key:default}} that resolved to the default are NOT missing.
+    """
+    import re
+
+    missing = []
+    if isinstance(obj, str):
+        # Find all remaining {{...}} patterns
+        for m in re.finditer(r"\{\{([^}]+)\}\}", obj):
+            inner = m.group(1)
+            if ":" not in inner:
+                missing.append(inner.strip())
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            missing.extend(_find_missing_placeholders(v, f"{path}.{k}" if path else k))
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            missing.extend(_find_missing_placeholders(item, f"{path}[{i}]"))
+    return missing
+
+
+def _import_plan_from_yaml(filepath: str, workdir: str = ".", params: dict[str, str] | None = None) -> SkillPlan:
+    """Import a skill plan from YAML file, substituting {{key}} placeholders with params."""
     import yaml
 
     path = Path(filepath)
@@ -978,6 +1027,17 @@ def _import_plan_from_yaml(filepath: str, workdir: str = ".") -> SkillPlan:
 
     if not isinstance(data, dict):
         raise ValueError(f"Invalid plan YAML format in {filepath}")
+
+    # Apply placeholder substitution (including defaults for {{key:default}} patterns)
+    data = _substitute_placeholders(data, params)
+
+    # Check for remaining unsubstituted mandatory placeholders
+    missing = _find_missing_placeholders(data)
+    if missing:
+        raise ValueError(
+            f"Unresolved mandatory placeholders in plan: {', '.join(set(missing))}. "
+            f"Provide values with -p/--param options."
+        )
 
     goal = data.get("goal", "")
     if not goal:
@@ -1037,6 +1097,7 @@ def run_router(
     shared_context: Any = None,
     export_plan_path: str | None = None,
     import_plan_path: str | None = None,
+    import_params: dict[str, str] | None = None,
     interactive: bool = False,
     export_successful_path: str | None = None,
 ) -> RouterState:
@@ -1121,10 +1182,12 @@ def run_router(
     # Import plan if provided
     if import_plan_path:
         try:
-            state.imported_plan = _import_plan_from_yaml(import_plan_path, workdir)
+            state.imported_plan = _import_plan_from_yaml(import_plan_path, workdir, params=import_params)
             logger.info("plan_imported", path=import_plan_path, steps=len(state.imported_plan.steps))
             if verbose:
                 print(f"\n[router] Imported plan from: {import_plan_path}")
+                if import_params:
+                    print(f"[router] Substituted params: {', '.join(import_params.keys())}")
                 print(f"[router] Plan has {len(state.imported_plan.steps)} steps")
         except Exception as exc:
             state.failed = True
