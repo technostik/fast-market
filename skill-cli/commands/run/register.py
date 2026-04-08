@@ -5,6 +5,7 @@ import sys
 import click
 
 from commands.base import CommandManifest
+from commands.params import RunPlanFileType
 from common.core.config import (
     ConfigError,
     load_common_config,
@@ -97,9 +98,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--import",
         "import_plan",
-        type=click.Path(exists=True),
+        type=RunPlanFileType(),
         default=None,
-        help="Import skill execution plan from YAML file instead of auto-planning",
+        help="Import skill execution plan from YAML file instead of auto-planning (searches in workdir)",
     )
     @click.option(
         "--param",
