@@ -755,6 +755,124 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not success:
             raise SystemExit(1)
 
+    # -----------------------------------------------------------------------
+    # RESET-LEARN subcommand — delete LEARN.md for skills in a plan or --skill
+    # -----------------------------------------------------------------------
+    @plan.command("reset-learn")
+    @click.argument("plan", type=RunPlanFileType(), required=False, default=None)
+    @click.option(
+        "--skill",
+        "-s",
+        "skill_name",
+        type=_SkillNameType(),
+        default=None,
+        help="Reset LEARN.md for a single skill instead of the whole plan.",
+    )
+    def reset_learn_cmd(plan, skill_name):
+        """Delete LEARN.md for all skills referenced in a plan, or for a single skill with --skill."""
+        from core.skill import Skill
+        from common.core.paths import get_skills_dir
+
+        skills_dir = get_skills_dir()
+
+        if skill_name:
+            # Single skill mode
+            skill_obj = Skill.from_path(skills_dir / skill_name)
+            if not skill_obj:
+                click.echo(f"Error: skill '{skill_name}' not found.", err=True)
+                raise SystemExit(1)
+            skill_names = [skill_name]
+        elif plan:
+            # Plan mode — extract skill names from plan steps
+            plan_path = Path(plan)
+            if not plan_path.exists():
+                click.echo(f"Error: Plan file not found: {plan_path}", err=True)
+                raise SystemExit(1)
+            data = load_plan(plan_path)
+            steps = data.get("plan", [])
+            skill_names = sorted(set(
+                step.get("skill")
+                for step in steps
+                if step.get("action") == "run" and step.get("skill")
+            ))
+            if not skill_names:
+                click.echo("No skills found in plan (no 'run' steps).", err=True)
+                return
+        else:
+            click.echo("Error: provide a plan file or use --skill <name>.", err=True)
+            raise SystemExit(1)
+
+        deleted = 0
+        for name in skill_names:
+            learn_path = skills_dir / name / "LEARN.md"
+            if learn_path.exists():
+                learn_path.unlink()
+                click.echo(f"Deleted: {learn_path}", err=True)
+                deleted += 1
+            else:
+                click.echo(f"No LEARN.md for: {name}", err=True)
+
+        click.echo(f"Done: {deleted} file(s) removed.", err=True)
+
+    # -----------------------------------------------------------------------
+    # RESET-SHELL subcommand — delete scripts/run.sh for skills in a plan or --skill
+    # -----------------------------------------------------------------------
+    @plan.command("reset-shell")
+    @click.argument("plan", type=RunPlanFileType(), required=False, default=None)
+    @click.option(
+        "--skill",
+        "-s",
+        "skill_name",
+        type=_SkillNameType(),
+        default=None,
+        help="Reset scripts/run.sh for a single skill instead of the whole plan.",
+    )
+    def reset_shell_cmd(plan, skill_name):
+        """Delete scripts/run.sh for all skills referenced in a plan, or for a single skill with --skill."""
+        from core.skill import Skill
+        from common.core.paths import get_skills_dir
+
+        skills_dir = get_skills_dir()
+
+        if skill_name:
+            # Single skill mode
+            skill_obj = Skill.from_path(skills_dir / skill_name)
+            if not skill_obj:
+                click.echo(f"Error: skill '{skill_name}' not found.", err=True)
+                raise SystemExit(1)
+            skill_names = [skill_name]
+        elif plan:
+            # Plan mode — extract skill names from plan steps
+            plan_path = Path(plan)
+            if not plan_path.exists():
+                click.echo(f"Error: Plan file not found: {plan_path}", err=True)
+                raise SystemExit(1)
+            data = load_plan(plan_path)
+            steps = data.get("plan", [])
+            skill_names = sorted(set(
+                step.get("skill")
+                for step in steps
+                if step.get("action") == "run" and step.get("skill")
+            ))
+            if not skill_names:
+                click.echo("No skills found in plan (no 'run' steps).", err=True)
+                return
+        else:
+            click.echo("Error: provide a plan file or use --skill <name>.", err=True)
+            raise SystemExit(1)
+
+        deleted = 0
+        for name in skill_names:
+            run_sh = skills_dir / name / "scripts" / "run.sh"
+            if run_sh.exists():
+                run_sh.unlink()
+                click.echo(f"Deleted: {run_sh}", err=True)
+                deleted += 1
+            else:
+                click.echo(f"No scripts/run.sh for: {name}", err=True)
+
+        click.echo(f"Done: {deleted} file(s) removed.", err=True)
+
     return CommandManifest(name="plan", click_command=plan)
 
 
