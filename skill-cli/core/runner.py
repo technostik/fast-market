@@ -517,6 +517,22 @@ def execute_skill_prompt(
         exit_code = 0 if "success" in end_reason else 1
         internal_steps = len(loop.session.turns) if loop.session else 0
 
+        # Auto-learn: analyze session and update LEARN.md
+        if auto_learn and loop.session:
+            try:
+                _run_auto_learn_from_skill(
+                    skill=skill,
+                    params=params,
+                    workdir=workdir,
+                    provider=providers.get(provider_name),
+                    model=model,
+                    session=loop.session,
+                    session_path=save_session,
+                    compact=compact,
+                )
+            except Exception as exc:
+                logger.warning("auto_learn_failed", skill=skill.name, error=str(exc))
+
         stdout_parts = []
         stderr_parts = []
         if loop.session:
@@ -568,6 +584,7 @@ def _run_auto_learn_from_skill(
     model: str | None = None,
     session=None,
     session_path: Path | None = None,
+    compact: bool = False,
 ) -> None:
     """Run auto-learn for a skill using LLM."""
     from datetime import datetime
@@ -635,6 +652,8 @@ def _run_auto_learn_from_skill(
                 provider=provider,
                 model=model,
                 temperature=config.get("default_temperature"),
+                use_compacting=compact,
+                autocompact_lines=skill.autocompact_lines,
             )
 
             if session_path and session_path.exists():

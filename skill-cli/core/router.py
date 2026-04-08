@@ -617,7 +617,8 @@ def _run_skill(
             provider=provider_name,
             model=model,
             save_session=session_path,
-            auto_learn=False,  # handled below with the right provider instance
+            auto_learn=auto_learn,
+            compact=compact,
             shared_context=shared_context,
             global_goal=global_goal,
             inject=inject,
@@ -625,16 +626,6 @@ def _run_skill(
         session_output = (result.stdout or "") + (result.stderr or "")
         exit_code = result.exit_code
         internal_steps = result.internal_steps
-
-        if auto_learn and session_path and session_path.exists():
-            _try_auto_learn_from_path(
-                skill=skill,
-                params=effective_params,
-                session_path=session_path,
-                subdir=subdir,
-                model=model,
-                compact=compact,
-            )
 
     # script/run: skills produce no session file
     if session_path and not session_path.exists():
@@ -647,44 +638,6 @@ def _run_skill(
         mode="script" if skill.has_scripts else ("run" if skill.run else "prompt"),
     )
     return exit_code, session_output, session_path, internal_steps
-
-
-def _try_auto_learn_from_path(
-    skill: Skill,
-    params: dict,
-    session_path: Path,
-    subdir: Path,
-    model: str | None,
-    compact: bool,
-) -> None:
-    """Load session from disk and run auto-learn. Never raises."""
-    try:
-        import yaml
-        from common.agent.session import Session
-        from common.core.config import load_tool_config
-        from common.llm.registry import discover_providers, get_default_provider_name
-        from core.runner import _run_auto_learn_from_skill
-
-        data = yaml.safe_load(session_path.read_text())
-        if not data:
-            return
-        session_obj = Session.from_dict(data)
-
-        config = load_tool_config("skill")
-        providers = discover_providers(config)
-        provider = providers.get(get_default_provider_name(config))
-        if provider:
-            _run_auto_learn_from_skill(
-                skill=skill,
-                params=params,
-                workdir=subdir,
-                provider=provider,
-                model=model,
-                session=session_obj,
-                session_path=session_path,
-            )
-    except Exception as exc:
-        logger.warning("auto_learn_failed", skill=skill.name, error=str(exc))
 
 
 # ---------------------------------------------------------------------------
