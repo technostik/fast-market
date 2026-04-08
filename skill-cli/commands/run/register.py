@@ -142,6 +142,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Export only the successfully executed steps to a YAML plan file",
     )
+    @click.option(
+        "--auto-skill",
+        is_flag=True,
+        default=False,
+        help="Convert named tasks (with 'name' field) to auto-skills for learning capabilities",
+    )
     def run_cmd(
         task,
         provider,
@@ -163,6 +169,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         interactive,
         export_successful,
         params,
+        auto_skill,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
@@ -248,6 +255,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             import_plan_path=import_plan,
             import_params=import_params,
             interactive=interactive,
+            auto_skill=auto_skill,
             export_successful_path=export_successful,
         )
         click.echo("\n" + "=" * 50, err=True)

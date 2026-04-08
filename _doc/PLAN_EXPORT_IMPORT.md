@@ -1,14 +1,93 @@
-# Skill Run Export/Import Feature
+# Skill Run Export/Import and Plan Management
 
 ## Overview
 
-The `skill run` command now supports exporting and importing execution plans in YAML format, allowing you to:
-1. **Export** the planned skill execution as a user-readable YAML file
-2. **Export** the actual execution log as a YAML file
-3. **Import** a pre-defined skill execution plan instead of relying on the router's auto-planning
-4. **Inject** custom instructions into each skill step
+The `skill run` and `skill run-plan` commands support a full lifecycle for plan management:
+1. **List** existing run plans
+2. **Export** the planned skill execution as a user-readable YAML file
+3. **Export** the actual execution log as a YAML file
+4. **Import** a pre-defined skill execution plan instead of relying on the router's auto-planning
+5. **Inject** custom instructions into each skill step
+6. **Edit** plans interactively or with LLM assistance
+7. **Parameterize** plans with placeholders for reuse
 
-## CLI Options
+## Plan Commands
+
+### `skill run-plan list`
+
+List all `run.yaml` files in the workdir (from common config).
+
+```bash
+skill run-plan list                  # text format
+skill run-plan list --format json    # machine-readable
+skill run-plan list --show-params    # show placeholders
+```
+
+### `skill run-plan params <plan>`
+
+Show all `{{placeholders}}` and their defaults for a specific plan.
+
+```bash
+skill run-plan params my-plan/run.yaml
+```
+
+Output:
+```
+Plan: /workdir/my-plan/run.yaml
+Goal: Promote my video {{video_url}}
+
+Parameters:
+  video_url  [required]
+  count      [optional] (default: 5)
+  keywords   [optional] (default: marketing,tech)
+```
+
+### `skill run-plan edit <plan>`
+
+Interactive wizard to edit a plan's steps:
+
+- **[S]how** — detailed view of a step
+- **[E]dit** — open step YAML in your editor
+- **[D]elete** — remove a step
+- **[M]ove** — reorder a step
+- **[A]dd** — add a new step (run/task/ask)
+- **[C]hange step (LLM)** — discuss with LLM to modify a single step
+- **[P]lan change (LLM)** — discuss with LLM to modify the entire plan
+- **[L]earn.md** — edit LEARN.md of the auto-skill for a named task
+- **[K]ill** — edit SKILL.md of the auto-skill for a named task
+- **[Q]uit** — save and exit
+
+### Plan YAML Format
+
+```yaml
+goal: "Analyze and promote a video"
+success_criteria: "At least 5 replies generated"
+plan:
+  - step: 1
+    action: run
+    skill: my-analyse
+    params:
+      url: "{{video_url}}"
+    context_hint: "Analysis result for {{video_url}}"
+  - step: 2
+    action: task
+    name: find-videos
+    description: "Search for videos about the same topic"
+    instructions: "Find at least 5 related videos"
+    context_hint: "List of related video URLs"
+  - step: 3
+    action: ask
+    question: "Which videos should we prioritize?"
+```
+
+**Step types:**
+- `run` — executes a skill. Fields: `skill`, `params`, `inject`, `context_hint`
+- `task` — free-form LLM task. Fields: `description`, `instructions`, `name` (for auto-skill), `context_hint`
+- `ask` — prompt the user. Fields: `question`
+
+## `skill run` Command
+
+### Import/Export
 
 ### `--export` / `-e`
 Export the execution plan and log to YAML files.
@@ -105,6 +184,7 @@ Executes a free-form CLI task description.
 ```yaml
 - step: 2
   action: task
+  name: find-videos          # optional: enables --auto-skill mode
   description: "Review the generated content and make improvements"
   instructions: |
     Focus on engagement metrics
@@ -112,8 +192,10 @@ Executes a free-form CLI task description.
 ```
 
 **Fields:**
+- `name`: (optional) Task name — when `--auto-skill` is enabled, creates skill `auto-{name}` from the description
 - `description`: Task description for the agent
 - `instructions`: Additional instructions for the task
+- `context_hint`: Hint for context extraction
 
 #### 3. `ask` - User Interaction
 Asks the user a question during execution.
@@ -158,6 +240,110 @@ execution:
     exit_code: 0
     summary: "Generated marketing content"
     output_preview: "Generated content..."
+```
+
+## Plan Parameterization
+
+Plans can be made reusable with `{{placeholders}}` that are substituted at import time.
+
+### Syntax
+
+- `{{key}}` — **mandatory** parameter, fails if not provided
+- `{{key:default}}` — **optional** parameter with default value
+
+```yaml
+goal: "Promote {{video_url}}"
+plan:
+  - step: 1
+    action: run
+    skill: my-analyse
+    params:
+      url: "{{video_url}}"
+  - step: 2
+    action: run
+    skill: find_videos
+    params:
+      keywords: "{{keywords:marketing,tech}}"
+      count: "{{count:5}}"
+```
+
+### Usage
+
+```bash
+# Provide mandatory params, use defaults for the rest
+skill run "promote" --import plan.yaml -p video_url=https://youtube.com/abc
+
+# Override defaults
+skill run "promote" --import plan.yaml \
+  -p video_url=https://youtube.com/abc \
+  -p keywords=AI,ML \
+  -p count=10
+
+# Fails if mandatory param not provided
+# Error: Unresolved mandatory placeholders in plan: video_url
+```
+
+### Inspect Plan Parameters
+
+```bash
+skill run-plan params plan.yaml           # show params for a specific plan
+skill run-plan list --show-params         # show params when listing
+```
+
+## Interactive Mode (`--interactive` / `-I`)
+
+Pause before each step for user approval:
+
+```bash
+skill run "promote my video" --interactive
+```
+
+At each step you can:
+- **[A]ccept** — execute as planned
+- **[S]kip** — mark as success without executing
+- **[E]dit** — modify the step in your editor before running
+- **[R]eplan** — ask the LLM for an alternative approach
+- **[Q]uit** — stop and export what succeeded
+
+Export successful steps:
+```bash
+skill run "promote" --interactive --export-successful good-plan.yaml
+```
+
+## Auto-Skill Mode (`--auto-skill`)
+
+When `--auto-skill` is set, named tasks (with `name` field) are automatically converted to skills:
+
+```yaml
+plan:
+  - step: 2
+    action: task
+    name: find-related-videos
+    description: "Search YouTube for related videos..."
+```
+
+The router:
+1. Checks if skill `auto-find-related-videos` exists
+2. If not, **creates it** from the description using `skill create from-description`
+3. **Executes as a skill** with full `--auto-learn` support
+
+```bash
+skill run "promote" --auto-skill --auto-learn
+```
+
+This enables learning capabilities for tasks that normally don't have them.
+
+### Edit Auto-Skills
+
+In `skill run-plan edit`, for named task steps:
+- **[L]earn.md** — opens `LEARN.md` of the auto-skill in your editor
+- **[K]ill** — opens `SKILL.md` of the auto-skill in your editor
+
+Auto-skill names are shown in the step list:
+```
+  [2] TASK
+      Auto-skill: auto-find-related-videos
+      Search YouTube for related videos...
 ```
 
 ## Usage Examples
@@ -276,6 +462,9 @@ The `inject` field appends custom instructions to the skill's prompt during exec
 3. **Keep plans modular** - create separate plan files for different workflows
 4. **Test with small plans** before creating complex multi-step workflows
 5. **Use context hints** to help the planner understand data flow between steps
+6. **Parameterize reusable plans** with `{{placeholders}}` and defaults
+7. **Use `--auto-skill` with `--auto-learn`** to enable learning for tasks
+8. **Use `--interactive`** for critical workflows where you want to approve each step
 
 ## Troubleshooting
 
@@ -283,6 +472,11 @@ The `inject` field appends custom instructions to the skill's prompt during exec
 - Ensure the YAML file has a valid `goal` field
 - Check that all steps have valid `action` values (run, task, or ask)
 - Verify the file path exists and is readable
+
+### Unresolved Placeholders
+- Provide all mandatory parameters with `-p key=value`
+- Check for typos in placeholder names (`{{key}}` vs `{{keys}}`)
+- Use `skill run-plan params <plan>` to see what's required
 
 ### Inject Not Working
 - Confirm the skill is a prompt-mode skill (has body in SKILL.md)
@@ -294,9 +488,16 @@ The `inject` field appends custom instructions to the skill's prompt during exec
 - Check if the router completed successfully
 - Verify `--export` option is specified correctly
 
+### Auto-Skill Not Created
+- Ensure the task has a `name` field
+- Run with `--auto-skill` flag
+- Check LLM provider is configured for skill extraction
+
 ## Files Modified
 
-- `skill-cli/commands/run/register.py` - Added CLI options
-- `skill-cli/core/router.py` - Added export/import logic and data structures
-- `tests/test_12_plan_export_import.py` - Unit tests for export/import
-- `tests/test_08_skill_router.py` - Integration tests for export/import
+- `skill-cli/commands/run/register.py` - Added CLI options (`--interactive`, `--auto-skill`, `--param`, `--export-successful`)
+- `skill-cli/commands/run-plan/register.py` - Plan management commands (`list`, `edit`, `params`)
+- `skill-cli/commands/params.py` - `RunPlanFileType` for TAB completion
+- `skill-cli/core/router.py` - Export/import logic, placeholder substitution, auto-skill creation, interactive approval
+- `skill-cli/core/repl.py` - Interactive prompt utilities
+- `common/cli/helpers.py` - Editor integration

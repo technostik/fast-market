@@ -512,6 +512,108 @@ def _call_evaluation(
 
 
 # ---------------------------------------------------------------------------
+# Auto-skill creation
+# ---------------------------------------------------------------------------
+
+
+def _ensure_auto_skill_exists(
+    task_name: str,
+    task_description: str,
+    skills: list[Skill],
+    provider,
+    model: str | None = None,
+) -> Skill | None:
+    """Check if auto-skill exists, create it from task description if not.
+    
+    Returns the Skill object, or None if creation failed.
+    """
+    skill_name = f"auto-{task_name}"
+    
+    existing = next((s for s in skills if s.name == skill_name), None)
+    if existing:
+        logger.info("auto_skill_exists", skill=skill_name)
+        return existing
+
+    logger.info("auto_skill_creating", skill=skill_name, description=task_description[:100])
+
+    from common.learn import extract_skill_from_description
+    from commands.setup import init_skill_agent_config
+
+    agent_config = init_skill_agent_config()
+    tools_description = _load_tools_description_simple(agent_config)
+    existing_skills_str = _load_existing_skills_simple()
+
+    try:
+        name, description, when_to_use, body = extract_skill_from_description(
+            task_description,
+            tools_description,
+            existing_skills_str,
+            provider,
+            model=model,
+        )
+    except Exception as exc:
+        logger.error("auto_skill_extraction_failed", error=str(exc))
+        click.echo(f"[auto-skill] Failed to create skill from description: {exc}", err=True)
+        return None
+
+    if not name.startswith("auto-"):
+        name = f"auto-{task_name}"
+
+    skill_path = get_skills_dir() / name
+    
+    if skill_path.exists():
+        logger.info("auto_skill_exists_on_disk", skill=name)
+        skill = Skill.from_path(skill_path)
+        return skill
+
+    try:
+        skill_path.mkdir(parents=True, exist_ok=True)
+        skill_content = f"""---
+name: {name}
+description: {description}
+---
+
+# {name}
+
+## When to use
+{when_to_use}
+
+## Instructions
+{body}
+"""
+        (skill_path / "SKILL.md").write_text(skill_content, encoding="utf-8")
+        logger.info("auto_skill_created", skill=name, path=str(skill_path))
+        click.echo(f"[auto-skill] Created skill: {name}", err=True)
+        return Skill.from_path(skill_path)
+    except Exception as exc:
+        logger.error("auto_skill_creation_failed", error=str(exc))
+        click.echo(f"[auto-skill] Failed to create skill {name}: {exc}", err=True)
+        return None
+
+
+def _load_tools_description_simple(agent_config: dict) -> str:
+    lines = []
+    fastmarket_tools = agent_config.get("fastmarket_tools", {})
+    if fastmarket_tools:
+        lines.append("## Available Tools")
+        for tool_name, tool_info in fastmarket_tools.items():
+            desc = tool_info.get("description", "") if isinstance(tool_info, dict) else ""
+            lines.append(f"- {tool_name}: {desc}")
+    return "\n".join(lines) or "(no tools available)"
+
+
+def _load_existing_skills_simple() -> str:
+    try:
+        skills = discover_skills(get_skills_dir())
+        lines = []
+        for skill in skills:
+            lines.append(f"- {skill.name}: {skill.description or ''}")
+        return "\n".join(lines) or "(no existing skills)"
+    except Exception:
+        return "(no existing skills)"
+
+
+# ---------------------------------------------------------------------------
 # Skill executor — delegates to runner.py, no TaskLoop duplication
 # ---------------------------------------------------------------------------
 
@@ -1099,6 +1201,7 @@ def run_router(
     import_plan_path: str | None = None,
     import_params: dict[str, str] | None = None,
     interactive: bool = False,
+    auto_skill: bool = False,
     export_successful_path: str | None = None,
 ) -> RouterState:
     """Orchestrate skills and tasks to achieve a goal.
@@ -1563,24 +1666,70 @@ def run_router(
                 )
                 break
 
-            # Determine workdir based on isolation mode
-            if isolation_mode == "none":
-                workdir_for_task = workdir_path
-                subdir_for_record = Path("")
-            else:
-                subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
-                workdir_for_task = subdir_for_record
+            # Auto-skill: convert task to skill if it has a name
+            task_name = plan.get("name", "").strip()
+            auto_skill_used = auto_skill and task_name
 
-            exit_code, session_output, session_path = _run_task(
-                description=description,
-                subdir=workdir_for_task,
-                provider_name=provider_name,
-                model=model,
-                prev_context=prev_context,
-                agent_cfg=agent_cfg,
-                save_session=save_session,
-            )
-            label = f"(task) {description[:60]}"
+            if auto_skill_used:
+                # Try to create/get auto-skill
+                auto_skill_obj = _ensure_auto_skill_exists(
+                    task_name=task_name,
+                    task_description=description,
+                    skills=skills,
+                    provider=provider,
+                    model=model,
+                )
+
+                if auto_skill_obj:
+                    # Execute as skill instead of task
+                    if isolation_mode == "none":
+                        workdir_for_skill = workdir_path
+                        subdir_for_record = Path("")
+                    else:
+                        subdir_for_record = _make_subdir(run_root, state.iteration, auto_skill_obj.name, isolation_mode)
+                        workdir_for_skill = subdir_for_record
+
+                    exit_code, session_output, session_path = _run_skill(
+                        skill=auto_skill_obj,
+                        params=params,
+                        subdir=workdir_for_skill,
+                        provider_name=provider_name,
+                        model=model,
+                        auto_learn=auto_learn,
+                        compact=compact,
+                        prev_context=prev_context,
+                        save_session=save_session,
+                        shared_context=state.shared_context,
+                        global_goal=state.goal,
+                        inject=None,
+                    )
+                    label = auto_skill_obj.name
+                    # Fall through to post-execution (context extract, evaluation, etc.)
+                    # Don't break — continue with the common post-processing
+                else:
+                    # Auto-skill creation failed, fall back to task
+                    click.echo(f"[auto-skill] Falling back to task execution", err=True)
+                    auto_skill_used = False
+
+            if not auto_skill_used:
+                # Normal task execution
+                if isolation_mode == "none":
+                    workdir_for_task = workdir_path
+                    subdir_for_record = Path("")
+                else:
+                    subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
+                    workdir_for_task = subdir_for_record
+
+                exit_code, session_output, session_path = _run_task(
+                    description=description,
+                    subdir=workdir_for_task,
+                    provider_name=provider_name,
+                    model=model,
+                    prev_context=prev_context,
+                    agent_cfg=agent_cfg,
+                    save_session=save_session,
+                )
+                label = f"(task) {description[:60]}"
 
         else:
             state.failed = True

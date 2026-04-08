@@ -59,6 +59,9 @@ def format_step(step: dict, index: int) -> str:
         if step.get("inject"):
             lines.append(f"      Inject: {step['inject'][:60]}...")
     elif action == "task":
+        task_name = step.get("name", "").strip()
+        if task_name:
+            lines.append(f"      Auto-skill: auto-{task_name}")
         desc = step.get("description", "")
         lines.append(f"      {desc[:80]}{'...' if len(desc) > 80 else ''}")
         if step.get("instructions"):
@@ -75,9 +78,15 @@ def format_step(step: dict, index: int) -> str:
 
 def show_step_detail(step: dict, index: int) -> None:
     """Show detailed view of a step."""
+    action = step.get('action', 'unknown').upper()
     click.echo(f"\n{'=' * 60}")
-    click.echo(f"Step {index}: {step.get('action', 'unknown').upper()}")
+    click.echo(f"Step {index}: {action}")
     click.echo(f"{'=' * 60}")
+
+    # Show auto-skill name if this is a named task
+    task_name = step.get("name", "").strip()
+    if step.get("action") == "task" and task_name:
+        click.echo(f"  Auto-skill: auto-{task_name}")
 
     for key, value in step.items():
         if key != "step":
@@ -339,9 +348,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 click.echo("No steps yet.\n")
 
             # Choose action
-            options = ["s", "e", "d", "m", "a", "c", "p", "q"]
+            options = ["s", "e", "d", "m", "a", "c", "p", "l", "k", "q"]
             action = prompt_with_options(
-                "Choose action — [S]how / [E]dit / [D]elete / [M]ove / [A]dd / [C]hange step (LLM) / [P]lan change (LLM) / [Q]uit: ",
+                "Choose action — [S]how / [E]dit / [D]elete / [M]ove / [A]dd / [C]hange step (LLM) / [P]lan change (LLM) / [L]earn.md (auto-skill) / s[K]ill (auto-skill) / [Q]uit: ",
                 options,
             )
 
@@ -488,6 +497,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
                 elif action == "c":
                     _llm_change_step(plan_path, data, steps, idx)
+
+                elif action == "l":
+                    _edit_auto_skill_learn(steps[idx])
+
+                elif action == "k":
+                    _edit_auto_skill_skill(steps[idx])
 
     return CommandManifest(name="run-plan", click_command=run_plan)
 
@@ -640,11 +655,60 @@ def _build_llm_context(plan_data: dict, skills: list, step_idx: int | None) -> s
     lines.append("3. Explain your changes")
     lines.append("4. Wait for their feedback or approval")
     lines.append("")
-    lines.append("When the user says 'done', output ONLY the final modified step(s) as YAML.")
-    lines.append("Do not output anything else at that point.")
+
+    # YAML syntax reference (always included so LLM produces valid output)
+    lines.append("## Run Plan YAML Syntax Reference")
     lines.append("")
-    lines.append("Step types: 'run' (execute a skill), 'task' (free-form instructions), 'ask' (prompt user)")
-    lines.append("For 'run' steps, use the exact skill names listed above.")
+    lines.append("Top-level keys: `goal`, `success_criteria` (optional), `preparation_plan` (optional), `plan` (list of steps).")
+    lines.append("")
+    lines.append("Each step is a YAML mapping with:")
+    lines.append("- `step`: integer (1-based, must be sequential)")
+    lines.append("- `action`: one of `run`, `task`, `ask`")
+    lines.append("")
+    lines.append("### For `action: run`")
+    lines.append("- `skill`: (string) exact skill name from the Available Skills list above")
+    lines.append("- `params`: (dict) key-value pairs matching the skill's parameters")
+    lines.append("- `inject`: (optional string) additional instructions appended to the skill's body")
+    lines.append("- `context_hint`: (optional string) hint for auto-chaining and context extraction")
+    lines.append("")
+    lines.append("### For `action: task`")
+    lines.append("- `description`: (string) free-form task description")
+    lines.append("- `instructions`: (optional string) additional execution instructions")
+    lines.append("- `name`: (optional string) task name — enables --auto-skill mode, creates `auto-{name}` skill")
+    lines.append("- `context_hint`: (optional string) hint for context extraction")
+    lines.append("")
+    lines.append("### For `action: ask`")
+    lines.append("- `question`: (string) question presented to the user")
+    lines.append("")
+    lines.append("### Placeholders")
+    lines.append("- `{{key}}` — mandatory parameter, substituted at import time")
+    lines.append("- `{{key:default}}` — optional parameter with default value")
+    lines.append("")
+    lines.append("### YAML Formatting Rules")
+    lines.append("- Each step in the `plan` list starts with `- step: N` (dash + space)")
+    lines.append("- Multi-line values or values with colons (:), commas, apostrophes MUST be double-quoted")
+    lines.append("- Nested dicts like `params:` must have each key on its own indented line")
+    lines.append("- Do NOT use inline flow style `{key: value}` for params")
+    lines.append("")
+    lines.append("Example:")
+    lines.append("```yaml")
+    lines.append("goal: \"Analyze {{video_url}}\"")
+    lines.append("plan:")
+    lines.append("  - step: 1")
+    lines.append("    action: run")
+    lines.append("    skill: my-analyse")
+    lines.append("    params:")
+    lines.append("      url: \"{{video_url}}\"")
+    lines.append("    context_hint: \"Result will be used by next step\"")
+    lines.append("  - step: 2")
+    lines.append("    action: task")
+    lines.append("    name: find-videos")
+    lines.append("    description: \"Search for videos about the analyzed topic\"")
+    lines.append("  - step: 3")
+    lines.append("    action: ask")
+    lines.append("    question: \"Which videos should we use?\"")
+    lines.append("```")
+    lines.append("")
 
     return "\n".join(lines)
 
@@ -755,20 +819,26 @@ def _run_llm_chat_loop(
 
     messages = []
     system_prompt = (
-        "You are helping a user edit a run plan (YAML file) for the fast-market skill runner. "
+        "You are helping a user edit a single step in a run plan (YAML file) for the fast-market skill runner. "
         "The user will describe the changes they want. "
         "Propose YAML modifications and explain your reasoning.\n\n"
-        "CRITICAL: When the user says 'done', output ONLY the final YAML block. "
-        "NEVER wrap values in quotes unless they contain YAML-special characters. "
-        "However, if a value contains colons (:), commas, apostrophes, or parentheses, "
-        "you MUST wrap it in double quotes. "
-        "NEVER use markdown code fences (```yaml ... ```). "
-        "Output raw YAML only — no explanation, no preamble, no backticks.\n\n"
-        "Example of CORRECT output:\n"
+        "CRITICAL: When the user says 'done', output ONLY the final modified step as a YAML mapping. "
+        "A step is a single YAML mapping with keys like: step, action, skill/params/description/etc.\n\n"
+        "YAML RULES:\n"
+        "- NEVER use markdown code fences. Output raw YAML only.\n"
+        "- If a value contains colons (:), commas, apostrophes, or parentheses, you MUST wrap it in double quotes.\n"
+        "- `params` must be a proper YAML dict with each key on its own indented line.\n"
+        "- Do NOT use inline flow style `{key: value}`.\n\n"
+        "Step format examples:\n"
+        "action: run\n"
+        "skill: my-skill\n"
+        "params:\n"
+        '  url: "https://example.com"\n\n'
         "action: task\n"
-        'description: "Use some tool on the video: https://example.com"\n\n'
-        "Example of INCORRECT output (will cause parse errors):\n"
-        "description: Use some tool on the video: https://example.com"
+        "name: find-videos\n"
+        'description: "Search for related videos"\n\n'
+        "action: ask\n"
+        'question: "What should we do next?"'
     )
 
     while True:
@@ -874,13 +944,39 @@ def _run_llm_chat_loop_for_plan(
         "The plan must have these top-level keys: 'goal' and 'plan' (list of steps). "
         "Each step must have 'step' (number), 'action' (run/task/ask). "
         "For 'run' steps: 'skill' and optionally 'params', 'inject', 'context_hint'. "
-        "For 'task' steps: 'description' and optionally 'instructions', 'context_hint'. "
+        "For 'task' steps: 'description' and optionally 'instructions', 'context_hint', 'name'. "
         "For 'ask' steps: 'question'.\n\n"
-        "NEVER wrap values in quotes unless they contain YAML-special characters. "
-        "If a value contains colons (:), commas, apostrophes, or parentheses, "
-        "you MUST wrap it in double quotes. "
-        "NEVER use markdown code fences (```yaml ... ```). "
-        "Output raw YAML only — no explanation, no preamble, no backticks."
+        "CRITICAL YAML RULES:\n"
+        "- NEVER use markdown code fences (```yaml ... ```). Output raw YAML only.\n"
+        "- If a value contains colons (:), commas, apostrophes, or parentheses, you MUST wrap it in double quotes.\n"
+        "- Use proper YAML list syntax: each step starts with '- step: N' (dash + space).\n"
+        "- Nested dicts like 'params:' must be indented under their key, each key on its own line.\n"
+        "- 'name' field on a task step enables --auto-skill mode (creates auto-{name} skill).\n"
+        "- {{placeholders}} like {{video_url}} or {{count:5}} can appear in any string value.\n\n"
+        "VALID PLAN YAML EXAMPLE:\n"
+        "goal: \"Analyze and promote a video\"\n"
+        "success_criteria: \"At least 5 replies generated\"\n"
+        "plan:\n"
+        "  - step: 1\n"
+        "    action: run\n"
+        "    skill: my-analyse\n"
+        "    params:\n"
+        "      url: \"{{video_url}}\"\n"
+        "    context_hint: \"Analysis result for {{video_url}}\"\n"
+        "  - step: 2\n"
+        "    action: task\n"
+        "    name: find-videos\n"
+        "    description: \"Search YouTube for videos about the same topic as the analyzed video\"\n"
+        "    instructions: \"Find at least 5 related videos using keywords from step 1\"\n"
+        "    context_hint: \"List of related video URLs\"\n"
+        "  - step: 3\n"
+        "    action: ask\n"
+        "    question: \"Which videos should we prioritize?\"\n\n"
+        "INVALID (will cause errors):\n"
+        "- Missing dash before 'step:' in the plan list\n"
+        "- 'description' value with unquoted colon\n"
+        "- 'params' as inline {key: value} instead of proper YAML dict\n\n"
+        "When the user says 'done', output ONLY the full modified plan YAML. Nothing else."
     )
 
     while True:
@@ -965,3 +1061,75 @@ def _run_llm_chat_loop_for_plan(
             messages.pop()
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Auto-skill editing helpers
+# ---------------------------------------------------------------------------
+
+def _get_auto_skill_path(step: dict) -> Path | None:
+    """Get the path to the auto-skill for a task step, if it exists."""
+    from common.core.paths import get_skills_dir
+
+    task_name = step.get("name", "").strip()
+    if not task_name:
+        return None
+
+    skill_name = f"auto-{task_name}"
+    skill_path = get_skills_dir() / skill_name
+
+    if skill_path.exists() and (skill_path / "SKILL.md").exists():
+        return skill_path
+    return None
+
+
+def _edit_auto_skill_learn(step: dict) -> None:
+    """Edit the LEARN.md file of the auto-skill for a task step."""
+    from common.cli.helpers import open_editor
+
+    task_name = step.get("name", "").strip()
+    if not task_name or step.get("action") != "task":
+        click.echo("This step is not a named task (no auto-skill).\n")
+        return
+
+    skill_path = _get_auto_skill_path(step)
+    if not skill_path:
+        click.echo(f"Auto-skill 'auto-{task_name}' does not exist yet.\n")
+        return
+
+    learn_path = skill_path / "LEARN.md"
+    
+    # Create LEARN.md if it doesn't exist
+    if not learn_path.exists():
+        learn_path.write_text("# Lessons Learned\n\n", encoding="utf-8")
+
+    click.echo(f"Opening LEARN.md for auto-{task_name}...")
+    try:
+        open_editor(learn_path)
+        click.echo("LEARN.md saved.\n")
+    except Exception as e:
+        click.echo(f"Error editing LEARN.md: {e}\n", err=True)
+
+
+def _edit_auto_skill_skill(step: dict) -> None:
+    """Edit the SKILL.md file of the auto-skill for a task step."""
+    from common.cli.helpers import open_editor
+
+    task_name = step.get("name", "").strip()
+    if not task_name or step.get("action") != "task":
+        click.echo("This step is not a named task (no auto-skill).\n")
+        return
+
+    skill_path = _get_auto_skill_path(step)
+    if not skill_path:
+        click.echo(f"Auto-skill 'auto-{task_name}' does not exist yet.\n")
+        return
+
+    skill_md_path = skill_path / "SKILL.md"
+    
+    click.echo(f"Opening SKILL.md for auto-{task_name}...")
+    try:
+        open_editor(skill_md_path)
+        click.echo("SKILL.md saved.\n")
+    except Exception as e:
+        click.echo(f"Error editing SKILL.md: {e}\n", err=True)
