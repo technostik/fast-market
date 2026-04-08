@@ -504,6 +504,128 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 elif action == "k":
                     _edit_auto_skill_skill(steps[idx])
 
+    # -----------------------------------------------------------------------
+    # CONVERT-TASK-TO-SKILL subcommand — named tasks → auto-skills + new plan
+    # -----------------------------------------------------------------------
+    @run_plan.command("convert-task-to-skill")
+    @click.argument("plan", type=RunPlanFileType())
+    @click.option(
+        "--reset",
+        is_flag=True,
+        default=False,
+        help="Force recreation of auto-skills even if they already exist.",
+    )
+    def convert_task_to_skill_cmd(plan, reset):
+        """Convert named tasks in a plan to auto-skills, output a new plan to stdout.
+
+        For each task step with a 'name' field:
+        1. Create an auto-{name} skill with parameters extracted from {{placeholders}}
+        2. Generate a one-sentence description using LLM
+        3. Save the original description as the skill body
+
+        The new plan replaces named task steps with 'run' steps referencing the auto-skills,
+        with parameters filled from the original task params or {{placeholder:default}} values.
+        """
+        plan_path = Path(plan)
+        if not plan_path.exists():
+            click.echo(f"Error: Plan file not found: {plan_path}", err=True)
+            raise SystemExit(1)
+
+        data = load_plan(plan_path)
+        steps = data.get("plan", [])
+
+        # Setup LLM
+        from common.core.config import requires_common_config, load_tool_config
+        from common.llm.registry import discover_providers, get_default_provider_name
+
+        requires_common_config("skill", ["llm"])
+        try:
+            config = load_tool_config("skill")
+            providers = discover_providers(config)
+            provider_name = get_default_provider_name(config)
+            llm = providers.get(provider_name)
+        except Exception as exc:
+            click.echo(f"Error: {exc}", err=True)
+            raise SystemExit(1)
+
+        if not llm:
+            click.echo(f"Error: provider '{provider_name}' not available.", err=True)
+            raise SystemExit(1)
+
+        new_steps = []
+        skills_created = []
+
+        for step in steps:
+            action = step.get("action", "")
+            task_name = step.get("name", "").strip() if action == "task" else ""
+
+            if action == "task" and task_name:
+                # This is a named task — convert to auto-skill
+                description = step.get("description", "")
+                params_from_step = {str(k): str(v) for k, v in (step.get("params") or {}).items()}
+
+                # Create the auto-skill
+                skill = _create_auto_skill(
+                    task_name=task_name,
+                    task_description=description,
+                    reset=reset,
+                    llm=llm,
+                    model=None,
+                )
+
+                if skill is None:
+                    click.echo(f"Error: Failed to create auto-skill for task '{task_name}'", err=True)
+                    raise SystemExit(1)
+
+                skills_created.append(skill.name)
+
+                # Extract params from description to build step params
+                desc_params = _extract_params_from_description(description)
+
+                # Build params dict for the run step
+                run_params = {}
+                for p in desc_params:
+                    pname = p["name"]
+                    # Use value from step params if present, otherwise use {{key:default}}
+                    if pname in params_from_step:
+                        run_params[pname] = params_from_step[pname]
+                    elif "default" in p:
+                        run_params[pname] = f"{{{{{pname}:{p['default']}}}}}"
+                    else:
+                        run_params[pname] = f"{{{{{pname}}}}}"
+
+                # Build new run step
+                new_step = {
+                    "step": 0,  # will be renumbered
+                    "action": "run",
+                    "skill": skill.name,
+                }
+                if run_params:
+                    new_step["params"] = run_params
+                if step.get("context_hint"):
+                    new_step["context_hint"] = step["context_hint"]
+
+                new_steps.append(new_step)
+            else:
+                # Keep non-named-task steps as-is
+                new_steps.append(dict(step))
+
+        # Renumber steps
+        for i, s in enumerate(new_steps, 1):
+            s["step"] = i
+
+        # Build new plan
+        new_plan_data = dict(data)
+        new_plan_data["plan"] = new_steps
+
+        # Print new plan to stdout (for redirection)
+        output = yaml.dump(new_plan_data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        click.echo(output)
+
+        # Print skill creation summary to stderr
+        for name in skills_created:
+            click.echo(f"Created skill: {name}", err=True)
+
     return CommandManifest(name="run-plan", click_command=run_plan)
 
 
@@ -674,7 +796,7 @@ def _build_llm_context(plan_data: dict, skills: list, step_idx: int | None) -> s
     lines.append("### For `action: task`")
     lines.append("- `description`: (string) free-form task description")
     lines.append("- `instructions`: (optional string) additional execution instructions")
-    lines.append("- `name`: (optional string) task name — enables --auto-skill mode, creates `auto-{name}` skill")
+    lines.append("- `name`: (optional string) task name — used by run-plan convert-task-to-skill to create `auto-{name}` skill")
     lines.append("- `context_hint`: (optional string) hint for context extraction")
     lines.append("")
     lines.append("### For `action: ask`")
@@ -951,7 +1073,7 @@ def _run_llm_chat_loop_for_plan(
         "- If a value contains colons (:), commas, apostrophes, or parentheses, you MUST wrap it in double quotes.\n"
         "- Use proper YAML list syntax: each step starts with '- step: N' (dash + space).\n"
         "- Nested dicts like 'params:' must be indented under their key, each key on its own line.\n"
-        "- 'name' field on a task step enables --auto-skill mode (creates auto-{name} skill).\n"
+        "- 'name' field on a task step is used by convert-task-to-skill (creates auto-{name} skill).\n"
         "- {{placeholders}} like {{video_url}} or {{count:5}} can appear in any string value.\n\n"
         "VALID PLAN YAML EXAMPLE:\n"
         "goal: \"Analyze and promote a video\"\n"
@@ -1126,10 +1248,172 @@ def _edit_auto_skill_skill(step: dict) -> None:
         return
 
     skill_md_path = skill_path / "SKILL.md"
-    
+
     click.echo(f"Opening SKILL.md for auto-{task_name}...")
     try:
         open_editor(skill_md_path)
         click.echo("SKILL.md saved.\n")
     except Exception as e:
         click.echo(f"Error editing SKILL.md: {e}\n", err=True)
+
+
+# ---------------------------------------------------------------------------
+# convert-task-to-skill helpers
+# ---------------------------------------------------------------------------
+
+def _extract_params_from_description(text: str) -> list[dict]:
+    """Extract {{key}} and {{key:default}} placeholders from text.
+
+    Returns a list of parameter dicts with name, description, required, and default fields.
+    """
+    import re
+    params = []
+    seen = set()
+
+    for m in re.finditer(r"\{\{([^}]+)\}\}", text):
+        inner = m.group(1).strip()
+        if ":" in inner:
+            key, default = inner.split(":", 1)
+            key = key.strip()
+            default = default.strip()
+        else:
+            key = inner
+            default = None
+
+        if key not in seen:
+            seen.add(key)
+            param = {
+                "name": key,
+                "description": f"Parameter {key}",
+                "required": default is None,
+            }
+            if default is not None:
+                param["default"] = default
+            params.append(param)
+
+    return params
+
+
+def _convert_placeholders_to_skill_format(text: str) -> str:
+    """Convert {{key}} and {{key:default}} to {key} for skill runtime substitution."""
+    import re
+    return re.sub(r"\{\{([^}]+)\}\}", lambda m: "{" + m.group(1).split(":")[0].strip() + "}", text)
+
+
+def _generate_parameters_yaml(params: list[dict]) -> str:
+    """Generate YAML parameters section for SKILL.md frontmatter."""
+    if not params:
+        return ""
+
+    lines = ["parameters:"]
+    for p in params:
+        pname = p['name']
+        desc = p.get('description', f'Parameter {pname}')
+        lines.append(f"  - name: {pname}")
+        lines.append(f"    description: {desc}")
+        if "default" in p:
+            lines.append(f"    default: {p['default']}")
+        elif p.get("required", True):
+            lines.append(f"    required: true")
+    return "\n".join(lines)
+
+
+def _llm_skill_summary(description: str, llm, model: str | None) -> str:
+    """Use LLM to generate a one-sentence summary of a skill from its description."""
+    from common.llm.base import LLMRequest
+
+    prompt = (
+        "You are given a skill description. Produce a single, concise sentence "
+        "(max 25 words) summarizing what the skill does. Output ONLY the sentence, "
+        "no extra text, no quotes, no explanation.\n\n"
+        f"Skill description:\n{description}"
+    )
+
+    req = LLMRequest(
+        system="You summarize skill descriptions in one sentence.",
+        messages=[{"role": "user", "content": prompt}],
+        model=model,
+        temperature=0.3,
+    )
+    resp = llm.complete(req)
+    return resp.content.strip().strip('"').strip("'").strip()
+
+
+def _create_auto_skill(
+    task_name: str,
+    task_description: str,
+    reset: bool,
+    llm,
+    model: str | None,
+):
+    """Create an auto-skill from a named task description.
+
+    1. Extract {{...}} params from description
+    2. Generate one-sentence summary via LLM
+    3. Write SKILL.md with params, summary as description, original description as body
+
+    Returns the Skill object, or None if creation failed.
+    """
+    from common.core.paths import get_skills_dir
+    from core.skill import Skill
+
+    skill_name = f"auto-{task_name}"
+    skill_path = get_skills_dir() / skill_name
+
+    # Check if skill already exists on disk (unless reset mode)
+    if not reset and skill_path.exists():
+        existing = Skill.from_path(skill_path)
+        if existing:
+            click.echo(f"[convert] Skill already exists: {skill_name}", err=True)
+            return existing
+
+    # Remove existing skill if reset mode
+    if reset and skill_path.exists():
+        import shutil
+        try:
+            shutil.rmtree(skill_path)
+        except Exception as exc:
+            click.echo(f"[convert] Warning: Failed to remove skill {skill_name}: {exc}", err=True)
+
+    # Extract parameters from task description
+    params_list = _extract_params_from_description(task_description)
+    params_yaml = _generate_parameters_yaml(params_list)
+
+    # Generate one-sentence summary via LLM
+    click.echo(f"[convert] Generating summary for: {skill_name}", err=True)
+    try:
+        summary = _llm_skill_summary(task_description, llm, model)
+    except Exception as exc:
+        click.echo(f"[convert] LLM summary failed for {skill_name}, using fallback: {exc}", err=True)
+        summary = task_description.split("\n")[0][:120]
+
+    # Convert placeholders from {{key:default}} to {key} for skill runtime
+    body = _convert_placeholders_to_skill_format(task_description)
+
+    # Build skill content
+    try:
+        skill_path.mkdir(parents=True, exist_ok=True)
+
+        # Build frontmatter
+        frontmatter = f"""---
+name: {skill_name}
+description: {summary}
+"""
+        if params_yaml:
+            frontmatter += params_yaml + "\n"
+        frontmatter += "---"
+
+        skill_content = f"""{frontmatter}
+
+# {skill_name}
+
+## Instructions
+
+{body}
+"""
+        (skill_path / "SKILL.md").write_text(skill_content, encoding="utf-8")
+        click.echo(f"[convert] Created skill: {skill_name}", err=True)
+        return Skill.from_path(skill_path)
+    except Exception as exc:
+        click.echo(f"[convert] Failed to create skill {skill_name}: {exc}", err=True)
+        return None

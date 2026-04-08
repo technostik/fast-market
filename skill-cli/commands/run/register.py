@@ -142,18 +142,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Export only the successfully executed steps to a YAML plan file",
     )
-    @click.option(
-        "--auto-skill",
-        is_flag=True,
-        default=False,
-        help="Convert named tasks (with 'name' field) to auto-skills for learning capabilities. Auto-skills are persistent across runs — they are created once and reused. Use --auto-skill-reset to force recreation.",
-    )
-    @click.option(
-        "--auto-skill-reset",
-        is_flag=True,
-        default=False,
-        help="Force recreation of auto-skills even if they already exist. Requires --auto-skill.",
-    )
     def run_cmd(
         task,
         provider,
@@ -175,8 +163,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         interactive,
         export_successful,
         params,
-        auto_skill,
-        auto_skill_reset,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
@@ -192,20 +178,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         Interactive mode (--interactive):
         - Before each step, you can approve, skip, edit, or replan
         - Use --export-successful to save the steps that worked
-
-        Auto-skill mode (--auto-skill):
-        - Named tasks (with 'name' field in plan) are converted to persistent skills
-        - Auto-skills are saved in the skills directory with task description as-is
-        - Once created, auto-skills are reused across runs without modification
-        - Use --auto-skill-reset to force recreation of auto-skills
         """
-        # Validate auto-skill options
-        if auto_skill_reset and not auto_skill:
-            click.echo(
-                "Error: --auto-skill-reset requires --auto-skill to be set.",
-                err=True,
-            )
-            sys.exit(1)
         if workdir is None:
             common_config = load_common_config()
             workdir = common_config.get("workdir") or "."
@@ -275,8 +248,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             import_plan_path=import_plan,
             import_params=import_params,
             interactive=interactive,
-            auto_skill=auto_skill,
-            auto_skill_reset=auto_skill_reset,
             export_successful_path=export_successful,
         )
         

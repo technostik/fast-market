@@ -184,7 +184,7 @@ Executes a free-form CLI task description.
 ```yaml
 - step: 2
   action: task
-  name: find-videos          # optional: enables --auto-skill mode
+  name: find-videos          # optional: used by run-plan convert-task-to-skill
   description: "Review the generated content and make improvements"
   instructions: |
     Focus on engagement metrics
@@ -192,7 +192,7 @@ Executes a free-form CLI task description.
 ```
 
 **Fields:**
-- `name`: (optional) Task name — when `--auto-skill` is enabled, creates skill `auto-{name}` from the description
+- `name`: (optional) Task name — used by `run-plan convert-task-to-skill` to create skill `auto-{name}`
 - `description`: Task description for the agent
 - `instructions`: Additional instructions for the task
 - `context_hint`: Hint for context extraction
@@ -310,28 +310,50 @@ Export successful steps:
 skill run "promote" --interactive --export-successful good-plan.yaml
 ```
 
-## Auto-Skill Mode (`--auto-skill`)
+## Auto-Skills (`run-plan convert-task-to-skill`)
 
-When `--auto-skill` is set, named tasks (with `name` field) are automatically converted to skills:
+Named tasks (with `name` field) can be converted to persistent auto-skills using:
 
+```bash
+skill run-plan convert-task-to-skill run.yaml             # Create skills, print new plan
+skill run-plan convert-task-to-skill run.yaml > new.yaml  # Save new plan to file
+skill run-plan convert-task-to-skill run.yaml --reset     # Force recreate skills
+```
+
+Given a plan with named tasks:
 ```yaml
 plan:
   - step: 2
     action: task
     name: find-related-videos
-    description: "Search YouTube for related videos..."
+    description: "Search YouTube for {{query}} related to {{topic}}..."
 ```
 
-The router:
-1. Checks if skill `auto-find-related-videos` exists
-2. If not, **creates it** from the description using `skill create from-description`
-3. **Executes as a skill** with full `--auto-learn` support
+The subcommand:
+1. Creates skill `auto-find-related-videos` with parameters `query` and `topic` extracted from `{{placeholders}}`
+2. Generates a one-sentence description via LLM
+3. Converts `{{key:default}}` to `{key}` in the skill body for runtime substitution
+4. Outputs a new plan with `run` steps referencing the auto-skills:
 
+```yaml
+plan:
+  - step: 1
+    action: run
+    skill: some-existing-skill
+    params:
+      url: "{{video_url}}"
+  - step: 2
+    action: run
+    skill: auto-find-related-videos
+    params:
+      query: "{{query}}"
+      topic: "{{topic}}"
+```
+
+Run the new plan with:
 ```bash
-skill run "promote" --auto-skill --auto-learn
+skill run "promote" --import new.yaml -p query=cats -p topic=animals
 ```
-
-This enables learning capabilities for tasks that normally don't have them.
 
 ### Edit Auto-Skills
 
@@ -463,7 +485,7 @@ The `inject` field appends custom instructions to the skill's prompt during exec
 4. **Test with small plans** before creating complex multi-step workflows
 5. **Use context hints** to help the planner understand data flow between steps
 6. **Parameterize reusable plans** with `{{placeholders}}` and defaults
-7. **Use `--auto-skill` with `--auto-learn`** to enable learning for tasks
+7. **Use `run-plan convert-task-to-skill`** to create auto-skills for named tasks
 8. **Use `--interactive`** for critical workflows where you want to approve each step
 
 ## Troubleshooting
@@ -490,14 +512,14 @@ The `inject` field appends custom instructions to the skill's prompt during exec
 
 ### Auto-Skill Not Created
 - Ensure the task has a `name` field
-- Run with `--auto-skill` flag
+- Run `skill run-plan convert-task-to-skill <plan>` to create auto-skills
 - Check LLM provider is configured for skill extraction
 
 ## Files Modified
 
-- `skill-cli/commands/run/register.py` - Added CLI options (`--interactive`, `--auto-skill`, `--param`, `--export-successful`)
-- `skill-cli/commands/run-plan/register.py` - Plan management commands (`list`, `edit`, `params`)
+- `skill-cli/commands/run/register.py` - CLI options (`--interactive`, `--param`, `--export-successful`)
+- `skill-cli/commands/run-plan/register.py` - Plan management commands (`list`, `edit`, `params`, `convert-task-to-skill`)
 - `skill-cli/commands/params.py` - `RunPlanFileType` for TAB completion
-- `skill-cli/core/router.py` - Export/import logic, placeholder substitution, auto-skill creation, interactive approval
+- `skill-cli/core/router.py` - Export/import logic, placeholder substitution, interactive approval
 - `skill-cli/core/repl.py` - Interactive prompt utilities
 - `common/cli/helpers.py` - Editor integration

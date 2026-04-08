@@ -59,21 +59,19 @@ The router injects into each skill's prompt:
 
 This enables skills to cooperate by passing structured information beyond file outputs.
 
-### Auto-Skill Mode (--auto-skill)
-When `--auto-skill` is enabled, named tasks (with a `name` field in the execution plan) are converted to persistent skills:
+### Auto-Skills (run-plan convert-task-to-skill)
+Named tasks (with a `name` field) can be converted to persistent auto-skills using the `skill run-plan convert-task-to-skill` subcommand:
 
-- **Creation**: Auto-skills are created in `~/.local/share/fast-market/skills/auto-{task_name}/`
-- **Content**: Task description is saved as-is in SKILL.md without LLM transformation
-- **Persistence**: Once created, auto-skills are reused across runs without modification
-- **Reset**: `--auto-skill-reset` forces recreation (requires `--auto-skill`)
-- **Validation**: `--auto-skill-reset` cannot be used without `--auto-skill` (exits with error)
-- **Purpose**: Enables learning capabilities for tasks that would otherwise be one-off
+- **Creation**: `skill run-plan convert-task-to-skill run.yaml` creates `auto-{name}` skills
+- **Parameters**: `{{key}}` and `{{key:default}}` placeholders in the description become skill parameters
+- **Summary**: A one-sentence description is generated via LLM
+- **Persistence**: Once created, auto-skills are reused across runs
+- **Reset**: `--reset` forces recreation of existing skills
 
-The `_ensure_auto_skill_exists()` function in `core/router.py` handles auto-skill creation/retrieval:
-1. Checks if skill exists on disk
-2. If not found (or reset=True), creates skill directory
-3. Writes SKILL.md with task description as both frontmatter and body
-4. Returns Skill object for execution
+The `_create_auto_skill()` function in `commands/run-plan/register.py` handles auto-skill creation:
+1. Extracts parameters from `{{placeholders}}` in the task description
+2. Calls LLM for a one-sentence summary
+3. Writes SKILL.md with parameters, summary, and converted body (`{{key}}` → `{key}`)
 
 ### Run Statistics
 At the end of each run, statistics are calculated and displayed:

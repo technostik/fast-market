@@ -186,8 +186,6 @@ skill run "task" -v                               # Verbose output
 skill run "task" --run-isolated                   # Isolated dir for entire run
 skill run "task" --skill-isolated                 # Isolated subdir per skill
 skill run "task" --shared-context                 # Enable shared context tool
-skill run "task" --auto-skill                     # Convert named tasks to auto-skills
-skill run "task" --auto-skill --auto-skill-reset  # Force recreate auto-skills
 ```
 
 **Isolation Modes:**
@@ -214,15 +212,22 @@ Each skill receives in its prompt:
 
 This enables skills to pass structured information and coordinate beyond file outputs.
 
-**Auto-Skill Mode (`--auto-skill`):**
+**Auto-Skills via `run-plan convert-task-to-skill`:**
 
-When enabled, named tasks (with a `name` field in the execution plan) are automatically converted to persistent skills:
+Use the `skill run-plan convert-task-to-skill` subcommand to convert named tasks from a plan file into persistent auto-skills:
 
-- Auto-skills are saved in `~/.local/share/fast-market/skills/auto-{task_name}/`
-- The task description is saved as-is in SKILL.md without LLM transformation
-- Once created, auto-skills are reused across runs without modification
-- Use `--auto-skill-reset` to force recreation of auto-skills (requires `--auto-skill`)
-- Auto-skills enable learning capabilities for tasks that would otherwise be one-off
+```bash
+skill run-plan convert-task-to-skill run.yaml             # Create skills, print new plan
+skill run-plan convert-task-to-skill run.yaml > new.yaml  # Save new plan to file
+skill run-plan convert-task-to-skill run.yaml --reset     # Force recreate skills
+```
+
+For each named task (with a `name` field) in the plan:
+1. An `auto-{name}` skill is created with parameters extracted from `{{placeholders}}`
+2. A one-sentence description is generated via LLM
+3. The new plan replaces named tasks with `run` steps referencing the auto-skills
+
+Auto-skills are saved in `~/.local/share/fast-market/skills/auto-{task_name}/`. Once created, they are reused across runs.
 
 **Run Statistics:**
 

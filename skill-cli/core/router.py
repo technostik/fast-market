@@ -102,7 +102,9 @@ class SkillPlanStep:
     instructions: str = ""  # additional instructions for action="task"
     question: str = ""  # for action="ask"
     context_hint: str = ""  # hint about context needed
-    name: str = ""  # task name for auto-skill conversion
+    name: str = ""  # task name, used by run-plan convert-task-to-skill
+    original_description: str = ""  # original description before placeholder substitution
+    original_params: dict[str, str] = None  # original params from plan before substitution
 
 
 @dataclass
@@ -517,68 +519,6 @@ def _call_evaluation(
 
 
 # ---------------------------------------------------------------------------
-# Auto-skill creation
-# ---------------------------------------------------------------------------
-
-
-def _ensure_auto_skill_exists(
-    task_name: str,
-    task_description: str,
-    skills: list[Skill],
-    provider=None,
-    model: str | None = None,
-    reset: bool = False,
-) -> Skill | None:
-    """Check if auto-skill exists, create it from task description if not.
-
-    The task description is saved as-is without any LLM transformation.
-    If reset=True, the skill is recreated even if it already exists.
-
-    Returns the Skill object, or None if creation failed.
-    """
-    skill_name = f"auto-{task_name}"
-    skill_path = get_skills_dir() / skill_name
-
-    # Check if skill already exists on disk (unless reset mode)
-    if not reset and skill_path.exists():
-        logger.info("auto_skill_exists_on_disk", skill=skill_name)
-        skill = Skill.from_path(skill_path)
-        if skill:
-            return skill
-
-    # Remove existing skill if reset mode
-    if reset and skill_path.exists():
-        import shutil
-        try:
-            shutil.rmtree(skill_path)
-            logger.info("auto_skill_reset", skill=skill_name)
-            click.echo(f"[auto-skill] Resetting existing skill: {skill_name}", err=True)
-        except Exception as exc:
-            logger.error("auto_skill_reset_failed", skill=skill_name, error=str(exc))
-            click.echo(f"[auto-skill] Warning: Failed to reset skill {skill_name}: {exc}", err=True)
-
-    # Create the skill with task description as-is
-    try:
-        skill_path.mkdir(parents=True, exist_ok=True)
-        skill_content = f"""---
-name: {skill_name}
-description: {task_description}
----
-
-# {skill_name}
-
-{task_description}
-"""
-        (skill_path / "SKILL.md").write_text(skill_content, encoding="utf-8")
-        logger.info("auto_skill_created", skill=skill_name, path=str(skill_path))
-        click.echo(f"[auto-skill] Created skill: {skill_name}", err=True)
-        return Skill.from_path(skill_path)
-    except Exception as exc:
-        logger.error("auto_skill_creation_failed", error=str(exc))
-        click.echo(f"[auto-skill] Failed to create skill {skill_name}: {exc}", err=True)
-        return None
-
-
 def _load_tools_description_simple(agent_config: dict) -> str:
     lines = []
     fastmarket_tools = agent_config.get("fastmarket_tools", {})
@@ -1120,13 +1060,13 @@ def _import_plan_from_yaml(filepath: str, workdir: str = ".", params: dict[str, 
     if not path.exists():
         raise FileNotFoundError(f"Plan file not found: {filepath}")
 
-    data = yaml.safe_load(path.read_text())
-
-    if not isinstance(data, dict):
+    # Read raw data BEFORE substitution
+    raw_data = yaml.safe_load(path.read_text())
+    if not isinstance(raw_data, dict):
         raise ValueError(f"Invalid plan YAML format in {filepath}")
 
     # Apply placeholder substitution (including defaults for {{key:default}} patterns)
-    data = _substitute_placeholders(data, params)
+    data = _substitute_placeholders(dict(raw_data), params)
 
     # Check for remaining unsubstituted mandatory placeholders
     missing = _find_missing_placeholders(data)
@@ -1142,19 +1082,27 @@ def _import_plan_from_yaml(filepath: str, workdir: str = ".", params: dict[str, 
 
     plan_steps = []
     plan_data = data.get("plan", [])
+    raw_plan_data = raw_data.get("plan", [])
 
     for i, step_dict in enumerate(plan_data, 1):
         action = step_dict.get("action", "")
         if action not in ("run", "task", "ask"):
             raise ValueError(f"Step {i} has invalid action: {action}")
 
+        # Get original (pre-substitution) values
+        raw_step = raw_plan_data[i - 1] if i - 1 < len(raw_plan_data) else {}
+        original_desc = raw_step.get("description", "")
+        original_params = raw_step.get("params", {}) or {}
+
         step = SkillPlanStep(
             step=i,
             action=action,
             skill_name=step_dict.get("skill", ""),
             params=step_dict.get("params", {}),
+            original_params=original_params,
             inject=step_dict.get("inject", ""),
             description=step_dict.get("description", ""),
+            original_description=original_desc,
             instructions=step_dict.get("instructions", ""),
             question=step_dict.get("question", ""),
             context_hint=step_dict.get("context_hint", ""),
@@ -1289,8 +1237,6 @@ def run_router(
     import_plan_path: str | None = None,
     import_params: dict[str, str] | None = None,
     interactive: bool = False,
-    auto_skill: bool = False,
-    auto_skill_reset: bool = False,
     export_successful_path: str | None = None,
 ) -> RouterState:
     """Orchestrate skills and tasks to achieve a goal.
@@ -1454,6 +1400,7 @@ def run_router(
                     "params": plan_step.params,
                     "context_hint": plan_step.context_hint,
                     "description": plan_step.description,
+                    "original_description": plan_step.original_description,
                     "question": plan_step.question,
                     "name": plan_step.name,
                     "reason": f"From imported plan (step {plan_step.step})",
@@ -1757,7 +1704,7 @@ def run_router(
         elif action == "task":
             description = str(plan.get("description", "")).strip()
             context_hint = str(plan.get("context_hint", ""))
-            params = {}
+            params = {str(k): str(v) for k, v in (plan.get("params") or {}).items()}
             task_internal_steps = 0
 
             if not description:
@@ -1767,80 +1714,23 @@ def run_router(
                 )
                 break
 
-            # Auto-skill: convert task to skill if it has a name
-            task_name = plan.get("name", "").strip()
-            auto_skill_used = auto_skill and task_name
+            if isolation_mode == "none":
+                workdir_for_task = workdir_path
+                subdir_for_record = Path("")
+            else:
+                subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
+                workdir_for_task = subdir_for_record
 
-            if auto_skill_used:
-                # Try to create/get auto-skill
-                auto_skill_obj = _ensure_auto_skill_exists(
-                    task_name=task_name,
-                    task_description=description,
-                    skills=skills,
-                    provider=provider,
-                    model=model,
-                    reset=auto_skill_reset,
-                )
-
-                if auto_skill_obj:
-                    # Execute as skill instead of task
-                    action = "run"  # Change action to "run" for correct statistics
-                    skill_name = auto_skill_obj.name
-                    
-                    # Update the last planned step to reflect skill execution instead of task
-                    if planned_steps:
-                        last_planned_step = planned_steps[-1]
-                        last_planned_step.action = "run"
-                        last_planned_step.skill_name = auto_skill_obj.name
-                    
-                    if isolation_mode == "none":
-                        workdir_for_skill = workdir_path
-                        subdir_for_record = Path("")
-                    else:
-                        subdir_for_record = _make_subdir(run_root, state.iteration, auto_skill_obj.name, isolation_mode)
-                        workdir_for_skill = subdir_for_record
-
-                    exit_code, session_output, session_path, skill_internal_steps = _run_skill(
-                        skill=auto_skill_obj,
-                        params=params,
-                        subdir=workdir_for_skill,
-                        provider_name=provider_name,
-                        model=model,
-                        auto_learn=auto_learn,
-                        compact=compact,
-                        prev_context=prev_context,
-                        save_session=save_session,
-                        shared_context=state.shared_context,
-                        global_goal=state.goal,
-                        inject=None,
-                    )
-                    label = auto_skill_obj.name
-                    # Fall through to post-execution (context extract, evaluation, etc.)
-                    # Don't break — continue with the common post-processing
-                else:
-                    # Auto-skill creation failed, fall back to task
-                    click.echo(f"[auto-skill] Falling back to task execution", err=True)
-                    auto_skill_used = False
-
-            if not auto_skill_used:
-                # Normal task execution
-                if isolation_mode == "none":
-                    workdir_for_task = workdir_path
-                    subdir_for_record = Path("")
-                else:
-                    subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
-                    workdir_for_task = subdir_for_record
-
-                exit_code, session_output, session_path, task_internal_steps = _run_task(
-                    description=description,
-                    subdir=workdir_for_task,
-                    provider_name=provider_name,
-                    model=model,
-                    prev_context=prev_context,
-                    agent_cfg=agent_cfg,
-                    save_session=save_session,
-                )
-                label = f"(task) {description[:60]}"
+            exit_code, session_output, session_path, task_internal_steps = _run_task(
+                description=description,
+                subdir=workdir_for_task,
+                provider_name=provider_name,
+                model=model,
+                prev_context=prev_context,
+                agent_cfg=agent_cfg,
+                save_session=save_session,
+            )
+            label = f"(task) {description[:60]}"
 
         else:
             state.failed = True
