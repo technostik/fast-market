@@ -20,7 +20,7 @@ from core.repl import prompt_with_options, prompt_free_text, prompt_confirm
 SHELLIFY_PROMPT_DEFAULT = """You are an agentic shell-script engineer. Your job is to create or replace `scripts/run.sh` for a skill.
 
 You have access to a working directory where you can:
-- **Read files** (cat, head, ls) to explore SKILL.md, LEARN.md, and any existing `scripts/run.sh`
+- **Read files** (cat, head, ls, find) to explore SKILL.md, LEARN.md, and any existing `scripts/run.sh`
 - **Execute commands** to discover tool behavior with `--help` or dry runs
 - **Write files** to create and iterate on `scripts/run.sh`
 - **Think** before acting — plan your approach step by step
@@ -31,7 +31,7 @@ You have access to a working directory where you can:
 # Skill Parameters
 {skill_parameters}
 
-# Skill Body (from SKILL.md)
+# Skill Body (from SKILL.md) — THIS IS WHAT YOU ARE TRANSFORMING INTO A SHELL SCRIPT
 {skill_body}
 
 {learn_section}
@@ -39,6 +39,8 @@ You have access to a working directory where you can:
 {existing_script_section}
 
 {instructions_section}
+
+{tools_section}
 
 # Your Task
 
@@ -49,7 +51,7 @@ Create a robust, reproducible `scripts/run.sh` bash script that implements this 
 1. **Start with `#!/usr/bin/env bash`** and use `set -euo pipefail`
 2. **Use environment variables for parameters** — each skill parameter is available as `$SKILL_{{PARAM_NAME_UPPER}}` (e.g., `video_url` → `$SKILL_VIDEO_URL`)
 3. **Validate required parameters** — exit with a helpful error if missing
-4. **Use CLI tools** — prefer `curl`, `jq`, `sed`, `awk`, `grep`, `yt-dlp`, `ffmpeg`, etc.
+4. **Use CLI tools** — refer to the Available Tools section above for what you can use. Discover their options with `--help`.
 5. **Be incremental and robust** — use intermediate files, handle errors gracefully
 6. **Be self-contained** — all commands in one script
 7. **Output to current directory** — no hardcoded absolute paths
@@ -70,7 +72,7 @@ Create a robust, reproducible `scripts/run.sh` bash script that implements this 
 ## Workflow
 
 1. **Explore** — Read SKILL.md, LEARN.md, and any existing `scripts/run.sh` to understand context
-2. **Research** — Use `--help` on tools to discover flags and options
+2. **Research** — Use `--help` on tools from the Available Tools list to discover flags and options
 3. **Write** — Create `scripts/run.sh` in the current directory
 4. **Verify** — Test the script works (or dry-run if it has side effects)
 5. **Iterate** — Fix issues until the script is robust
@@ -80,6 +82,62 @@ When {reset_mode}, write a completely new script. When iterating on an existing 
 ## Finishing
 
 When the script is ready and you've written it to `scripts/run.sh`, indicate the task is complete.
+"""
+
+# Simple one-shot prompt for --no-agent mode — only asks for the script, nothing else.
+SHELLIFY_NOAGENT_PROMPT = """You are converting an agentic skill into a deterministic shell script (`run.sh`).
+
+
+# Goal
+Transform the skill description and instructions into a robust, reproducible `run.sh` bash script that accomplishes the same task using shell commands and CLI tools.
+
+# Skill Description
+{skill_description}
+
+# Skill Parameters
+{skill_parameters}
+
+# Skill Body (from SKILL.md) — THIS IS WHAT YOU ARE TRANSFORMING INTO A SHELL SCRIPT
+{skill_body}
+
+{learn_section}
+
+{tools_section}
+
+# Output Requirements
+
+Produce ONLY a valid bash script. The script must:
+
+1. **Start with `#!/usr/bin/env bash`** and use `set -euo pipefail`
+2. **Use environment variables for parameters** — each skill parameter is available as `$SKILL_{{PARAM_NAME_UPPER}}` (e.g., parameter `video_url` becomes `$SKILL_VIDEO_URL`)
+3. **Validate required parameters** — check that required parameters are set and exit with a helpful error message if not
+4. **Use CLI tools** — refer to the Available Tools section above for what you can use. Use `--help` to discover their options.
+5. **Be incremental and robust** — use intermediate files, handle errors gracefully, provide progress output
+6. **Be self-contained** — include all necessary commands in one script
+7. **Output results to the current working directory** — do not use hardcoded absolute paths
+
+# Parameter Handling
+
+- For a parameter named `foo`, the environment variable is `$SKILL_FOO`
+- For optional parameters with defaults, use `${{SKILL_FOO:-default_value}}`
+- Validate required parameters early:
+  ```bash
+  if [ -z "${{SKILL_REQUIRED_PARAM:-}}" ]; then
+    echo "Error: SKILL_REQUIRED_PARAM is required" >&2
+    exit 1
+  fi
+  ```
+
+# Shell Script
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Your script here
+```
+
+Output ONLY the script content, with no extra explanation.
 """
 
 
@@ -738,7 +796,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Use a simple one-shot LLM call instead of the agentic loop.",
     )
-    def shellify_cmd(skill, model, instruction, reset, verbose, max_iterations, no_agent):
+    @click.option(
+        "--debug",
+        "-d",
+        is_flag=True,
+        default=False,
+        help="Print the full prompt that would be sent to the LLM and exit.",
+    )
+    def shellify_cmd(skill, model, instruction, reset, verbose, max_iterations, no_agent, debug):
         """Convert a skill into scripts/run.sh using an agentic LLM loop.
 
         Reads SKILL.md and LEARN.md (if present) from the skill directory,
@@ -789,6 +854,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             verbose=verbose,
             max_iterations=max_iterations,
             no_agent=no_agent,
+            debug=debug,
         )
 
         if not success:
@@ -919,36 +985,189 @@ def register(plugin_manifests: dict) -> CommandManifest:
 # Shellify — convert a skill into scripts/run.sh (uses generic agent_call)
 # ---------------------------------------------------------------------------
 
+def _backup_run_sh(run_sh_path: Path) -> Path | None:
+    """Backup existing run.sh before overwriting. Returns backup path or None."""
+    if not run_sh_path.exists():
+        return None
+
+    import time
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    backup = run_sh_path.with_name(f"run.sh.bak.{ts}")
+    try:
+        run_sh_path.rename(backup)
+        return backup
+    except Exception:
+        return None
+
+
+def _get_fastmarket_tool_description(tool_name: str) -> str:
+    """Get description for a fast-market tool by running --help and summarizing commands."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            [tool_name, "--help"],
+            capture_output=True, text=True, timeout=5,
+        )
+        output = (result.stdout or result.stderr).strip()
+        if not output:
+            return f"Project CLI: `{tool_name}`."
+
+        # Extract commands section
+        commands = []
+        in_commands = False
+        for line in output.split("\n"):
+            line = line.strip()
+            if line.lower().startswith("commands"):
+                in_commands = True
+                continue
+            if in_commands:
+                if not line:
+                    continue
+                # Command lines: "  name  description" or "name  description"
+                if line.startswith("-") or line.startswith("Options"):
+                    break
+                parts = line.split(None, 1)
+                if parts:
+                    cmd_name = parts[0].rstrip(",")
+                    cmd_desc = parts[1].strip() if len(parts) > 1 else ""
+                    # Skip meta-commands (setup, serve, status, stats)
+                    if cmd_name not in ("setup", "serve", "status", "stats", "embed-server",
+                                        "batch-comments", "batch-post", "batch-reply"):
+                        if cmd_desc:
+                            commands.append(f"{cmd_name}: {cmd_desc}")
+                        else:
+                            commands.append(cmd_name)
+
+        if commands:
+            return f"Commands: {', '.join(commands[:5])}."
+        return f"Project CLI: `{tool_name}`."
+    except Exception:
+        return f"Project CLI: `{tool_name}`."
+
+
+def _build_tools_section(system_commands: list[str] | None = None) -> str:
+    """Build a tools reference section for the shellify prompt.
+
+    Dynamically discovers fast-market tools by running --help on each.
+    System commands are listed simply — the LLM already knows them.
+    """
+    from common.agent.executor import DEFAULT_FASTMARKET_TOOLS
+
+    allowed_system = set(system_commands or [])
+
+    lines = ["# Available Tools", ""]
+
+    # Fast-Market tools — dynamically discovered with --help
+    fastmarket_tools = sorted(DEFAULT_FASTMARKET_TOOLS)
+    if fastmarket_tools:
+        lines.append("## Fast-Market Tools")
+        lines.append("These are project-specific CLIs. Discover subcommands with `tool --help`.")
+        lines.append("")
+        for name in fastmarket_tools:
+            desc = _get_fastmarket_tool_description(name)
+            lines.append(f"- `{name}` — {desc}")
+        lines.append("")
+
+    # System commands — just a list, the LLM knows these
+    if allowed_system:
+        lines.append("## System Commands")
+        lines.append("Standard shell utilities. Use `tool --help` for options.")
+        lines.append("")
+        lines.append(", ".join(f"`{c}`" for c in sorted(allowed_system)))
+        lines.append("")
+
+    lines.append("## Discovery")
+    lines.append("- Use `tool --help` at runtime to discover flags and options")
+    lines.append("- Use `command -v tool` to check if a tool is available")
+    lines.append("- Include fallback logic when tools may be missing")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _extract_bash_script(content: str) -> str:
+    """Extract bash script from LLM response — strips markdown fences, commentary."""
+    content = content.strip()
+
+    # If wrapped in code fences, extract content
+    if content.startswith("```bash"):
+        content = content[len("```bash"):]
+    if content.startswith("```\n"):
+        content = content[len("```\n"):]
+    if content.startswith("```"):
+        content = content[len("```"):]
+    if content.endswith("```"):
+        content = content[:-len("```")]
+
+    content = content.strip()
+
+    # If it doesn't start with shebang, try to find the script within
+    if not content.startswith("#!/"):
+        # Look for last occurrence of ```bash or ```
+        lines = content.split("\n")
+        start_idx = 0
+        for i, line in enumerate(lines):
+            if line.strip().startswith("#!"):
+                start_idx = i
+                break
+        if start_idx > 0:
+            content = "\n".join(lines[start_idx:])
+
+    return content
+
+
 def _shellify_no_agent(
     skill,
     provider: str,
     model: str | None,
-    prompt_template: str,
     skill_description: str,
     skill_parameters: str,
     skill_body: str,
     learn_section: str,
-    existing_script_section: str,
-    instructions_section: str,
-    reset_mode_str: str,
+    tools_section: str,
     verbose: bool,
+    debug: bool,
 ) -> bool:
     """Simple one-shot LLM call to generate run.sh (no agentic loop)."""
     from common.core.config import load_tool_config
     from common.llm.registry import discover_providers
     from common.llm.base import LLMRequest
 
-    formatted_prompt = prompt_template.format(
+    # CRITICAL system instruction for no-agent mode
+    system_msg = (
+        "You are a bash script generator. Your ONLY job is to output a bash script.\n"
+        "RULES:\n"
+        "1. Output ONLY the script content, with NO explanation, NO commentary, NO markdown.\n"
+        "2. If you must use markdown fences, the script must be the ONLY code block.\n"
+        "3. Start with #!/usr/bin/env bash and use set -euo pipefail.\n"
+        "4. Do NOT include any text before or after the script.\n"
+        "5. Any extra text will be discarded. Just output the raw script."
+    )
+
+    # Use the dedicated no-agent prompt template
+    formatted_prompt = SHELLIFY_NOAGENT_PROMPT.format(
         skill_description=skill_description,
         skill_parameters=skill_parameters,
         skill_body=skill_body,
         learn_section=learn_section,
-        existing_script_section=existing_script_section,
-        instructions_section=instructions_section,
-        reset_mode=reset_mode_str,
+        tools_section=tools_section,
+    )
+
+    # Add a final emphatic reminder to the prompt
+    formatted_prompt += (
+        "\n\n---\n"
+        "FINAL INSTRUCTION: Output ONLY the bash script. No explanation. No preamble. "
+        "No summary. Just the script."
     )
 
     click.echo(f"Shellifying skill '{skill.name}' (one-shot)...", err=True)
+
+    # Debug: print prompt and exit
+    if debug:
+        click.echo(f"=== Shellify prompt for skill '{skill.name}' (no-agent) ===")
+        click.echo(formatted_prompt)
+        click.echo("=== End of prompt ===")
+        return True
 
     config = load_tool_config("skill")
     providers = discover_providers(config)
@@ -958,24 +1177,27 @@ def _shellify_no_agent(
         return False
 
     req = LLMRequest(
-        system="You convert agentic skills into deterministic bash scripts.",
+        system=system_msg,
         messages=[{"role": "user", "content": formatted_prompt}],
         model=model,
-        temperature=0.2,
+        temperature=0.1,
     )
     resp = llm.complete(req)
-    script_content = resp.content.strip()
+    script_content = _extract_bash_script(resp.content)
 
-    # Strip markdown code fences if present
-    if script_content.startswith("```bash"):
-        script_content = script_content[len("```bash") :].strip()
-    if script_content.startswith("```"):
-        script_content = script_content[len("```") :].strip()
-    if script_content.endswith("```"):
-        script_content = script_content[: -len("```")].strip()
+    if not script_content or not script_content.startswith("#!/"):
+        click.echo(
+            f"Warning: LLM response does not appear to be a valid bash script. "
+            f"Writing raw output anyway.",
+            err=True,
+        )
 
-    # Write to scripts/run.sh
+    # Backup existing run.sh before writing
     run_sh_path = skill.path / "scripts" / "run.sh"
+    backup = _backup_run_sh(run_sh_path)
+    if backup and verbose:
+        click.echo(f"Backed up: {backup}", err=True)
+
     run_sh_path.write_text(script_content + "\n", encoding="utf-8")
 
     try:
@@ -997,6 +1219,7 @@ def _shellify_skill(
     verbose: bool = False,
     max_iterations: int = 25,
     no_agent: bool = False,
+    debug: bool = False,
 ) -> bool:
     """Convert a skill into scripts/run.sh using an agentic loop.
 
@@ -1010,6 +1233,7 @@ def _shellify_skill(
         verbose: Show agent progress to stderr.
         max_iterations: Maximum agent iterations.
         no_agent: If True, use a simple one-shot LLM call instead.
+        debug: If True, print the full prompt to stdout and exit.
 
     Returns True on success, False on failure.
     """
@@ -1063,6 +1287,15 @@ def _shellify_skill(
     else:
         instructions_section = "# Additional Instructions\n\nNone."
 
+    # Available tools for the script
+    system_commands = [
+        "ls", "cat", "head", "tail", "grep", "find", "wc",
+        "mkdir", "touch", "cp", "mv", "rm", "chmod", "date",
+        "printf", "sed", "awk", "cut", "tr", "sort", "uniq",
+        "curl", "wget", "jq", "tee", "tar", "gzip", "zip", "unzip",
+    ]
+    tools_section = _build_tools_section(system_commands)
+
     # Build the prompt
     if prompt_template is None:
         prompt_template = SHELLIFY_PROMPT_DEFAULT
@@ -1074,6 +1307,7 @@ def _shellify_skill(
         learn_section=learn_section,
         existing_script_section=existing_script_section,
         instructions_section=instructions_section,
+        tools_section=tools_section,
         reset_mode=reset_mode_str,
     )
 
@@ -1089,15 +1323,13 @@ def _shellify_skill(
             skill=skill,
             provider=provider,
             model=model,
-            prompt_template=prompt_template,
             skill_description=skill_description,
             skill_parameters=skill_parameters,
             skill_body=skill_body,
             learn_section=learn_section,
-            existing_script_section=existing_script_section,
-            instructions_section=instructions_section,
-            reset_mode_str=reset_mode_str,
+            tools_section=tools_section,
             verbose=verbose,
+            debug=debug,
         )
 
     # ------------------------------------------------------------------
@@ -1114,20 +1346,33 @@ def _shellify_skill(
             click.echo(f"  Instructions: {instruction[:80]}...", err=True)
 
     # System commands the agent can use for exploration and file operations
-    system_commands = [
+    # (must match the tools_section list above)
+    agent_system_commands = [
         "ls", "cat", "head", "tail", "grep", "find", "wc",
-        "mkdir", "touch", "cp", "mv", "rm",
-        "printf", "sed", "awk",
-        "curl", "jq",
+        "mkdir", "touch", "cp", "mv", "rm", "chmod", "date",
+        "printf", "sed", "awk", "cut", "tr", "sort", "uniq",
+        "curl", "wget", "jq", "tee", "tar", "gzip", "zip", "unzip",
     ]
 
     task_description = formatted_prompt
+
+    # Backup existing run.sh before the agent runs (agent will overwrite it)
+    backup = _backup_run_sh(run_sh_path)
+    if backup and verbose:
+        click.echo(f"Backed up: {backup}", err=True)
+
+    # Debug: print prompt and exit
+    if debug:
+        click.echo(f"=== Shellify prompt for skill '{skill.name}' (agentic) ===")
+        click.echo(formatted_prompt)
+        click.echo("=== End of prompt ===")
+        return True
 
     try:
         session = agent_call(
             task_description=task_description,
             workdir=skill.path,
-            system_commands=system_commands,
+            system_commands=agent_system_commands,
             max_iterations=max_iterations,
             provider=provider,
             model=model,
@@ -1377,7 +1622,7 @@ def _build_llm_context(plan_data: dict, skills: list, step_idx: int | None) -> s
 
 def _clean_llm_yaml(raw: str) -> str | None:
     """Robustly clean LLM output to produce parseable YAML.
-    
+
     Handles: markdown code fences, stray text outside YAML, unquoted values
     with colons, and other common LLM formatting issues.
     """
@@ -1411,7 +1656,7 @@ def _clean_llm_yaml(raw: str) -> str | None:
     # 3. Extract YAML-like content: find first and last YAML-looking lines
     known_keys = ["action:", "step:", "skill:", "description:", "question:",
                   "context_hint:", "params:", "inject:", "instructions:"]
-    
+
     lines = text.splitlines()
     first_yaml = -1
     last_yaml = -1
@@ -1760,7 +2005,7 @@ def _edit_auto_skill_learn(step: dict) -> None:
         return
 
     learn_path = skill_path / "LEARN.md"
-    
+
     # Create LEARN.md if it doesn't exist
     if not learn_path.exists():
         learn_path.write_text("# Lessons Learned\n\n", encoding="utf-8")

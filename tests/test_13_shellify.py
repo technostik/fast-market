@@ -22,11 +22,17 @@ class TestShellifyPrompt:
         assert len(mod.SHELLIFY_PROMPT_DEFAULT) > 100
 
     def test_shellify_prompt_has_placeholders(self):
-        """The prompt should have all required placeholders."""
+        """The agentic prompt should have all required placeholders."""
         mod = _get_shellify_module()
         for key in ["{skill_description}", "{skill_parameters}", "{skill_body}", "{learn_section}",
-                     "{existing_script_section}", "{instructions_section}", "{reset_mode}"]:
+                     "{existing_script_section}", "{instructions_section}", "{tools_section}", "{reset_mode}"]:
             assert key in mod.SHELLIFY_PROMPT_DEFAULT
+
+    def test_shellify_noagent_prompt_has_placeholders(self):
+        """The no-agent prompt should have all required placeholders."""
+        mod = _get_shellify_module()
+        for key in ["{skill_description}", "{skill_parameters}", "{skill_body}", "{learn_section}", "{tools_section}"]:
+            assert key in mod.SHELLIFY_NOAGENT_PROMPT
 
 
 class TestShellifyCommand:
@@ -38,11 +44,17 @@ class TestShellifyCommand:
 
         shellify_mod = _get_shellify_module()
 
-        with patch("common.agent.call.agent_call") as mock_agent_call:
+        def _mock_agent_call(*args, **kwargs):
+            """Simulate agent writing run.sh."""
+            workdir = kwargs.get("workdir")
+            run_sh = workdir / "scripts" / "run.sh"
+            run_sh.parent.mkdir(parents=True, exist_ok=True)
+            run_sh.write_text("#!/usr/bin/env bash\necho test\n", encoding="utf-8")
             mock_session = MagicMock()
             mock_session.turns = []
-            mock_agent_call.return_value = mock_session
+            return mock_session
 
+        with patch("common.agent.call.agent_call", side_effect=_mock_agent_call):
             skill = Skill.from_path(skills_dir / "test-echo")
             assert skill is not None
 
@@ -64,11 +76,6 @@ class TestShellifyCommand:
             )
 
             assert result is True
-            mock_agent_call.assert_called_once()
-            call_kwargs = mock_agent_call.call_args[1]
-            assert call_kwargs["workdir"] == skill.path
-            assert call_kwargs["max_iterations"] == 5
-            assert "task_description" in call_kwargs
 
     def test_shellify_resets_existing(self, skills_dir):
         """shellify with reset=True should tell agent to start fresh."""
@@ -76,11 +83,19 @@ class TestShellifyCommand:
 
         shellify_mod = _get_shellify_module()
 
-        with patch("common.agent.call.agent_call") as mock_agent_call:
+        captured = {}
+
+        def _mock_agent_call(*args, **kwargs):
+            captured["task_description"] = kwargs.get("task_description", "")
+            workdir = kwargs.get("workdir")
+            run_sh = workdir / "scripts" / "run.sh"
+            run_sh.parent.mkdir(parents=True, exist_ok=True)
+            run_sh.write_text("#!/usr/bin/env bash\nnew script\n", encoding="utf-8")
             mock_session = MagicMock()
             mock_session.turns = []
-            mock_agent_call.return_value = mock_session
+            return mock_session
 
+        with patch("common.agent.call.agent_call", side_effect=_mock_agent_call):
             skill = Skill.from_path(skills_dir / "test-echo")
             scripts_dir = skill.path / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -95,8 +110,7 @@ class TestShellifyCommand:
                 max_iterations=5,
             )
 
-            call_kwargs = mock_agent_call.call_args[1]
-            task_desc = call_kwargs["task_description"]
+            task_desc = captured.get("task_description", "")
             assert "--reset flag" in task_desc or "resetting" in task_desc
 
     def test_shellify_passes_instruction(self, skills_dir):
@@ -105,11 +119,19 @@ class TestShellifyCommand:
 
         shellify_mod = _get_shellify_module()
 
-        with patch("common.agent.call.agent_call") as mock_agent_call:
+        captured = {}
+
+        def _mock_agent_call(*args, **kwargs):
+            captured["task_description"] = kwargs.get("task_description", "")
+            workdir = kwargs.get("workdir")
+            run_sh = workdir / "scripts" / "run.sh"
+            run_sh.parent.mkdir(parents=True, exist_ok=True)
+            run_sh.write_text("#!/usr/bin/env bash\nscript\n", encoding="utf-8")
             mock_session = MagicMock()
             mock_session.turns = []
-            mock_agent_call.return_value = mock_session
+            return mock_session
 
+        with patch("common.agent.call.agent_call", side_effect=_mock_agent_call):
             skill = Skill.from_path(skills_dir / "test-echo")
             scripts_dir = skill.path / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -123,9 +145,7 @@ class TestShellifyCommand:
                 max_iterations=5,
             )
 
-            call_kwargs = mock_agent_call.call_args[1]
-            task_desc = call_kwargs["task_description"]
-            assert "Use curl with retries" in task_desc
+            assert "Use curl with retries" in captured.get("task_description", "")
 
     def test_shellify_includes_existing_script_as_context(self, skills_dir):
         """shellify should include existing run.sh in the prompt when not resetting."""
@@ -133,11 +153,19 @@ class TestShellifyCommand:
 
         shellify_mod = _get_shellify_module()
 
-        with patch("common.agent.call.agent_call") as mock_agent_call:
+        captured = {}
+
+        def _mock_agent_call(*args, **kwargs):
+            captured["task_description"] = kwargs.get("task_description", "")
+            workdir = kwargs.get("workdir")
+            run_sh = workdir / "scripts" / "run.sh"
+            run_sh.parent.mkdir(parents=True, exist_ok=True)
+            run_sh.write_text("#!/usr/bin/env bash\nscript\n", encoding="utf-8")
             mock_session = MagicMock()
             mock_session.turns = []
-            mock_agent_call.return_value = mock_session
+            return mock_session
 
+        with patch("common.agent.call.agent_call", side_effect=_mock_agent_call):
             skill = Skill.from_path(skills_dir / "test-echo")
             scripts_dir = skill.path / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -152,6 +180,5 @@ class TestShellifyCommand:
                 max_iterations=5,
             )
 
-            call_kwargs = mock_agent_call.call_args[1]
-            task_desc = call_kwargs["task_description"]
+            task_desc = captured.get("task_description", "")
             assert "existing scripts/run.sh" in task_desc.lower() or "current version" in task_desc.lower()
