@@ -13,7 +13,7 @@ from common.core.config import (
     requires_common_config,
 )
 from common.llm.registry import discover_providers, get_default_provider_name
-from core.router import CLIInteractionPlugin, run_router
+from core.router import CLIInteractionPlugin, run_router, calculate_run_statistics, format_statistics
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -146,7 +146,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--auto-skill",
         is_flag=True,
         default=False,
-        help="Convert named tasks (with 'name' field) to auto-skills for learning capabilities",
+        help="Convert named tasks (with 'name' field) to auto-skills for learning capabilities. Auto-skills are persistent across runs — they are created once and reused. Use --auto-skill-reset to force recreation.",
+    )
+    @click.option(
+        "--auto-skill-reset",
+        is_flag=True,
+        default=False,
+        help="Force recreation of auto-skills even if they already exist. Requires --auto-skill.",
     )
     def run_cmd(
         task,
@@ -170,6 +176,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         export_successful,
         params,
         auto_skill,
+        auto_skill_reset,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
@@ -185,7 +192,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
         Interactive mode (--interactive):
         - Before each step, you can approve, skip, edit, or replan
         - Use --export-successful to save the steps that worked
+
+        Auto-skill mode (--auto-skill):
+        - Named tasks (with 'name' field in plan) are converted to persistent skills
+        - Auto-skills are saved in the skills directory with task description as-is
+        - Once created, auto-skills are reused across runs without modification
+        - Use --auto-skill-reset to force recreation of auto-skills
         """
+        # Validate auto-skill options
+        if auto_skill_reset and not auto_skill:
+            click.echo(
+                "Error: --auto-skill-reset requires --auto-skill to be set.",
+                err=True,
+            )
+            sys.exit(1)
         if workdir is None:
             common_config = load_common_config()
             workdir = common_config.get("workdir") or "."
@@ -256,9 +276,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
             import_params=import_params,
             interactive=interactive,
             auto_skill=auto_skill,
+            auto_skill_reset=auto_skill_reset,
             export_successful_path=export_successful,
         )
-        click.echo("\n" + "=" * 50, err=True)
+        
+        # Display statistics
+        stats = calculate_run_statistics(state)
+        stats_output = format_statistics(stats)
+        click.echo("\n" + stats_output, err=True)
+        
         if state.done:
             click.echo(f"✓ Done: {state.final_result}", err=True)
             return

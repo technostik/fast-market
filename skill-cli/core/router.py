@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime as dt
@@ -155,6 +156,8 @@ class RouterState:
     imported_plan: SkillPlan | None = None  # imported plan if provided
     exported_plan_path: Path | None = None  # where to export the plan
     export_execution_path: Path | None = None  # where to export execution log
+    start_time: float = 0.0  # timestamp when run started
+    end_time: float = 0.0  # timestamp when run completed
 
 
 # ---------------------------------------------------------------------------
@@ -520,74 +523,57 @@ def _ensure_auto_skill_exists(
     task_name: str,
     task_description: str,
     skills: list[Skill],
-    provider,
+    provider=None,
     model: str | None = None,
+    reset: bool = False,
 ) -> Skill | None:
     """Check if auto-skill exists, create it from task description if not.
-    
+
+    The task description is saved as-is without any LLM transformation.
+    If reset=True, the skill is recreated even if it already exists.
+
     Returns the Skill object, or None if creation failed.
     """
     skill_name = f"auto-{task_name}"
-    
-    existing = next((s for s in skills if s.name == skill_name), None)
-    if existing:
-        logger.info("auto_skill_exists", skill=skill_name)
-        return existing
+    skill_path = get_skills_dir() / skill_name
 
-    logger.info("auto_skill_creating", skill=skill_name, description=task_description[:100])
-
-    from common.learn import extract_skill_from_description
-    from commands.setup import init_skill_agent_config
-
-    agent_config = init_skill_agent_config()
-    tools_description = _load_tools_description_simple(agent_config)
-    existing_skills_str = _load_existing_skills_simple()
-
-    try:
-        name, description, when_to_use, body = extract_skill_from_description(
-            task_description,
-            tools_description,
-            existing_skills_str,
-            provider,
-            model=model,
-        )
-    except Exception as exc:
-        logger.error("auto_skill_extraction_failed", error=str(exc))
-        click.echo(f"[auto-skill] Failed to create skill from description: {exc}", err=True)
-        return None
-
-    if not name.startswith("auto-"):
-        name = f"auto-{task_name}"
-
-    skill_path = get_skills_dir() / name
-    
-    if skill_path.exists():
-        logger.info("auto_skill_exists_on_disk", skill=name)
+    # Check if skill already exists on disk (unless reset mode)
+    if not reset and skill_path.exists():
+        logger.info("auto_skill_exists_on_disk", skill=skill_name)
         skill = Skill.from_path(skill_path)
-        return skill
+        if skill:
+            return skill
 
+    # Remove existing skill if reset mode
+    if reset and skill_path.exists():
+        import shutil
+        try:
+            shutil.rmtree(skill_path)
+            logger.info("auto_skill_reset", skill=skill_name)
+            click.echo(f"[auto-skill] Resetting existing skill: {skill_name}", err=True)
+        except Exception as exc:
+            logger.error("auto_skill_reset_failed", skill=skill_name, error=str(exc))
+            click.echo(f"[auto-skill] Warning: Failed to reset skill {skill_name}: {exc}", err=True)
+
+    # Create the skill with task description as-is
     try:
         skill_path.mkdir(parents=True, exist_ok=True)
         skill_content = f"""---
-name: {name}
-description: {description}
+name: {skill_name}
+description: {task_description}
 ---
 
-# {name}
+# {skill_name}
 
-## When to use
-{when_to_use}
-
-## Instructions
-{body}
+{task_description}
 """
         (skill_path / "SKILL.md").write_text(skill_content, encoding="utf-8")
-        logger.info("auto_skill_created", skill=name, path=str(skill_path))
-        click.echo(f"[auto-skill] Created skill: {name}", err=True)
+        logger.info("auto_skill_created", skill=skill_name, path=str(skill_path))
+        click.echo(f"[auto-skill] Created skill: {skill_name}", err=True)
         return Skill.from_path(skill_path)
     except Exception as exc:
         logger.error("auto_skill_creation_failed", error=str(exc))
-        click.echo(f"[auto-skill] Failed to create skill {name}: {exc}", err=True)
+        click.echo(f"[auto-skill] Failed to create skill {skill_name}: {exc}", err=True)
         return None
 
 
@@ -1175,6 +1161,87 @@ def _import_plan_from_yaml(filepath: str, workdir: str = ".", params: dict[str, 
 
 
 # ---------------------------------------------------------------------------
+# Run statistics
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RunStatistics:
+    """Statistics about a completed router run."""
+    total_duration_seconds: float
+    total_steps: int
+    successful_steps: int
+    failed_steps: int
+    skipped_steps: int
+    run_actions: int
+    task_actions: int
+    ask_actions: int
+    unique_skills_executed: int
+
+
+def calculate_run_statistics(state: RouterState) -> RunStatistics:
+    """Calculate statistics from a completed router run."""
+    total_steps = len(state.attempts)
+    successful_steps = sum(1 for a in state.attempts if a.success)
+    failed_steps = sum(1 for a in state.attempts if not a.success and a.exit_code != 0)
+    skipped_steps = sum(1 for a in state.attempts if a.exit_code == 0 and not a.success and "skipped" in a.runner_summary.lower())
+    
+    run_actions = sum(1 for a in state.attempts if a.action == "run")
+    task_actions = sum(1 for a in state.attempts if a.action == "task")
+    ask_actions = sum(1 for a in state.attempts if a.action == "ask")
+    
+    unique_skills = set()
+    for a in state.attempts:
+        if a.action == "run":
+            unique_skills.add(a.skill_name)
+    
+    total_duration = state.end_time - state.start_time if state.end_time > 0 else 0.0
+    
+    return RunStatistics(
+        total_duration_seconds=total_duration,
+        total_steps=total_steps,
+        successful_steps=successful_steps,
+        failed_steps=failed_steps,
+        skipped_steps=skipped_steps,
+        run_actions=run_actions,
+        task_actions=task_actions,
+        ask_actions=ask_actions,
+        unique_skills_executed=len(unique_skills),
+    )
+
+
+def format_statistics(stats: RunStatistics) -> str:
+    """Format statistics as a human-readable string."""
+    minutes = int(stats.total_duration_seconds // 60)
+    seconds = stats.total_duration_seconds % 60
+    
+    if minutes > 0:
+        time_str = f"{minutes}m {seconds:.1f}s"
+    else:
+        time_str = f"{seconds:.1f}s"
+    
+    lines = [
+        "=" * 60,
+        "RUN STATISTICS",
+        "=" * 60,
+        f"Total run time:          {time_str}",
+        f"Total steps executed:    {stats.total_steps}",
+        f"  Successful:            {stats.successful_steps}",
+        f"  Failed:                {stats.failed_steps}",
+        f"  Skipped:               {stats.skipped_steps}",
+        "-" * 60,
+        f"Actions breakdown:",
+        f"  Skill executions:      {stats.run_actions}",
+        f"  Task executions:       {stats.task_actions}",
+        f"  User questions:        {stats.ask_actions}",
+        "-" * 60,
+        f"Unique skills used:      {stats.unique_skills_executed}",
+        "=" * 60,
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Main router loop
 # ---------------------------------------------------------------------------
 
@@ -1202,6 +1269,7 @@ def run_router(
     import_params: dict[str, str] | None = None,
     interactive: bool = False,
     auto_skill: bool = False,
+    auto_skill_reset: bool = False,
     export_successful_path: str | None = None,
 ) -> RouterState:
     """Orchestrate skills and tasks to achieve a goal.
@@ -1258,6 +1326,7 @@ def run_router(
         run_root=run_root,
         isolation_mode=isolation_mode,
         shared_context=shared_context,
+        start_time=time.time(),
     )
 
     # Handle export paths - files go into run_root (or workdir if no isolation)
@@ -1295,11 +1364,13 @@ def run_router(
         except Exception as exc:
             state.failed = True
             state.failure_reason = f"Failed to import plan: {exc}"
+            state.end_time = time.time()
             return state
 
     if not skills:
         state.failed = True
         state.failure_reason = "No skills available"
+        state.end_time = time.time()
         return state
 
     # Load prompt overrides
@@ -1334,6 +1405,7 @@ def run_router(
     except Exception as exc:
         state.failed = True
         state.failure_reason = f"Preparation failed: {exc}"
+        state.end_time = time.time()
         return state
 
     session_files: list[Path] = []
@@ -1678,6 +1750,7 @@ def run_router(
                     skills=skills,
                     provider=provider,
                     model=model,
+                    reset=auto_skill_reset,
                 )
 
                 if auto_skill_obj:
@@ -1889,4 +1962,5 @@ def run_router(
             state=state,
         )
 
+    state.end_time = time.time()
     return state

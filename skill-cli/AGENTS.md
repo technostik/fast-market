@@ -53,11 +53,36 @@ When `--shared-context` is enabled, skills gain access to a `shared_context` too
 - **clear** — Empties the context
 
 The router injects into each skill's prompt:
-- The global task goal
+- The global task objective
 - Current context state
 - Instructions to write key results so downstream skills can use them
 
 This enables skills to cooperate by passing structured information beyond file outputs.
+
+### Auto-Skill Mode (--auto-skill)
+When `--auto-skill` is enabled, named tasks (with a `name` field in the execution plan) are converted to persistent skills:
+
+- **Creation**: Auto-skills are created in `~/.local/share/fast-market/skills/auto-{task_name}/`
+- **Content**: Task description is saved as-is in SKILL.md without LLM transformation
+- **Persistence**: Once created, auto-skills are reused across runs without modification
+- **Reset**: `--auto-skill-reset` forces recreation (requires `--auto-skill`)
+- **Validation**: `--auto-skill-reset` cannot be used without `--auto-skill` (exits with error)
+- **Purpose**: Enables learning capabilities for tasks that would otherwise be one-off
+
+The `_ensure_auto_skill_exists()` function in `core/router.py` handles auto-skill creation/retrieval:
+1. Checks if skill exists on disk
+2. If not found (or reset=True), creates skill directory
+3. Writes SKILL.md with task description as both frontmatter and body
+4. Returns Skill object for execution
+
+### Run Statistics
+At the end of each run, statistics are calculated and displayed:
+- **Timing**: Total run time (tracked via `start_time` and `end_time` in RouterState)
+- **Steps**: Total steps executed, broken down by successful/failed/skipped
+- **Actions**: Skill executions, task executions, user questions
+- **Skills**: Count of unique skills executed
+
+Statistics are computed by `calculate_run_statistics()` and formatted by `format_statistics()` in `core/router.py`.
 
 ## SKILL.md Frontmatter Options
 - `name` — Skill name (defaults to directory name)
@@ -151,4 +176,3 @@ as an "## Additional Instructions" section, after:
 
 This allows users to add context-specific guidance without modifying the skill file itself.
 The injection is visible in dry-run output under "[DRY RUN] Injected instructions:".
-

@@ -181,11 +181,13 @@ Orchestrate multiple skills to accomplish complex tasks (requires LLM).
 skill run "your task description"                 # Run with default LLM
 skill run "task" -P openai -m gpt-4               # Specific provider
 skill run "task" -w /path                         # Working directory
-skill run "task" -i 20                           # Max iterations
-skill run "task" -v                              # Verbose output
-skill run "task" --run-isolated                  # Isolated dir for entire run
-skill run "task" --skill-isolated                # Isolated subdir per skill
-skill run "task" --shared-context                # Enable shared context tool
+skill run "task" -i 20                            # Max iterations
+skill run "task" -v                               # Verbose output
+skill run "task" --run-isolated                   # Isolated dir for entire run
+skill run "task" --skill-isolated                 # Isolated subdir per skill
+skill run "task" --shared-context                 # Enable shared context tool
+skill run "task" --auto-skill                     # Convert named tasks to auto-skills
+skill run "task" --auto-skill --auto-skill-reset  # Force recreate auto-skills
 ```
 
 **Isolation Modes:**
@@ -206,11 +208,29 @@ shared_context(action="clear")                     # Reset context
 ```
 
 Each skill receives in its prompt:
-- The global task goal
+- The global task objective
 - Current context state (what previous skills wrote)
 - Instructions to write key results for downstream skills
 
 This enables skills to pass structured information and coordinate beyond file outputs.
+
+**Auto-Skill Mode (`--auto-skill`):**
+
+When enabled, named tasks (with a `name` field in the execution plan) are automatically converted to persistent skills:
+
+- Auto-skills are saved in `~/.local/share/fast-market/skills/auto-{task_name}/`
+- The task description is saved as-is in SKILL.md without LLM transformation
+- Once created, auto-skills are reused across runs without modification
+- Use `--auto-skill-reset` to force recreation of auto-skills (requires `--auto-skill`)
+- Auto-skills enable learning capabilities for tasks that would otherwise be one-off
+
+**Run Statistics:**
+
+At the end of each run, statistics are displayed showing:
+- Total run time
+- Total steps executed (successful, failed, skipped)
+- Actions breakdown (skill executions, task executions, user questions)
+- Unique skills used
 
 ### skill path
 
