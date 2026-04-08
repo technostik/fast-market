@@ -1,0 +1,1 @@
+"""Command manifests for webux."""
