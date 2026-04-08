@@ -102,7 +102,7 @@ class SkillPlanStep:
     instructions: str = ""  # additional instructions for action="task"
     question: str = ""  # for action="ask"
     context_hint: str = ""  # hint about context needed
-    name: str = ""  # task name, used by run-plan convert-task-to-skill
+    name: str = ""  # task name, used by plan convert-task-to-skill
     original_description: str = ""  # original description before placeholder substitution
     original_params: dict[str, str] = None  # original params from plan before substitution
 

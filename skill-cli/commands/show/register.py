@@ -3,20 +3,21 @@ from __future__ import annotations
 import click
 
 from commands.base import CommandManifest
+from commands.params import SkillNameType
 from common.core.paths import get_skills_dir
 from core.skill import Skill
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("show")
-    @click.argument("name")
+    @click.argument("name", type=SkillNameType())
     @click.option(
-        "--learned",
+        "--learn",
         "-l",
         is_flag=True,
         help="Show LEARN.md instead of SKILL.md",
     )
-    def show_cmd(name, learned):
+    def show_cmd(name, learn):
         """Show skill details."""
         skill_path = get_skills_dir() / name
         if not skill_path.exists():
@@ -33,7 +34,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if skill.description:
             click.echo(f"    Description: {skill.description}")
 
-        if learned:
+        if learn:
             learned_path = skill_path / "LEARN.md"
             if not learned_path.exists():
                 click.echo(f"Error: LEARN.md not found in skill '{name}'", err=True)

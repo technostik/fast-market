@@ -9,10 +9,73 @@ import click
 import yaml
 
 from commands.base import CommandManifest
-from commands.params import RunPlanFileType
+from commands.params import RunPlanFileType, SkillNameType as _SkillNameType
 from common.cli.helpers import get_editor, open_editor
 from common.core.config import load_common_config
 from core.repl import prompt_with_options, prompt_free_text, prompt_confirm
+
+# ---------------------------------------------------------------------------
+# Default prompt for shellify — declared here, overridable via prompt service
+# ---------------------------------------------------------------------------
+SHELLIFY_PROMPT_DEFAULT = """You are converting an agentic skill into a deterministic shell script (`run.sh`).
+
+# Goal
+Transform the skill description and instructions into a robust, reproducible `run.sh` bash script that accomplishes the same task using shell commands and CLI tools.
+
+# Skill Description
+{skill_description}
+
+# Skill Parameters
+{skill_parameters}
+
+# Skill Body (from SKILL.md)
+{skill_body}
+
+{learn_section}
+
+# Output Requirements
+
+Produce ONLY a valid bash script. The script must:
+
+1. **Start with `#!/usr/bin/env bash`** and use `set -euo pipefail`
+2. **Use environment variables for parameters** — each skill parameter is available as `$SKILL_{{PARAM_NAME_UPPER}}` (e.g., parameter `video_url` becomes `$SKILL_VIDEO_URL`)
+3. **Validate required parameters** — check that required parameters are set and exit with a helpful error message if not
+4. **Use common CLI tools** — prefer standard tools like `curl`, `jq`, `sed`, `awk`, `grep`, `yt-dlp`, `ffmpeg`, etc. over reimplementing logic
+5. **Be incremental and robust** — use intermediate files, handle errors gracefully, provide progress output
+6. **Be self-contained** — include all necessary commands in one script
+7. **Output results to the current working directory** — do not use hardcoded absolute paths
+
+# Parameter Handling
+
+- For a parameter named `foo`, the environment variable is `$SKILL_FOO`
+- For optional parameters with defaults, use `${{SKILL_FOO:-default_value}}`
+- Validate required parameters early:
+  ```bash
+  if [ -z "${{SKILL_REQUIRED_PARAM:-}}" ]; then
+    echo "Error: SKILL_REQUIRED_PARAM is required" >&2
+    exit 1
+  fi
+  ```
+
+# Tool Selection
+
+- Use the simplest tool that gets the job done
+- Prefer `curl` over `wget` for HTTP requests
+- Use `jq` for JSON processing
+- Use `yt-dlp` for YouTube/video downloads if applicable
+- Use `ffmpeg` for media processing if applicable
+
+# Shell Script
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Your script here
+```
+
+Output ONLY the script content, with no extra explanation.
+"""
 
 
 def find_run_yaml_files(search_dir: Path, recursive: bool = True) -> list[Path]:
@@ -177,12 +240,12 @@ def edit_step_in_editor(step: dict) -> dict | None:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.group("run-plan")
-    def run_plan():
+    @click.group("plan")
+    def plan():
         """Manage run plans."""
         pass
 
-    @run_plan.command("list")
+    @plan.command("list")
     @click.argument(
         "directory",
         type=click.Path(exists=True, file_okay=True, dir_okay=True, path_type=Path),
@@ -290,7 +353,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             click.echo()
 
-    @run_plan.command("params")
+    @plan.command("params")
     @click.argument("plan", type=RunPlanFileType())
     def params_cmd(plan):
         """Show plan parameters (placeholders and defaults)."""
@@ -319,7 +382,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     # -----------------------------------------------------------------------
     # EDIT subcommand — step wizard
     # -----------------------------------------------------------------------
-    @run_plan.command("edit")
+    @plan.command("edit")
     @click.argument("plan", type=RunPlanFileType())
     def edit_cmd(plan):
         """Interactive wizard to edit a run plan's steps."""
@@ -507,7 +570,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     # -----------------------------------------------------------------------
     # CONVERT-TASK-TO-SKILL subcommand — named tasks → auto-skills + new plan
     # -----------------------------------------------------------------------
-    @run_plan.command("convert-task-to-skill")
+    @plan.command("convert-task-to-skill")
     @click.argument("plan", type=RunPlanFileType())
     @click.option(
         "--reset",
@@ -626,7 +689,167 @@ def register(plugin_manifests: dict) -> CommandManifest:
         for name in skills_created:
             click.echo(f"Created skill: {name}", err=True)
 
-    return CommandManifest(name="run-plan", click_command=run_plan)
+    # -----------------------------------------------------------------------
+    # SHELLIFY subcommand — convert a skill into scripts/run.sh
+    # -----------------------------------------------------------------------
+    @plan.command("shellify")
+    @click.argument("skill", type=_SkillNameType())
+    @click.option(
+        "--model",
+        "-m",
+        default=None,
+        help="LLM model to use for generation.",
+    )
+    def shellify_cmd(skill, model):
+        """Convert a skill into scripts/run.sh using the LLM.
+
+        Reads SKILL.md and LEARN.md (if present) from the skill directory,
+        sends them to the LLM with the shellify prompt, and writes the
+        resulting bash script to scripts/run.sh in the skill directory.
+        """
+        from common.core.config import requires_common_config, load_tool_config
+        from common.llm.registry import discover_providers, get_default_provider_name
+        from core.skill import Skill, discover_skills
+        from common.core.paths import get_skills_dir
+
+        requires_common_config("skill", ["llm"])
+        try:
+            config = load_tool_config("skill")
+            providers = discover_providers(config)
+            provider_name = get_default_provider_name(config)
+            llm = providers.get(provider_name)
+        except Exception as exc:
+            click.echo(f"Error: {exc}", err=True)
+            raise SystemExit(1)
+
+        if not llm:
+            click.echo(f"Error: provider '{provider_name}' not available.", err=True)
+            raise SystemExit(1)
+
+        # Resolve the skill
+        skills_dir = get_skills_dir()
+        all_skills = discover_skills(skills_dir)
+        skill_obj = None
+        for s in all_skills:
+            if s.name == skill:
+                skill_obj = s
+                break
+
+        if skill_obj is None:
+            click.echo(f"Error: skill '{skill}' not found.", err=True)
+            raise SystemExit(1)
+
+        # Get the prompt
+        from cli.main import get_skill_prompt_manager
+        prompt_manager = get_skill_prompt_manager()
+        prompt_text = prompt_manager.get("shellify") if prompt_manager else SHELLIFY_PROMPT_DEFAULT
+
+        # Run the shellify logic
+        success = _shellify_skill(
+            skill=skill_obj,
+            llm=llm,
+            model=model,
+            prompt=prompt_text,
+        )
+
+        if not success:
+            raise SystemExit(1)
+
+    return CommandManifest(name="plan", click_command=plan)
+
+
+# ---------------------------------------------------------------------------
+# Shellify — convert a skill into scripts/run.sh
+# ---------------------------------------------------------------------------
+
+def _shellify_skill(
+    skill,
+    llm,
+    model: str | None = None,
+    prompt: str | None = None,
+) -> bool:
+    """Convert a skill into scripts/run.sh using the LLM.
+
+    Args:
+        skill: Skill object with parameters, description, and path.
+        llm: LLM provider instance.
+        model: Optional model name override.
+        prompt: Optional shellify prompt template (uses default if None).
+
+    Returns True on success, False on failure.
+    """
+    from common.llm.base import LLMRequest
+
+    # Get the prompt template
+    if prompt is None:
+        prompt = SHELLIFY_PROMPT_DEFAULT
+
+    # Read skill content
+    skill_body = skill.get_body()
+    skill_description = skill.description or skill.name
+
+    # Build parameters section
+    params_list = skill.parameters
+    if params_list:
+        params_lines = []
+        for p in params_list:
+            pname = p.get("name", "?")
+            req = " (required)" if p.get("required", True) else f" (optional, default: {p.get('default', 'none')})"
+            desc = p.get("description", "")
+            params_lines.append(f"- {pname}{req}: {desc}")
+        skill_parameters = "\n".join(params_lines)
+    else:
+        skill_parameters = "No parameters — this skill has no configurable inputs."
+
+    # Read LEARN.md if it exists
+    learn_path = skill.path / "LEARN.md"
+    if learn_path.exists():
+        learn_content = learn_path.read_text(encoding="utf-8")
+        learn_section = f"# Lessons from Previous Runs\n\n{learn_content}"
+    else:
+        learn_section = "# Lessons from Previous Runs\n\nNone — this is a fresh skill with no previous runs."
+
+    # Build the prompt
+    formatted_prompt = prompt.format(
+        skill_description=skill_description,
+        skill_parameters=skill_parameters,
+        skill_body=skill_body,
+        learn_section=learn_section,
+    )
+
+    # Call the LLM
+    click.echo(f"Shellifying skill '{skill.name}'...", err=True)
+    req = LLMRequest(
+        system="You convert agentic skills into deterministic bash scripts.",
+        messages=[{"role": "user", "content": formatted_prompt}],
+        model=model,
+        temperature=0.2,
+    )
+    resp = llm.complete(req)
+    script_content = resp.content.strip()
+
+    # Strip markdown code fences if present
+    if script_content.startswith("```bash"):
+        script_content = script_content[len("```bash") :].strip()
+    if script_content.startswith("```"):
+        script_content = script_content[len("```") :].strip()
+    if script_content.endswith("```"):
+        script_content = script_content[: -len("```")].strip()
+
+    # Write to scripts/run.sh
+    scripts_dir = skill.path / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    run_sh = scripts_dir / "run.sh"
+    run_sh.write_text(script_content + "\n", encoding="utf-8")
+
+    # Make executable
+    try:
+        run_sh.chmod(0o755)
+    except Exception:
+        pass
+
+    click.echo(f"Generated {run_sh}", err=True)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -796,7 +1019,7 @@ def _build_llm_context(plan_data: dict, skills: list, step_idx: int | None) -> s
     lines.append("### For `action: task`")
     lines.append("- `description`: (string) free-form task description")
     lines.append("- `instructions`: (optional string) additional execution instructions")
-    lines.append("- `name`: (optional string) task name — used by run-plan convert-task-to-skill to create `auto-{name}` skill")
+    lines.append("- `name`: (optional string) task name — used by plan convert-task-to-skill to create `auto-{name}` skill")
     lines.append("- `context_hint`: (optional string) hint for context extraction")
     lines.append("")
     lines.append("### For `action: ask`")

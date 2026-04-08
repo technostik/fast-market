@@ -7,10 +7,10 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - `cli/main.py` — Entry point, registers all commands via `discover_commands()`
 - `commands/base.py` — `CommandManifest` dataclass for command registration
 - `commands/list/register.py` — List all skills
-- `commands/show/register.py` — Show skill details, supports `--learned` for LEARN.md
+- `commands/show/register.py` — Show skill details, supports `--learn` for LEARN.md
 - `commands/create/register.py` — Scaffold new skill
 - `commands/delete/register.py` — Remove skill
-- `commands/edit/register.py` — Edit skill files, supports `--learned` for LEARN.md
+- `commands/edit/register.py` — Edit skill files, supports `--learn` for LEARN.md and `--shell` for scripts/run.sh
 - `commands/run/register.py` — Orchestrate multiple skills (LLM-powered) with isolated subdirs
 - `commands/apply/register.py` — Apply/execute a skill
 - `commands/auto_learn/register.py` — Auto-learn templates and compact command
@@ -59,10 +59,10 @@ The router injects into each skill's prompt:
 
 This enables skills to cooperate by passing structured information beyond file outputs.
 
-### Auto-Skills (run-plan convert-task-to-skill)
-Named tasks (with a `name` field) can be converted to persistent auto-skills using the `skill run-plan convert-task-to-skill` subcommand:
+### Auto-Skills (plan convert-task-to-skill)
+Named tasks (with a `name` field) can be converted to persistent auto-skills using the `skill plan convert-task-to-skill` subcommand:
 
-- **Creation**: `skill run-plan convert-task-to-skill run.yaml` creates `auto-{name}` skills
+- **Creation**: `skill plan convert-task-to-skill run.yaml` creates `auto-{name}` skills
 - **Parameters**: `{{key}}` and `{{key:default}}` placeholders in the description become skill parameters
 - **Summary**: A one-sentence description is generated via LLM
 - **Persistence**: Once created, auto-skills are reused across runs
@@ -105,9 +105,9 @@ Statistics are computed by `calculate_run_statistics()` and formatted by `format
 - Always validate paths are within skill directory (prevent directory traversal)
 - Use `click.echo()` for output, `err=True` for errors
 - Use `sys.exit(1)` for fatal errors after error message
-- Support `--learned` / `-l` flag for LEARN.md operations (see `show` and `edit`)
+- Support `--learn` / `-l` flag for LEARN.md operations (see `show` and `edit`)
 - Use `--create` / `-c` flag for creating files that don't exist
-- Include short forms for options: `-l` for `--learned`, `-c` for `--create`, `-C` for `--compact`
+- Include short forms for options: `-l` for `--learn`, `-c` for `--create`, `-C` for `--compact`
 - Keep commands thin — delegate to `common.skill.skill.Skill` for logic
 - Use `CommandManifest` dataclass to return commands
 - Use `SkillNameType()` for skill name arguments with autocomplete
@@ -134,7 +134,7 @@ Statistics are computed by `calculate_run_statistics()` and formatted by `format
 
 ### Add New Option to Existing Command
 - Add `@click.option()` decorator before the callback function
-- Follow existing patterns: `--learned` / `-l` for LEARN.md, `--create` / `-c` for creation
+- Follow existing patterns: `--learn` / `-l` for LEARN.md, `--shell` / `-s` for scripts/run.sh, `--create` / `-c` for creation
 - Update help text to be clear and concise
 
 ### Add Skill File Type
