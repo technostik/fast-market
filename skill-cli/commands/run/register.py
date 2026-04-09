@@ -13,7 +13,7 @@ from common.core.config import (
     requires_common_config,
 )
 from common.llm.registry import discover_providers, get_default_provider_name
-from core.router import CLIInteractionPlugin, run_router, calculate_run_statistics, format_statistics
+from core.router import CLIInteractionPlugin, run_router, calculate_run_statistics, format_statistics, _execution_log_to_yaml
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -255,7 +255,38 @@ def register(plugin_manifests: dict) -> CommandManifest:
         stats = calculate_run_statistics(state)
         stats_output = format_statistics(stats)
         click.echo("\n" + stats_output, err=True)
-        
+
+        # Display detailed error report for failed steps
+        failed_attempts = [a for a in state.attempts if not a.success and a.exit_code != 0]
+        if failed_attempts:
+            click.echo("\n" + "=" * 60, err=True)
+            click.echo("FAILED STEPS ERROR REPORT", err=True)
+            click.echo("=" * 60, err=True)
+            for attempt in failed_attempts:
+                click.echo(f"\nStep {attempt.iteration}: {attempt.skill_name} ({attempt.action})", err=True)
+                click.echo(f"Exit code: {attempt.exit_code}", err=True)
+                if attempt.params:
+                    click.echo(f"Params: {attempt.params}", err=True)
+                if attempt.runner_summary:
+                    click.echo(f"\nSummary:", err=True)
+                    click.echo(attempt.runner_summary.strip(), err=True)
+                if attempt.raw_output:
+                    click.echo(f"\nRaw output:", err=True)
+                    click.echo(attempt.raw_output.strip(), err=True)
+                click.echo("-" * 60, err=True)
+
+        # Write full error log to workdir
+        if failed_attempts:
+            from pathlib import Path
+            workdir_path = Path(workdir) if isinstance(workdir, str) else workdir
+            log_path = workdir_path / "error_log.yaml"
+            try:
+                log_content = _execution_log_to_yaml(state)
+                log_path.write_text(log_content, encoding="utf-8")
+                click.echo(f"\n✓ Full error log written to: {log_path}", err=True)
+            except Exception as e:
+                click.echo(f"\n✗ Failed to write error log: {e}", err=True)
+
         if state.done:
             click.echo(f"✓ Done: {state.final_result}", err=True)
             return
