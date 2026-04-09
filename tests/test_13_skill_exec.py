@@ -53,7 +53,7 @@ class TestSkillExecCommand:
         """Test that exec command validates plan file format."""
         plan_file = tmp_path / "invalid.yaml"
         plan_file.write_text("not: a: valid: yaml:")
-        
+
         runner = CliRunner()
         result = runner.invoke(get_cli(), [
             "exec", str(plan_file),
@@ -72,7 +72,7 @@ class TestSkillExecCommand:
             ]
         }
         plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
-        
+
         runner = CliRunner()
         result = runner.invoke(get_cli(), [
             "exec", str(plan_file),
@@ -84,20 +84,23 @@ class TestSkillExecCommand:
     def test_exec_command_with_params(self, tmp_path):
         """Test that exec command accepts -p parameters."""
         plan_file = tmp_path / "plan.yaml"
-        plan_content = {
-            "goal": "Test {{name}}",
-            "plan": [
-                {"step": 1, "action": "task", "description": "Echo {{message}}"}
-            ]
-        }
-        plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
-        
+        plan_content = """
+goal: Test {{name}}
+params:
+  - name
+  - message:hello
+plan:
+  - step: 1
+    action: task
+    description: "Do something"
+"""
+        plan_file.write_text(plan_content)
+
         runner = CliRunner()
         result = runner.invoke(get_cli(), [
             "exec", str(plan_file),
             "--workdir", str(tmp_path),
             "-p", "name=test",
-            "-p", "message=hello",
         ])
         # Will fail due to missing LLM, but should accept the params
         assert "Plan file not found" not in result.output
@@ -111,7 +114,7 @@ class TestSkillExecCommand:
             "plan": []
         }
         plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
-        
+
         runner = CliRunner()
         result = runner.invoke(get_cli(), [
             "exec", str(plan_file),
@@ -143,7 +146,7 @@ class TestSkillExecPlanImport:
     def test_exec_import_valid_plan_with_run_step(self, tmp_path):
         """Test exec imports a valid plan with run steps."""
         from core.plan_utils import import_plan_from_yaml
-        
+
         plan_file = tmp_path / "plan.yaml"
         plan_content = {
             "goal": "Test goal",
@@ -153,24 +156,25 @@ class TestSkillExecPlanImport:
                     "step": 1,
                     "action": "run",
                     "skill": "test-skill",
-                    "params": {"input": "test"},
                 }
             ]
         }
         plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
-        
+
         plan = import_plan_from_yaml(str(plan_file))
-        
+
         assert plan.goal == "Test goal"
         assert plan.success_criteria == "Test criteria"
         assert len(plan.steps) == 1
         assert plan.steps[0].action == "run"
         assert plan.steps[0].skill_name == "test-skill"
+        # Params are now empty on the step (global params injected at runtime)
+        assert plan.steps[0].params == {}
 
     def test_exec_import_valid_plan_with_task_step(self, tmp_path):
         """Test exec imports a valid plan with task steps."""
         from core.plan_utils import import_plan_from_yaml
-        
+
         plan_file = tmp_path / "plan.yaml"
         plan_content = {
             "goal": "Test goal",
@@ -184,9 +188,9 @@ class TestSkillExecPlanImport:
             ]
         }
         plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
-        
+
         plan = import_plan_from_yaml(str(plan_file))
-        
+
         assert len(plan.steps) == 1
         assert plan.steps[0].action == "task"
         assert plan.steps[0].description == "Do something"
@@ -195,64 +199,98 @@ class TestSkillExecPlanImport:
     def test_exec_import_plan_with_placeholders(self, tmp_path):
         """Test exec imports plan with {{key}} placeholders and substitutes them."""
         from core.plan_utils import import_plan_from_yaml
-        
+
         plan_file = tmp_path / "plan.yaml"
-        plan_content = {
-            "goal": "Process {{INPUT_FILE}}",
-            "plan": [
-                {
-                    "step": 1,
-                    "action": "task",
-                    "description": "Work on {{INPUT_FILE}}",
-                }
-            ]
-        }
-        plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
-        
-        plan = import_plan_from_yaml(str(plan_file), params={"INPUT_FILE": "data.csv"})
-        
+        plan_content = """
+goal: Process {{INPUT_FILE}}
+params:
+  - INPUT_FILE:data.csv
+plan:
+  - step: 1
+    action: task
+    description: "Work on file"
+"""
+        plan_file.write_text(plan_content)
+
+        plan = import_plan_from_yaml(str(plan_file))
+
         assert plan.goal == "Process data.csv"
-        assert plan.steps[0].description == "Work on data.csv"
 
     def test_exec_import_plan_with_default_placeholders(self, tmp_path):
         """Test exec imports plan with {{key:default}} placeholders."""
         from core.plan_utils import import_plan_from_yaml
-        
+
         plan_file = tmp_path / "plan.yaml"
-        plan_content = {
-            "goal": "Process {{INPUT_FILE:input.csv}}",
-            "plan": [
-                {
-                    "step": 1,
-                    "action": "task",
-                    "description": "Work on file",
-                }
-            ]
-        }
-        plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
-        
+        plan_content = """
+goal: Process {{INPUT_FILE:input.csv}}
+params:
+  - INPUT_FILE:input.csv
+plan:
+  - step: 1
+    action: task
+    description: "Work on file"
+"""
+        plan_file.write_text(plan_content)
+
         # Without providing the param, should use default
         plan = import_plan_from_yaml(str(plan_file))
-        
+
         assert plan.goal == "Process input.csv"
-        
-        # With param, should use provided value
+
+        # With param override, should use provided value
         plan2 = import_plan_from_yaml(str(plan_file), params={"INPUT_FILE": "custom.csv"})
         assert plan2.goal == "Process custom.csv"
 
     def test_exec_import_plan_unresolved_placeholders_fails(self, tmp_path):
         """Test exec fails when mandatory placeholders are not resolved."""
         from core.plan_utils import import_plan_from_yaml
-        
+
         plan_file = tmp_path / "plan.yaml"
-        plan_content = {
-            "goal": "Process {{REQUIRED_PARAM}}",
-            "plan": []
-        }
-        plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
-        
-        with pytest.raises(ValueError, match="Unresolved mandatory placeholders"):
+        plan_content = """
+goal: Process {{REQUIRED_PARAM}}
+params:
+  - REQUIRED_PARAM
+plan: []
+"""
+        plan_file.write_text(plan_content)
+
+        with pytest.raises(ValueError, match="Missing required plan parameters"):
             import_plan_from_yaml(str(plan_file))
+
+    def test_exec_import_plan_with_global_params(self, tmp_path):
+        """Test exec imports plan with global params section."""
+        from core.plan_utils import import_plan_from_yaml
+
+        plan_file = tmp_path / "plan.yaml"
+        plan_content = """
+goal: Process {{URL}}
+params:
+  - URL
+  - LANGUAGE:fr
+  - MAX_RESULTS:50
+plan:
+  - step: 1
+    action: run
+    skill: test-skill
+  - step: 2
+    action: run
+    skill: another-skill
+"""
+        plan_file.write_text(plan_content)
+
+        # Without providing URL, should fail
+        with pytest.raises(ValueError, match="Missing required plan parameters"):
+            import_plan_from_yaml(str(plan_file))
+
+        # With URL provided, should succeed
+        plan = import_plan_from_yaml(str(plan_file), params={"URL": "https://example.com"})
+        assert plan.goal == "Process https://example.com"
+        assert len(plan.steps) == 2
+        assert plan.steps[0].skill_name == "test-skill"
+        assert plan.steps[1].skill_name == "another-skill"
+        # Steps don't have params (global params injected at runtime)
+        assert plan.steps[0].params == {}
+        assert plan.steps[1].params == {}
 
 
 class TestSkillExecVsRun:

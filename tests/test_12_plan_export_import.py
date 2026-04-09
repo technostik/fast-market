@@ -4,6 +4,14 @@ import yaml
 from pathlib import Path
 import tempfile
 
+from core.plan_utils import (
+    parse_global_params,
+    build_params_dict,
+    validate_mandatory_params,
+    PlanParamDef,
+    SkillPlan,
+    SkillPlanStep,
+)
 from core.router import (
     _import_plan_from_yaml,
     _plan_to_yaml,
@@ -11,8 +19,6 @@ from core.router import (
     _export_plan_to_file,
     _export_execution_log,
     _substitute_placeholders,
-    SkillPlan,
-    SkillPlanStep,
     SkillExecutionLog,
     RouterState,
     SkillAttempt,
@@ -34,7 +40,6 @@ class TestPlanImportExport:
                     "step": 1,
                     "action": "run",
                     "skill": "test-skill",
-                    "params": {"input": "test"},
                     "inject": "Inject this",
                 },
                 {
@@ -86,7 +91,6 @@ class TestPlanImportExport:
                     step=1,
                     action="run",
                     skill_name="test-skill",
-                    params={"input": "test"},
                     inject="Inject instructions",
                 ),
                 SkillPlanStep(
@@ -139,6 +143,118 @@ class TestPlanImportExport:
         assert "Test stdout" in captured.out
 
 
+class TestGlobalParams:
+    """Test global params section parsing and validation."""
+
+    def test_parse_global_params_mandatory(self):
+        """Test parsing mandatory params (no default)."""
+        param_defs = parse_global_params(["URL", "LANGUAGE"])
+        assert len(param_defs) == 2
+        assert param_defs[0].name == "URL"
+        assert param_defs[0].is_mandatory is True
+        assert param_defs[0].default is None
+        assert param_defs[1].name == "LANGUAGE"
+        assert param_defs[1].is_mandatory is True
+
+    def test_parse_global_params_with_defaults(self):
+        """Test parsing params with default values."""
+        param_defs = parse_global_params(["URL", "LANGUAGE:fr", "MAX_RESULTS:50"])
+        assert len(param_defs) == 3
+        assert param_defs[0].name == "URL"
+        assert param_defs[0].is_mandatory is True
+        assert param_defs[1].name == "LANGUAGE"
+        assert param_defs[1].default == "fr"
+        assert param_defs[1].is_mandatory is False
+        assert param_defs[2].name == "MAX_RESULTS"
+        assert param_defs[2].default == "50"
+        assert param_defs[2].is_mandatory is False
+
+    def test_build_params_dict_cli_overrides(self):
+        """Test that CLI params override global defaults."""
+        param_defs = parse_global_params(["URL", "LANGUAGE:fr", "MAX:10"])
+        cli_params = {"LANGUAGE": "en", "URL": "https://example.com"}
+
+        result = build_params_dict(param_defs, cli_params)
+        assert result["URL"] == "https://example.com"
+        assert result["LANGUAGE"] == "en"  # CLI overrides default
+        assert result["MAX"] == "10"  # Uses default since not in CLI
+
+    def test_build_params_dict_no_cli(self):
+        """Test building params dict without CLI params uses defaults."""
+        param_defs = parse_global_params(["URL", "LANGUAGE:fr"])
+        # Only params with defaults should be in result
+        result = build_params_dict(param_defs, {})
+        assert "URL" not in result  # Mandatory, not provided
+        assert result["LANGUAGE"] == "fr"
+
+    def test_validate_mandatory_params_missing(self):
+        """Test validation fails for missing mandatory params."""
+        param_defs = parse_global_params(["URL", "LANGUAGE:fr"])
+        provided = {"LANGUAGE": "en"}  # URL is missing
+
+        missing = validate_mandatory_params(param_defs, provided)
+        assert "URL" in missing
+
+    def test_validate_mandatory_params_all_provided(self):
+        """Test validation passes when all mandatory params provided."""
+        param_defs = parse_global_params(["URL", "LANGUAGE:fr"])
+        provided = {"URL": "https://example.com", "LANGUAGE": "en"}
+
+        missing = validate_mandatory_params(param_defs, provided)
+        assert len(missing) == 0
+
+    def test_import_plan_with_global_params(self, tmp_path):
+        """Import a plan with global params section."""
+        plan_file = tmp_path / "plan.yaml"
+        plan_content = """
+goal: Process {{URL}}
+params:
+  - URL
+  - LANGUAGE:fr
+  - MAX_RESULTS:50
+plan:
+  - step: 1
+    action: run
+    skill: test-skill
+"""
+        plan_file.write_text(plan_content)
+
+        # Without providing URL, should fail
+        with pytest.raises(ValueError, match="Missing required plan parameters"):
+            _import_plan_from_yaml(str(plan_file))
+
+        # With URL provided, should succeed
+        plan = _import_plan_from_yaml(str(plan_file), params={"URL": "https://example.com"})
+        assert plan.goal == "Process https://example.com"
+        assert len(plan.steps) == 1
+        assert plan.steps[0].skill_name == "test-skill"
+        # Params are now empty on the step (global params injected at runtime)
+        assert plan.steps[0].params == {}
+
+    def test_import_plan_with_invalid_params_section(self, tmp_path):
+        """Import fails with invalid params section format."""
+        plan_file = tmp_path / "plan.yaml"
+        plan_content = """
+goal: Test
+params: not_a_list
+plan:
+  - step: 1
+    action: run
+    skill: test-skill
+"""
+        plan_file.write_text(plan_content)
+
+        with pytest.raises(ValueError, match="Invalid 'params' section"):
+            _import_plan_from_yaml(str(plan_file))
+
+    def test_import_plan_with_colon_in_default(self, tmp_path):
+        """Test that defaults can contain colons (e.g., URLs)."""
+        param_defs = parse_global_params(["URL:https://example.com:8080"])
+        assert len(param_defs) == 1
+        assert param_defs[0].name == "URL"
+        assert param_defs[0].default == "https://example.com:8080"
+
+
 class TestRunDirPlaceholder:
     """Test RUN_DIR placeholder functionality."""
 
@@ -151,23 +267,21 @@ class TestRunDirPlaceholder:
                     "step": 1,
                     "action": "run",
                     "skill": "test-skill",
-                    "params": {"path": "{{RUN_DIR}}/output"},
                 }
             ]
         }
-        
+
         params = {"RUN_DIR": "runs/abc123"}
         result = _substitute_placeholders(plan_data, params)
-        
+
         assert result["goal"] == "Test runs/abc123"
-        assert result["plan"][0]["params"]["path"] == "runs/abc123/output"
 
     def test_run_dir_default_value_when_no_isolation(self):
         """Test that RUN_DIR defaults to '.' when no isolation."""
         params = {"RUN_DIR": "."}
         plan_data = {"goal": "Work in {{RUN_DIR}}"}
         result = _substitute_placeholders(plan_data, params)
-        
+
         assert result["goal"] == "Work in ."
 
     def test_import_plan_with_run_dir(self, tmp_path):
@@ -175,20 +289,18 @@ class TestRunDirPlaceholder:
         plan_file = tmp_path / "plan.yaml"
         plan_content = """
 goal: Process in {{RUN_DIR}}
+params:
+  - RUN_DIR:runs/test123
 plan:
   - step: 1
     action: run
     skill: test-skill
-    params:
-      output_dir: "{{RUN_DIR}}/results"
 """
         plan_file.write_text(plan_content)
-        
-        params = {"RUN_DIR": "runs/test123"}
-        plan = _import_plan_from_yaml(str(plan_file), params=params)
-        
+
+        plan = _import_plan_from_yaml(str(plan_file))
+
         assert plan.goal == "Process in runs/test123"
-        assert plan.steps[0].params["output_dir"] == "runs/test123/results"
 
 
 class TestExecutionLogExport:

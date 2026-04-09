@@ -21,6 +21,7 @@ from common.agent.prompts import (
 )
 from common.core.paths import get_skills_dir
 from common.llm.base import LLMRequest
+from core.plan_utils import SkillPlan, SkillPlanStep
 from core.runner import make_run_root
 from core.skill import Skill, discover_skills
 
@@ -90,31 +91,7 @@ class SkillAttempt:
     internal_steps: int = 0  # TaskLoop turns within this attempt
 
 
-@dataclass
-class SkillPlanStep:
-    """A single step in a skill execution plan."""
-    step: int
-    action: str  # "run", "task", "ask"
-    skill_name: str = ""  # for action="run"
-    params: dict[str, str] = None  # for action="run"
-    inject: str = ""  # injected instructions for action="run"
-    description: str = ""  # for action="task"
-    instructions: str = ""  # additional instructions for action="task"
-    question: str = ""  # for action="ask"
-    context_hint: str = ""  # hint about context needed
-    name: str = ""  # task name, used by plan convert-task-to-skill
-    original_description: str = ""  # original description before placeholder substitution
-    original_params: dict[str, str] = None  # original params from plan before substitution
-
-
-@dataclass
-class SkillPlan:
-    """A complete execution plan exported from the router."""
-    goal: str
-    steps: list[SkillPlanStep] = None
-    success_criteria: str = ""
-    preparation_plan: str = ""
-
+# SkillPlanStep and SkillPlan are imported from core.models
 
 @dataclass
 class SkillExecutionLog:
@@ -158,6 +135,7 @@ class RouterState:
     isolation_mode: str = "skill"  # "none", "run", or "skill"
     shared_context: Any = None  # SharedContext instance or None
     imported_plan: SkillPlan | None = None  # imported plan if provided
+    resolved_params: dict[str, str] = None  # global params resolved from plan + CLI
     exported_plan_path: Path | None = None  # where to export the plan
     export_execution_path: Path | None = None  # where to export execution log
     start_time: float = 0.0  # timestamp when run started
@@ -956,119 +934,8 @@ def _export_successful_plan(state: RouterState, filepath: str) -> None:
         logger.info("successful_plan_exported", path=str(path))
 
 
-def _substitute_placeholders(obj: Any, params: dict[str, str]) -> Any:
-    """Recursively replace {{key}} and {{key:default}} placeholders in string values.
-    
-    Supports two forms:
-    - {{key}} — mandatory, errors if not in params
-    - {{key:default}} — optional, uses 'default' if key not in params
-    """
-    import re
-
-    if isinstance(obj, str):
-        def _replace(m):
-            inner = m.group(1)  # e.g. "key" or "key:default"
-            if ":" in inner:
-                key, default = inner.split(":", 1)
-                return params.get(key.strip(), default) if params else default
-            else:
-                return params.get(inner, m.group(0)) if params else m.group(0)
-        return re.sub(r"\{\{([^}]+)\}\}", _replace, obj)
-    if isinstance(obj, dict):
-        return {k: _substitute_placeholders(v, params) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_substitute_placeholders(item, params) for item in obj]
-    return obj
-
-
-def _find_missing_placeholders(obj: Any, path: str = "") -> list[str]:
-    """Find remaining unsubstituted mandatory {{key}} placeholders.
-    
-    Only reports {{key}} without defaults as missing.
-    {{key:default}} that resolved to the default are NOT missing.
-    """
-    import re
-
-    missing = []
-    if isinstance(obj, str):
-        # Find all remaining {{...}} patterns
-        for m in re.finditer(r"\{\{([^}]+)\}\}", obj):
-            inner = m.group(1)
-            if ":" not in inner:
-                missing.append(inner.strip())
-    elif isinstance(obj, dict):
-        for k, v in obj.items():
-            missing.extend(_find_missing_placeholders(v, f"{path}.{k}" if path else k))
-    elif isinstance(obj, list):
-        for i, item in enumerate(obj):
-            missing.extend(_find_missing_placeholders(item, f"{path}[{i}]"))
-    return missing
-
-
-def _import_plan_from_yaml(filepath: str, workdir: str = ".", params: dict[str, str] | None = None) -> SkillPlan:
-    """Import a skill plan from YAML file, substituting {{key}} placeholders with params."""
-    import yaml
-
-    path = Path(filepath)
-    if not path.exists():
-        raise FileNotFoundError(f"Plan file not found: {filepath}")
-
-    # Read raw data BEFORE substitution
-    raw_data = yaml.safe_load(path.read_text())
-    if not isinstance(raw_data, dict):
-        raise ValueError(f"Invalid plan YAML format in {filepath}")
-
-    # Apply placeholder substitution (including defaults for {{key:default}} patterns)
-    data = _substitute_placeholders(dict(raw_data), params)
-
-    # Check for remaining unsubstituted mandatory placeholders
-    missing = _find_missing_placeholders(data)
-    if missing:
-        raise ValueError(
-            f"Unresolved mandatory placeholders in plan: {', '.join(set(missing))}. "
-            f"Provide values with -p/--param options."
-        )
-
-    goal = data.get("goal", "")
-    if not goal:
-        raise ValueError(f"Plan missing 'goal' field in {filepath}")
-
-    plan_steps = []
-    plan_data = data.get("plan", [])
-    raw_plan_data = raw_data.get("plan", [])
-
-    for i, step_dict in enumerate(plan_data, 1):
-        action = step_dict.get("action", "")
-        if action not in ("run", "task", "ask"):
-            raise ValueError(f"Step {i} has invalid action: {action}")
-
-        # Get original (pre-substitution) values
-        raw_step = raw_plan_data[i - 1] if i - 1 < len(raw_plan_data) else {}
-        original_desc = raw_step.get("description", "")
-        original_params = raw_step.get("params", {}) or {}
-
-        step = SkillPlanStep(
-            step=i,
-            action=action,
-            skill_name=step_dict.get("skill", ""),
-            params=step_dict.get("params", {}),
-            original_params=original_params,
-            inject=step_dict.get("inject", ""),
-            description=step_dict.get("description", ""),
-            original_description=original_desc,
-            instructions=step_dict.get("instructions", ""),
-            question=step_dict.get("question", ""),
-            context_hint=step_dict.get("context_hint", ""),
-            name=step_dict.get("name", ""),
-        )
-        plan_steps.append(step)
-
-    return SkillPlan(
-        goal=goal,
-        steps=plan_steps,
-        success_criteria=data.get("success_criteria", ""),
-        preparation_plan=data.get("preparation_plan", ""),
-    )
+# _substitute_placeholders, _find_missing_placeholders, and _import_plan_from_yaml
+# are imported from core.plan_utils at the bottom of this file to avoid circular imports
 
 
 # ---------------------------------------------------------------------------
@@ -1296,6 +1163,19 @@ def run_router(
                 if import_params:
                     print(f"[router] Substituted params: {', '.join(import_params.keys())}")
                 print(f"[router] Plan has {len(state.imported_plan.steps)} steps")
+
+            # Extract resolved global params for injection into skills
+            # These are the params that were resolved from global params section + CLI overrides
+            state.resolved_params = dict(import_params)  # Start with CLI params
+            # Add defaults from global params section (CLI params already override them)
+            from core.plan_utils import parse_global_params, build_params_dict
+            import yaml as _yaml
+            _raw_data = _yaml.safe_load(Path(import_plan_path).read_text())
+            if isinstance(_raw_data, dict):
+                raw_param_defs = _raw_data.get("params", [])
+                if raw_param_defs:
+                    param_defs = parse_global_params(raw_param_defs)
+                    state.resolved_params = build_params_dict(param_defs, import_params)
         except Exception as exc:
             state.failed = True
             state.failure_reason = f"Failed to import plan: {exc}"
@@ -1553,10 +1433,45 @@ def run_router(
         # Run skill
         if action == "run":
             skill_name = str(plan.get("skill_name", "")).strip()
-            params = {str(k): str(v) for k, v in (plan.get("params") or {}).items()}
             context_hint = str(plan.get("context_hint", ""))
             inject_instructions = plan.get("inject")
             skill_internal_steps = 0
+
+            matched = next((s for s in skills if s.name == skill_name), None)
+            if not matched:
+                state.failed = True
+                state.failure_reason = f"Planner returned unknown skill: {skill_name!r}"
+                break
+
+            # Build params for this skill:
+            # 1. Start with global resolved params (from plan's global params section)
+            # 2. Filter to only include params that the skill actually expects
+            # 3. Validate all required params are satisfied
+            params = {}
+            if state.resolved_params:
+                skill_param_names = {p.get("name") for p in (matched.parameters or []) if "name" in p}
+                if skill_param_names:
+                    # Only inject params that the skill expects
+                    for key, value in state.resolved_params.items():
+                        if key in skill_param_names:
+                            params[key] = value
+
+            # Check for missing required params and fail loudly
+            missing_required = []
+            for skill_param in (matched.parameters or []):
+                param_name = skill_param.get("name", "")
+                is_required = skill_param.get("required", False)
+                has_default = "default" in skill_param and skill_param["default"] is not None
+                if is_required and param_name and param_name not in params and not has_default:
+                    missing_required.append(param_name)
+
+            if missing_required:
+                state.failed = True
+                state.failure_reason = (
+                    f"Skill '{skill_name}' requires parameters: {', '.join(missing_required)}. "
+                    f"Add them to the global 'params:' section in the plan file."
+                )
+                break
 
             # Auto-chain: detect when previous skill output should be passed as a param
             if state.attempts and context_hint:
@@ -1584,12 +1499,6 @@ def run_router(
                         param=target_param,
                         value=output_value[:100],
                     )
-
-            matched = next((s for s in skills if s.name == skill_name), None)
-            if not matched:
-                state.failed = True
-                state.failure_reason = f"Planner returned unknown skill: {skill_name!r}"
-                break
 
             # Prevent repeating a successful skill with the same params
             prev_success_match = any(
@@ -1880,9 +1789,17 @@ from core.plan_utils import (
     substitute_placeholders as _substitute_placeholders,
     find_missing_placeholders as _find_missing_placeholders,
     import_plan_from_yaml as _import_plan_from_yaml,
+    parse_global_params as _parse_global_params,
+    build_params_dict as _build_params_dict,
+    validate_mandatory_params as _validate_mandatory_params,
+    PlanParamDef as _PlanParamDef,
 )
 
 # Also expose the public names for direct import
 substitute_placeholders = _substitute_placeholders
 find_missing_placeholders = _find_missing_placeholders
 import_plan_from_yaml = _import_plan_from_yaml
+parse_global_params = _parse_global_params
+build_params_dict = _build_params_dict
+validate_mandatory_params = _validate_mandatory_params
+PlanParamDef = _PlanParamDef
