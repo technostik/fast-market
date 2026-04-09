@@ -254,16 +254,49 @@ youtube batch-reply INPUT_FILE --prompt "PROMPT" [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-p, --prompt` | Prompt template for generating replies | required |
+| `-p, --prompt` | Prompt template for generating replies. Can be used multiple times. Supports `@filename` to include file contents, `@-` for stdin, and template variables like `{URL}`, `{AUTHOR}`, `{COMMENT}` | required |
 | `-f, --format` | Output: json, yaml, text | json |
 | `-o, --output` | Save results to file | None |
 
+**Prompt Features:**
+
+1. **Multiple Prompts**: Use `-p` multiple times to combine instructions
+2. **File References**: Use `@filename` to include file contents (e.g., `@transcript.txt`)
+3. **Stdin Piping**: Use `@-` to read from stdin
+4. **Template Variables**: Use `{URL}`, `{AUTHOR}`, `{COMMENT}`, `{VIDEO_TITLE}`, etc.
+
+**Supported Template Variables:**
+- `{URL}` or `{VIDEO_URL}` - The video URL
+- `{VIDEO_ID}` - The video ID
+- `{AUTHOR}` or `{COMMENT_AUTHOR}` - The comment author
+- `{COMMENT}` or `{COMMENT_TEXT}` - The comment text
+- `{VIDEO_TITLE}` - The video title
+
 **Examples:**
 ```bash
-# Generate friendly replies
+# Simple reply generation
 youtube batch-reply comments.json \
   -p "Write a friendly, helpful reply to this YouTube comment" \
   --format json -o replies.json
+
+# Multiple prompts with file reference
+youtube batch-reply comments.json \
+  -p 'Write a response that agrees with the comment and promotes my video {URL}.' \
+  -p 'Use this transcript for context: @transcript.txt' \
+  -o replies.json
+
+# Using stdin for transcript
+cat transcript.txt | youtube batch-reply comments.json \
+  -p 'Base your response on this transcript: @-' \
+  -p 'Always mention {URL} in your reply' \
+  -o replies.json
+
+# Complex example with multiple files and variables
+youtube batch-reply comments.json \
+  -p 'Context from guidelines: @content-guidelines.md' \
+  -p 'Video transcript: @transcript.txt' \
+  -p 'Reply to {AUTHOR} in a friendly tone, promoting {URL}' \
+  -o replies.json
 
 # replies.json format:
 # [

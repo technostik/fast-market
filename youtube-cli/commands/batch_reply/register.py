@@ -12,6 +12,10 @@ from common.core.config import load_tool_config
 from common.core.yaml_utils import dump_yaml
 from common.llm.base import LLMRequest
 from common.llm.registry import discover_providers, get_default_provider_name
+from commands.batch_reply.prompt_processor import (
+    process_prompts,
+    PromptProcessorError,
+)
 
 
 def _detect_format_from_filename(filename: str) -> str:
@@ -30,7 +34,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--prompt",
         "-p",
         required=True,
-        help="Prompt template for generating replies (same for all comments)",
+        multiple=True,
+        help="Prompt template for generating replies. Can be used multiple times. "
+             "Supports @filename to include file contents, @- for stdin, "
+             "and template variables like {URL}, {AUTHOR}, {COMMENT}.",
     )
     @click.option(
         "--format",
@@ -80,8 +87,24 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 if not comment_text:
                     continue
 
-                # Build prompt
-                user_prompt = f"{prompt}\n\n---\nComment by: {author}\nVideo: {video_url}\nComment: {comment_text}\n---\n\nGenerate a reply:"
+                # Build prompt using the prompt processor
+                # The processor handles:
+                # - Multiple -p flags (concatenation)
+                # - @filename references (file inclusion)
+                # - @- for stdin
+                # - Template variables like {URL}, {AUTHOR}, {COMMENT}
+                try:
+                    processed_prompt = process_prompts(
+                        prompts=list(prompt),
+                        data=item,
+                        working_dir=input_path.parent,
+                    )
+                except PromptProcessorError as e:
+                    click.echo(f"Error processing prompt for comment {idx}: {e}", err=True)
+                    continue
+
+                # Add the actual comment context to the prompt
+                user_prompt = f"{processed_prompt}\n\n---\nComment by: {author}\nVideo: {video_url}\nComment: {comment_text}\n---\n\nGenerate a reply:"
 
                 # Call LLM
                 request = LLMRequest(
