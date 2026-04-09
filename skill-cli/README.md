@@ -61,7 +61,7 @@ my-skill/
 name: my-skill
 description: What this skill does
 max_iterations: 10
-timeout: 300
+timeout: 10m
 autocompact: 40
 ---
 
@@ -78,8 +78,8 @@ Step-by-step instructions.
 - `name` — Skill name (defaults to directory name)
 - `description` — Brief description
 - `max_iterations` — Max LLM iterations for prompt-based skills
-- `timeout` — Execution timeout in seconds (0 = no timeout)
-- `llm_timeout` — LLM call timeout in seconds
+- `timeout` — Execution timeout. Supports duration strings: `30s` (seconds), `10m` (minutes), `1h` (hours), or plain seconds (e.g., `300`)
+- `llm_timeout` — LLM call timeout in seconds (also supports duration strings)
 - `autocompact` — Auto-compact LEARN.md when exceeding this many lines
 - `stop_condition` — Custom completion criteria that tells the LLM when the task is done. Injected into the task body to prevent early termination. Example:
   ```yaml

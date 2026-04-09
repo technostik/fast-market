@@ -16,6 +16,59 @@ from core.skill import Skill, discover_skills
 logger = structlog.get_logger(__name__)
 
 
+def parse_duration(duration_str: str | int | float | None) -> int | None:
+    """Parse a duration string like '30s', '10m', '1h' into seconds.
+    
+    Accepts:
+    - Integer/float: treated as seconds
+    - String with suffix: 's' (seconds), 'm' (minutes), 'h' (hours)
+    - None: returns None
+    - '0' or 0: returns 0 (no timeout)
+    
+    Examples:
+    >>> parse_duration('30s')
+    30
+    >>> parse_duration('10m')
+    600
+    >>> parse_duration('1h')
+    3600
+    >>> parse_duration(60)
+    60
+    """
+    if duration_str is None:
+        return None
+    
+    if isinstance(duration_str, (int, float)):
+        return int(duration_str)
+    
+    duration_str = str(duration_str).strip().lower()
+    
+    if not duration_str:
+        return None
+    
+    # Match number with optional suffix
+    match = re.match(r'^(\d+(?:\.\d+)?)\s*(s|m|h)?$', duration_str)
+    if not match:
+        # Fallback: try to parse as plain number
+        try:
+            return int(float(duration_str))
+        except ValueError:
+            logger.warning("invalid_duration_string", duration=duration_str)
+            return None
+    
+    value = float(match.group(1))
+    suffix = match.group(2) or 's'  # Default to seconds if no suffix
+    
+    if suffix == 's':
+        return int(value)
+    elif suffix == 'm':
+        return int(value * 60)
+    elif suffix == 'h':
+        return int(value * 3600)
+    
+    return int(value)
+
+
 def make_run_root(workdir: Path, skill_name: str | None = None) -> Path:
     """Create a unique isolated subdirectory inside workdir.
 
@@ -144,7 +197,7 @@ def execute_skill_script(
     skill_ref: str,
     workdir: Path,
     params: dict[str, str] | None = None,
-    timeout: int | None = None,
+    timeout: int | str | None = None,
     save_session: Path | None = None,
 ) -> SkillResult:
     """Execute a skill script directly with SKILL_* environment parameters."""
@@ -198,7 +251,7 @@ def execute_skill_script(
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
         effective_timeout = 60
-    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    effective_timeout = parse_duration(effective_timeout)
     if effective_timeout == 0:
         effective_timeout = None  # 0 means no timeout
 
@@ -255,7 +308,7 @@ def execute_skill_run(
     skill: Skill,
     workdir: Path,
     params: dict[str, str] | None = None,
-    timeout: int | None = None,
+    timeout: int | str | None = None,
     save_session: Path | None = None,
 ) -> SkillResult:
     """
@@ -287,7 +340,7 @@ def execute_skill_run(
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
         effective_timeout = 60
-    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    effective_timeout = parse_duration(effective_timeout)
     if effective_timeout == 0:
         effective_timeout = None  # 0 means no timeout
 
@@ -344,9 +397,9 @@ def execute_skill_prompt(
     skill: Skill,
     workdir: Path,
     params: dict[str, str] | None = None,
-    timeout: int | None = None,
+    timeout: int | str | None = None,
     max_iterations: int | None = None,
-    llm_timeout: int | None = None,
+    llm_timeout: int | str | None = None,
     auto_learn: bool = False,
     provider: str | None = None,
     model: str | None = None,
@@ -416,7 +469,7 @@ def execute_skill_prompt(
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
         effective_timeout = 300
-    effective_timeout = int(str(effective_timeout).rstrip("s"))
+    effective_timeout = parse_duration(effective_timeout)
     if effective_timeout == 0:
         effective_timeout = None
 
@@ -429,6 +482,7 @@ def execute_skill_prompt(
     )
     if effective_llm_timeout is None:
         effective_llm_timeout = 0
+    effective_llm_timeout = parse_duration(effective_llm_timeout) or 0
 
     from commands.setup import init_skill_agent_config
 

@@ -1253,7 +1253,7 @@ def run_router(
     export_target = run_root if run_root is not None else workdir_path
     plan_export_path = None
     execution_export_path = None
-    
+
     if export_plan_path:
         if export_plan_path == "-":
             # Special case: export to stdout
@@ -1270,6 +1270,13 @@ def run_router(
                 # Relative path or filename - place in export_target
                 plan_export_path = export_target / export_path
                 execution_export_path = export_target / f"{export_path.stem}.execution{export_path.suffix}"
+
+    # Handle export_successful_path - redirect to export_target if it's just a filename
+    if export_successful_path:
+        export_succ_path = Path(export_successful_path)
+        if not export_succ_path.is_absolute():
+            # Redirect to the run directory
+            export_successful_path = str(export_target / export_succ_path)
 
     # Import plan if provided
     if import_plan_path:

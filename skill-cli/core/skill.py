@@ -23,8 +23,8 @@ class Skill:
     parameters: list[dict] = field(default_factory=list)
     run: str = ""
     max_iterations: int | None = None
-    timeout: int | None = None
-    llm_timeout: int | None = None
+    timeout: int | str | None = None  # Can be seconds (int) or duration string like '10m', '1h'
+    llm_timeout: int | str | None = None  # Can be seconds (int) or duration string
     autocompact_lines: int | None = None
     stop_condition: str = ""
 
