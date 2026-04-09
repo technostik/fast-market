@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import click
@@ -505,9 +506,10 @@ def register_shellify_subcommand(plan):
     @click.option(
         "--instruction",
         "-i",
-        "instruction",
-        default=None,
-        help="Additional instructions for the LLM to guide shellification.",
+        "instructions",
+        default=(),
+        multiple=True,
+        help="Additional instructions (can be used multiple times). Use '-' to read from stdin.",
     )
     @click.option(
         "--reset",
@@ -542,7 +544,7 @@ def register_shellify_subcommand(plan):
         default=False,
         help="Print the full prompt that would be sent to the LLM and exit.",
     )
-    def shellify_cmd(skill, model, instruction, reset, verbose, max_iterations, no_agent, debug):
+    def shellify_cmd(skill, model, instructions, reset, verbose, max_iterations, no_agent, debug):
         """Convert a skill into scripts/run.sh using an agentic LLM loop.
 
         Reads SKILL.md and LEARN.md (if present) from the skill directory,
@@ -563,6 +565,23 @@ def register_shellify_subcommand(plan):
         except Exception as exc:
             click.echo(f"Error: {exc}", err=True)
             raise SystemExit(1)
+
+        # Merge instructions: handle "-" as stdin, join all with newlines
+        merged_parts = []
+        for instr in instructions:
+            if instr == "-":
+                if sys.stdin.isatty():
+                    raise click.ClickException(
+                        "Instruction '-' requires stdin (pipe content into this command)"
+                    )
+                stdin_content = sys.stdin.read().strip()
+                if not stdin_content:
+                    raise click.ClickException("No input from stdin for instruction '-'")
+                merged_parts.append(stdin_content)
+            else:
+                merged_parts.append(instr)
+
+        instruction = "\n\n".join(merged_parts) if merged_parts else None
 
         # Resolve the skill
         skills_dir = get_skills_dir()
