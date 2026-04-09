@@ -10,6 +10,7 @@ from core.router import (
     _execution_log_to_yaml,
     _export_plan_to_file,
     _export_execution_log,
+    _substitute_placeholders,
     SkillPlan,
     SkillPlanStep,
     SkillExecutionLog,
@@ -136,6 +137,58 @@ class TestPlanImportExport:
 
         captured = capsys.readouterr()
         assert "Test stdout" in captured.out
+
+
+class TestRunDirPlaceholder:
+    """Test RUN_DIR placeholder functionality."""
+
+    def test_substitute_run_dir_placeholder(self):
+        """Test that {{RUN_DIR}} is substituted correctly."""
+        plan_data = {
+            "goal": "Test {{RUN_DIR}}",
+            "plan": [
+                {
+                    "step": 1,
+                    "action": "run",
+                    "skill": "test-skill",
+                    "params": {"path": "{{RUN_DIR}}/output"},
+                }
+            ]
+        }
+        
+        params = {"RUN_DIR": "runs/abc123"}
+        result = _substitute_placeholders(plan_data, params)
+        
+        assert result["goal"] == "Test runs/abc123"
+        assert result["plan"][0]["params"]["path"] == "runs/abc123/output"
+
+    def test_run_dir_default_value_when_no_isolation(self):
+        """Test that RUN_DIR defaults to '.' when no isolation."""
+        params = {"RUN_DIR": "."}
+        plan_data = {"goal": "Work in {{RUN_DIR}}"}
+        result = _substitute_placeholders(plan_data, params)
+        
+        assert result["goal"] == "Work in ."
+
+    def test_import_plan_with_run_dir(self, tmp_path):
+        """Import a plan with {{RUN_DIR}} placeholder and verify substitution."""
+        plan_file = tmp_path / "plan.yaml"
+        plan_content = """
+goal: Process in {{RUN_DIR}}
+plan:
+  - step: 1
+    action: run
+    skill: test-skill
+    params:
+      output_dir: "{{RUN_DIR}}/results"
+"""
+        plan_file.write_text(plan_content)
+        
+        params = {"RUN_DIR": "runs/test123"}
+        plan = _import_plan_from_yaml(str(plan_file), params=params)
+        
+        assert plan.goal == "Process in runs/test123"
+        assert plan.steps[0].params["output_dir"] == "runs/test123/results"
 
 
 class TestExecutionLogExport:

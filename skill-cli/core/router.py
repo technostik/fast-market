@@ -1235,8 +1235,16 @@ def run_router(
     # Create run_root based on isolation mode
     if isolation_mode == "none":
         run_root = None  # Will use workdir_path directly
+        run_dir_value = "."  # No isolation, use workdir
     else:
         run_root = make_run_root(workdir_path)
+        # Calculate RUN_DIR as relative path from workdir to run_root
+        run_dir_value = str(run_root.relative_to(workdir_path))
+
+    # Inject RUN_DIR into import_params for plan substitution
+    if import_params is None:
+        import_params = {}
+    import_params["RUN_DIR"] = run_dir_value
 
     state = RouterState(
         goal=goal,
