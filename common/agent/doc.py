@@ -37,7 +37,7 @@ def _parse_help_output(output: str, tool_name: str) -> dict[str, Any]:
     
     Returns dict with:
     - name: tool name
-    - description: short description
+    - description: useful description (not the Usage line)
     - commands: list of subcommands (if any)
     """
     if not output:
@@ -49,10 +49,13 @@ def _parse_help_output(output: str, tool_name: str) -> dict[str, Any]:
     
     lines = output.split("\n")
     
-    # Extract description (usually first line or after tool name)
-    description = lines[0] if lines else f"Project CLI: `{tool_name}`."
-    if len(description) > 120:
-        description = description[:120] + "..."
+    # Extract description - skip the "Usage:" line, take the next non-empty line
+    description = f"Project CLI: `{tool_name}`."
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("Usage:") and not stripped.startswith("Options:"):
+            description = stripped
+            break
     
     # Extract commands section
     commands = []

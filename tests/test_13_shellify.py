@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -58,24 +59,40 @@ class TestShellifyCommand:
             skill = Skill.from_path(skills_dir / "test-echo")
             assert skill is not None
 
-            # Create scripts dir so run.sh path exists
+            # Create scripts dir and backup if exists
             scripts_dir = skill.path / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
             run_sh = scripts_dir / "run.sh"
-            run_sh.write_text("#!/usr/bin/env bash\necho test\n", encoding="utf-8")
+            
+            # Backup existing run.sh if it exists
+            backup_path = None
+            if run_sh.exists():
+                backup_path = run_sh.with_name("run.sh.test.bak")
+                shutil.copy2(run_sh, backup_path)
 
-            result = shellify_mod._shellify_skill(
-                skill=skill,
-                provider="test-provider",
-                model=None,
-                prompt_template=None,
-                instruction=None,
-                reset=False,
-                verbose=False,
-                max_iterations=5,
-            )
+            try:
+                run_sh.write_text("#!/usr/bin/env bash\necho test\n", encoding="utf-8")
 
-            assert result is True
+                result = shellify_mod._shellify_skill(
+                    skill=skill,
+                    provider="test-provider",
+                    model=None,
+                    prompt_template=None,
+                    instruction=None,
+                    reset=False,
+                    verbose=False,
+                    max_iterations=5,
+                )
+
+                assert result is True
+                assert run_sh.exists()
+            finally:
+                # Restore original or delete new file
+                if backup_path and backup_path.exists():
+                    shutil.copy2(backup_path, run_sh)
+                    backup_path.unlink()
+                elif run_sh.exists():
+                    run_sh.unlink()
 
     def test_shellify_resets_existing(self, skills_dir):
         """shellify with reset=True should tell agent to start fresh."""
@@ -100,18 +117,28 @@ class TestShellifyCommand:
             scripts_dir = skill.path / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
             run_sh = scripts_dir / "run.sh"
-            run_sh.write_text("#!/usr/bin/env bash\nold script\n", encoding="utf-8")
+            
+            # Store original content
+            original_content = run_sh.read_text(encoding="utf-8") if run_sh.exists() else None
 
-            shellify_mod._shellify_skill(
-                skill=skill,
-                provider="test-provider",
-                reset=True,
-                verbose=False,
-                max_iterations=5,
-            )
+            try:
+                run_sh.write_text("#!/usr/bin/env bash\nold script\n", encoding="utf-8")
 
-            task_desc = captured.get("task_description", "")
-            assert "--reset flag" in task_desc or "resetting" in task_desc
+                shellify_mod._shellify_skill(
+                    skill=skill,
+                    provider="test-provider",
+                    reset=True,
+                    verbose=False,
+                    max_iterations=5,
+                )
+
+                assert "starting fresh" in captured.get("task_description", "").lower()
+            finally:
+                # Restore original
+                if original_content is not None:
+                    run_sh.write_text(original_content, encoding="utf-8")
+                elif run_sh.exists():
+                    run_sh.unlink()
 
     def test_shellify_passes_instruction(self, skills_dir):
         """shellify should include user instruction in the prompt."""
@@ -135,17 +162,28 @@ class TestShellifyCommand:
             skill = Skill.from_path(skills_dir / "test-echo")
             scripts_dir = skill.path / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
+            run_sh = scripts_dir / "run.sh"
+            
+            # Store original content
+            original_content = run_sh.read_text(encoding="utf-8") if run_sh.exists() else None
 
-            shellify_mod._shellify_skill(
-                skill=skill,
-                provider="test-provider",
-                instruction="Use curl with retries",
-                reset=False,
-                verbose=False,
-                max_iterations=5,
-            )
+            try:
+                shellify_mod._shellify_skill(
+                    skill=skill,
+                    provider="test-provider",
+                    instruction="Use curl with retries",
+                    reset=False,
+                    verbose=False,
+                    max_iterations=5,
+                )
 
-            assert "Use curl with retries" in captured.get("task_description", "")
+                assert "Use curl with retries" in captured.get("task_description", "")
+            finally:
+                # Restore original
+                if original_content is not None:
+                    run_sh.write_text(original_content, encoding="utf-8")
+                elif run_sh.exists():
+                    run_sh.unlink()
 
     def test_shellify_includes_existing_script_as_context(self, skills_dir):
         """shellify should include existing run.sh in the prompt when not resetting."""
@@ -170,15 +208,26 @@ class TestShellifyCommand:
             scripts_dir = skill.path / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
             run_sh = scripts_dir / "run.sh"
-            run_sh.write_text("#!/usr/bin/env bash\necho 'existing'\n", encoding="utf-8")
+            
+            # Store original content
+            original_content = run_sh.read_text(encoding="utf-8") if run_sh.exists() else None
 
-            shellify_mod._shellify_skill(
-                skill=skill,
-                provider="test-provider",
-                reset=False,
-                verbose=False,
-                max_iterations=5,
-            )
+            try:
+                run_sh.write_text("#!/usr/bin/env bash\necho 'existing'\n", encoding="utf-8")
 
-            task_desc = captured.get("task_description", "")
-            assert "existing scripts/run.sh" in task_desc.lower() or "current version" in task_desc.lower()
+                shellify_mod._shellify_skill(
+                    skill=skill,
+                    provider="test-provider",
+                    reset=False,
+                    verbose=False,
+                    max_iterations=5,
+                )
+
+                task_desc = captured.get("task_description", "")
+                assert "existing scripts/run.sh" in task_desc.lower() or "current version" in task_desc.lower()
+            finally:
+                # Restore original
+                if original_content is not None:
+                    run_sh.write_text(original_content, encoding="utf-8")
+                elif run_sh.exists():
+                    run_sh.unlink()
