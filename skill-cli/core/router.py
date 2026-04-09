@@ -358,6 +358,15 @@ def _make_subdir(run_root: Path, iteration: int, label: str, isolation_mode: str
     return subdir
 
 
+def _format_elapsed(start_time: float) -> str:
+    """Format elapsed time as HH:MM:SS."""
+    elapsed = time.time() - start_time
+    hours = int(elapsed // 3600)
+    minutes = int((elapsed % 3600) // 60)
+    seconds = int(elapsed % 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
 def _print_attempt(attempt: SkillAttempt) -> None:
     status = "success" if attempt.success else "failed"
     params = ", ".join(f"{k}={v}" for k, v in attempt.params.items())
@@ -1561,6 +1570,10 @@ def run_router(
                 subdir_for_record = _make_subdir(run_root, state.iteration, skill_name, isolation_mode)
                 workdir_for_skill = subdir_for_record
 
+            # Display step being executed (without changing line)
+            step_label = f"Step {state.iteration}: {skill_name}"
+            click.echo(f"\r{step_label} ... [{_format_elapsed(state.start_time)}]", err=True, nl=False)
+
             exit_code, session_output, session_path, skill_internal_steps = _run_skill(
                 skill=matched,
                 params=params,
@@ -1576,6 +1589,10 @@ def run_router(
                 inject=inject_instructions,
             )
             label = skill_name
+
+            # Update display with result
+            status = "✓" if exit_code == 0 else "✗"
+            click.echo(f"\r{step_label} {status} [{_format_elapsed(state.start_time)}]", err=True)
 
         # Free-form task
         elif action == "task":
@@ -1598,6 +1615,10 @@ def run_router(
                 subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
                 workdir_for_task = subdir_for_record
 
+            # Display step being executed (without changing line)
+            step_label = f"Step {state.iteration}: (task) {description[:50]}"
+            click.echo(f"\r{step_label} ... [{_format_elapsed(state.start_time)}]", err=True, nl=False)
+
             exit_code, session_output, session_path, task_internal_steps = _run_task(
                 description=description,
                 subdir=workdir_for_task,
@@ -1608,6 +1629,10 @@ def run_router(
                 save_session=save_session,
             )
             label = f"(task) {description[:60]}"
+
+            # Update display with result
+            status = "✓" if exit_code == 0 else "✗"
+            click.echo(f"\r{step_label} {status} [{_format_elapsed(state.start_time)}]", err=True)
 
         else:
             state.failed = True

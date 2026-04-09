@@ -283,11 +283,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     click.echo(attempt.raw_output.strip(), err=True)
                 click.echo("-" * 60, err=True)
 
-        # Write full error log to workdir
+        # Write full error log to run_dir
         if failed_attempts:
             from pathlib import Path
-            workdir_path = Path(workdir) if isinstance(workdir, str) else workdir
-            log_path = workdir_path / "error_log.yaml"
+            # Write to run_root (the actual run directory) if available, otherwise workdir
+            if state.run_root is not None:
+                log_path = state.run_root / "error_log.yaml"
+            else:
+                workdir_path = Path(workdir) if isinstance(workdir, str) else workdir
+                log_path = workdir_path / "error_log.yaml"
             try:
                 log_content = _execution_log_to_yaml(state)
                 log_path.write_text(log_content, encoding="utf-8")
