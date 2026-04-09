@@ -241,12 +241,15 @@ def execute_skill_script(
             exit_code=result.returncode,
         )
     except subprocess.TimeoutExpired as exc:
+        stdout_text = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr_text = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        if not stderr_text:
+            stderr_text = f"Skill script timed out after {effective_timeout} seconds"
         return SkillResult(
             skill_name=skill.name,
             script_name=script_path.name,
-            stdout=exc.stdout or "",
-            stderr=(exc.stderr or "")
-            or f"Skill script timed out after {effective_timeout} seconds",
+            stdout=stdout_text,
+            stderr=stderr_text,
             exit_code=124,
             timed_out=True,
         )
@@ -330,12 +333,17 @@ def execute_skill_run(
             stderr=result.stderr,
             exit_code=result.returncode,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        stdout_text = exc.stdout.decode() if isinstance(exc.stdout, bytes) else ""
+        stderr_text = exc.stderr.decode() if isinstance(exc.stderr, bytes) else ""
+        timeout_msg = f"Skill run timed out after {effective_timeout}s"
+        if not stderr_text:
+            stderr_text = timeout_msg
         return SkillResult(
             skill_name=skill.name,
             script_name="run:",
-            stdout="",
-            stderr=f"Skill run timed out after {effective_timeout}s",
+            stdout=stdout_text,
+            stderr=stderr_text,
             exit_code=124,
             timed_out=True,
         )
