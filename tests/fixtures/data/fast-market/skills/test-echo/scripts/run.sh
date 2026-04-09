@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-echo 'existing'
+set -euo pipefail
+echo "${SKILL_PREFIX:-ECHO}: ${SKILL_MESSAGE}"
