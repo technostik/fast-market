@@ -78,6 +78,9 @@ class Comment(BaseModel):
     like_count: int = 0
     parent_id: Optional[str] = None
     total_reply_count: int = 0
+    channel_name: Optional[str] = None
+    channel_url: Optional[str] = None
+    view_count: int = 0
 
     @classmethod
     def from_api_response(cls, item: dict, video_id: str) -> "Comment":

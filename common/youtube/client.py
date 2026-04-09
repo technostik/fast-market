@@ -135,6 +135,29 @@ class YouTubeClient:
             for item in response.get("items", []):
                 comments.append(Comment.from_api_response(item, video_id))
 
+            # Fetch video details to populate channel_name, channel_url, view_count
+            # We need snippet (for channel info) + statistics (for view count)
+            video_request = self.youtube.videos().list(
+                part="snippet,statistics",
+                id=video_id,
+            )
+            video_response = video_request.execute()
+            self._track_quota(1)
+
+            if video_response.get("items"):
+                video_item = video_response["items"][0]
+                snippet = video_item.get("snippet", {})
+                stats = video_item.get("statistics", {})
+                channel_id = snippet.get("channelId", "")
+                channel_title = snippet.get("channelTitle", "")
+                channel_url = f"https://www.youtube.com/channel/{channel_id}" if channel_id else None
+                view_count = int(stats.get("viewCount", 0))
+
+                for comment in comments:
+                    comment.view_count = view_count
+                    comment.channel_name = channel_title
+                    comment.channel_url = channel_url
+
             logger.info(
                 "comments_retrieved",
                 video_id=video_id,
