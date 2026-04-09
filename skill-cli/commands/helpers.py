@@ -227,6 +227,8 @@ def apply_skill_impl(
             click.echo(f"  SKILL_{key.upper()}={provided_params[key]}")
 
     if skill.has_scripts:
+        if fmt != "json":
+            click.echo(f"mode: script")
         if dry_run:
             if fmt == "json":
                 click.echo(json.dumps({"exit_code": 0, "stdout": "", "stderr": ""}))
@@ -252,6 +254,8 @@ def apply_skill_impl(
             model_name=None,
         )
     elif skill.run:
+        if fmt != "json":
+            click.echo(f"mode: command")
         if dry_run:
             cmd_preview = skill.run
             for key, value in provided_params.items():
@@ -292,6 +296,7 @@ def apply_skill_impl(
         if provider_name:
             llm_display = f"{provider_name}/{llm_display}"
         click.echo(f"llm: {llm_display}")
+        click.echo(f"mode: agent")
 
         if dry_run:
             if fmt == "json":

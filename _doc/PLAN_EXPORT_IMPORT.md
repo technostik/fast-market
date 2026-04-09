@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `skill run` and `skill run-plan` commands support a full lifecycle for plan management:
+The `skill run` and `skill plan` commands support a full lifecycle for plan management:
 1. **List** existing run plans
 2. **Export** the planned skill execution as a user-readable YAML file
 3. **Export** the actual execution log as a YAML file
@@ -13,22 +13,22 @@ The `skill run` and `skill run-plan` commands support a full lifecycle for plan 
 
 ## Plan Commands
 
-### `skill run-plan list`
+### `skill plan list`
 
 List all `run.yaml` files in the workdir (from common config).
 
 ```bash
-skill run-plan list                  # text format
-skill run-plan list --format json    # machine-readable
-skill run-plan list --show-params    # show placeholders
+skill plan list                  # text format
+skill plan list --format json    # machine-readable
+skill plan list --show-params    # show placeholders
 ```
 
-### `skill run-plan params <plan>`
+### `skill plan params <plan>`
 
 Show all `{{placeholders}}` and their defaults for a specific plan.
 
 ```bash
-skill run-plan params my-plan/run.yaml
+skill plan params my-plan/run.yaml
 ```
 
 Output:
@@ -42,7 +42,7 @@ Parameters:
   keywords   [optional] (default: marketing,tech)
 ```
 
-### `skill run-plan edit <plan>`
+### `skill plan edit <plan>`
 
 Interactive wizard to edit a plan's steps:
 
@@ -184,7 +184,7 @@ Executes a free-form CLI task description.
 ```yaml
 - step: 2
   action: task
-  name: find-videos          # optional: used by run-plan convert-task-to-skill
+  name: find-videos          # optional: used by plan convert-task-to-skill
   description: "Review the generated content and make improvements"
   instructions: |
     Focus on engagement metrics
@@ -192,7 +192,7 @@ Executes a free-form CLI task description.
 ```
 
 **Fields:**
-- `name`: (optional) Task name — used by `run-plan convert-task-to-skill` to create skill `auto-{name}`
+- `name`: (optional) Task name — used by `plan convert-task-to-skill` to create skill `auto-{name}`
 - `description`: Task description for the agent
 - `instructions`: Additional instructions for the task
 - `context_hint`: Hint for context extraction
@@ -286,8 +286,8 @@ skill run "promote" --import plan.yaml \
 ### Inspect Plan Parameters
 
 ```bash
-skill run-plan params plan.yaml           # show params for a specific plan
-skill run-plan list --show-params         # show params when listing
+skill plan params plan.yaml           # show params for a specific plan
+skill plan list --show-params         # show params when listing
 ```
 
 ## Interactive Mode (`--interactive` / `-I`)
@@ -310,14 +310,14 @@ Export successful steps:
 skill run "promote" --interactive --export-successful good-plan.yaml
 ```
 
-## Auto-Skills (`run-plan convert-task-to-skill`)
+## Auto-Skills (`plan convert-task-to-skill`)
 
 Named tasks (with `name` field) can be converted to persistent auto-skills using:
 
 ```bash
-skill run-plan convert-task-to-skill run.yaml             # Create skills, print new plan
-skill run-plan convert-task-to-skill run.yaml > new.yaml  # Save new plan to file
-skill run-plan convert-task-to-skill run.yaml --reset     # Force recreate skills
+skill plan convert-task-to-skill run.yaml             # Create skills, print new plan
+skill plan convert-task-to-skill run.yaml > new.yaml  # Save new plan to file
+skill plan convert-task-to-skill run.yaml --reset     # Force recreate skills
 ```
 
 Given a plan with named tasks:
@@ -357,7 +357,7 @@ skill run "promote" --import new.yaml -p query=cats -p topic=animals
 
 ### Edit Auto-Skills
 
-In `skill run-plan edit`, for named task steps:
+In `skill plan edit`, for named task steps:
 - **[L]earn.md** — opens `LEARN.md` of the auto-skill in your editor
 - **[K]ill** — opens `SKILL.md` of the auto-skill in your editor
 
@@ -485,7 +485,7 @@ The `inject` field appends custom instructions to the skill's prompt during exec
 4. **Test with small plans** before creating complex multi-step workflows
 5. **Use context hints** to help the planner understand data flow between steps
 6. **Parameterize reusable plans** with `{{placeholders}}` and defaults
-7. **Use `run-plan convert-task-to-skill`** to create auto-skills for named tasks
+7. **Use `plan convert-task-to-skill`** to create auto-skills for named tasks
 8. **Use `--interactive`** for critical workflows where you want to approve each step
 
 ## Troubleshooting
@@ -498,7 +498,7 @@ The `inject` field appends custom instructions to the skill's prompt during exec
 ### Unresolved Placeholders
 - Provide all mandatory parameters with `-p key=value`
 - Check for typos in placeholder names (`{{key}}` vs `{{keys}}`)
-- Use `skill run-plan params <plan>` to see what's required
+- Use `skill plan params <plan>` to see what's required
 
 ### Inject Not Working
 - Confirm the skill is a prompt-mode skill (has body in SKILL.md)
@@ -512,7 +512,7 @@ The `inject` field appends custom instructions to the skill's prompt during exec
 
 ### Auto-Skill Not Created
 - Ensure the task has a `name` field
-- Run `skill run-plan convert-task-to-skill <plan>` to create auto-skills
+- Run `skill plan convert-task-to-skill <plan>` to create auto-skills
 - Check LLM provider is configured for skill extraction
 
 ## Files Modified

@@ -9,10 +9,11 @@ import click
 import yaml
 
 from commands.base import CommandManifest
-from commands.params import RunPlanFileType
+from commands.params import RunPlanFileType, SkillNameType as _SkillNameType
 from common.cli.helpers import get_editor, open_editor
 from common.core.config import load_common_config
 from core.repl import prompt_with_options, prompt_free_text, prompt_confirm
+from .shellify import register_shellify_subcommand
 
 
 def find_run_yaml_files(search_dir: Path, recursive: bool = True) -> list[Path]:
@@ -177,12 +178,12 @@ def edit_step_in_editor(step: dict) -> dict | None:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.group("run-plan")
-    def run_plan():
+    @click.group("plan")
+    def plan():
         """Manage run plans."""
         pass
 
-    @run_plan.command("list")
+    @plan.command("list")
     @click.argument(
         "directory",
         type=click.Path(exists=True, file_okay=True, dir_okay=True, path_type=Path),
@@ -290,7 +291,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             click.echo()
 
-    @run_plan.command("params")
+    @plan.command("params")
     @click.argument("plan", type=RunPlanFileType())
     def params_cmd(plan):
         """Show plan parameters (placeholders and defaults)."""
@@ -319,7 +320,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     # -----------------------------------------------------------------------
     # EDIT subcommand — step wizard
     # -----------------------------------------------------------------------
-    @run_plan.command("edit")
+    @plan.command("edit")
     @click.argument("plan", type=RunPlanFileType())
     def edit_cmd(plan):
         """Interactive wizard to edit a run plan's steps."""
@@ -507,7 +508,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     # -----------------------------------------------------------------------
     # CONVERT-TASK-TO-SKILL subcommand — named tasks → auto-skills + new plan
     # -----------------------------------------------------------------------
-    @run_plan.command("convert-task-to-skill")
+    @plan.command("convert-task-to-skill")
     @click.argument("plan", type=RunPlanFileType())
     @click.option(
         "--reset",
@@ -626,7 +627,128 @@ def register(plugin_manifests: dict) -> CommandManifest:
         for name in skills_created:
             click.echo(f"Created skill: {name}", err=True)
 
-    return CommandManifest(name="run-plan", click_command=run_plan)
+    # Register shellify subcommand (extracted to its own module)
+    register_shellify_subcommand(plan)
+
+    # -----------------------------------------------------------------------
+    # RESET-LEARN subcommand — delete LEARN.md for skills in a plan or --skill
+    # -----------------------------------------------------------------------
+    @plan.command("reset-learn")
+    @click.argument("plan", type=RunPlanFileType(), required=False, default=None)
+    @click.option(
+        "--skill",
+        "-s",
+        "skill_name",
+        type=_SkillNameType(),
+        default=None,
+        help="Reset LEARN.md for a single skill instead of the whole plan.",
+    )
+    def reset_learn_cmd(plan, skill_name):
+        """Delete LEARN.md for all skills referenced in a plan, or for a single skill with --skill."""
+        from core.skill import Skill
+        from common.core.paths import get_skills_dir
+
+        skills_dir = get_skills_dir()
+
+        if skill_name:
+            # Single skill mode
+            skill_obj = Skill.from_path(skills_dir / skill_name)
+            if not skill_obj:
+                click.echo(f"Error: skill '{skill_name}' not found.", err=True)
+                raise SystemExit(1)
+            skill_names = [skill_name]
+        elif plan:
+            # Plan mode — extract skill names from plan steps
+            plan_path = Path(plan)
+            if not plan_path.exists():
+                click.echo(f"Error: Plan file not found: {plan_path}", err=True)
+                raise SystemExit(1)
+            data = load_plan(plan_path)
+            steps = data.get("plan", [])
+            skill_names = sorted(set(
+                step.get("skill")
+                for step in steps
+                if step.get("action") == "run" and step.get("skill")
+            ))
+            if not skill_names:
+                click.echo("No skills found in plan (no 'run' steps).", err=True)
+                return
+        else:
+            click.echo("Error: provide a plan file or use --skill <name>.", err=True)
+            raise SystemExit(1)
+
+        deleted = 0
+        for name in skill_names:
+            learn_path = skills_dir / name / "LEARN.md"
+            if learn_path.exists():
+                learn_path.unlink()
+                click.echo(f"Deleted: {learn_path}", err=True)
+                deleted += 1
+            else:
+                click.echo(f"No LEARN.md for: {name}", err=True)
+
+        click.echo(f"Done: {deleted} file(s) removed.", err=True)
+
+    # -----------------------------------------------------------------------
+    # RESET-SHELL subcommand — delete scripts/run.sh for skills in a plan or --skill
+    # -----------------------------------------------------------------------
+    @plan.command("reset-shell")
+    @click.argument("plan", type=RunPlanFileType(), required=False, default=None)
+    @click.option(
+        "--skill",
+        "-s",
+        "skill_name",
+        type=_SkillNameType(),
+        default=None,
+        help="Reset scripts/run.sh for a single skill instead of the whole plan.",
+    )
+    def reset_shell_cmd(plan, skill_name):
+        """Delete scripts/run.sh for all skills referenced in a plan, or for a single skill with --skill."""
+        from core.skill import Skill
+        from common.core.paths import get_skills_dir
+
+        skills_dir = get_skills_dir()
+
+        if skill_name:
+            # Single skill mode
+            skill_obj = Skill.from_path(skills_dir / skill_name)
+            if not skill_obj:
+                click.echo(f"Error: skill '{skill_name}' not found.", err=True)
+                raise SystemExit(1)
+            skill_names = [skill_name]
+        elif plan:
+            # Plan mode — extract skill names from plan steps
+            plan_path = Path(plan)
+            if not plan_path.exists():
+                click.echo(f"Error: Plan file not found: {plan_path}", err=True)
+                raise SystemExit(1)
+            data = load_plan(plan_path)
+            steps = data.get("plan", [])
+            skill_names = sorted(set(
+                step.get("skill")
+                for step in steps
+                if step.get("action") == "run" and step.get("skill")
+            ))
+            if not skill_names:
+                click.echo("No skills found in plan (no 'run' steps).", err=True)
+                return
+        else:
+            click.echo("Error: provide a plan file or use --skill <name>.", err=True)
+            raise SystemExit(1)
+
+        deleted = 0
+        for name in skill_names:
+            run_sh = skills_dir / name / "scripts" / "run.sh"
+            if run_sh.exists():
+                run_sh.unlink()
+                click.echo(f"Deleted: {run_sh}", err=True)
+                deleted += 1
+            else:
+                click.echo(f"No scripts/run.sh for: {name}", err=True)
+
+        click.echo(f"Done: {deleted} file(s) removed.", err=True)
+
+    return CommandManifest(name="plan", click_command=plan)
 
 
 # ---------------------------------------------------------------------------
@@ -796,7 +918,7 @@ def _build_llm_context(plan_data: dict, skills: list, step_idx: int | None) -> s
     lines.append("### For `action: task`")
     lines.append("- `description`: (string) free-form task description")
     lines.append("- `instructions`: (optional string) additional execution instructions")
-    lines.append("- `name`: (optional string) task name — used by run-plan convert-task-to-skill to create `auto-{name}` skill")
+    lines.append("- `name`: (optional string) task name — used by plan convert-task-to-skill to create `auto-{name}` skill")
     lines.append("- `context_hint`: (optional string) hint for context extraction")
     lines.append("")
     lines.append("### For `action: ask`")
@@ -837,7 +959,7 @@ def _build_llm_context(plan_data: dict, skills: list, step_idx: int | None) -> s
 
 def _clean_llm_yaml(raw: str) -> str | None:
     """Robustly clean LLM output to produce parseable YAML.
-    
+
     Handles: markdown code fences, stray text outside YAML, unquoted values
     with colons, and other common LLM formatting issues.
     """
@@ -871,7 +993,7 @@ def _clean_llm_yaml(raw: str) -> str | None:
     # 3. Extract YAML-like content: find first and last YAML-looking lines
     known_keys = ["action:", "step:", "skill:", "description:", "question:",
                   "context_hint:", "params:", "inject:", "instructions:"]
-    
+
     lines = text.splitlines()
     first_yaml = -1
     last_yaml = -1
@@ -1220,7 +1342,7 @@ def _edit_auto_skill_learn(step: dict) -> None:
         return
 
     learn_path = skill_path / "LEARN.md"
-    
+
     # Create LEARN.md if it doesn't exist
     if not learn_path.exists():
         learn_path.write_text("# Lessons Learned\n\n", encoding="utf-8")

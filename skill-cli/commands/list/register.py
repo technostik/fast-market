@@ -31,7 +31,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         {
                             "name": s.name,
                             "description": s.description,
+                            "mode": s.get_execution_mode(),
                             "has_scripts": s.has_scripts,
+                            "health_issues": s.health_check(),
                         }
                         for s in skills
                     ],
@@ -46,10 +48,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         click.echo(f"Skills directory: {skills_dir}\n")
         for skill in skills:
-            click.echo(f"  {skill.name}")
+            mode = skill.get_execution_mode()
+            issues = skill.health_check()
+            status = ""
+            if issues:
+                status = f" ⚠ {', '.join(issues)}"
+            
+            click.echo(f"  {skill.name} [{mode}]{status}")
             if skill.description:
                 click.echo(f"    Description: {skill.description}")
             if skill.has_scripts:
-                click.echo("    Has executable scripts")
+                scripts_dir = skill.path / "scripts"
+                script_files = [p.name for p in scripts_dir.iterdir() if p.is_file()]
+                if script_files:
+                    click.echo(f"    Scripts: {', '.join(script_files)}")
 
     return CommandManifest(name="list", click_command=list_cmd)

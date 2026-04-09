@@ -9,7 +9,10 @@ from common.core.registry import discover_commands, discover_plugins
 
 requires_common_config("image", [])
 
-main = create_cli_group("image")
+main = create_cli_group(
+    "image",
+    description="Generate images from text prompts using AI (FLUX.2 and other engines)."
+)
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 

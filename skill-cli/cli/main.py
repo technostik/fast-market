@@ -24,7 +24,10 @@ from common.prompt import register_commands, get_prompt_manager
 
 requires_common_config("skill", [])
 
-main = create_cli_group("skill")
+main = create_cli_group(
+    "skill",
+    description="Manage reusable skills with optional executable scripts and learn from previous runs."
+)
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 _prompt_manager = None
 

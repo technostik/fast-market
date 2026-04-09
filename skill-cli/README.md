@@ -105,8 +105,8 @@ Show skill details.
 
 ```bash
 skill show <name>             # Show SKILL.md content
-skill show <name> --learned   # Show LEARN.md instead
-skill show <name> -l          # Short form for --learned
+skill show <name> --learn   # Show LEARN.md instead
+skill show <name> -l        # Short form for --learn
 ```
 
 ### skill create
@@ -135,7 +135,7 @@ Edit skill files.
 
 ```bash
 skill edit <name>                     # Edit SKILL.md
-skill edit <name> --learned           # Edit LEARN.md
+skill edit <name> --learn               # Edit LEARN.md
 skill edit <name> -l                  # Short form
 skill edit <name> script.sh           # Edit specific file
 skill edit <name> script.sh --create  # Create if doesn't exist
@@ -212,14 +212,14 @@ Each skill receives in its prompt:
 
 This enables skills to pass structured information and coordinate beyond file outputs.
 
-**Auto-Skills via `run-plan convert-task-to-skill`:**
+**Auto-Skills via `plan convert-task-to-skill`:**
 
-Use the `skill run-plan convert-task-to-skill` subcommand to convert named tasks from a plan file into persistent auto-skills:
+Use the `skill plan convert-task-to-skill` subcommand to convert named tasks from a plan file into persistent auto-skills:
 
 ```bash
-skill run-plan convert-task-to-skill run.yaml             # Create skills, print new plan
-skill run-plan convert-task-to-skill run.yaml > new.yaml  # Save new plan to file
-skill run-plan convert-task-to-skill run.yaml --reset     # Force recreate skills
+skill plan convert-task-to-skill run.yaml             # Create skills, print new plan
+skill plan convert-task-to-skill run.yaml > new.yaml  # Save new plan to file
+skill plan convert-task-to-skill run.yaml --reset     # Force recreate skills
 ```
 
 For each named task (with a `name` field) in the plan:

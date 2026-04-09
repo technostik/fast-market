@@ -12,6 +12,15 @@ from core.config import load_config
 from core.engine import build_youtube_client
 
 
+def _detect_format_from_filename(filename: str) -> str:
+    """Auto-detect output format from file extension."""
+    if filename.endswith(".yaml") or filename.endswith(".yml"):
+        return "yaml"
+    elif filename.endswith(".json"):
+        return "json"
+    return "text"
+
+
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("batch-comments")
     @click.argument("input_file", type=click.Path(exists=True))
@@ -33,8 +42,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "-f",
         "fmt",
         type=click.Choice(["json", "yaml", "text"]),
-        default="text",
-        help="Output format",
+        default=None,
+        help="Output format (auto-detected from file extension if not specified)",
     )
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.option(
@@ -85,14 +94,24 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             # Output results
             if output:
-                Path(output).write_text(
-                    json.dumps(all_comments, ensure_ascii=False, default=str)
-                    if fmt == "json"
-                    else dump_yaml(all_comments)
-                )
+                # Auto-detect format from filename if not explicitly specified
+                output_fmt = fmt if fmt else _detect_format_from_filename(output)
+                
+                if output_fmt == "json":
+                    Path(output).write_text(
+                        json.dumps(all_comments, ensure_ascii=False, default=str)
+                    )
+                elif output_fmt == "yaml":
+                    Path(output).write_text(dump_yaml(all_comments))
+                else:
+                    # text format - write as JSON lines or simple text
+                    Path(output).write_text(
+                        json.dumps(all_comments, ensure_ascii=False, default=str)
+                    )
                 click.echo(f"Saved {len(all_comments)} comments to {output}", err=True)
             else:
-                out(all_comments, fmt)
+                # Default to text if no output file and no format specified
+                out(all_comments, fmt if fmt else "text")
 
         except Exception as e:
             click.echo(f"Error: {e}", err=True)

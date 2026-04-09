@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 
 import click
+from common import structlog
 
 from commands.base import CommandManifest
 from commands.completion import PromptNameParamType
@@ -71,51 +72,110 @@ def register(plugin_manifests: dict) -> CommandManifest:
         prompt_content = None
         saved_prompt = None
 
-        # Read from stdin if requested
-        if stdin or prompt_name_or_content == "-":
-            # Check if this is a named prompt (not "-")
-            if stdin and prompt_name_or_content != "-":
-                # User provided a named prompt with --stdin flag
-                # Try to load the saved prompt to show its placeholders
-                store = PromptStore()
-                maybe_saved_prompt = store.get_prompt(prompt_name_or_content)
+        # --- Implicit stdin handling (without --stdin flag) ---
+        implicit_stdin = False
+        stdin_content = ""
+        if (
+            not stdin
+            and prompt_name_or_content != "-"
+            and not sys.stdin.isatty()
+            and len(args) == 0  # Only if no explicit args provided
+        ):
+            stdin_content = sys.stdin.read().strip()
+            if stdin_content:
+                implicit_stdin = True
 
-                if maybe_saved_prompt:
-                    from core.substitution import extract_placeholders
+        # Read from stdin if requested (explicit --stdin or "-" or implicit)
+        if stdin or prompt_name_or_content == "-" or implicit_stdin:
+            # For explicit --stdin or "-", use old behavior
+            if stdin or prompt_name_or_content == "-":
+                if stdin and prompt_name_or_content != "-":
+                    # User provided a named prompt with --stdin flag
+                    # Try to load the saved prompt to show its placeholders
+                    store = PromptStore()
+                    maybe_saved_prompt = store.get_prompt(prompt_name_or_content)
 
-                    placeholders = extract_placeholders(maybe_saved_prompt.content)
-                    if placeholders:
-                        placeholder_list = " ".join(
-                            f"{p}=-" for p in placeholders
-                        )
-                        click.echo(
-                            f"Error: --stdin is not compatible with applying a named prompt.\n"
-                            f"Named prompt '{prompt_name_or_content}' has placeholders: {', '.join(placeholders)}\n"
-                            f"Instead use: prompt apply {prompt_name_or_content} {placeholder_list}",
-                            err=True,
-                        )
-                    else:
-                        click.echo(
-                            f"Error: --stdin is not compatible with applying a named prompt.\n"
-                            f"Instead use: prompt apply {prompt_name_or_content}",
-                            err=True,
-                        )
+                    if maybe_saved_prompt:
+                        from core.substitution import extract_placeholders
+
+                        placeholders = extract_placeholders(maybe_saved_prompt.content)
+                        if placeholders:
+                            placeholder_list = " ".join(
+                                f"{p}=-" for p in placeholders
+                            )
+                            click.echo(
+                                f"Error: --stdin is not compatible with applying a named prompt.\n"
+                                f"Named prompt '{prompt_name_or_content}' has placeholders: {', '.join(placeholders)}\n"
+                                f"Instead use: prompt apply {prompt_name_or_content} {placeholder_list}",
+                                err=True,
+                            )
+                        else:
+                            click.echo(
+                                f"Error: --stdin is not compatible with applying a named prompt.\n"
+                                f"Instead use: prompt apply {prompt_name_or_content}",
+                                err=True,
+                            )
+                        sys.exit(1)
+                    # If not a saved prompt, treat as direct prompt + stdin (allowed, stdin overrides)
+
+                if not sys.stdin.isatty():
+                    prompt_content = sys.stdin.read().strip()
+                    if not prompt_content:
+                        click.echo("Error: No input from stdin", err=True)
+                        sys.exit(1)
+                    is_direct_prompt = True
+                    prompt_name_or_content = "<stdin>"
+                else:
+                    click.echo(
+                        "Error: No stdin available (pipe content into this command)",
+                        err=True,
+                    )
                     sys.exit(1)
-                # If not a saved prompt, treat as direct prompt + stdin (allowed, stdin overrides)
-
-            if not sys.stdin.isatty():
-                prompt_content = sys.stdin.read().strip()
-                if not prompt_content:
-                    click.echo("Error: No input from stdin", err=True)
-                    sys.exit(1)
-                is_direct_prompt = True
-                prompt_name_or_content = "<stdin>"
             else:
-                click.echo(
-                    "Error: No stdin available (pipe content into this command)",
-                    err=True,
-                )
-                sys.exit(1)
+                # Implicit stdin path: validate and handle
+                store = PromptStore()
+                saved_prompt = store.get_prompt(prompt_name_or_content)
+
+                if not saved_prompt:
+                    click.echo(
+                        f"Error: Unknown prompt '{prompt_name_or_content}'.\n"
+                        f"Use 'prompt list' to see available prompts.",
+                        err=True,
+                    )
+                    sys.exit(1)
+
+                prompt_content = saved_prompt.content
+                from core.substitution import extract_placeholders
+                placeholders = extract_placeholders(prompt_content)
+
+                if len(placeholders) == 0:
+                    click.echo(
+                        f"Error: this prompt should not have additional content.",
+                        err=True,
+                    )
+                    sys.exit(1)
+                elif len(placeholders) == 1:
+                    logger = structlog.get_logger(__name__)
+                    logger.warning(
+                        "implicit_stdin_replacing_placeholder",
+                        placeholder=placeholders[0],
+                    )
+                    click.echo(
+                        f"Warning: replacing placeholder '{placeholders[0]}' with stdin content",
+                        err=True,
+                    )
+                    prompt_content = prompt_content.replace(
+                        f"{{{placeholders[0]}}}", stdin_content
+                    )
+                else:
+                    placeholder_list = " ".join(f"{p}=value" for p in placeholders)
+                    click.echo(
+                        f"Error: prompt '{prompt_name_or_content}' has {len(placeholders)} placeholders: {', '.join(placeholders)}\n"
+                        f"Provide values using: prompt apply {prompt_name_or_content} {placeholder_list}\n"
+                        f"Or use stdin for one placeholder: {placeholders[0]}=-",
+                        err=True,
+                    )
+                    sys.exit(1)
         else:
             # Try to load as saved prompt first
             store = PromptStore()

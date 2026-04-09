@@ -54,6 +54,9 @@ _YT_POSTER_HTML = """<!doctype html>
   <div id=\"controls\" class=\"controls\">
     <button id=\"selectAll\">Select all</button>
     <button id=\"deselectAll\">Deselect all</button>
+    <label style=\"display:flex;align-items:center;gap:6px;\">
+      <input type=\"checkbox\" id=\"dryRun\"> Dry run
+    </label>
   </div>
 
   <div id=\"tableWrap\" class=\"table-wrap\">
@@ -93,6 +96,7 @@ const footer = document.getElementById('footer');
 const postBtn = document.getElementById('postBtn');
 const selectAllBtn = document.getElementById('selectAll');
 const deselectAllBtn = document.getElementById('deselectAll');
+const dryRunEl = document.getElementById('dryRun');
 const spinner = document.getElementById('spinner');
 const output = document.getElementById('output');
 const exitCode = document.getElementById('exitCode');
@@ -163,6 +167,10 @@ async function loadFile(){
     return;
   }
   const data = await resp.json();
+  const url = new URL(window.location.href);
+  url.searchParams.set('file', file);
+  window.history.replaceState({}, '', url);
+
   rows = data.map(item => ({ ...item, selected: true }));
   controls.style.display = 'flex';
   tableWrap.style.display = 'block';
@@ -179,7 +187,7 @@ async function postSelected(){
   const resp = await fetch('/api/yt_poster/post', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ file, indices }),
+    body: JSON.stringify({ file, indices, dry_run: dryRunEl.checked }),
   });
 
   spinner.style.display = 'none';
@@ -188,7 +196,9 @@ async function postSelected(){
   const code = body.exit_code ?? -1;
   exitCode.textContent = `Exit code: ${code}`;
   exitCode.style.color = code === 0 ? 'var(--success)' : 'var(--error)';
-  logEl.textContent = body.output || '';
+  const reportPath = body.report ? `\nReport: ${body.report}` : '';
+  const mode = body.dry_run ? '[dry-run] ' : '';
+  logEl.textContent = `${mode}${body.output || ''}${reportPath}`;
 }
 
 loadBtn.addEventListener('click', loadFile);
@@ -198,7 +208,10 @@ deselectAllBtn.addEventListener('click', () => { rows.forEach(r => r.selected = 
 
 const params = new URLSearchParams(window.location.search);
 const preset = params.get('file');
-if (preset) fileInput.value = preset;
+if (preset) {
+  fileInput.value = preset;
+  loadFile();
+}
 </script>
 </body>
 </html>

@@ -9,7 +9,10 @@ from common.core.registry import discover_commands
 
 requires_common_config("youtube", ["llm", "youtube"])
 
-main = create_cli_group("youtube-agent")
+main = create_cli_group(
+    "youtube-agent",
+    description="Search YouTube, fetch videos/comments, and post replies via the YouTube Data API."
+)
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -161,3 +161,39 @@ def test_apply_inject_adds_instructions_to_prompt_mode(workdir):
     )
 
 
+def test_apply_heredoc_command_in_agent_mode(workdir):
+    """Test that heredoc commands with quoted delimiters can be executed by the executor.
+    
+    This regression test ensures that commands like:
+        cat > file.sh << 'EOF'
+        ...
+        EOF
+    
+    Don't fail with "No closing quotation" errors. The executor should handle
+    heredoc syntax properly by extracting the base command for whitelist
+    validation while passing the full heredoc to the shell for execution.
+    
+    Note: This tests the executor directly, not through the full agentic loop,
+    to avoid requiring actual LLM calls in unit tests.
+    """
+    from common.agent.executor import execute_command
+    
+    # Test that a heredoc command can be parsed and executed without errors
+    cmd = """cat > output.txt << 'EOF'
+test content from heredoc
+EOF"""
+    
+    allowed = {"cat", "echo", "bash"}
+    result = execute_command(cmd, workdir, allowed)
+    
+    # Should not get "No closing quotation" error
+    assert "No closing quotation" not in result.stderr
+    assert result.exit_code == 0, f"Command failed: {result.stderr}"
+    
+    # Verify the file was created with correct content
+    output_file = workdir / "output.txt"
+    assert output_file.exists(), "output.txt should be created by the heredoc command"
+    content = output_file.read_text()
+    assert "test content from heredoc" in content, "output.txt should contain the heredoc content"
+
+

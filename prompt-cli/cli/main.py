@@ -10,7 +10,10 @@ from common.llm.registry import discover_providers
 
 requires_common_config("prompt", ["llm"])
 
-main = create_cli_group("prompt")
+main = create_cli_group(
+    "prompt",
+    description="Manage reusable LLM prompt templates with placeholder substitution."
+)
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 

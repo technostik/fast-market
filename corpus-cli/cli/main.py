@@ -9,7 +9,10 @@ from common.core.registry import discover_commands, discover_plugins
 
 requires_common_config("corpus", ["llm", "youtube"])
 
-main = create_cli_group("corpus")
+main = create_cli_group(
+    "corpus", 
+    description="Index and search your content corpus (Obsidian notes, YouTube videos) for semantic retrieval."
+)
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -6,7 +6,10 @@ from pathlib import Path
 from common.cli.base import create_cli_group
 from common.core.registry import discover_commands, discover_plugins
 
-main = create_cli_group("message-agent")
+main = create_cli_group(
+    "message-agent",
+    description="Alert and interact with users via messaging platforms (e.g., Telegram)."
+)
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
 

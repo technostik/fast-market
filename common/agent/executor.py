@@ -86,12 +86,32 @@ def _parse_command_tokens(cmd_str: str) -> tuple[bool, list[str], str | None]:
 
     Returns (success, tokens, error_message).
     If success is False, error_message contains the parsing error.
+    
+    For heredoc commands (<<), extracts just the base command for parsing
+    since shlex.split() fails on the multi-line heredoc content.
     """
     try:
         tokens = shlex.split(cmd_str)
         return True, tokens, None
-    except ValueError as exc:
-        return False, [], str(exc)
+    except ValueError:
+        # If shlex fails, this might be a heredoc command with complex quoting.
+        # For heredocs, extract just the base command (before <<) for whitelist checking.
+        if "<<" in cmd_str:
+            try:
+                # Extract the part before the heredoc
+                base_cmd = cmd_str.split("<<")[0].strip()
+                if base_cmd:
+                    tokens = shlex.split(base_cmd)
+                    # Return base command tokens for whitelist checking
+                    return True, tokens, None
+            except (ValueError, IndexError):
+                pass
+        # Return the original error
+        try:
+            shlex.split(cmd_str)
+        except ValueError as exc:
+            return False, [], str(exc)
+        return False, [], "Command parsing error"
 
 
 def is_command_allowed(cmd_str: str, allowed: set[str]) -> tuple[bool, str | None]:

@@ -14,6 +14,15 @@ from common.llm.base import LLMRequest
 from common.llm.registry import discover_providers, get_default_provider_name
 
 
+def _detect_format_from_filename(filename: str) -> str:
+    """Auto-detect output format from file extension."""
+    if filename.endswith(".yaml") or filename.endswith(".yml"):
+        return "yaml"
+    elif filename.endswith(".json"):
+        return "json"
+    return "text"
+
+
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("batch-reply")
     @click.argument("input_file", type=click.Path(exists=True))
@@ -28,8 +37,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "-f",
         "fmt",
         type=click.Choice(["json", "yaml", "text"]),
-        default="json",
-        help="Output format",
+        default=None,
+        help="Output format (auto-detected from file extension if not specified)",
     )
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.pass_context
@@ -96,14 +105,24 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             # Output results
             if output:
-                Path(output).write_text(
-                    json.dumps(results, ensure_ascii=False, default=str)
-                    if fmt == "json"
-                    else dump_yaml(results)
-                )
+                # Auto-detect format from filename if not explicitly specified
+                output_fmt = fmt if fmt else _detect_format_from_filename(output)
+
+                if output_fmt == "json":
+                    Path(output).write_text(
+                        json.dumps(results, ensure_ascii=False, default=str)
+                    )
+                elif output_fmt == "yaml":
+                    Path(output).write_text(dump_yaml(results))
+                else:
+                    # text format - write as JSON
+                    Path(output).write_text(
+                        json.dumps(results, ensure_ascii=False, default=str)
+                    )
                 click.echo(f"Saved {len(results)} replies to {output}", err=True)
             else:
-                out(results, fmt)
+                # Default to json if no output file and no format specified
+                out(results, fmt if fmt else "json")
 
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
