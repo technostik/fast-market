@@ -9,64 +9,12 @@ from uuid import uuid4
 
 from common import structlog
 from common.core.config import load_tool_config
+from common.core.duration import parse_duration
 from common.core.paths import get_skills_dir
 from common.core.yaml_utils import dump_yaml
 from core.skill import Skill, discover_skills
 
 logger = structlog.get_logger(__name__)
-
-
-def parse_duration(duration_str: str | int | float | None) -> int | None:
-    """Parse a duration string like '30s', '10m', '1h' into seconds.
-    
-    Accepts:
-    - Integer/float: treated as seconds
-    - String with suffix: 's' (seconds), 'm' (minutes), 'h' (hours)
-    - None: returns None
-    - '0' or 0: returns 0 (no timeout)
-    
-    Examples:
-    >>> parse_duration('30s')
-    30
-    >>> parse_duration('10m')
-    600
-    >>> parse_duration('1h')
-    3600
-    >>> parse_duration(60)
-    60
-    """
-    if duration_str is None:
-        return None
-    
-    if isinstance(duration_str, (int, float)):
-        return int(duration_str)
-    
-    duration_str = str(duration_str).strip().lower()
-    
-    if not duration_str:
-        return None
-    
-    # Match number with optional suffix
-    match = re.match(r'^(\d+(?:\.\d+)?)\s*(s|m|h)?$', duration_str)
-    if not match:
-        # Fallback: try to parse as plain number
-        try:
-            return int(float(duration_str))
-        except ValueError:
-            logger.warning("invalid_duration_string", duration=duration_str)
-            return None
-    
-    value = float(match.group(1))
-    suffix = match.group(2) or 's'  # Default to seconds if no suffix
-    
-    if suffix == 's':
-        return int(value)
-    elif suffix == 'm':
-        return int(value * 60)
-    elif suffix == 'h':
-        return int(value * 3600)
-    
-    return int(value)
 
 
 def make_run_root(workdir: Path, skill_name: str | None = None) -> Path:

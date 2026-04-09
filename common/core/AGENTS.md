@@ -135,6 +135,31 @@ requires_common_config("image", [])               # No common config needed
 - `discover_plugins()` - Auto-discovers plugins from `plugins/*/plugin.py`
 - `build_plugins(manifests)` - Builds plugin instances from manifests
 
+## Duration Parsing
+
+Two functions for parsing duration strings into seconds:
+
+### `parse_duration(duration)`
+Parses simple duration strings with suffixes:
+- `'30s'` - 30 seconds
+- `'10m'` - 10 minutes (600 seconds)
+- `'1h'` - 1 hour (3600 seconds)
+- `'2.5h'` - 2.5 hours (9000 seconds)
+- `'300'` or `300` - plain seconds (backward compatible)
+- `None` - returns `None`
+
+Used for skill timeouts in SKILL.md frontmatter (`timeout: 10m`).
+
+### `parse_iso_duration(iso_duration)`
+Parses ISO 8601 duration strings:
+- `'PT30S'` - 30 seconds
+- `'PT10M'` - 10 minutes
+- `'PT1H'` - 1 hour
+- `'PT1H2M3S'` - 1 hour, 2 minutes, 3 seconds (3723 seconds)
+- Falls back to `parse_duration()` for non-ISO formats
+
+Used for YouTube video durations (`PT1H2M3S` format).
+
 ## Aliases
 
 - `get_aliases_path()` - Returns aliases file path

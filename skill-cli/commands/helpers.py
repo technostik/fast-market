@@ -343,12 +343,13 @@ def apply_skill_impl(
         )
 
         if auto_learn:
+            from common.core.duration import parse_duration
             from core.runner import _run_auto_learn_from_skill
 
             timed_out_seconds = timeout if timeout is not None else skill.timeout
             if timed_out_seconds is None:
                 timed_out_seconds = 300
-            timed_out_seconds = int(str(timed_out_seconds).rstrip("s"))
+            timed_out_seconds = parse_duration(timed_out_seconds) or 300
 
             session = None
             session_path = auto_learn_session_path or _resolve_save_session_path(

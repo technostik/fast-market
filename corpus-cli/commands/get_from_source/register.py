@@ -8,6 +8,7 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import build_engine, out
+from common.core.duration import parse_iso_duration
 from core.sync_errors import APIRateLimitError, NetworkError, TranscriptUnavailableError
 from plugins.base import ItemMeta
 
@@ -138,7 +139,7 @@ def _sync_youtube(plugin, video_id: str, engine, store) -> None:
             ).replace(tzinfo=None)
         else:
             updated = datetime.utcnow()
-        duration = _parse_duration(detail.get("contentDetails", {}).get("duration", 0))
+        duration = parse_iso_duration(detail.get("contentDetails", {}).get("duration", 0))
         item_meta = ItemMeta(
             source_id=video_id,
             updated_at=updated,
@@ -181,20 +182,6 @@ def _sync_generic(plugin, source_id: str, engine, store) -> None:
     except Exception as exc:
         click.echo(f"Error syncing {source_id}: {exc}", err=True)
         sys.exit(1)
-
-
-def _parse_duration(duration) -> int:
-    if duration is None:
-        return 0
-    if isinstance(duration, int):
-        return duration
-    if isinstance(duration, float):
-        return int(duration)
-    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration)
-    if not match:
-        return 0
-    h, m, s = (int(x or 0) for x in match.groups())
-    return h * 3600 + m * 60 + s
 
 
 def _store_document(document, engine, store) -> None:
