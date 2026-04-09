@@ -304,6 +304,8 @@ def _shellify_skill(
     """
     from common.agent.call import agent_call
     from common.core.paths import get_skills_dir
+    from common.core.config import load_tool_config
+    from commands.setup import init_skill_agent_config
 
     # Read skill content
     skill_body = skill.get_body()
@@ -424,6 +426,10 @@ def _shellify_skill(
         "curl", "wget", "jq", "tee", "tar", "gzip", "zip", "unzip",
     ]
 
+    # Load fastmarket_tools from config to include prompt, corpus, image, etc.
+    agent_config = init_skill_agent_config()
+    fastmarket_tools = agent_config.get("fastmarket_tools", {})
+
     task_description = formatted_prompt
 
     # Backup existing run.sh before the agent runs (agent will overwrite it)
@@ -443,6 +449,7 @@ def _shellify_skill(
             task_description=task_description,
             workdir=skill.path,
             system_commands=agent_system_commands,
+            fastmarket_tools=fastmarket_tools,
             provider=provider,
             model=model,
             verbose=verbose,
