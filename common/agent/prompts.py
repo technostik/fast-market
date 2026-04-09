@@ -509,7 +509,58 @@ def _build_aliases_section() -> str:
 
 
 def _build_fastmarket_tools_section(fastmarket_tools_config: dict) -> str:
-    """Build the Fast-Market tools section of command documentation."""
+    """Build the Fast-Market tools section of command documentation.
+    
+    Uses dynamic --help discovery from doc.py for up-to-date documentation.
+    Falls back to config-based descriptions if doc.py fails.
+    """
+    try:
+        from common.agent.doc import build_single_tool_doc
+    except ImportError:
+        # Fallback to old behavior if doc.py not available
+        return _build_fastmarket_tools_section_from_config(fastmarket_tools_config)
+    
+    try:
+        from common.core.aliases import get_reverse_aliases
+    except ImportError:
+        def get_reverse_aliases():
+            return {}
+    
+    if not fastmarket_tools_config:
+        return ""
+    
+    reverse_aliases = get_reverse_aliases()
+    docs = ["## Fast-Market Tools\n"]
+    
+    for cmd in sorted(fastmarket_tools_config.keys()):
+        # Try to get dynamic documentation from --help
+        try:
+            tool_doc = build_single_tool_doc(cmd, depth=1)
+            docs.append(tool_doc)
+        except Exception:
+            # Fallback to config-based description
+            config = fastmarket_tools_config[cmd]
+            desc = config.get("description", "") if isinstance(config, dict) else ""
+            if not desc:
+                desc = f"{cmd} command-line tool"
+            
+            docs.append(f"### {cmd}")
+            docs.append(desc)
+            docs.append(f"**Usage**: `{cmd} [OPTIONS]`")
+        
+        # Add aliases if any
+        cmd_aliases = reverse_aliases.get(cmd, [])
+        if cmd_aliases:
+            docs.append(
+                f"**Aliases**: {', '.join(f'`{a}`' for a in sorted(cmd_aliases))}"
+            )
+        docs.append("")
+    
+    return "\n".join(docs)
+
+
+def _build_fastmarket_tools_section_from_config(fastmarket_tools_config: dict) -> str:
+    """Build the Fast-Market tools section from config (fallback behavior)."""
     try:
         from common.core.aliases import get_reverse_aliases
     except ImportError:

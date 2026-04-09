@@ -267,3 +267,26 @@ def build_tool_documentation(
     lines.append("")
     
     return "\n".join(lines)
+
+
+def build_single_tool_doc(tool_name: str, depth: int = 1) -> str:
+    """Build documentation for a single tool.
+    
+    Args:
+        tool_name: Name of the tool to document.
+        depth: Documentation depth level (same as build_tool_documentation).
+    
+    Returns:
+        Formatted markdown string for the single tool.
+    """
+    help_output = _run_help(tool_name)
+    tool_info = _parse_help_output(help_output, tool_name)
+    
+    # For depth 3+, get subcommands
+    if depth >= 3:
+        subcommands = _get_subcommands(tool_name, [], 0, max(2, depth))
+        if subcommands:
+            tool_info["commands"] = subcommands
+    
+    return _format_tool_doc(tool_info, depth)
+
