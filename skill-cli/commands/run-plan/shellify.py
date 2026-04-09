@@ -150,91 +150,6 @@ def _backup_run_sh(run_sh_path: Path) -> Path | None:
         return None
 
 
-def _get_fastmarket_tool_description(tool_name: str) -> str:
-    """Get description for a fast-market tool by running --help and summarizing commands."""
-    import subprocess
-    try:
-        result = subprocess.run(
-            [tool_name, "--help"],
-            capture_output=True, text=True, timeout=5,
-        )
-        output = (result.stdout or result.stderr).strip()
-        if not output:
-            return f"Project CLI: `{tool_name}`."
-
-        # Extract commands section
-        commands = []
-        in_commands = False
-        for line in output.split("\n"):
-            line = line.strip()
-            if line.lower().startswith("commands"):
-                in_commands = True
-                continue
-            if in_commands:
-                if not line:
-                    continue
-                # Command lines: "  name  description" or "name  description"
-                if line.startswith("-") or line.startswith("Options"):
-                    break
-                parts = line.split(None, 1)
-                if parts:
-                    cmd_name = parts[0].rstrip(",")
-                    cmd_desc = parts[1].strip() if len(parts) > 1 else ""
-                    # Skip meta-commands (setup, serve, status, stats)
-                    if cmd_name not in ("setup", "serve", "status", "stats", "embed-server",
-                                        "batch-comments", "batch-post", "batch-reply"):
-                        if cmd_desc:
-                            commands.append(f"{cmd_name}: {cmd_desc}")
-                        else:
-                            commands.append(cmd_name)
-
-        if commands:
-            return f"Commands: {', '.join(commands[:5])}."
-        return f"Project CLI: `{tool_name}`."
-    except Exception:
-        return f"Project CLI: `{tool_name}`."
-
-
-def _build_tools_section(system_commands: list[str] | None = None) -> str:
-    """Build a tools reference section for the shellify prompt.
-
-    Dynamically discovers fast-market tools by running --help on each.
-    System commands are listed simply — the LLM already knows them.
-    """
-    from common.agent.executor import DEFAULT_FASTMARKET_TOOLS
-
-    allowed_system = set(system_commands or [])
-
-    lines = ["# Available Tools", ""]
-
-    # Fast-Market tools — dynamically discovered with --help
-    fastmarket_tools = sorted(DEFAULT_FASTMARKET_TOOLS)
-    if fastmarket_tools:
-        lines.append("## Fast-Market Tools")
-        lines.append("These are project-specific CLIs. Discover subcommands with `tool --help`.")
-        lines.append("")
-        for name in fastmarket_tools:
-            desc = _get_fastmarket_tool_description(name)
-            lines.append(f"- `{name}` — {desc}")
-        lines.append("")
-
-    # System commands — just a list, the LLM knows these
-    if allowed_system:
-        lines.append("## System Commands")
-        lines.append("Standard shell utilities. Use `tool --help` for options.")
-        lines.append("")
-        lines.append(", ".join(f"`{c}`" for c in sorted(allowed_system)))
-        lines.append("")
-
-    lines.append("## Discovery")
-    lines.append("- Use `tool --help` at runtime to discover flags and options")
-    lines.append("- Use `command -v tool` to check if a tool is available")
-    lines.append("- Include fallback logic when tools may be missing")
-    lines.append("")
-
-    return "\n".join(lines)
-
-
 def _extract_bash_script(content: str) -> str:
     """Extract bash script from LLM response — strips markdown fences, commentary."""
     content = content.strip()
@@ -437,14 +352,19 @@ def _shellify_skill(
     else:
         instructions_section = "# Additional Instructions\n\nNone."
 
-    # Available tools for the script
+    # Available tools for the script (level 1 = tool name + description only)
     system_commands = [
         "ls", "cat", "head", "tail", "grep", "find", "wc",
         "mkdir", "touch", "cp", "mv", "rm", "chmod", "date",
         "printf", "sed", "awk", "cut", "tr", "sort", "uniq",
         "curl", "wget", "jq", "tee", "tar", "gzip", "zip", "unzip",
     ]
-    tools_section = _build_tools_section(system_commands)
+    
+    from common.agent.doc import build_tool_documentation
+    tools_section = build_tool_documentation(
+        depth=1,
+        system_commands=system_commands,
+    )
 
     # Build the prompt
     if prompt_template is None:
