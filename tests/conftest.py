@@ -142,8 +142,3 @@ def pytest_configure(config):
     )
 
 
-def pytest_collection_modifyitems(session, config, items):
-    """Force fail-fast when test_11_llm_agent.py is in the selected test set."""
-    has_llm_agent_module = any(item.fspath.basename == "test_11_llm_agent.py" for item in items)
-    if has_llm_agent_module:
-        config.option.maxfail = 1
