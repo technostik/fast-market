@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ router = APIRouter()
 class PostRequest(BaseModel):
     file: str
     indices: list[int]
+    dry_run: bool = False
 
 
 def _workdir() -> Path:
@@ -63,7 +65,7 @@ def load(file: str = Query(...)) -> list:
 
 
 @router.post("/post")
-def post(payload: PostRequest) -> dict[str, int | str]:
+def post(payload: PostRequest) -> dict[str, int | str | bool]:
     source_path = _resolve_workdir_relative(payload.file)
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Input file not found")
@@ -75,10 +77,40 @@ def post(payload: PostRequest) -> dict[str, int | str]:
     temp_path.write_text(json.dumps(selected, ensure_ascii=False), encoding="utf-8")
 
     cmd = ["youtube", "batch-post", str(temp_path), "--format", "json"]
-    logger.info("yt_poster_exec", cmd=" ".join(cmd), selected_count=len(selected))
+    if payload.dry_run:
+        cmd.append("--dry-run")
+
+    logger.info(
+        "yt_poster_exec",
+        cmd=" ".join(cmd),
+        selected_count=len(selected),
+        dry_run=payload.dry_run,
+    )
+
+    report_path = source_path.parent / f"{source_path.stem}.batch-post-report.json"
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         output = (proc.stdout or "") + (proc.stderr or "")
-        return {"exit_code": proc.returncode, "output": output}
+
+        report = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source_file": str(source_path),
+            "dry_run": payload.dry_run,
+            "selected_count": len(selected),
+            "exit_code": proc.returncode,
+            "output": output,
+            "items": selected,
+        }
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        return {
+            "exit_code": proc.returncode,
+            "output": output,
+            "dry_run": payload.dry_run,
+            "report": str(report_path),
+        }
     finally:
         temp_path.unlink(missing_ok=True)
