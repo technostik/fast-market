@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webux-agent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "auto-click-auto>=0.1.0",
+    "pyyaml>=6.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "structlog>=24.2",
+]
+
+[project.scripts]
+webux = "webux_entry:main"
+
+[tool.setuptools]
+packages = [
+    "webux_entry",
+    "cli",
+    "core",
+    "plugins",
+    "plugins.fileviewer",
+    "plugins.yt_poster",
+    "commands",
+    "commands.serve",
+]

@@ -1,0 +1,1 @@
+"""Fileviewer plugin."""
