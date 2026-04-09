@@ -95,6 +95,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Export planned skills to YAML file (use '-' for stdout)",
     )
     @click.option(
+        "--param",
+        "-p",
+        "params",
+        multiple=True,
+        type=str,
+        help="Plan parameter KEY=VALUE (can be repeated). Substitutes {{key}} in plan.",
+    )
+    @click.option(
         "--run-isolated",
         is_flag=True,
         default=False,
@@ -140,6 +148,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         no_eval,
         save_session,
         export,
+        params,
         run_isolated,
         skill_isolated,
         shared_context,
@@ -191,6 +200,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         interaction = _NoAskPlugin() if no_ask else CLIInteractionPlugin()
 
+        # Convert -p KEY=VALUE pairs to dict for plan parameter substitution
+        import_params = {}
+        for p in params:
+            if "=" in p:
+                k, v = p.split("=", 1)
+                import_params[k.strip()] = v.strip()
+            else:
+                click.echo(f"Warning: invalid param format '{p}', expected KEY=VALUE", err=True)
+
         # Create shared context if enabled
         shared_ctx = None
         if shared_context:
@@ -220,6 +238,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             isolation_mode=isolation_mode,
             shared_context=shared_ctx,
             export_plan_path=export,
+            import_params=import_params,
             interactive=interactive,
             export_successful_path=export_successful,
         )

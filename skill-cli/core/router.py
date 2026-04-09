@@ -779,15 +779,29 @@ def _save_router_session(
 
 
 def _plan_to_yaml(plan: SkillPlan) -> str:
-    """Convert a SkillPlan to user-readable YAML string."""
+    """Convert a SkillPlan to user-readable YAML string.
+
+    Uses the new format with global params section instead of per-step params.
+    """
     import yaml
+
+    # Collect all unique params from all steps
+    all_params = {}
+    for step in plan.steps:
+        if step.params:
+            all_params.update(step.params)
 
     data = {
         "goal": plan.goal,
         "success_criteria": plan.success_criteria,
         "preparation_plan": plan.preparation_plan,
-        "plan": [],
     }
+
+    # Add global params section if any params exist
+    if all_params:
+        data["params"] = list(all_params.keys())
+
+    data["plan"] = []
 
     for step in plan.steps:
         step_dict = {
@@ -797,8 +811,7 @@ def _plan_to_yaml(plan: SkillPlan) -> str:
 
         if step.action == "run":
             step_dict["skill"] = step.skill_name
-            if step.params:
-                step_dict["params"] = step.params
+            # Don't export per-step params - they're now global
             if step.inject:
                 step_dict["inject"] = step.inject
             if step.context_hint:
@@ -896,11 +909,15 @@ def _export_execution_log(state: RouterState, filepath: str) -> None:
 
 
 def _export_successful_plan(state: RouterState, filepath: str) -> None:
-    """Export only the successful steps as a clean plan YAML."""
+    """Export only the successful steps as a clean plan YAML.
+
+    Uses the new format with global params section instead of per-step params.
+    """
     import yaml
 
     successful_steps = []
     step_num = 0
+    all_params = {}
 
     for attempt in state.attempts:
         if attempt.success or attempt.action == "ask":
@@ -912,8 +929,9 @@ def _export_successful_plan(state: RouterState, filepath: str) -> None:
 
             if attempt.action == "run":
                 step_dict["skill"] = attempt.skill_name
+                # Collect params for global section, don't add to step
                 if attempt.params:
-                    step_dict["params"] = attempt.params
+                    all_params.update(attempt.params)
             elif attempt.action == "task":
                 # Extract description from runner_summary or raw_output
                 desc = attempt.runner_summary or f"Task: {attempt.skill_name}"
@@ -930,8 +948,13 @@ def _export_successful_plan(state: RouterState, filepath: str) -> None:
         "goal": state.goal,
         "success_criteria": state.success_criteria,
         "final_result": state.final_result if state.done else state.failure_reason,
-        "plan": successful_steps,
     }
+
+    # Add global params section if any params exist
+    if all_params:
+        data["params"] = list(all_params.keys())
+
+    data["plan"] = successful_steps
 
     yaml_content = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 

@@ -315,16 +315,16 @@ class TestSkillExecVsRun:
         assert result.exit_code != 0
         assert "no such option" in result.output.lower() or "error" in result.output.lower()
 
-    def test_run_does_not_accept_param_flag(self):
-        """Test that skill run no longer accepts --param/-p flag."""
+    def test_run_accepts_param_flag(self):
+        """Test that skill run now accepts --param/-p flag (matching skill exec)."""
         runner = CliRunner()
         result = runner.invoke(get_cli(), [
             "run", "test task",
             "-p", "key=value",
         ])
-        # Should fail because -p is not a valid option anymore
-        assert result.exit_code != 0
-        assert "no such option" in result.output.lower() or "error" in result.output.lower()
+        # Should not fail with "no such option" - param flag is now supported
+        # It may fail for other reasons (no LLM, missing skills, etc.) but not due to invalid option
+        assert "no such option" not in result.output.lower() or "-p" not in result.output.lower()
 
 
 if __name__ == "__main__":
