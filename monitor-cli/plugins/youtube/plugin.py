@@ -106,14 +106,20 @@ class YouTubePlugin(SourcePlugin):
                     entries = info.get("entries", []) or []
                     channel_name = info.get("channel", info.get("uploader", ""))
                     videos = []
+                    found_last = last_item_id is None
                     for entry in entries[:limit]:
                         if not entry:
                             continue
                         video_id = entry.get("id")
                         if not video_id:
                             continue
-                        if last_item_id and video_id == last_item_id:
-                            break
+                        
+                        # Skip items until we find last_item_id, then collect the rest
+                        if not found_last:
+                            if video_id == last_item_id:
+                                found_last = True
+                            continue
+                        
                         upload_date = None
                         if entry.get("upload_date"):
                             try:
