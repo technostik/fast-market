@@ -217,9 +217,12 @@ def execute_skill_script(
             cwd=workdir,
             env=env,
             capture_output=True,
-            text=True,
             timeout=effective_timeout if effective_timeout else None,
         )
+
+        # Decode output with error handling for non-UTF-8 bytes
+        stdout_text = result.stdout.decode('utf-8', errors='replace')
+        stderr_text = result.stderr.decode('utf-8', errors='replace')
 
         # Write artificial session file for script skills when requested
         if save_session:
@@ -227,8 +230,8 @@ def execute_skill_script(
                 skill_name=skill.name,
                 script_name=script_path.name,
                 params=params or {},
-                stdout=result.stdout,
-                stderr=result.stderr,
+                stdout=stdout_text,
+                stderr=stderr_text,
                 exit_code=result.returncode,
                 save_path=save_session,
             )
@@ -236,8 +239,8 @@ def execute_skill_script(
         return SkillResult(
             skill_name=skill.name,
             script_name=script_path.name,
-            stdout=result.stdout,
-            stderr=result.stderr,
+            stdout=stdout_text,
+            stderr=stderr_text,
             exit_code=result.returncode,
         )
     except subprocess.TimeoutExpired as exc:
@@ -310,9 +313,12 @@ def execute_skill_run(
             cwd=workdir,
             env=env,
             capture_output=True,
-            text=True,
             timeout=effective_timeout if effective_timeout else None,
         )
+
+        # Decode output with error handling for non-UTF-8 bytes
+        stdout_text = result.stdout.decode('utf-8', errors='replace')
+        stderr_text = result.stderr.decode('utf-8', errors='replace')
 
         # Write artificial session file for run: skills when requested
         if save_session:
@@ -320,8 +326,8 @@ def execute_skill_run(
                 skill_name=skill.name,
                 script_name="run:",
                 params=params or {},
-                stdout=result.stdout,
-                stderr=result.stderr,
+                stdout=stdout_text,
+                stderr=stderr_text,
                 exit_code=result.returncode,
                 save_path=save_session,
             )
@@ -329,8 +335,8 @@ def execute_skill_run(
         return SkillResult(
             skill_name=skill.name,
             script_name="run:",
-            stdout=result.stdout,
-            stderr=result.stderr,
+            stdout=stdout_text,
+            stderr=stderr_text,
             exit_code=result.returncode,
         )
     except subprocess.TimeoutExpired as exc:
