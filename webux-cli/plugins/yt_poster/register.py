@@ -202,7 +202,10 @@ deselectAllBtn.addEventListener('click', () => { rows.forEach(r => r.selected = 
 
 const params = new URLSearchParams(window.location.search);
 const preset = params.get('file');
-if (preset) fileInput.value = preset;
+if (preset) {
+  fileInput.value = preset;
+  loadFile();
+}
 </script>
 </body>
 </html>
