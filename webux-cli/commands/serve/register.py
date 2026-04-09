@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import signal
+import threading
 import webbrowser
 from pathlib import Path
 
@@ -24,7 +27,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--open", "open_browser", is_flag=True, default=False)
     @click.pass_context
     def serve_cmd(ctx: click.Context, host: str, port: int, open_browser: bool) -> None:
-        logging.getLogger().setLevel(logging.DEBUG if ctx.obj.get("verbose") else logging.CRITICAL)
+        logging.getLogger().setLevel(
+            logging.DEBUG if ctx.obj.get("verbose") else logging.CRITICAL
+        )
 
         config = load_tool_config("webux")
         discovered = discover_plugins(config, tool_root=_TOOL_ROOT)
@@ -33,7 +38,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if open_browser:
             webbrowser.open(f"http://{host}:{port}")
 
-        app = build_app(config=config, plugins=discovered, tool_root=_TOOL_ROOT)
+        def _shutdown() -> None:
+            threading.Timer(0.2, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+
+        app = build_app(
+            config=config,
+            plugins=discovered,
+            tool_root=_TOOL_ROOT,
+            shutdown_callback=_shutdown,
+        )
         uvicorn.run(app, host=host, port=port)
 
     return CommandManifest(name="serve", click_command=serve_cmd)
