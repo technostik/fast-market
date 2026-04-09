@@ -12,6 +12,16 @@ def _get_shellify_module():
     return importlib.import_module("commands.run-plan.shellify")
 
 
+def _cleanup_backups(scripts_dir: Path) -> None:
+    """Delete all timestamped backup files (run.sh.bak.*) from scripts directory."""
+    if scripts_dir.exists():
+        for backup in scripts_dir.glob("run.sh.bak.*"):
+            try:
+                backup.unlink()
+            except Exception:
+                pass
+
+
 class TestShellifyPrompt:
     """Test the shellify prompt template."""
 
@@ -93,6 +103,8 @@ class TestShellifyCommand:
                     backup_path.unlink()
                 elif run_sh.exists():
                     run_sh.unlink()
+                # Clean up any timestamped backups created by _backup_run_sh
+                _cleanup_backups(scripts_dir)
 
     def test_shellify_resets_existing(self, skills_dir):
         """shellify with reset=True should tell agent to start fresh."""
@@ -139,6 +151,8 @@ class TestShellifyCommand:
                     run_sh.write_text(original_content, encoding="utf-8")
                 elif run_sh.exists():
                     run_sh.unlink()
+                # Clean up any timestamped backups created by _backup_run_sh
+                _cleanup_backups(scripts_dir)
 
     def test_shellify_passes_instruction(self, skills_dir):
         """shellify should include user instruction in the prompt."""
@@ -184,6 +198,8 @@ class TestShellifyCommand:
                     run_sh.write_text(original_content, encoding="utf-8")
                 elif run_sh.exists():
                     run_sh.unlink()
+                # Clean up any timestamped backups created by _backup_run_sh
+                _cleanup_backups(scripts_dir)
 
     def test_shellify_includes_existing_script_as_context(self, skills_dir):
         """shellify should include existing run.sh in the prompt when not resetting."""
@@ -231,3 +247,5 @@ class TestShellifyCommand:
                     run_sh.write_text(original_content, encoding="utf-8")
                 elif run_sh.exists():
                     run_sh.unlink()
+                # Clean up any timestamped backups created by _backup_run_sh
+                _cleanup_backups(scripts_dir)
