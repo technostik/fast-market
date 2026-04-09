@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from common import structlog
 from common.core.config import load_common_config
-from common.core.paths import get_common_config_path, get_data_dir
+from common.core.paths import get_common_config_path
 from core.security import _assert_path_safe
 
 logger = structlog.get_logger(__name__)
@@ -25,7 +25,7 @@ def _roots() -> dict[str, Path | None]:
     workdir_path = Path(workdir).expanduser().resolve() if workdir else None
     return {
         "config": get_common_config_path().parent,
-        "data": get_data_dir(),
+        "data": get_common_config_path().parent.parent,
         "workdir": workdir_path,
     }
 
