@@ -5,7 +5,6 @@ import sys
 import click
 
 from commands.base import CommandManifest
-from commands.params import RunPlanFileType
 from common.core.config import (
     ConfigError,
     load_common_config,
@@ -96,21 +95,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Export planned skills to YAML file (use '-' for stdout)",
     )
     @click.option(
-        "--import",
-        "import_plan",
-        type=RunPlanFileType(),
-        default=None,
-        help="Import skill execution plan from YAML file instead of auto-planning (searches in workdir)",
-    )
-    @click.option(
-        "--param",
-        "-p",
-        "params",
-        multiple=True,
-        type=str,
-        help="Plan parameter KEY=VALUE (can be repeated). Substitutes {{key}} in imported plan.",
-    )
-    @click.option(
         "--run-isolated",
         is_flag=True,
         default=False,
@@ -156,19 +140,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         no_eval,
         save_session,
         export,
-        import_plan,
         run_isolated,
         skill_isolated,
         shared_context,
         interactive,
         export_successful,
-        params,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
         The router plans each step using an LLM, then executes skills or
         free-form tasks directly (no subprocess). Results and context are
         passed in-memory between steps.
+
+        To execute a plan file instead, use: skill exec <plan.yaml>
 
         Isolation modes:
         - Default: skills use the workdir directly (cooperation enabled)
@@ -207,15 +191,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         interaction = _NoAskPlugin() if no_ask else CLIInteractionPlugin()
 
-        # Convert -p KEY=VALUE pairs to dict for plan parameter substitution
-        import_params = {}
-        for p in params:
-            if "=" in p:
-                k, v = p.split("=", 1)
-                import_params[k.strip()] = v.strip()
-            else:
-                click.echo(f"Warning: invalid param format '{p}', expected KEY=VALUE", err=True)
-
         # Create shared context if enabled
         shared_ctx = None
         if shared_context:
@@ -245,8 +220,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             isolation_mode=isolation_mode,
             shared_context=shared_ctx,
             export_plan_path=export,
-            import_plan_path=import_plan,
-            import_params=import_params,
             interactive=interactive,
             export_successful_path=export_successful,
         )

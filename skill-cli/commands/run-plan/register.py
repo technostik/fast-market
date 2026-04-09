@@ -9,7 +9,8 @@ import click
 import yaml
 
 from commands.base import CommandManifest
-from commands.params import RunPlanFileType, SkillNameType as _SkillNameType
+from commands.params import SkillNameType as _SkillNameType
+from core.plan_utils import RunPlanFileType
 from common.cli.helpers import get_editor, open_editor
 from common.core.config import load_common_config
 from core.repl import prompt_with_options, prompt_free_text, prompt_confirm

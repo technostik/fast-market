@@ -1868,3 +1868,21 @@ def run_router(
 
     state.end_time = time.time()
     return state
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility aliases
+# ---------------------------------------------------------------------------
+# These functions have been moved to core.plan_utils but are re-exported
+# here to avoid breaking existing imports.
+
+from core.plan_utils import (
+    substitute_placeholders as _substitute_placeholders,
+    find_missing_placeholders as _find_missing_placeholders,
+    import_plan_from_yaml as _import_plan_from_yaml,
+)
+
+# Also expose the public names for direct import
+substitute_placeholders = _substitute_placeholders
+find_missing_placeholders = _find_missing_placeholders
+import_plan_from_yaml = _import_plan_from_yaml
