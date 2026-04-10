@@ -1,7 +1,6 @@
-from __future__ import annotations
-
 import click
-import uuid6
+import shutil
+import uuid
 from pathlib import Path
 
 from common.core.config import (
@@ -42,6 +41,19 @@ def register():
         click.echo(f"Workdir root initialized: {root_path}")
         click.echo(f"Workdir prefix set to: {workdir_prefix}")
 
+    @workdir_cmd.command("show")
+    def workdir_show():
+        """Display current workdir."""
+        config = load_common_config()
+        current_workdir = config.get("workdir")
+
+        if not current_workdir:
+            click.echo("No workdir configured. Run: toolsetup workdir init <path>")
+            return
+
+        workdir_path = Path(current_workdir).expanduser().resolve()
+        click.echo(f"{workdir_path}")
+
     @workdir_cmd.command("reset")
     def workdir_reset():
         """Reset current workdir to workdir_root."""
@@ -81,9 +93,9 @@ def register():
         root_path = Path(workdir_root).expanduser().resolve()
         root_path.mkdir(parents=True, exist_ok=True)
 
-        # Generate time-sortable UUID
-        uid = str(uuid6.uuid6())
-        dir_name = f"{prefix}{uid}"
+        # Generate short 6-char random ID
+        short_id = uuid.uuid4().hex[:6]
+        dir_name = f"{prefix}{short_id}"
         new_workdir = root_path / dir_name
         new_workdir.mkdir(parents=True, exist_ok=True)
 
@@ -264,7 +276,6 @@ def register():
                 click.echo("Cancelled.")
                 return
 
-        import shutil
         deleted_count = 0
         for wd in workdirs_to_delete:
             try:
@@ -274,5 +285,14 @@ def register():
                 click.echo(f"Error removing {wd}: {e}", err=True)
 
         click.echo(f"Deleted {deleted_count} workdir(s).")
+
+        # Reset workdir to workdir_root
+        workdir_root = config.get("workdir_root")
+        if workdir_root:
+            root_path = Path(workdir_root).expanduser().resolve()
+            if root_path.exists():
+                config["workdir"] = str(root_path)
+                save_common_config(config)
+                click.echo(f"Workdir reset to: {root_path}")
 
     return workdir_cmd
