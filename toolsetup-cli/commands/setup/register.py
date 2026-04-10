@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import sys
+import subprocess
 import click
 import yaml
 from pathlib import Path
@@ -184,6 +186,28 @@ def register():
     # Register workdir subgroup
     workdir_cmd = workdir_register()
     setup_cmd.add_command(workdir_cmd, name="workdir")
+
+    @setup_cmd.command("edit")
+    @click.option("--llm", "-l", "edit_llm", is_flag=True, help="Edit LLM config (common/llm/config.yaml)")
+    @click.option("--common", "-c", "edit_common", is_flag=True, help="Edit common config (common/config.yaml)")
+    def edit_config(edit_llm, edit_common):
+        """Open config file(s) in your editor.
+
+        By default, opens common/config.yaml.
+        Use --llm to open common/llm/config.yaml.
+        """
+        if edit_llm:
+            config_path = get_llm_config_path()
+        else:
+            config_path = get_common_config_path()
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        if not config_path.exists():
+            config_path.write_text("", encoding="utf-8")
+
+        common_cfg = load_common_config()
+        editor = common_cfg.get("default_editor") or os.environ.get("EDITOR", "nano")
+        subprocess.run([editor, str(config_path)])
 
     @setup_cmd.command("clean-workdir")
     @click.option(
