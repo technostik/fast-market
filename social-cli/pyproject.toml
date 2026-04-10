@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "social-agent"
+version = "0.1.0"
+description = "Post to and search across social media backends (Twitter, LinkedIn, Substack)"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "auto-click-auto>=0.1.0",
+    "pyyaml>=6.0",
+    "tweepy>=4.14",
+    "requests>=2.31",
+    "structlog>=24.2",
+    "substack>=0.0.1",
+    "selenium>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+social = "social_entry:main"
+
+[tool.setuptools]
+packages = [
+    "common",
+    "common.core",
+    "common.cli",
+    "common.auth",
+    "common.storage",
+    "social_entry",
+    "cli",
+    "core",
+    "plugins",
+    "plugins.twitter",
+    "plugins.linkedin",
+    "plugins.substack",
+    "commands",
+    "commands.post",
+    "commands.search",
+]
