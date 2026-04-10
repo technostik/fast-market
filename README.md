@@ -34,7 +34,7 @@ fast-market/
 ├── task-cli/                  # Agentic task execution
 ├── skill-cli/                 # Skill management
 ├── tiktok-cli/                # TikTok operations
-└── common-setup-cli/          # Common configuration
+└── setup/                     # Common configuration
 ```
 
 All tools use:
@@ -56,7 +56,7 @@ pip install -e './prompt-cli[openai]'
 pip install -e './task-cli'
 pip install -e './skill-cli'
 pip install -e './tiktok-cli'
-pip install -e './common-setup-cli'
+pip install -e './setup'
 ```
 
 Or install everything at once:
@@ -71,7 +71,7 @@ pip install -e './corpus-cli[ml,youtube]' \
                -e './task-cli' \
                -e './skill-cli' \
                -e './tiktok-cli' \
-               -e './common-setup-cli'
+               -e './setup'
 ```
 
 ### Optional Dependency Groups
