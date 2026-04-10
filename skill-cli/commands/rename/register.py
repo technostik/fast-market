@@ -6,12 +6,13 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from commands.params import SkillNameType
 from common.core.paths import get_skills_dir
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("rename")
-    @click.argument("old_name")
+    @click.argument("old_name", type=SkillNameType())
     @click.argument("new_name")
     @click.option(
         "--force", "-f", is_flag=True, help="Skip confirmation if overwriting"
