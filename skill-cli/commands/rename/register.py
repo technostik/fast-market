@@ -40,6 +40,27 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         shutil.move(str(old_path), str(new_path))
 
+        # Update the name field in SKILL.md frontmatter
+        skill_md = new_path / "SKILL.md"
+        if skill_md.exists():
+            content = skill_md.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    try:
+                        frontmatter = yaml.safe_load(parts[1])
+                        frontmatter["name"] = new_name
+                        new_frontmatter = yaml.dump(
+                            frontmatter, default_flow_style=False, allow_unicode=True
+                        )
+                        new_content = f"---\n{new_frontmatter}---{parts[2]}"
+                        skill_md.write_text(new_content, encoding="utf-8")
+                    except Exception as e:
+                        click.echo(
+                            f"Warning: Could not update SKILL.md frontmatter: {e}",
+                            err=True,
+                        )
+
         click.echo(f"Renamed skill: {old_name} -> {new_name}")
 
     return CommandManifest(name="rename", click_command=rename_cmd)
