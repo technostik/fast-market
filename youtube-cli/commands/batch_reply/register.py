@@ -47,9 +47,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Output format (auto-detected from file extension if not specified)",
     )
+    @click.option(
+        "--filter",
+        "filter_ids",
+        type=str,
+        default=None,
+        help="JSON list of comment IDs to process only those comments. "
+             "Example: '[\"comment_id_1\", \"comment_id_2\"]'",
+    )
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.pass_context
-    def batch_reply_cmd(ctx, input_file, prompt, fmt, output, **kwargs):
+    def batch_reply_cmd(ctx, input_file, prompt, fmt, filter_ids, output, **kwargs):
         try:
             # Load LLM config and discover providers
             config = load_tool_config("youtube")
@@ -75,6 +83,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             if not isinstance(data, list):
                 data = [data]
+
+            # Apply filter if provided
+            if filter_ids:
+                try:
+                    filter_list = json.loads(filter_ids)
+                    if not isinstance(filter_list, list):
+                        click.echo("Error: --filter must be a JSON list of comment IDs", err=True)
+                        return
+                    filter_set = set(filter_list)
+                    data = [item for item in data if item.get("id") in filter_set]
+                    click.echo(f"Filtered to {len(data)} comments matching filter IDs", err=True)
+                except json.JSONDecodeError as e:
+                    click.echo(f"Error: --filter contains invalid JSON: {e}", err=True)
+                    return
 
             # Process comments sequentially
             results = []
