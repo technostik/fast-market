@@ -25,6 +25,12 @@ class PostRequest(BaseModel):
     dry_run: bool = False
 
 
+class SaveReplyRequest(BaseModel):
+    file: str
+    index: int
+    reply: str
+
+
 def _workdir() -> Path:
     workdir = load_common_config().get("workdir")
     if not workdir:
@@ -114,3 +120,34 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
         }
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+@router.post("/save_reply")
+def save_reply(payload: SaveReplyRequest) -> dict[str, str]:
+    source_path = _resolve_workdir_relative(payload.file)
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Input file not found")
+
+    data = _load_array(source_path)
+    if payload.index < 0 or payload.index >= len(data):
+        raise HTTPException(status_code=404, detail="Index out of range")
+
+    # Update the reply field in the data
+    item = data[payload.index]
+    item["reply"] = payload.reply
+    item["generated_reply"] = payload.reply
+
+    # Write back to the source file
+    source_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    logger.info(
+        "yt_poster_save_reply",
+        file=payload.file,
+        index=payload.index,
+        reply_length=len(payload.reply),
+    )
+
+    return {"status": "ok"}

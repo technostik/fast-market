@@ -50,6 +50,17 @@ _YT_POSTER_HTML = """<!doctype html>
     .stats span { margin-right:8px; }
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); align-items:center; justify-content:center; }
     .modal { width:min(920px,90vw); max-height:80vh; overflow:auto; background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:14px; }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+    .modal-header h3 { margin:0; font-size:16px; }
+    .modal-close { background:none; border:none; font-size:20px; cursor:pointer; color:var(--text-dim); padding:4px 8px; }
+    .modal-close:hover { color:var(--text); }
+    .modal-body { margin-bottom:12px; }
+    .modal-edit-area { width:100%; min-height:120px; padding:10px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); font-family:inherit; font-size:13px; resize:vertical; }
+    .modal-footer { display:flex; gap:8px; justify-content:flex-end; }
+    .modal-footer button { padding:8px 16px; }
+    .btn-save { background:var(--success); color:#000; border:none; font-weight:600; }
+    .btn-save:hover { opacity:0.85; }
+    .btn-cancel { background:var(--accent); color:var(--text); }
   </style>
 </head>
 <body>
@@ -88,7 +99,19 @@ _YT_POSTER_HTML = """<!doctype html>
   </div>
 
   <div id=\"modalOverlay\" class=\"modal-overlay\">
-    <div class=\"modal\"><pre id=\"modalText\"></pre></div>
+    <div class=\"modal\">
+      <div class=\"modal-header\">
+        <h3 id=\"modalTitle\">Comment</h3>
+        <button class=\"modal-close\" id=\"modalCloseBtn\">&times;</button>
+      </div>
+      <div class=\"modal-body\" id=\"modalBody\">
+        <pre id=\"modalText\"></pre>
+      </div>
+      <div class=\"modal-footer\" id=\"modalFooter\" style=\"display:none;\">
+        <button class=\"btn-cancel\" id=\"modalCancelBtn\">Cancel</button>
+        <button class=\"btn-save\" id=\"modalSaveBtn\">Save</button>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -110,7 +133,16 @@ const output = document.getElementById('output');
 const exitCode = document.getElementById('exitCode');
 const logEl = document.getElementById('log');
 const modalOverlay = document.getElementById('modalOverlay');
+const modalTitle = document.getElementById('modalTitle');
 const modalText = document.getElementById('modalText');
+const modalBody = document.getElementById('modalBody');
+const modalFooter = document.getElementById('modalFooter');
+const modalCloseBtn = document.getElementById('modalCloseBtn');
+const modalCancelBtn = document.getElementById('modalCancelBtn');
+const modalSaveBtn = document.getElementById('modalSaveBtn');
+
+let editingRowIndex = -1;
+let currentSourceFile = '';
 
 function trunc(v, n=100) { if (!v) return '—'; return v.length > n ? v.slice(0,n) + '…' : v; }
 function esc(v='') { return String(v).replaceAll('&', '&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
@@ -146,9 +178,52 @@ function formatNumber(n) {
   return n.toString();
 }
 
-function showModal(text){ modalText.textContent = text || ''; modalOverlay.style.display = 'flex'; }
-modalOverlay.addEventListener('click', (e)=>{ if (e.target === modalOverlay) modalOverlay.style.display='none'; });
-document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') modalOverlay.style.display='none'; });
+function showModal(text, editable=false, rowIndex=-1){
+  editingRowIndex = rowIndex;
+  if (editable && rowIndex >= 0) {
+    modalTitle.textContent = 'Edit Reply';
+    modalBody.innerHTML = '<textarea id=\"modalTextarea\" class=\"modal-edit-area\">' + esc(text || '') + '</textarea>';
+    modalFooter.style.display = 'flex';
+  } else {
+    modalTitle.textContent = 'Comment';
+    modalBody.innerHTML = '<pre id=\"modalText\"></pre>';
+    document.getElementById('modalText').textContent = text || '';
+    modalFooter.style.display = 'none';
+  }
+  modalOverlay.style.display = 'flex';
+}
+
+function closeModal(){
+  modalOverlay.style.display = 'none';
+  editingRowIndex = -1;
+}
+
+async function saveReply(){
+  const textarea = document.getElementById('modalTextarea');
+  if (!textarea || editingRowIndex < 0) return;
+  const newText = textarea.value;
+  rows[editingRowIndex].reply = newText;
+  rows[editingRowIndex].generated_reply = newText;
+
+  const resp = await fetch('/api/yt_poster/save_reply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: currentSourceFile, index: editingRowIndex, reply: newText }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: 'Save failed' }));
+    errorEl.textContent = err.detail || 'Save failed';
+  } else {
+    errorEl.textContent = '';
+  }
+  closeModal();
+  renderTable();
+}
+modalOverlay.addEventListener('click', (e)=>{ if (e.target === modalOverlay) closeModal(); });
+document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeModal(); });
+modalCloseBtn.addEventListener('click', closeModal);
+modalCancelBtn.addEventListener('click', closeModal);
+modalSaveBtn.addEventListener('click', saveReply);
 
 function renderTable(){
   tbody.innerHTML = rows.map((row, i) => {
@@ -175,7 +250,10 @@ function renderTable(){
       </td>
       <td><a href=\"${esc(channelUrl)}\" class=\"channel-link\" target=\"_blank\">${esc(channelName)}</a></td>
       <td><span class=\"clickable\" data-full=\"orig-${i}\">${esc(trunc(oc.text || oc.comment || ''))}</span></td>
-      <td><span class=\"clickable\" data-full=\"reply-${i}\">${esc(trunc(row.reply || row.generated_reply || ''))}</span></td>
+      <td>
+        <span class=\"clickable\" data-full=\"reply-${i}\">${esc(trunc(row.reply || row.generated_reply || ''))}</span>
+        <button class=\"edit-reply-btn\" data-i=\"${i}\" style=\"margin-left:6px;padding:2px 6px;font-size:11px;cursor:pointer;\">✏️</button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -198,6 +276,15 @@ function renderTable(){
     });
   });
 
+  tbody.querySelectorAll('.edit-reply-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.i);
+      const row = rows[idx];
+      const replyText = row.reply || row.generated_reply || '';
+      showModal(replyText, true, idx);
+    });
+  });
+
   updatePostLabel();
 }
 
@@ -217,6 +304,7 @@ async function loadFile(){
   url.searchParams.set('file', file);
   window.history.replaceState({}, '', url);
 
+  currentSourceFile = file;
   rows = data.map(item => ({ ...item, selected: true }));
   controls.style.display = 'flex';
   tableWrap.style.display = 'block';
