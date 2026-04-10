@@ -25,6 +25,7 @@ from commands.completion import (
     ShellType,
     PathParamType,
 )
+from commands.setup.workdir import register as workdir_register
 
 _PROVIDERS = {
     "anthropic": {
@@ -179,6 +180,10 @@ def register():
         config["workdir"] = path
         save_common_config(config)
         click.echo(f"Default workdir set to: {path}")
+
+    # Register workdir subgroup
+    workdir_cmd = workdir_register()
+    setup_cmd.add_command(workdir_cmd, name="workdir")
 
     @setup_cmd.command("clean-workdir")
     @click.option(

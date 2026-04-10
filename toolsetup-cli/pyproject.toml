@@ -12,6 +12,7 @@ dependencies = [
   "auto-click-auto>=0.1.0",
   "pyyaml>=6.0",
   "prompt-agent>=0.1.0",
+  "uuid6>=2023.5.2",
 ]
 
 [project.scripts]
