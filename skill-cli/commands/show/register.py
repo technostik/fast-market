@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import click
 
 from commands.base import CommandManifest
@@ -17,8 +19,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Show LEARN.md instead of SKILL.md",
     )
-    def show_cmd(name, learn):
+    @click.option(
+        "--run",
+        "-r",
+        "show_run",
+        is_flag=True,
+        help="Show the run entry (run: frontmatter or scripts/run.sh)",
+    )
+    def show_cmd(name, learn, show_run):
         """Show skill details."""
+        if learn and show_run:
+            click.echo("Error: --learn and --run are mutually exclusive", err=True)
+            sys.exit(1)
+
         skill_path = get_skills_dir() / name
         if not skill_path.exists():
             click.echo(f"Error: Skill '{name}' not found", err=True)
@@ -27,6 +40,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         skill = Skill.from_path(skill_path)
         if not skill:
             click.echo(f"Error: '{name}' is not a valid skill", err=True)
+            return
+
+        if show_run:
+            if skill.run:
+                click.echo(skill.run)
+            else:
+                run_sh = skill_path / "scripts" / "run.sh"
+                if run_sh.exists():
+                    click.echo(run_sh.read_text(encoding="utf-8"))
+                else:
+                    click.echo("Error: No run entry found", err=True)
+                    sys.exit(1)
             return
 
         click.echo(f"  {skill.name}")
