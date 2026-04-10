@@ -55,7 +55,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             config = load_tool_config("youtube")
             providers = discover_providers(config)
             if not providers:
-                click.echo("Error: No LLM providers configured. Run: common-setup", err=True)
+                click.echo("Error: No LLM providers configured. Run: toolsetup", err=True)
                 return
 
             provider_name = get_default_provider_name(config)

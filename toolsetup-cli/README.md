@@ -1,4 +1,4 @@
-# common-setup
+# toolsetup
 
 Configure global settings and LLM providers for all fast-market CLI tools.
 
@@ -17,7 +17,7 @@ pip install -e .[all]
 Run without arguments to launch the interactive configuration wizard:
 
 ```bash
-common-setup
+toolsetup
 ```
 
 This will guide you through:
@@ -28,26 +28,26 @@ This will guide you through:
 
 ```bash
 # Show all configuration
-common-setup --show
+toolsetup --show
 
 # Show config file paths
-common-setup --show-path
+toolsetup --show-path
 ```
 
 ### LLM Provider Management
 
 ```bash
 # List configured providers
-common-setup llm list
+toolsetup llm list
 
 # Add a new provider
-common-setup llm add <provider>
+toolsetup llm add <provider>
 
 # Remove a provider
-common-setup llm remove <provider>
+toolsetup llm remove <provider>
 
 # Set default provider
-common-setup llm set-default <provider>
+toolsetup llm set-default <provider>
 ```
 
 Available providers: `anthropic`, `openai`, `openai-compatible`, `ollama`
@@ -56,19 +56,19 @@ Available providers: `anthropic`, `openai`, `openai-compatible`, `ollama`
 
 ```bash
 # Set global default working directory
-common-setup workdir /path/to/dir
+toolsetup workdir /path/to/dir
 
 # Show current working directory
-common-setup workdir
+toolsetup workdir
 
 # Clean working directory (delete all files)
-common-setup clean-workdir
+toolsetup clean-workdir
 
 # Clean with confirmation skipped
-common-setup clean-workdir --force
+toolsetup clean-workdir --force
 
 # Clean including subdirectories and hidden files
-common-setup clean-workdir --all
+toolsetup clean-workdir --all
 ```
 
 ## Shell Autocompletion
@@ -78,11 +78,11 @@ common-setup clean-workdir --all
 Generate and install shell completion for all fast-market CLI tools:
 
 ```bash
-common-setup autocomplete-configure
+toolsetup autocomplete-configure
 ```
 
 This will:
-1. Generate completion scripts for: corpus, image, message, monitor, prompt, skill, task, tiktok, youtube
+1. Generate completion scripts for: corpus, image, message, monitor, prompt, skill, task, tiktok, toolsetup, youtube
 2. Save to `~/.config/fast-market/completions/fast-market.bash`
 3. Print instructions to add to your shell config
 
@@ -90,13 +90,13 @@ This will:
 
 ```bash
 # For bash (default)
-common-setup autocomplete-configure --shell bash
+toolsetup autocomplete-configure --shell bash
 
 # For zsh
-common-setup autocomplete-configure --shell zsh
+toolsetup autocomplete-configure --shell zsh
 
 # For fish
-common-setup autocomplete-configure --shell fish
+toolsetup autocomplete-configure --shell fish
 ```
 
 ### Enable Completions
@@ -118,7 +118,7 @@ source ~/.config/fast-market/completions/fast-market.bash
 If you add new CLI tools or want to regenerate:
 
 ```bash
-common-setup autocomplete-configure --force
+toolsetup autocomplete-configure --force
 ```
 
 ## Configuration Files

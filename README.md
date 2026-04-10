@@ -34,7 +34,7 @@ fast-market/
 ├── task-cli/                  # Agentic task execution
 ├── skill-cli/                 # Skill management
 ├── tiktok-cli/                # TikTok operations
-└── setup/                     # Common configuration
+└── toolsetup-cli/             # Tool configuration
 ```
 
 All tools use:
@@ -56,7 +56,7 @@ pip install -e './prompt-cli[openai]'
 pip install -e './task-cli'
 pip install -e './skill-cli'
 pip install -e './tiktok-cli'
-pip install -e './setup'
+pip install -e './toolsetup-cli'
 ```
 
 Or install everything at once:
@@ -71,7 +71,7 @@ pip install -e './corpus-cli[ml,youtube]' \
                -e './task-cli' \
                -e './skill-cli' \
                -e './tiktok-cli' \
-               -e './setup'
+               -e './toolsetup-cli'
 ```
 
 ### Optional Dependency Groups
@@ -88,10 +88,10 @@ pip install -e './corpus-cli[ml,youtube]' \
 
 ### First-time Setup
 
-Run the common setup wizard to configure LLM providers:
+Run the toolsetup wizard to configure LLM providers:
 
 ```bash
-common-setup
+toolsetup
 ```
 
 This configures:
@@ -104,17 +104,17 @@ This configures:
 Add providers with:
 
 ```bash
-common-setup llm add anthropic
-common-setup llm add openai
-common-setup llm add ollama
-common-setup llm add groq
-common-setup llm add xai
+toolsetup llm add anthropic
+toolsetup llm add openai
+toolsetup llm add ollama
+toolsetup llm add groq
+toolsetup llm add xai
 ```
 
 Set default:
 
 ```bash
-common-setup llm set-default anthropic
+toolsetup llm set-default anthropic
 ```
 
 ### Environment Variables
@@ -296,17 +296,17 @@ skill delete my-skill
 
 ---
 
-### common-setup — Common Configuration
+### toolsetup — Tool Configuration
 
 Configure shared settings across all tools.
 
 ```bash
-common-setup                  # Interactive wizard
-common-setup --show          # Show current config
-common-setup workdir [path]  # Get/set workdir
-common-setup llm list        # List providers
-common-setup llm add anthropic
-common-setup llm set-default anthropic
+toolsetup                  # Interactive wizard
+toolsetup --show          # Show current config
+toolsetup workdir [path]  # Get/set workdir
+toolsetup llm list        # List providers
+toolsetup llm add anthropic
+toolsetup llm set-default anthropic
 ```
 
 ---

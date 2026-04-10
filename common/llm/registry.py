@@ -42,7 +42,7 @@ def discover_providers(config: dict) -> dict[str, LLMProvider]:
     """
     configured_providers, default_provider = _get_llm_section(config)
     if not configured_providers:
-        raise ConfigError("No LLM config found. Run: common-setup")
+        raise ConfigError("No LLM config found. Run: toolsetup")
 
     providers: dict[str, LLMProvider] = {}
 
@@ -76,5 +76,5 @@ def get_default_provider_name(config: dict) -> str:
     """
     _, default_provider = _get_llm_section(config)
     if not default_provider:
-        raise ConfigError("No default LLM provider configured. Run: common-setup")
+        raise ConfigError("No default LLM provider configured. Run: toolsetup")
     return default_provider

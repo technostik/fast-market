@@ -15,7 +15,7 @@ common/agent/. task-cli re-exports these via thin shims. task-cli owns only:
 - Max iterations, timeouts, workdir
 
 ## What it does NOT manage
-- LLM configuration → use `common-setup`
+- LLM configuration → use `toolsetup`
 
 ## Dependencies
 - common.core.config (load_tool_config for task)
@@ -26,4 +26,4 @@ common/agent/. task-cli re-exports these via thin shims. task-cli owns only:
 
 ## Do NOT
 - Do not add LLM config management here
-- Do not re-implement what common-setup does
+- Do not re-implement what toolsetup does

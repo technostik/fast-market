@@ -34,7 +34,7 @@ def _load():
         plugin_manifests = discover_providers(config)
     except ConfigError as exc:
         click.echo(f"Error: {exc}", err=True)
-        click.echo("Run: common-setup", err=True)
+        click.echo("Run: toolsetup", err=True)
         sys.exit(1)
 
     from commands.task.register import register as task_register, report_cmd

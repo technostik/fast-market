@@ -196,7 +196,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             provider_name = provider or get_default_provider_name(common_config)
         except ConfigError:
             click.echo("Error: No default LLM provider configured.", err=True)
-            click.echo("Run: common-setup", err=True)
+            click.echo("Run: toolsetup", err=True)
             sys.exit(1)
 
         if not provider_name:

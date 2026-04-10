@@ -1,4 +1,4 @@
-# common-setup
+# toolsetup
 
 ## Purpose
 Standalone CLI to configure common settings and LLM providers for all fast-market commands.
@@ -24,15 +24,15 @@ Standalone CLI to configure common settings and LLM providers for all fast-marke
 - NO dependency on any other agent
 
 ## Commands
-- `common-setup` — Run interactive wizard
-- `common-setup --show` — Show current config
-- `common-setup --show-path` — Show config file paths
-- `common-setup workdir [path]` — Get or set workdir
-- `common-setup clean-workdir` — Clean workdir files
-- `common-setup llm list` — List providers
-- `common-setup llm add <provider>` — Add provider
-- `common-setup llm remove <provider>` — Remove provider
-- `common-setup llm set-default <provider>` — Set default provider
+- `toolsetup` — Run interactive wizard
+- `toolsetup --show` — Show current config
+- `toolsetup --show-path` — Show config file paths
+- `toolsetup workdir [path]` — Get or set workdir
+- `toolsetup clean-workdir` — Clean workdir files
+- `toolsetup llm list` — List providers
+- `toolsetup llm add <provider>` — Add provider
+- `toolsetup llm remove <provider>` — Remove provider
+- `toolsetup llm set-default <provider>` — Set default provider
 
 ## Do NOT
 - Do not manage per-tool config here

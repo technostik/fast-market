@@ -152,13 +152,13 @@ try:
     config = load_tool_config("your-tool")
 except ConfigError as exc:
     click.echo(f"Error: {exc}", err=True)
-    click.echo("Run: common-setup", err=True)
+    click.echo("Run: toolsetup", err=True)
     sys.exit(1)
 ```
 
 **First-time setup:**
 ```
-Run: common-setup    # configure LLM providers, workdir, etc.
+Run: toolsetup    # configure LLM providers, workdir, etc.
 ```
 
 ### 2.4 Registry (core/registry.py)
@@ -214,7 +214,7 @@ Functions from `common.storage.base`:
 fast-market uses a two-level XDG config layout under `~/.config/fast-market/`:
 
 ### Common config (shared across tools)
-Managed by `common-setup`. Lives under `~/.config/fast-market/common/`.
+Managed by `toolsetup`. Lives under `~/.config/fast-market/common/`.
 
 | File | Contains | Used by |
 |------|----------|---------|
@@ -237,9 +237,9 @@ If a required subconfig is missing, `load_tool_config()` raises `ConfigError`.
 
 ### Setting up
 ```bash
-common-setup          # interactive wizard
-common-setup --show   # show current common config
-common-setup --show-path   # show config file paths
+toolsetup          # interactive wizard
+toolsetup --show   # show current common config
+toolsetup --show-path   # show config file paths
 ```
 
 ### In your agent code

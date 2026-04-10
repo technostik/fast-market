@@ -173,7 +173,7 @@ def load_tool_config(tool_name: str, path: str | None = None) -> dict:
     for subconfig in required_subconfigs:
         if subconfig not in discovered_subconfigs:
             raise ConfigError(
-                f"Required common config '{subconfig}' not found. Run: common-setup"
+                f"Required common config '{subconfig}' not found. Run: toolsetup"
             )
 
     common_cfg = load_common_config()
@@ -244,7 +244,7 @@ def resolve_llm_config(tool_name: str) -> dict:
     if "providers" in cfg:
         default_provider = cfg.get("default_provider", "")
         if not default_provider:
-            raise ConfigError("No default LLM provider set. Run: common-setup")
+            raise ConfigError("No default LLM provider set. Run: toolsetup")
         return {
             "providers": cfg.get("providers", {}),
             "default_provider": default_provider,
@@ -252,9 +252,9 @@ def resolve_llm_config(tool_name: str) -> dict:
         }
     llm = cfg.get("llm", {})
     if not llm:
-        raise ConfigError("No LLM configured. Run: common-setup")
+        raise ConfigError("No LLM configured. Run: toolsetup")
     if not llm.get("default_provider"):
-        raise ConfigError("No default LLM provider set. Run: common-setup")
+        raise ConfigError("No default LLM provider set. Run: toolsetup")
     return {
         "providers": llm.get("providers", {}),
         "default_provider": llm["default_provider"],

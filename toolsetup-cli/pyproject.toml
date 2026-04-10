@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "common-setup"
+name = "toolsetup"
 version = "0.1.0"
-description = "Common configuration CLI for fast-market"
+description = "Tool configuration CLI for fast-market"
 requires-python = ">=3.11"
 dependencies = [
   "click>=8.1",
@@ -15,11 +15,11 @@ dependencies = [
 ]
 
 [project.scripts]
-common-setup = "setup_entry:main"
+toolsetup = "toolsetup_entry:main"
 
 [tool.setuptools]
 packages = [
-  "setup_entry",
+  "toolsetup_entry",
   "commands",
   "commands.setup",
   "commands.autocomplete",
