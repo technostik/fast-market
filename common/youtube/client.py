@@ -150,6 +150,7 @@ class YouTubeClient:
                 stats = video_item.get("statistics", {})
                 channel_id = snippet.get("channelId", "")
                 channel_title = snippet.get("channelTitle", "")
+                video_title = snippet.get("title", "")
                 channel_url = f"https://www.youtube.com/channel/{channel_id}" if channel_id else None
                 view_count = int(stats.get("viewCount", 0))
 
@@ -157,6 +158,7 @@ class YouTubeClient:
                     comment.view_count = view_count
                     comment.channel_name = channel_title
                     comment.channel_url = channel_url
+                    comment.video_title = video_title
 
             logger.info(
                 "comments_retrieved",
