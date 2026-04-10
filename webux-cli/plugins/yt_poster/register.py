@@ -341,7 +341,7 @@ selectAllBtn.addEventListener('click', () => { rows.forEach(r => r.selected = tr
 deselectAllBtn.addEventListener('click', () => { rows.forEach(r => r.selected = false); renderTable(); });
 
 const params = new URLSearchParams(window.location.search);
-const preset = params.get('file');
+const preset = params.get('file') || 'replies.json';
 if (preset) {
   fileInput.value = preset;
   loadFile();
