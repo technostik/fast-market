@@ -1213,6 +1213,10 @@ def run_router(
             state.failure_reason = f"Failed to import plan: {exc}"
             state.end_time = time.time()
             return state
+    else:
+        # No import plan provided, but we still need to initialize resolved_params
+        # from CLI params so skills can receive them
+        state.resolved_params = dict(import_params) if import_params else {}
 
     if not skills:
         state.failed = True
@@ -1477,16 +1481,24 @@ def run_router(
 
             # Build params for this skill:
             # 1. Start with global resolved params (from plan's global params section)
-            # 2. Filter to only include params that the skill actually expects
-            # 3. Validate all required params are satisfied
+            # 2. Merge params from the planner's response for this specific step
+            # 3. Filter to only include params that the skill actually expects
+            # 4. Validate all required params are satisfied
             params = {}
-            if state.resolved_params:
-                skill_param_names = {p.get("name") for p in (matched.parameters or []) if "name" in p}
-                if skill_param_names:
-                    # Only inject params that the skill expects
-                    for key, value in state.resolved_params.items():
-                        if key in skill_param_names:
-                            params[key] = value
+            skill_param_names = {p.get("name") for p in (matched.parameters or []) if "name" in p}
+            
+            if state.resolved_params and skill_param_names:
+                # Only inject params that the skill expects
+                for key, value in state.resolved_params.items():
+                    if key in skill_param_names:
+                        params[key] = value
+
+            # Merge planner-provided params for this step (these take precedence)
+            planner_params = {str(k): str(v) for k, v in (plan.get("params") or {}).items()}
+            if skill_param_names:
+                for key, value in planner_params.items():
+                    if key in skill_param_names:
+                        params[key] = value
 
             # Check for missing required params and fail loudly
             missing_required = []
