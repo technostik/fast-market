@@ -58,15 +58,14 @@ class SubstackPlugin(SocialPlugin):
         from selenium import webdriver
         from selenium.webdriver.common.by import By
         from selenium.webdriver.common.keys import Keys
-        from selenium.webdriver.chrome.service import Service
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
 
         chrome_options = Options()
         chrome_options.add_argument("--start-maximized")
-        service = Service("/usr/bin/chromedriver")
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        # Selenium 4+ auto-manages ChromeDriver via Selenium Manager
+        driver = webdriver.Chrome(options=chrome_options)
 
         try:
             driver.get("https://substack.com/sign-in")
