@@ -26,60 +26,9 @@ from commands.helpers import (
     ensure_agent_browser_installed,
     is_cdp_available,
 )
+from commands.run.session_utils import export_data_to_session_dict
 from common.core.config import load_tool_config, get_tool_config_path, ConfigError
 from common.llm.registry import get_default_provider_name
-
-
-def _export_data_to_session_dict(data: dict) -> dict:
-    """Convert export-format dict (with 'commands' key) back to session-format
-    dict (with 'turns' key) so it can be loaded via ``Session.from_dict()``.
-
-    The export format flattens commands, while the session format organises
-    them into turns.  For import purposes we create a single assistant turn
-    containing all commands.
-    """
-    from datetime import datetime
-
-    tool_calls = []
-    for i, cmd in enumerate(data.get("commands", [])):
-        tool_calls.append({
-            "tool_call_id": f"import-{i}",
-            "tool_name": "browse",
-            "arguments": {
-                "action": cmd.get("action", ""),
-                "args": cmd.get("args", []),
-                "explanation": cmd.get("explanation", ""),
-            },
-            "explanation": cmd.get("explanation", ""),
-            "exit_code": cmd.get("exit_code"),
-            "stdout": cmd.get("stdout", ""),
-            "stderr": cmd.get("stderr", ""),
-            "error": cmd.get("error"),
-            "result": cmd.get("result"),
-        })
-
-    meta = data.get("session_metadata", {})
-    return {
-        "task_description": data.get("task_description", ""),
-        "workdir": meta.get("workdir", ""),
-        "provider": meta.get("provider", ""),
-        "model": meta.get("model", ""),
-        "max_iterations": meta.get("max_iterations", 20),
-        "task_params": meta.get("task_params", {}),
-        "turns": [
-            {
-                "role": "assistant",
-                "content": "Imported session reference",
-                "timestamp": meta.get("start_time", datetime.utcnow().isoformat()),
-                "tool_calls": tool_calls,
-            }
-        ],
-        "start_time": meta.get("start_time", datetime.utcnow().isoformat()),
-        "end_time": meta.get("end_time"),
-        "end_reason": meta.get("end_reason", ""),
-        "exit_code": meta.get("exit_code", 0),
-        "error": meta.get("error"),
-    }
 
 
 class _ProviderParamType(click.ParamType):
@@ -480,7 +429,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 import_path_obj = Path(import_path)
                 export_data = Session.load_export(import_path_obj)
                 imported_session = Session.from_dict(
-                    _export_data_to_session_dict(export_data)
+                    export_data_to_session_dict(export_data)
                 )
                 if not silent:
                     m = imported_session.metrics_dict()

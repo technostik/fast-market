@@ -247,37 +247,17 @@ class TestExportDataToSessionDict:
 
     def test_conversion_preserves_commands(self):
         """Converted data should have turns with tool_calls from commands."""
-        # Use importlib to explicitly load from browser-cli, avoiding ambiguous
-        # 'commands.run.register' which could resolve to skill-cli instead.
+        # Import directly from the clean utility module (no CLI dependencies)
         import importlib.util
         from pathlib import Path
 
         browser_cli = Path(__file__).parent.parent / "browser-cli"
-        browser_register = browser_cli / "commands" / "run" / "register.py"
+        session_utils = browser_cli / "commands" / "run" / "session_utils.py"
 
-        # Temporarily put browser-cli before skill-cli in sys.path so that
-        # `from commands.helpers import ...` inside register.py resolves correctly.
-        browser_cli_str = str(browser_cli)
-        old_path = list(sys.path)
-        # Save and temporarily remove any 'commands.*' modules from sys.modules
-        # to prevent skill-cli's commands package from interfering
-        old_modules = {k: v for k, v in sys.modules.items() if k.startswith("commands")}
-        modules_to_remove = [k for k in sys.modules if k.startswith("commands")]
-        for mod in modules_to_remove:
-            del sys.modules[mod]
-        try:
-            sys.path = [p for p in sys.path if p != browser_cli_str]
-            sys.path.insert(0, browser_cli_str)
-
-            spec = importlib.util.spec_from_file_location("browser_run_register", browser_register)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-        finally:
-            sys.path = old_path
-            # Restore the original sys.modules state
-            sys.modules.update(old_modules)
-
-        _export_data_to_session_dict = module._export_data_to_session_dict
+        spec = importlib.util.spec_from_file_location("session_utils", session_utils)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        export_data_to_session_dict = module.export_data_to_session_dict
 
         export_data = {
             "task_description": "Test task",
@@ -307,7 +287,7 @@ class TestExportDataToSessionDict:
             ],
         }
 
-        session_data = _export_data_to_session_dict(export_data)
+        session_data = export_data_to_session_dict(export_data)
         assert session_data["task_description"] == "Test task"
         assert len(session_data["turns"]) == 1
         assert len(session_data["turns"][0]["tool_calls"]) == 1
