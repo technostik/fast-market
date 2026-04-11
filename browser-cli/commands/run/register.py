@@ -390,7 +390,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def run_cmd(
         ctx,
         task_description: str | None,
-        file: str | None,
+        task_file: str | None,
         workdir: str | None,
         params: tuple[str, ...],
         provider: str | None,
@@ -447,8 +447,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             save_session = str(workdir_path / ".last-browser-session.yaml")
 
         # Resolve task description
-        if file:
-            task_description = Path(file).read_text(encoding="utf-8").strip()
+        if task_file:
+            task_description = Path(task_file).read_text(encoding="utf-8").strip()
         if not task_description:
             raise click.ClickException(
                 "TASK_DESCRIPTION is required (or use --file/-f)."
@@ -467,11 +467,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if not provider_name:
             click.echo("Error: No LLM provider available.", err=True)
-            sys.exit(1)
-
-        provider_instance = plugin_manifests.get(provider_name)
-        if not provider_instance:
-            click.echo(f"Error: Provider '{provider_name}' not available.", err=True)
             sys.exit(1)
 
         # Load browser documentation
