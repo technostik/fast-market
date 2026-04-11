@@ -246,7 +246,16 @@ class TestExportDataToSessionDict:
 
     def test_conversion_preserves_commands(self):
         """Converted data should have turns with tool_calls from commands."""
-        from commands.run.register import _export_data_to_session_dict
+        # Use importlib to explicitly load from browser-cli, avoiding ambiguous
+        # 'commands.run.register' which could resolve to skill-cli instead.
+        import importlib.util
+        from pathlib import Path
+        
+        browser_register = Path(__file__).parent.parent / "browser-cli" / "commands" / "run" / "register.py"
+        spec = importlib.util.spec_from_file_location("browser_run_register", browser_register)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _export_data_to_session_dict = module._export_data_to_session_dict
 
         export_data = {
             "task_description": "Test task",
