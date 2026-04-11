@@ -48,6 +48,7 @@ def substitute_params(instruction: str, params: dict[str, str]) -> str:
 def build_agent_cmd(
     instruction: str,
     cdp_port: int = 9222,
+    timeout: int | None = None,
 ) -> list[str]:
     """Build the agent-browser command line."""
     try:
@@ -55,21 +56,25 @@ def build_agent_cmd(
     except ValueError:
         # Fall back: pass instruction as a single argument if quoting is unbalanced
         args = [instruction]
-    return [
+    cmd = [
         _AGENT_BROWSER,
         "--cdp",
         str(cdp_port),
         *args,
     ]
+    if timeout is not None:
+        cmd.extend(["--timeout", str(timeout)])
+    return cmd
 
 
 def run_agent_cmd(
     instruction: str,
     cdp_port: int = 9222,
+    timeout: int | None = None,
     capture_stderr: bool = True,
 ) -> subprocess.CompletedProcess:
     """Run an agent-browser instruction and return the result."""
-    cmd = build_agent_cmd(instruction, cdp_port)
+    cmd = build_agent_cmd(instruction, cdp_port, timeout)
     return subprocess.run(
         cmd,
         capture_output=True,

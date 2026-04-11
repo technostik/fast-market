@@ -66,6 +66,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Do not stop the browser after the script completes.",
     )
+    @click.option(
+        "--timeout",
+        "-t",
+        "timeout",
+        type=int,
+        default=None,
+        help="Timeout in milliseconds for each agent-browser instruction (default: 30000).",
+    )
     def script_cmd(
         script_input: str | None,
         cdp_port: int,
@@ -74,6 +82,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         stdin: bool,
         script_file: str | None,
         keep_browser: bool,
+        timeout: int | None,
     ) -> None:
         """Run a set of agent-browser instructions as a script.
 
@@ -186,7 +195,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 click.echo(f"  [{i+1}/{len(instructions)}] {resolved}", err=True)
 
             try:
-                result = run_agent_cmd(resolved, cdp_port)
+                result = run_agent_cmd(resolved, cdp_port, timeout=timeout)
             except Exception as exc:
                 entry = {
                     "instruction": resolved,
