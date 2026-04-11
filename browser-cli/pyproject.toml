@@ -35,4 +35,5 @@ packages = [
     "commands.stop",
     "commands.run",
     "commands.script",
+    "commands.setup",
 ]

@@ -50,11 +50,16 @@ def build_agent_cmd(
     cdp_port: int = 9222,
 ) -> list[str]:
     """Build the agent-browser command line."""
+    try:
+        args = shlex.split(instruction)
+    except ValueError:
+        # Fall back: pass instruction as a single argument if quoting is unbalanced
+        args = [instruction]
     return [
         _AGENT_BROWSER,
         "--cdp",
         str(cdp_port),
-        *shlex.split(instruction),
+        *args,
     ]
 
 

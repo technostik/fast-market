@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import click
 from commands.base import CommandManifest
+from commands.completion import ScriptPathParamType, resolve_script_path
 from commands.helpers import (
     ensure_agent_browser_installed,
     substitute_params,
@@ -14,10 +15,14 @@ from commands.helpers import (
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("script")
-    @click.argument("script_input", required=False)
+    @click.argument(
+        "script_input",
+        required=False,
+        type=ScriptPathParamType(),
+    )
     @click.option(
         "--cdp-port",
-        "-p",
+        "-c",
         "cdp_port",
         type=int,
         default=9222,
@@ -33,7 +38,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--param",
-        "-P",
+        "-p",
         "params",
         multiple=True,
         type=str,
@@ -51,9 +56,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--file",
         "-f",
         "script_file",
-        type=click.Path(exists=True, dir_okay=False),
+        type=ScriptPathParamType(),
         default=None,
-        help="Read script from a file.",
+        help="Read script from a file (searched in workdir if relative).",
     )
     @click.option(
         "--keep-browser",
@@ -75,7 +80,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         SCRIPT_INPUT is either the script content (one instruction per line),
         a file path when using --file, or read from stdin with --stdin.
 
-        Use -P KEY=VALUE to set {key} placeholders in the instructions.
+        If SCRIPT_INPUT looks like a file path (no newlines, not absolute text),
+        it is resolved from CWD then workdir.
+
+        Use -p KEY=VALUE to set {key} placeholders in the instructions.
 
         If no browser is detected on CDP, one is launched and stopped after
         the script finishes (unless --keep-browser is set).
@@ -93,13 +101,26 @@ def register(plugin_manifests: dict) -> CommandManifest:
         # Resolve script content
         if script_file:
             from pathlib import Path
-            script_content = Path(script_file).read_text().strip()
+            resolved = resolve_script_path(script_file)
+            if resolved is None:
+                raise click.ClickException(f"Script file not found: {script_file}")
+            script_content = resolved.read_text().strip()
         elif stdin or script_input == "-":
             script_content = read_stdin()
         elif script_input is None:
             raise click.ClickException("SCRIPT_INPUT is required (or use --stdin/-s or --file/-f).")
         else:
-            script_content = script_input.strip()
+            # If it contains newlines, treat as inline script content
+            if "\n" in script_input:
+                script_content = script_input.strip()
+            else:
+                # Single line without newlines: try as file path first
+                resolved = resolve_script_path(script_input)
+                if resolved is not None:
+                    script_content = resolved.read_text().strip()
+                else:
+                    # Treat as inline instruction content
+                    script_content = script_input.strip()
 
         # Parse instructions (one per line, skip empty/comment lines)
         instructions = []
@@ -164,7 +185,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if fmt == "text":
                 click.echo(f"  [{i+1}/{len(instructions)}] {resolved}", err=True)
 
-            result = run_agent_cmd(resolved, cdp_port)
+            try:
+                result = run_agent_cmd(resolved, cdp_port)
+            except Exception as exc:
+                entry = {
+                    "instruction": resolved,
+                    "stdout": "",
+                    "stderr": str(exc),
+                    "exit_code": 1,
+                    "success": False,
+                }
+                results.append(entry)
+                errors.append(entry)
+                if fmt == "text":
+                    click.echo(f"    Error: {exc}", err=True)
+                continue
 
             entry = {
                 "instruction": resolved,

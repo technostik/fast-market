@@ -16,7 +16,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.argument("instruction", required=False)
     @click.option(
         "--cdp-port",
-        "-p",
+        "-c",
         "cdp_port",
         type=int,
         default=9222,
@@ -32,7 +32,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--param",
-        "-P",
+        "-p",
         "params",
         multiple=True,
         type=str,
@@ -56,7 +56,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Run a single agent-browser instruction.
 
         INSTRUCTION is the command to run (e.g., 'open https://example.com').
-        Use -P KEY=VALUE to set {key} placeholders in the instruction.
+        Use -p KEY=VALUE to set {key} placeholders in the instruction.
         """
         ensure_agent_browser_installed()
 
