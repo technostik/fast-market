@@ -8,7 +8,10 @@ from common.core.registry import discover_commands, discover_plugins
 
 main = create_cli_group(
     "browser",
-    description="Control a Chromium-based browser via CDP for agent automation."
+    description=(
+        "Control a Chromium-based browser via CDP for agent automation.\n\n"
+        "See https://github.com/vercel-labs/agent-browser for full command reference."
+    ),
 )
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
