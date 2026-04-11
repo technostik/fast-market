@@ -20,6 +20,21 @@ from commands.helpers import (
 _TIMEOUT_RE = re.compile(r"timed?\s*out|timeout", re.IGNORECASE)
 
 
+def _split_instructions(raw: str) -> list[str]:
+    """Split raw script content by ';;' separator.
+
+    Single ';' is treated as a literal semicolon.
+    ';;' separates instructions.
+    """
+    parts = raw.split(";;")
+    instructions = []
+    for part in parts:
+        cleaned = part.strip()
+        if cleaned:
+            instructions.append(cleaned)
+    return instructions
+
+
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("script")
     @click.argument(
@@ -91,10 +106,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         keep_browser: bool,
         timeout: int | None,
     ) -> None:
-        """Run a set of agent-browser instructions as a script.
+        """Run agent-browser instruction(s).
 
-        SCRIPT_INPUT is either the script content (one instruction per line),
+        SCRIPT_INPUT is either the script content, a single instruction,
         a file path when using --file, or read from stdin with --stdin.
+
+        Multiple instructions can be separated by ';;' on a single line,
+        or by newlines in multi-line scripts.
 
         If SCRIPT_INPUT looks like a file path (no newlines, not absolute text),
         it is resolved from CWD then workdir.
@@ -135,16 +153,31 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 if resolved is not None:
                     script_content = resolved.read_text().strip()
                 else:
-                    # Treat as inline instruction content
+                    # Treat as inline instruction(s) content (supports ;; separator)
                     script_content = script_input.strip()
 
-        # Parse instructions (one per line, skip empty/comment lines)
+        # Parse instructions: split by ';;' first (for inline), then by lines (for multi-line scripts)
+        # Also support newline-separated lines for multi-line scripts
         instructions = []
-        for line in script_content.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            instructions.append(line)
+
+        # Check if content uses ;; separator (no newlines, or explicit ;; present)
+        if ";;" in script_content:
+            # Use ;; splitting for inline multi-instruction
+            raw_instructions = _split_instructions(script_content)
+            for inst in raw_instructions:
+                # Each ;; separated part could itself be multi-line (ignore comments/blanks)
+                for line in inst.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    instructions.append(line)
+        else:
+            # Traditional line-by-line parsing
+            for line in script_content.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                instructions.append(line)
 
         if not instructions:
             raise click.ClickException("No instructions found in script.")

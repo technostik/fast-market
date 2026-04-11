@@ -33,7 +33,6 @@ packages = [
     "commands",
     "commands.start",
     "commands.stop",
-    "commands.run",
     "commands.script",
     "commands.setup",
 ]
