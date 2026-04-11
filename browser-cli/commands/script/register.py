@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import re
+import subprocess
+import time
+
 import click
 from commands.base import CommandManifest
 from commands.completion import ScriptPathParamType, resolve_script_path
@@ -11,6 +15,9 @@ from commands.helpers import (
     read_stdin,
     is_cdp_available,
 )
+
+# Pattern to detect agent-browser timeout errors
+_TIMEOUT_RE = re.compile(r"timed?\s*out|timeout", re.IGNORECASE)
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -172,7 +179,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             )
 
             # Wait for browser to be ready
-            import time
             for _ in range(30):
                 if is_cdp_available(cdp_port):
                     launched_browser = True
@@ -194,35 +200,100 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if fmt == "text":
                 click.echo(f"  [{i+1}/{len(instructions)}] {resolved}", err=True)
 
-            try:
-                result = run_agent_cmd(resolved, cdp_port, timeout=timeout)
-            except Exception as exc:
+            # Determine if we should retry on timeout
+            retry_budget_ms = timeout  # None means no retry (single attempt)
+            entry = None
+            if retry_budget_ms is not None:
+                # Retry loop: keep retrying timed-out instructions until budget expires
+                start_ms = time.monotonic() * 1000
+                attempt = 0
+                while True:
+                    attempt += 1
+                    try:
+                        result = run_agent_cmd(resolved, cdp_port, timeout=timeout)
+                    except Exception as exc:
+                        if fmt == "text" and attempt == 1:
+                            click.echo(f"    Error: {exc}", err=True)
+                        entry = {
+                            "instruction": resolved,
+                            "stdout": "",
+                            "stderr": str(exc),
+                            "exit_code": 1,
+                            "success": False,
+                            "attempts": attempt,
+                        }
+                        # Check if this was a timeout error
+                        if _TIMEOUT_RE.search(str(exc).lower()):
+                            elapsed_ms = (time.monotonic() * 1000) - start_ms
+                            remaining_ms = retry_budget_ms - elapsed_ms
+                            if remaining_ms > 0 and attempt < 50:
+                                if fmt == "text":
+                                    click.echo(
+                                        f"    Retry on timeout ({attempt} attempt{'s' if attempt > 1 else ''}), "
+                                        f"remaining budget: {remaining_ms:.0f}ms",
+                                        err=True,
+                                    )
+                                continue
+                        # Non-timeout error or budget exhausted
+                        break
+                    else:
+                        entry = {
+                            "instruction": resolved,
+                            "stdout": result.stdout.strip(),
+                            "stderr": result.stderr.strip(),
+                            "exit_code": result.returncode,
+                            "success": result.returncode == 0,
+                            "attempts": attempt,
+                        }
+                        # Check if this is still a timeout failure
+                        is_timeout_error = (
+                            result.returncode != 0
+                            and _TIMEOUT_RE.search(result.stderr.lower())
+                        )
+                        if is_timeout_error:
+                            elapsed_ms = (time.monotonic() * 1000) - start_ms
+                            remaining_ms = retry_budget_ms - elapsed_ms
+                            if remaining_ms > 0 and attempt < 50:
+                                if fmt == "text":
+                                    click.echo(
+                                        f"    Retry on timeout ({attempt} attempt{'s' if attempt > 1 else ''}), "
+                                        f"remaining budget: {remaining_ms:.0f}ms",
+                                        err=True,
+                                    )
+                                continue
+                        break
+            else:
+                # No retry: single attempt
+                try:
+                    result = run_agent_cmd(resolved, cdp_port, timeout=timeout)
+                except Exception as exc:
+                    entry = {
+                        "instruction": resolved,
+                        "stdout": "",
+                        "stderr": str(exc),
+                        "exit_code": 1,
+                        "success": False,
+                    }
+                    results.append(entry)
+                    errors.append(entry)
+                    if fmt == "text":
+                        click.echo(f"    Error: {exc}", err=True)
+                    continue
+
                 entry = {
                     "instruction": resolved,
-                    "stdout": "",
-                    "stderr": str(exc),
-                    "exit_code": 1,
-                    "success": False,
+                    "stdout": result.stdout.strip(),
+                    "stderr": result.stderr.strip(),
+                    "exit_code": result.returncode,
+                    "success": result.returncode == 0,
                 }
-                results.append(entry)
-                errors.append(entry)
-                if fmt == "text":
-                    click.echo(f"    Error: {exc}", err=True)
-                continue
 
-            entry = {
-                "instruction": resolved,
-                "stdout": result.stdout.strip(),
-                "stderr": result.stderr.strip(),
-                "exit_code": result.returncode,
-                "success": result.returncode == 0,
-            }
             results.append(entry)
 
-            if result.returncode != 0:
+            if entry["exit_code"] != 0:
                 errors.append(entry)
-                if fmt == "text" and result.stderr.strip():
-                    click.echo(f"    Error: {result.stderr.strip()}", err=True)
+                if fmt == "text" and entry["stderr"].strip():
+                    click.echo(f"    Error: {entry['stderr']}", err=True)
 
         # Cleanup: stop browser if we launched it and --keep-browser not set
         if launched_browser and not keep_browser:
