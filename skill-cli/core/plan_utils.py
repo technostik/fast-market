@@ -379,6 +379,41 @@ class RunPlanFileType(click.ParamType):
 
             items.append(CompletionItem(rel, help=help_text))
 
+        # Fallback: also search in workdir_root
+        try:
+            from common.core.config import load_common_config
+            common_config = load_common_config()
+            workdir_root = common_config.get("workdir_root")
+            if workdir_root:
+                workdir_root_path = Path(workdir_root).expanduser().resolve()
+                if workdir_root_path.exists() and workdir_root_path.is_dir():
+                    root_plans = self._find_run_plans(workdir_root_path)
+                    for plan_path in root_plans:
+                        try:
+                            rel = plan_path.relative_to(workdir_root_path).as_posix()
+                        except ValueError:
+                            rel = str(plan_path)
+
+                        if not rel.startswith(incomplete):
+                            continue
+
+                        # Avoid duplicates
+                        if any(item.value == rel for item in items):
+                            continue
+
+                        # Try to read goal for help text
+                        help_text = ""
+                        try:
+                            data = yaml.safe_load(plan_path.read_text())
+                            if isinstance(data, dict) and data.get("goal"):
+                                help_text = data["goal"]
+                        except Exception:
+                            pass
+
+                        items.append(CompletionItem(rel, help=help_text))
+        except Exception:
+            pass
+
         return items
 
     def convert(self, value, param, ctx):
@@ -387,6 +422,19 @@ class RunPlanFileType(click.ParamType):
         if not path.is_absolute():
             workdir = self._get_workdir()
             path = workdir / path
+            # Fallback to workdir_root if file not found in workdir
+            if not path.exists():
+                try:
+                    from common.core.config import load_common_config
+                    common_config = load_common_config()
+                    workdir_root = common_config.get("workdir_root")
+                    if workdir_root:
+                        workdir_root_path = Path(workdir_root).expanduser().resolve()
+                        fallback_path = workdir_root_path / value
+                        if fallback_path.exists():
+                            path = fallback_path
+                except Exception:
+                    pass
         return path.resolve()
 
 
