@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "browser-agent"
+version = "0.1.0"
+description = "Control a Chromium-based browser via CDP for agent automation"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "auto-click-auto>=0.1.0",
+    "pyyaml>=6.0",
+    "structlog>=24.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+browser = "browser_entry:main"
+
+[tool.setuptools]
+packages = [
+    "common",
+    "common.core",
+    "common.cli",
+    "common.auth",
+    "common.storage",
+    "browser_entry",
+    "cli",
+    "core",
+    "commands",
+    "commands.start",
+    "commands.stop",
+    "commands.run",
+    "commands.script",
+]
