@@ -30,6 +30,58 @@ from common.core.config import load_tool_config, get_tool_config_path, ConfigErr
 from common.llm.registry import get_default_provider_name
 
 
+def _export_data_to_session_dict(data: dict) -> dict:
+    """Convert export-format dict (with 'commands' key) back to session-format
+    dict (with 'turns' key) so it can be loaded via ``Session.from_dict()``.
+
+    The export format flattens commands, while the session format organises
+    them into turns.  For import purposes we create a single assistant turn
+    containing all commands.
+    """
+    from datetime import datetime
+
+    tool_calls = []
+    for i, cmd in enumerate(data.get("commands", [])):
+        tool_calls.append({
+            "tool_call_id": f"import-{i}",
+            "tool_name": "browse",
+            "arguments": {
+                "action": cmd.get("action", ""),
+                "args": cmd.get("args", []),
+                "explanation": cmd.get("explanation", ""),
+            },
+            "explanation": cmd.get("explanation", ""),
+            "exit_code": cmd.get("exit_code"),
+            "stdout": cmd.get("stdout", ""),
+            "stderr": cmd.get("stderr", ""),
+            "error": cmd.get("error"),
+            "result": cmd.get("result"),
+        })
+
+    meta = data.get("session_metadata", {})
+    return {
+        "task_description": data.get("task_description", ""),
+        "workdir": meta.get("workdir", ""),
+        "provider": meta.get("provider", ""),
+        "model": meta.get("model", ""),
+        "max_iterations": meta.get("max_iterations", 20),
+        "task_params": meta.get("task_params", {}),
+        "turns": [
+            {
+                "role": "assistant",
+                "content": "Imported session reference",
+                "timestamp": meta.get("start_time", datetime.utcnow().isoformat()),
+                "tool_calls": tool_calls,
+            }
+        ],
+        "start_time": meta.get("start_time", datetime.utcnow().isoformat()),
+        "end_time": meta.get("end_time"),
+        "end_reason": meta.get("end_reason", ""),
+        "exit_code": meta.get("exit_code", 0),
+        "error": meta.get("error"),
+    }
+
+
 class _ProviderParamType(click.ParamType):
     """Shell completion for LLM provider names."""
     name = "provider"
@@ -312,6 +364,28 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Save session to YAML file.",
     )
+    @click.option(
+        "--export",
+        "-e",
+        "export_path",
+        type=click.Path(),
+        default=None,
+        help="Export session as YAML with commands and results for LLM learning.",
+    )
+    @click.option(
+        "--commands-only",
+        "-c",
+        is_flag=True,
+        help="When used with --export, export only the command sequence (no stdout/results).",
+    )
+    @click.option(
+        "--import",
+        "-I",
+        "import_path",
+        type=click.Path(exists=True),
+        default=None,
+        help="Import a previous session export to inform the agent.",
+    )
     @click.pass_context
     def run_cmd(
         ctx,
@@ -332,6 +406,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         fmt: str,
         silent: bool,
         save_session: str | None,
+        export_path: str | None,
+        commands_only: bool,
+        import_path: str | None,
     ) -> None:
         """Run an LLM-driven browser task.
 
@@ -400,6 +477,28 @@ def register(plugin_manifests: dict) -> CommandManifest:
         # Load browser documentation
         browser_doc = _load_browser_doc()
 
+        # Load imported session if provided
+        imported_session = None
+        if import_path is not None:
+            try:
+                from common.agent.session import Session
+                import_path_obj = Path(import_path)
+                export_data = Session.load_export(import_path_obj)
+                imported_session = Session.from_dict(
+                    _export_data_to_session_dict(export_data)
+                )
+                if not silent:
+                    m = imported_session.metrics_dict()
+                    click.echo(
+                        f"Imported session: {imported_session.task_description[:80]}... "
+                        f"({m['total_tool_calls']} commands, "
+                        f"{m['error_count']} errors, "
+                        f"{m['success_rate']:.0%} success)",
+                        err=True,
+                    )
+            except Exception as exc:
+                click.echo(f"Warning: Could not import session file: {exc}", err=True)
+
         # Browser lifecycle: auto-launch if needed
         launched_browser = False
         browser_was_running = is_cdp_available(cdp_port)
@@ -423,6 +522,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             verbose=ctx.obj.get("verbose", False),
             debug=debug,
             silent=silent,
+            imported_session=imported_session,
         )
 
         try:
@@ -439,6 +539,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 loop.session.save(session_path)
                 if not silent:
                     click.echo(f"\nSession saved to: {session_path}", err=True)
+
+            # Export session (for LLM learning)
+            if export_path and loop.session:
+                export_path_obj = Path(export_path)
+                if not export_path_obj.is_absolute():
+                    export_path_obj = workdir_path / export_path_obj
+                loop.session.end_time = datetime.utcnow()
+                export_yaml = loop.session.to_export_yaml(commands_only=commands_only)
+                export_path_obj.write_text(export_yaml, encoding="utf-8")
+                label = "commands-only" if commands_only else "full"
+                if not silent:
+                    click.echo(f"\nSession exported ({label}) to: {export_path_obj}", err=True)
 
             # Metrics
             if not silent and loop.session:
@@ -461,11 +573,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         except Exception as exc:
             if loop.session:
+                loop.session.end_time = datetime.utcnow()
                 loop.session.exit_code = 1
                 loop.session.error = str(exc)
                 loop.session.end_reason = f"internal failure: {exc}"
                 if save_session:
                     loop.session.save(Path(save_session))
+                if export_path:
+                    export_path_obj = Path(export_path)
+                    if not export_path_obj.is_absolute():
+                        export_path_obj = workdir_path / export_path_obj
+                    export_yaml = loop.session.to_export_yaml(commands_only=commands_only)
+                    export_path_obj.write_text(export_yaml, encoding="utf-8")
+                    label = "commands-only" if commands_only else "full"
+                    click.echo(f"\nSession exported ({label}) to: {export_path_obj}", err=True)
             click.echo(f"Error: {exc}", err=True)
             sys.exit(1)
         finally:

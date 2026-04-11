@@ -23,7 +23,7 @@ FIXTURE_DATA = FIXTURES_DIR / "data"
 FIXTURE_BIN = FIXTURES_DIR / "bin"
 
 # Ensure local CLI entry packages are importable in tests.
-for path in (TESTS_DIR, REPO_ROOT, REPO_ROOT / "task-cli", REPO_ROOT / "skill-cli"):
+for path in (TESTS_DIR, REPO_ROOT, REPO_ROOT / "task-cli", REPO_ROOT / "skill-cli", REPO_ROOT / "browser-cli"):
     path_str = str(path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)

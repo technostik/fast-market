@@ -27,6 +27,7 @@ packages = [
     "common.cli",
     "common.auth",
     "common.storage",
+    "common.agent",
     "browser_entry",
     "cli",
     "core",
@@ -35,4 +36,5 @@ packages = [
     "commands.stop",
     "commands.script",
     "commands.setup",
+    "commands.run",
 ]

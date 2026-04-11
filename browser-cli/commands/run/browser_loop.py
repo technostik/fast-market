@@ -101,6 +101,7 @@ def build_browser_system_prompt(
     browser_doc: str,
     task_params: dict[str, str] | None = None,
     workdir: Path | None = None,
+    imported_session: Optional[Session] = None,
 ) -> str:
     """Build the full system prompt for the browser agent loop.
 
@@ -109,6 +110,7 @@ def build_browser_system_prompt(
     - The **full** browser documentation (as ``browser doc`` outputs it)
     - Parameter documentation
     - Usage rules
+    - Previous session reference (if imported)
     """
     from common.prompt import get_cached_manager
 
@@ -157,6 +159,11 @@ def build_browser_system_prompt(
 
     parts.append("\n## Rules\n" + rules_prompt)
 
+    # Imported session reference
+    if imported_session is not None:
+        imported_text = imported_session.format_for_import(task_description)
+        parts.append(f"\n## Previous Session Reference\n\n{imported_text}")
+
     return "\n\n".join(parts)
 
 
@@ -179,6 +186,7 @@ class BrowserTaskLoop:
     verbose: bool = False
     debug: str = ""                    # "" | "normal" | "full"
     silent: bool = False
+    imported_session: Optional[Session] = None
     session: Optional[Session] = None
 
     @property
@@ -239,6 +247,7 @@ class BrowserTaskLoop:
             browser_doc=browser_doc,
             task_params=task_params,
             workdir=self.workdir,
+            imported_session=self.imported_session,
         )
 
         messages = [
