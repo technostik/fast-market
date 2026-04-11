@@ -530,6 +530,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             # Save session
             if save_session and loop.session:
                 session_path = Path(save_session)
+                session_path.parent.mkdir(parents=True, exist_ok=True)
                 loop.session.end_time = datetime.utcnow()
                 loop.session.save(session_path)
                 if not silent:
@@ -540,6 +541,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 export_path_obj = Path(export_path)
                 if not export_path_obj.is_absolute():
                     export_path_obj = workdir_path / export_path_obj
+                export_path_obj.parent.mkdir(parents=True, exist_ok=True)
                 loop.session.end_time = datetime.utcnow()
                 export_yaml = loop.session.to_export_yaml(commands_only=commands_only)
                 export_path_obj.write_text(export_yaml, encoding="utf-8")
@@ -573,11 +575,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 loop.session.error = str(exc)
                 loop.session.end_reason = f"internal failure: {exc}"
                 if save_session:
-                    loop.session.save(Path(save_session))
+                    session_path = Path(save_session)
+                    session_path.parent.mkdir(parents=True, exist_ok=True)
+                    loop.session.save(session_path)
                 if export_path:
                     export_path_obj = Path(export_path)
                     if not export_path_obj.is_absolute():
                         export_path_obj = workdir_path / export_path_obj
+                    export_path_obj.parent.mkdir(parents=True, exist_ok=True)
                     export_yaml = loop.session.to_export_yaml(commands_only=commands_only)
                     export_path_obj.write_text(export_yaml, encoding="utf-8")
                     label = "commands-only" if commands_only else "full"
