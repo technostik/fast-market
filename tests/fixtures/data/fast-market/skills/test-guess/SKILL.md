@@ -15,4 +15,5 @@ stop_condition: |
 ## Instructions
 
 Use the `guess {input}` command to process the value of {input}.
-Find the correct invocation if you encounter errors.
+
+**IMPORTANT**: If you get an error, IMMEDIATELY run `guess --help` to understand the correct syntax. Do NOT repeat the same failed command. Read the help output carefully and follow it exactly.

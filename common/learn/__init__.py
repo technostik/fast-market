@@ -37,6 +37,9 @@ IMPORTANT : Only write NEW lessons that are not already present in the existing 
 - When task succeeded (exit code 0), the "What Works" section MUST contain the exact successful command, not advice like "use --help"
 - Generalize specific values — use <INPUT> instead of actual values
 - If the LLM claimed an answer in text without executing a command, capture that claimed answer as the lesson
+- For "What to Avoid": be VERY specific about the wrong command pattern (e.g., "Do not run `guess <value>` - it will fail")
+- For "Common Errors and Fixes": always specify the exact recovery action (e.g., "Run `guess --help` immediately after this error")
+- For "Useful Commands": include the EXACT sequence needed, including which --help to read first
 - Output ONLY the markdown content, no preamble, no code fences
 
 ---
