@@ -4,7 +4,6 @@ import click
 import sys
 from pathlib import Path
 
-from common.core.config import _resolve_config_path
 from common.core.yaml_utils import dump_yaml
 from commands.setup import init_task_config, load_task_config, save_task_config
 from commands.setup.task_edit import edit_task_config
@@ -17,7 +16,8 @@ def register(plugin_manifests: dict | None = None):
     def setup_cmd(ctx, path):
         """Manage task-specific configuration."""
         if path:
-            config_path = _resolve_config_path("task")
+            from common.core.config import get_agent_config_path
+            config_path = get_agent_config_path()
             click.echo(config_path)
             ctx.exit()
 
@@ -26,7 +26,7 @@ def register(plugin_manifests: dict | None = None):
         """Show current task config."""
         config = load_task_config()
         task = init_task_config(config)
-        click.echo(dump_yaml({"task": task}, sort_keys=False))
+        click.echo(dump_yaml(task, sort_keys=False))
 
     @setup_cmd.command("edit")
     def edit_cmd():
@@ -72,7 +72,7 @@ def register(plugin_manifests: dict | None = None):
         ):
             if command not in system_commands:
                 system_commands.append(command)
-                save_task_config({"task": task})
+                save_task_config(task)
                 click.echo(f"Added to system_commands: {command}")
             else:
                 click.echo(f"Already present in system_commands: {command}")
@@ -82,7 +82,7 @@ def register(plugin_manifests: dict | None = None):
                     "description": f"User-added {command} tool",
                     "commands": ["run"],
                 }
-                save_task_config({"task": task})
+                save_task_config(task)
                 click.echo(f"Added to fastmarket_tools: {command}")
             else:
                 click.echo(f"Already present in fastmarket_tools: {command}")
@@ -114,7 +114,7 @@ def register(plugin_manifests: dict | None = None):
                 removed = True
 
         if removed:
-            save_task_config({"task": task})
+            save_task_config(task)
             click.echo(f"Removed: {command}")
         else:
             click.echo(f"Not present: {command}")
@@ -126,7 +126,7 @@ def register(plugin_manifests: dict | None = None):
         config = load_task_config()
         task = init_task_config(config)
         task["max_iterations"] = n
-        save_task_config(config)
+        save_task_config(task)
         click.echo(f"Max iterations set to: {n}")
 
     @setup_cmd.command("set-timeout")
@@ -136,7 +136,7 @@ def register(plugin_manifests: dict | None = None):
         config = load_task_config()
         task = init_task_config(config)
         task["default_timeout"] = n
-        save_task_config(config)
+        save_task_config(task)
         click.echo(f"Default timeout set to: {n}s")
 
     @setup_cmd.command("set-workdir")
@@ -146,7 +146,7 @@ def register(plugin_manifests: dict | None = None):
         config = load_task_config()
         task = init_task_config(config)
         task["default_workdir"] = path
-        save_task_config(config)
+        save_task_config(task)
         click.echo(f"Default workdir set to: {path}")
 
     return setup_cmd

@@ -28,7 +28,7 @@ def load_skill_agent_config() -> dict:
 def save_skill_agent_config(agent_config: dict) -> None:
     """Save agent config to the common file.
 
-    Writes the full agent config dict directly to ~/.config/fast-market/common/agent.yaml.
+    Writes the full agent config dict directly to ~/.config/fast-market/common/agent/config.yaml.
     """
     save_agent_config(agent_config)
 

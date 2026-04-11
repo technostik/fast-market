@@ -139,7 +139,7 @@ def save_youtube_config(config: dict) -> None:
 
 
 def load_agent_config() -> dict:
-    """Load ~/.config/fast-market/common/agent.yaml.
+    """Load ~/.config/fast-market/common/agent/config.yaml.
 
     Returns empty dict if file does not exist.
     This is the shared agent config for skill, task, and prompt CLIs.
@@ -148,7 +148,7 @@ def load_agent_config() -> dict:
 
 
 def save_agent_config(config: dict) -> None:
-    """Save to ~/.config/fast-market/common/agent.yaml."""
+    """Save to ~/.config/fast-market/common/agent/config.yaml."""
     _save_yaml(get_agent_config_path(), config)
 
 

@@ -12,44 +12,32 @@ from common.agent.prompts import (
     DEFAULT_SYSTEM_COMMANDS,
     default_fastmarket_tools_dict,
 )
-from common.core.config import _resolve_config_path, load_tool_config, save_tool_config
+from common.core.config import load_agent_config, save_agent_config
 from common.core.yaml_utils import dump_yaml
 
 
 def load_task_config() -> dict:
-    """Load task config from file, returning dict with task key.
+    """Load agent config from the common file.
 
-    Handles both formats:
-    - Root-level: {fastmarket_tools: ..., system_commands: ...}
-    - Wrapped: {task: {fastmarket_tools: ..., system_commands: ...}}
+    Returns the full agent config dict (top-level keys like fastmarket_tools,
+    system_commands, agent_prompt, etc.). Returns {} if file doesn't exist.
     """
-    config_path = _resolve_config_path("task")
-    if config_path.exists():
-        with open(config_path) as f:
-            data = yaml.safe_load(f) or {}
-        if "task" in data:
-            return data
-        return {"task": data}
-    return {}
+    return load_agent_config()
 
 
 def save_task_config(config: dict) -> None:
-    """Save task config to file.
+    """Save agent config to the common file.
 
-    Expects config to have 'task' key, saves it at root level for cleaner YAML.
+    Writes the full agent config dict directly to ~/.config/fast-market/common/agent/config.yaml.
     """
-    config_path = _resolve_config_path("task")
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    task_data = config.get("task", config)
-    with open(config_path, "w") as f:
-        f.write(dump_yaml(task_data, sort_keys=False))
+    save_agent_config(config)
 
 
 def init_task_config(config: dict | None = None) -> dict:
     """Initialize task config with defaults if not present.
 
-    Loads from file first, then applies defaults for any missing keys.
+    Loads from the common agent config file first, then applies defaults
+    for any missing keys.
     """
     if config is None:
         config = load_task_config()
@@ -57,18 +45,17 @@ def init_task_config(config: dict | None = None) -> dict:
         file_config = load_task_config()
         config = {**file_config, **config}
 
-    task = config.setdefault("task", {})
-    if not isinstance(task, dict):
-        raise ValueError("task config must be a mapping")
+    if not isinstance(config, dict):
+        raise ValueError("agent config must be a mapping")
 
-    task.setdefault("fastmarket_tools", default_fastmarket_tools_dict())
-    task.setdefault("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
-    task.setdefault("max_iterations", 20)
-    task.setdefault("default_timeout", 60)
-    task.setdefault("default_workdir", None)
+    config.setdefault("fastmarket_tools", default_fastmarket_tools_dict())
+    config.setdefault("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
+    config.setdefault("max_iterations", 20)
+    config.setdefault("default_timeout", 60)
+    config.setdefault("default_workdir", None)
 
-    if "agent_prompt" not in task:
-        task["agent_prompt"] = {
+    if "agent_prompt" not in config:
+        config["agent_prompt"] = {
             "active": "default",
             "templates": {
                 "default": {
@@ -78,20 +65,20 @@ def init_task_config(config: dict | None = None) -> dict:
             },
         }
 
-    if "command_docs" not in task:
-        task["command_docs"] = {
+    if "command_docs" not in config:
+        config["command_docs"] = {
             "active": "minimal",
             "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
         }
 
-    if "learn_analysis_prompt" not in task:
+    if "learn_analysis_prompt" not in config:
         from common.learn import LEARN_ANALYSIS_PROMPT_TEMPLATE
 
-        task["learn_analysis_prompt"] = LEARN_ANALYSIS_PROMPT_TEMPLATE
+        config["learn_analysis_prompt"] = LEARN_ANALYSIS_PROMPT_TEMPLATE
 
-    if "learn_result_template" not in task:
+    if "learn_result_template" not in config:
         from common.learn import LEARN_RESULT_TEMPLATE
 
-        task["learn_result_template"] = LEARN_RESULT_TEMPLATE
+        config["learn_result_template"] = LEARN_RESULT_TEMPLATE
 
-    return task
+    return config

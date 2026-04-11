@@ -6,7 +6,6 @@ from pathlib import Path
 
 import yaml
 
-from common.core.config import _resolve_config_path
 from common.core.yaml_utils import dump_yaml
 from commands.setup import load_task_config, save_task_config, init_task_config
 
@@ -15,11 +14,10 @@ from common.cli.helpers import get_editor
 
 def edit_task_config() -> bool:
     """Edit the full task config file."""
-    config_path = _resolve_config_path("task")
     config = load_task_config()
     task = init_task_config(config)
 
-    yaml_content = dump_yaml({"task": task}, sort_keys=False)
+    yaml_content = dump_yaml(task, sort_keys=False)
 
     import tempfile
 
@@ -48,7 +46,7 @@ def edit_task_config() -> bool:
             return False
 
         save_task_config(new_config)
-        print(f"Configuration saved to: {config_path}")
+        print("Configuration saved")
         return True
 
     finally:
@@ -58,14 +56,12 @@ def edit_task_config() -> bool:
 def _validate_full_config(config: dict) -> list[str]:
     errors = []
 
-    if "task" in config:
-        task = config["task"]
-        if not isinstance(task, dict):
-            errors.append("task must be a mapping")
-        else:
-            task_errors = _validate_task_config(task)
-            for err in task_errors:
-                errors.append(f"task.{err}")
+    if not isinstance(config, dict):
+        errors.append("config must be a mapping")
+    else:
+        task_errors = _validate_task_config(config)
+        for err in task_errors:
+            errors.append(err)
 
     return errors
 
