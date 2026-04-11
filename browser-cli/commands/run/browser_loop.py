@@ -44,6 +44,48 @@ _TERMINATION_PATTERNS = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Default prompt templates
+# ---------------------------------------------------------------------------
+
+BROWSER_DEFAULT_PROMPTS = {
+    "browser": (
+        "You are an autonomous web browser agent. "
+        "Your job is to accomplish the task described below by interacting with "
+        "a web browser through the ``browse`` tool. "
+        "You have **only one tool**: ``browse``.  You **cannot** execute shell "
+        "commands.  Every browser operation — navigation, clicking, filling "
+        "forms, taking screenshots, extracting data — must be done through "
+        "the ``browse`` tool."
+    ),
+    "browser-params-header": (
+        "The following parameters are available as ``{key}`` placeholders "
+        "in the ``args`` of the ``browse`` tool.  They will be substituted "
+        "before the command is executed:"
+    ),
+    "browser-doc-header": (
+        "Below is the complete reference for the ``browse`` tool. "
+        "The ``action`` parameter maps to the first word of each command, "
+        "and ``args`` maps to the remaining arguments."
+    ),
+    "browser-rules": (
+        "1. Use ``snapshot`` to get the accessibility tree with element refs "
+        "before interacting — this is the best way to understand the page.\n"
+        "2. Always use element refs from snapshot (e.g. ``@e2``) when possible "
+        "instead of CSS selectors — they are more reliable.\n"
+        "3. After navigating or interacting with the page, wait for the page "
+        "to load before taking the next action.\n"
+        "4. Use ``screenshot`` to capture visual state when needed.\n"
+        "5. When a file upload is needed and a ``{key}`` parameter contains "
+        "the file path, pass it directly in the args.\n"
+        "6. When the task is complete, provide a clear summary of what you "
+        "accomplished and include relevant extracted data or results.\n"
+        "7. If you encounter an error, try to recover and continue.  If "
+        "recovery is impossible, report the error clearly.\n"
+    ),
+}
+
+
 def is_termination_message(content: str) -> bool:
     """Check if the LLM message indicates the browser task is done."""
     content_lower = content.lower()
@@ -63,35 +105,35 @@ def build_browser_system_prompt(
     """Build the full system prompt for the browser agent loop.
 
     Includes:
-    - Role description
+    - Role description (from prompt service or default)
     - The **full** browser documentation (as ``browser doc`` outputs it)
     - Parameter documentation
     - Usage rules
     """
+    from common.prompt import get_cached_manager
+
+    # Get the browser role prompt from the prompt service
+    manager = get_cached_manager("browser")
+    role_prompt = manager.get("browser") if manager else None
+    if role_prompt is None:
+        role_prompt = BROWSER_DEFAULT_PROMPTS["browser"]
+
     parts: list[str] = []
 
     # Role
-    parts.append(
-        "You are an autonomous web browser agent. "
-        "Your job is to accomplish the task described below by interacting with "
-        "a web browser through the ``browse`` tool. "
-        "You have **only one tool**: ``browse``.  You **cannot** execute shell "
-        "commands.  Every browser operation — navigation, clicking, filling "
-        "forms, taking screenshots, extracting data — must be done through "
-        "the ``browse`` tool."
-    )
+    parts.append(role_prompt)
 
     # Task
     parts.append(f"## Task\n{task_description}")
 
     # Parameters
     if task_params:
+        params_header = manager.get("browser-params-header") if manager else None
+        if params_header is None:
+            params_header = BROWSER_DEFAULT_PROMPTS["browser-params-header"]
+
         parts.append("## Task Parameters\n")
-        parts.append(
-            "The following parameters are available as ``{key}`` placeholders "
-            "in the ``args`` of the ``browse`` tool.  They will be substituted "
-            "before the command is executed:"
-        )
+        parts.append(params_header)
         for k, v in task_params.items():
             display = v[:80] + "..." if len(v) > 80 else v
             parts.append(f"- ``{{{k}}}`` → ``{display}``")
@@ -101,31 +143,19 @@ def build_browser_system_prompt(
         parts.append(f"\n## Working Directory\n``{workdir}``")
 
     # Full browser documentation
-    parts.append(
-        "\n## Browser Command Reference\n"
-        "Below is the complete reference for the ``browse`` tool. "
-        "The ``action`` parameter maps to the first word of each command, "
-        "and ``args`` maps to the remaining arguments.\n"
-    )
+    doc_header = manager.get("browser-doc-header") if manager else None
+    if doc_header is None:
+        doc_header = BROWSER_DEFAULT_PROMPTS["browser-doc-header"]
+
+    parts.append("\n## Browser Command Reference\n" + doc_header + "\n")
     parts.append(browser_doc)
 
     # Rules
-    parts.append(
-        "\n## Rules\n"
-        "1. Use ``snapshot`` to get the accessibility tree with element refs "
-        "before interacting — this is the best way to understand the page.\n"
-        "2. Always use element refs from snapshot (e.g. ``@e2``) when possible "
-        "instead of CSS selectors — they are more reliable.\n"
-        "3. After navigating or interacting with the page, wait for the page "
-        "to load before taking the next action.\n"
-        "4. Use ``screenshot`` to capture visual state when needed.\n"
-        "5. When a file upload is needed and a ``{key}`` parameter contains "
-        "the file path, pass it directly in the args.\n"
-        "6. When the task is complete, provide a clear summary of what you "
-        "accomplished and include relevant extracted data or results.\n"
-        "7. If you encounter an error, try to recover and continue.  If "
-        "recovery is impossible, report the error clearly.\n"
-    )
+    rules_prompt = manager.get("browser-rules") if manager else None
+    if rules_prompt is None:
+        rules_prompt = BROWSER_DEFAULT_PROMPTS["browser-rules"]
+
+    parts.append("\n## Rules\n" + rules_prompt)
 
     return "\n\n".join(parts)
 
