@@ -24,4 +24,5 @@ packages = [
   "commands",
   "commands.setup",
   "commands.autocomplete",
+  "commands.conf",
 ]
