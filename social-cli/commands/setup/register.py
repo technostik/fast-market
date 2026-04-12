@@ -240,6 +240,62 @@ def _edit_all_backends(plugin_manifests: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# setup reset
+# ---------------------------------------------------------------------------
+@setup_group.command("reset")
+@click.option(
+    "--backend",
+    "-b",
+    "backend",
+    type=str,
+    default=None,
+    help="Backend to reset (resets all if omitted).",
+)
+@click.pass_context
+def setup_reset(ctx, backend):
+    """Reset configuration for a backend or all backends."""
+    from cli.main import _plugin_manifests
+
+    if not _plugin_manifests:
+        raise click.ClickException("No plugins discovered. Check your config.")
+
+    if backend:
+        if backend not in _plugin_manifests:
+            valid = ", ".join(sorted(_plugin_manifests.keys()))
+            raise click.ClickException(f"Unknown backend: {backend}. Valid backends: {valid}")
+        _reset_single_backend(backend, _plugin_manifests)
+    else:
+        _reset_all_backends(_plugin_manifests)
+
+
+def _reset_single_backend(backend: str, plugin_manifests: dict) -> None:
+    """Reset a single backend's config (backup to .bak, write empty {})."""
+    if backend not in plugin_manifests:
+        raise click.ClickException(f"Unknown backend: {backend}")
+
+    cfg_path = _backend_config_path(backend)
+    bak_path = Path(str(cfg_path) + ".bak")
+
+    if cfg_path.exists():
+        cfg_path.rename(bak_path)
+        click.echo(f"Backed up {cfg_path} -> {bak_path}")
+    else:
+        click.echo(f"No config found at {cfg_path}")
+
+    _write_yaml_file(cfg_path, "{}")
+    click.echo(f"Reset {cfg_path} to empty {{}}")
+
+
+def _reset_all_backends(plugin_manifests: dict) -> None:
+    """Reset all backends found in plugin_manifests."""
+    for name in sorted(plugin_manifests.keys()):
+        _reset_single_backend(name, plugin_manifests)
+        click.echo()
+
+    click.echo(f"Reset {len(plugin_manifests)} backend(s).")
+
+
+# ---------------------------------------------------------------------------
 # Register
 # ---------------------------------------------------------------------------
 def register(plugin_manifests: dict) -> CommandManifest:

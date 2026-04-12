@@ -34,8 +34,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Show configuration file path",
     )
+    @click.option(
+        "-R",
+        "--reset",
+        is_flag=True,
+        help="Reset configuration to defaults",
+    )
     @click.pass_context
-    def setup_cmd(ctx, plugin, show_config, show_config_path, **kwargs):
+    def setup_cmd(ctx, plugin, show_config, show_config_path, reset, **kwargs):
         config_path = _get_config_path()
 
         if show_config_path:
@@ -48,6 +54,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 click.echo(dump_yaml(config))
             else:
                 click.echo("(no configuration found)")
+            return
+
+        if reset:
+            _reset_config(config_path)
             return
 
         click.echo(f"Setting up {plugin} plugin...")
@@ -68,6 +78,26 @@ def _get_config_path() -> Path:
     path = get_tool_config("message")
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _reset_config(config_path: Path):
+    DEFAULT_TELEGRAM_CONFIG = {
+        "telegram": {
+            "bot_token": "",
+            "allowed_chat_id": None,
+            "default_timeout": 300,
+            "default_wait_for_ack": False,
+        },
+    }
+
+    if config_path.exists():
+        backup_path = config_path.with_suffix(".yaml.bak")
+        config_path.rename(backup_path)
+        click.echo(f"Existing configuration backed up to: {backup_path}")
+
+    config_path.write_text(dump_yaml(DEFAULT_TELEGRAM_CONFIG))
+    click.echo(f"Default configuration written to: {config_path}")
+    click.echo("Configuration has been reset to defaults.")
 
 
 def _setup_telegram(config_path: Path):

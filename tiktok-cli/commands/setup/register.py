@@ -3,7 +3,7 @@ from __future__ import annotations
 import click
 
 from commands.base import CommandManifest
-from common.core.paths import get_tool_config
+from common.core.paths import get_tool_config, get_tool_config_path
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -11,7 +11,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--show", "-s", is_flag=True, help="Display current configuration")
     @click.option("--locate", "-l", is_flag=True, help="Show config file path")
     @click.option("--create", "-c", is_flag=True, help="Create default config file")
-    def setup_cmd(show, locate, create, **kwargs):
+    @click.option("--reset", "-R", is_flag=True, help="Reset config to defaults (backs up current config)")
+    def setup_cmd(show, locate, create, reset, **kwargs):
         """Setup and show tiktok-agent configuration."""
         from pathlib import Path
 
@@ -40,6 +41,16 @@ tiktok:
                 click.echo("No configuration file found. Use --create to create one.")
                 click.echo(f"Default configuration would be:\n{default_config}")
 
+        elif reset:
+            reset_path = get_tool_config_path("tiktok")
+            if reset_path.exists():
+                bak_path = reset_path.with_suffix(".yaml.bak")
+                bak_path.write_text(reset_path.read_text())
+                click.echo(f"Backed up current config to {bak_path}")
+            reset_path.parent.mkdir(parents=True, exist_ok=True)
+            reset_path.write_text(default_config)
+            click.echo(f"Reset config to defaults at {reset_path}")
+
         elif create:
             if cfg_path.exists():
                 click.echo(f"Config already exists at {cfg_path}")
@@ -58,6 +69,7 @@ tiktok:
             click.echo("  --locate    Show config file locations")
             click.echo("  --show      Display current configuration")
             click.echo("  --create    Create default configuration file")
+            click.echo("  --reset     Reset config to defaults (backs up current config)")
             click.echo("")
             click.echo("First time setup:")
             click.echo("  1. tiktok setup --create")

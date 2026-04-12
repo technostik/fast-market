@@ -27,6 +27,249 @@ from core.time_scheduler import (
     validate_interval_expression,
 )
 
+# =============================================================================
+# Self-documenting default monitor config
+# =============================================================================
+_DEFAULT_MONITOR_CONFIG = """\
+# =============================================================================
+# MONITOR CONFIGURATION
+# =============================================================================
+#
+# This file configures the monitor agent: what to watch, what to do when
+# content matches, and under what conditions.
+#
+# Quick start:
+#   1. Add a SOURCE below (what to monitor)
+#   2. Add an ACTION (what command to run)
+#   3. Add a RULE (when to trigger the action)
+#
+# =============================================================================
+
+# Default cooldown between checks for all sources (unless overridden per-source)
+# Accepts: "5m", "1h", "30s", "900" (seconds)
+default_check_interval: "5m"
+
+# =============================================================================
+# SOURCES — What content to monitor
+# =============================================================================
+#
+# Each source defines where to look for content.
+#
+# Fields:
+#   id:          Unique identifier (used in rules via source_id)
+#   plugin:      Plugin type: youtube | rss | yt-search
+#   origin:      Plugin-specific identifier:
+#                  youtube  → channel ID (e.g., UCxxxxxxxxxxxx)
+#                  rss      → feed URL
+#                  yt-search → search keywords (e.g., "Python tutorial")
+#   description: Human-readable label
+#   enabled:     true | false — disable without deleting
+#   is_new:      true  → only trigger on items newer than last check
+#                false → trigger on ALL items every check
+#   metadata:    Custom key-value pairs for your reference
+#                (available in rules as metadata.theme, metadata.priority, etc.)
+#   check_interval: Optional override of default_check_interval for this source
+#
+# Available fields for conditions (see RULES section):
+#   Item fields:    id, title, url, content_type, published_at
+#   Source fields:  source_id, source_plugin, source_origin,
+#                   source_description, source_metadata.*
+#   Extra fields:   extra.*  (plugin-specific: views, duration, channel_name...)
+#
+sources: []
+
+# Example sources (uncomment and edit):
+#
+# sources:
+#   - id: my_youtube_channel
+#     plugin: youtube
+#     origin: UCxxxxxxxxxxxx
+#     description: "My YouTube channel"
+#     enabled: true
+#     is_new: true
+#     metadata:
+#       theme: technology
+#       priority: high
+#     # check_interval: 15m        # override global default for this source
+#
+#   - id: tech_news
+#     plugin: rss
+#     origin: https://news.ycombinator.com/rss
+#     description: "Hacker News RSS"
+#     enabled: true
+#     is_new: true
+#     metadata:
+#       theme: news
+#
+#   - id: python_tutorials
+#     plugin: yt-search
+#     origin: "Python tutorial 2024"
+#     description: "Search for Python tutorials"
+#     enabled: false
+#     is_new: true
+#     metadata:
+#       theme: education
+
+# =============================================================================
+# ACTIONS — Commands to execute when a rule matches
+# =============================================================================
+#
+# Each action is a shell command run when a rule's conditions are met.
+#
+# Fields:
+#   id:          Unique identifier (referenced in rules via action_ids)
+#   command:     Shell command to execute (use $PLACEHOLDER for dynamic values)
+#   description: Human-readable label
+#   enabled:     true | false — disable without deleting
+#
+# ── Placeholders available in commands ──
+#
+#   Item placeholders:
+#     $ITEM_ID            Unique item ID (video ID, article URL, etc.)
+#     $ITEM_TITLE         Item title
+#     $ITEM_URL           Item URL
+#     $ITEM_CONTENT_TYPE  Type: video | short | article | etc.
+#     $ITEM_PUBLISHED     ISO timestamp of publication
+#
+#   Source placeholders:
+#     $SOURCE_ID          Source ID (e.g., my_youtube_channel)
+#     $SOURCE_PLUGIN      Plugin type: youtube | rss | yt-search
+#     $SOURCE_ORIGIN      Source origin (channel ID, feed URL, search query)
+#     $SOURCE_URL         URL to the source (channel page, feed URL)
+#     $SOURCE_DESC        Source description
+#
+#   Rule placeholder:
+#     $RULE_ID            ID of the rule that matched
+#
+#   Extra placeholders (plugin-specific item fields):
+#     $EXTRA_<KEY>        Any field from item.extra
+#                         Examples: $EXTRA_VIEWS, $EXTRA_CHANNEL_NAME,
+#                                   $EXTRA_DURATION, $EXTRA_CATEGORIES
+#
+#   Error/execution context (for on_error / on_execution actions):
+#     $RULE_ERROR         Error message if the main action failed
+#     $RULE_RESULT        Exit code of main action (e.g., "exit=0")
+#     $RULE_MSG           Formatted: "Error: ..." or "Result: ..."
+#     $RULE_TIME          ISO timestamp when the hook was triggered
+#
+# ── Command examples ──
+#
+#   Simple notification:
+#     command: 'message alert "New: $ITEM_TITLE — $ITEM_URL"'
+#
+#   Log to file:
+#     command: 'echo "$ITEM_PUBLISHED | $ITEM_TITLE | $ITEM_URL" >> ~/monitor.log'
+#
+#   Run a script with arguments:
+#     command: '/home/user/scripts/process.sh "$ITEM_TITLE" "$ITEM_URL" "$EXTRA_VIEWS"'
+#
+#   Chain with error handling (using on_error_action_ids in rule):
+#     command: 'curl -s -X POST https://hooks.example.com/notify -d "title=$ITEM_TITLE"'
+#
+actions: []
+
+# Example actions (uncomment and edit):
+#
+# actions:
+#   - id: echo_action
+#     command: 'echo "[MONITOR] $ITEM_TITLE ($ITEM_CONTENT_TYPE) from $SOURCE_ID"'
+#     description: "Print match to console"
+#     enabled: false
+#
+#   - id: telegram_notify
+#     command: 'message alert "📺 New $ITEM_CONTENT_TYPE: $ITEM_TITLE — $ITEM_URL"'
+#     description: "Send Telegram notification via message CLI"
+#     enabled: true
+#
+#   - id: log_action
+#     command: 'echo "$(date -Iseconds) | $SOURCE_PLUGIN | $ITEM_TITLE | $ITEM_URL" >> ~/monitor.log'
+#     description: "Append to log file"
+#     enabled: true
+
+# =============================================================================
+# RULES — When to trigger actions
+# =============================================================================
+#
+# Each rule defines: IF conditions match THEN run these actions.
+#
+# Fields:
+#   id:                 Unique identifier
+#   description:        Human-readable label
+#   enabled:            true | false — disable without deleting
+#   conditions:         DSL condition string (syntax documented below)
+#   action_ids:         List of action IDs to run when matched
+#   on_error_action_ids:     Optional — actions to run if a main action fails
+#   on_execution_action_ids: Optional — actions to run after main actions succeed
+#   schedule:           Optional — limit when the rule is evaluated:
+#                         cron: "0 * * * *"     (minute hour day month weekday)
+#                         interval: "30m"        (30m, 1h, 2h, 1d)
+#                       timezone: "UTC"          (for cron schedules)
+#
+# ── DSL Condition Syntax ──
+#
+#   Comparisons:
+#     content_type == 'short'           # Equal (strings or numbers)
+#     content_type != 'video'           # Not equal
+#     extra.views > 10000               # Greater than (numeric)
+#     extra.duration >= 600             # Greater or equal
+#     extra.likes < 100                 # Less than
+#
+#   String matching:
+#     title contains 'AI'               # Substring (case-sensitive)
+#     title matches '.*Python.*'        # Regex match (full Python regex)
+#
+#   Field paths (dot notation):
+#     source_plugin == 'youtube'              # Source plugin type
+#     source_origin == 'UCxxx'               # Source origin value
+#     extra.channel_name == 'My Channel'     # Extra field (plugin-specific)
+#     extra.categories contains 'Technology' # List membership
+#     metadata.priority == 'high'            # Source metadata
+#
+#   Logical operators:
+#     content_type == 'video' and extra.views > 1000
+#     source_plugin == 'youtube' or source_plugin == 'rss'
+#     (content_type == 'short') and (extra.views > 500)
+#
+#   Available condition fields:
+#     id, title, url, content_type, published_at        (item)
+#     source_id, source_plugin, source_origin,           (source)
+#       source_description, source_metadata.<key>
+#     extra.<any_field>                                  (plugin-specific)
+#
+rules: []
+
+# Example rules (uncomment and edit):
+#
+# rules:
+#   - id: notify_shorts
+#     description: "Notify on YouTube Shorts"
+#     enabled: true
+#     conditions: "content_type == 'short'"
+#     action_ids:
+#       - telegram_notify
+#
+#   - id: popular_videos
+#     description: "Notify on videos with >10k views"
+#     enabled: true
+#     conditions: "content_type == 'video' and extra.views > 10000"
+#     action_ids:
+#       - telegram_notify
+#       - log_action
+#     on_error_action_ids:
+#       - echo_action
+#
+#   - id: any_new_content
+#     description: "Log all new items from any source"
+#     enabled: false
+#     conditions: "source_plugin == 'rss'"
+#     action_ids:
+#       - log_action
+#     schedule:
+#       interval: "1h"
+#       # cron: "0 */2 * * *"    # alternative: every 2 hours
+#     timezone: "UTC"
+"""
+
 
 def _parse_check_interval(interval_str: str | None) -> int | None:
     """Parse check interval string to seconds.
@@ -1268,6 +1511,37 @@ def register(plugin_manifests: dict) -> CommandManifest:
             out_formatted([to_dict(a) for a in storage.get_all_actions()], fmt)
         else:
             out_formatted([to_dict(r) for r in storage.get_all_rules()], fmt)
+
+    @setup_group.command("reset")
+    @click.option("--yes", is_flag=True, help="Skip confirmation prompt")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
+    def reset(yes, fmt):
+        """Reset configuration to defaults (backs up existing config first)."""
+        from common.core.paths import get_tool_config_path
+
+        config_path = get_tool_config_path("monitor")
+
+        if config_path.exists() and not yes:
+            click.confirm("This will reset all configuration to defaults. Continue?", abort=True)
+
+        # Back up existing config if it exists
+        backup_path = config_path.with_suffix(".yaml.bak")
+        if config_path.exists():
+            shutil.copy2(str(config_path), str(backup_path))
+            click.echo(f"Backed up existing config to {backup_path}")
+
+        # Write default config with full documentation
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(_DEFAULT_MONITOR_CONFIG, encoding="utf-8")
+
+        out_formatted(
+            {
+                "message": "Configuration reset to defaults",
+                "config_path": str(config_path),
+                "backup_path": str(backup_path) if backup_path.exists() else None,
+            },
+            fmt,
+        )
 
     return CommandManifest(
         name="setup",

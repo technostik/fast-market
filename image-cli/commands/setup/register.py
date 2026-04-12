@@ -40,6 +40,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--show-config-path", "-p", is_flag=True, help="Show config file path"
     )
+    @click.option(
+        "--reset",
+        "-R",
+        is_flag=True,
+        help="Reset config to defaults (backs up existing config)",
+    )
     @click.pass_context
     def setup_cmd(
         ctx,
@@ -52,9 +58,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
         set_output_dir,
         show_config,
         show_config_path,
+        reset,
     ):
         """Setup wizard for managing image-agent configuration."""
         config_path = get_tool_config("image")
+
+        if reset:
+            _reset_config(config_path)
+            return
+
         config = _load_config(config_path)
 
         if list_engines:
@@ -106,6 +118,19 @@ def _save_config(config_path: Path, config: dict) -> None:
         dump_yaml(config, sort_keys=False),
         encoding="utf-8",
     )
+
+
+def _reset_config(config_path: Path) -> None:
+    """Reset config to defaults, backing up existing config if present."""
+    if config_path.exists():
+        backup_path = config_path.with_suffix(".yaml.bak")
+        backup_path.write_text(config_path.read_text(encoding="utf-8"), encoding="utf-8")
+        click.echo(f"Backed up existing config to: {backup_path}")
+
+    default_config = get_default_config()
+    _save_config(config_path, default_config)
+    click.echo(f"Reset config to defaults: {config_path}")
+    click.echo("Use 'image setup --show-config' to review the default settings.")
 
 
 def _require_supported(engine_name: str) -> str:

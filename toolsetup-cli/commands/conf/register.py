@@ -9,25 +9,38 @@ from pathlib import Path
 import click
 
 XDG_CONFIG_DIR = Path.home() / ".config" / "fast-market"
-CONFGUARD_DATA_DIR = Path.home() / ".local" / "share" / "fast-market" / "confguard"
+SNAPSHOT_DATA_DIR = Path.home() / ".local" / "share" / "fast-market" / "snapshots"
 STATE_FILE = "state.json"
+
+_OLD_CONFGUARD_DIR = Path.home() / ".local" / "share" / "fast-market" / "confguard"
 
 
 def _ensure_dirs():
-    """Ensure required directories exist."""
-    CONFGUARD_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    """Ensure required directories exist. Migrate old confguard data if present."""
+    SNAPSHOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
     XDG_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Migrate old confguard data to new snapshots directory
+    if _OLD_CONFGUARD_DIR.exists():
+        for item in _OLD_CONFGUARD_DIR.iterdir():
+            if item.is_dir():
+                shutil.move(str(item), str(SNAPSHOT_DATA_DIR / item.name))
+        # Migrate state file if it exists
+        old_state = _OLD_CONFGUARD_DIR / STATE_FILE
+        if old_state.exists():
+            old_state.rename(SNAPSHOT_DATA_DIR / STATE_FILE)
+        _OLD_CONFGUARD_DIR.rmdir()
 
 
 def _state_path() -> Path:
-    return CONFGUARD_DATA_DIR / STATE_FILE
+    return SNAPSHOT_DATA_DIR / STATE_FILE
 
 
 def _load_state() -> dict:
     state_file = _state_path()
     if state_file.exists():
         return json.loads(state_file.read_text(encoding="utf-8"))
-    return {"guarded": False, "targets": [], "sentinel": None}
+    return {"snapped": False, "targets": [], "sentinel": None}
 
 
 def _save_state(state: dict):
@@ -35,34 +48,34 @@ def _save_state(state: dict):
     state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def _is_guarded() -> bool:
+def _is_snapped() -> bool:
     state = _load_state()
-    return state.get("guarded", False)
+    return state.get("snapped", False)
 
 
-def _do_guard(targets: list[str]):
-    """Guard specified files/dirs by moving them and creating symlinks."""
+def _do_snapshot(targets: list[str]):
+    """Snapshot specified files/dirs by moving them and creating symlinks."""
     _ensure_dirs()
 
-    if _is_guarded():
-        click.echo("Config is already guarded. Run 'toolsetup conf unguard' first.")
+    if _is_snapped():
+        click.echo("Config is already snapped. Run 'toolsetup conf restore' first.")
         return
 
     # Create sentinel directory
     sentinel = f"fast-market-{uuid.uuid4().hex[:8]}"
-    target_dir = CONFGUARD_DATA_DIR / sentinel
+    target_dir = SNAPSHOT_DATA_DIR / sentinel
     target_dir.mkdir(parents=True, exist_ok=True)
 
     state = _load_state()
-    state["guarded"] = True
+    state["snapped"] = True
     state["targets"] = targets
     state["sentinel"] = sentinel
-    state["guard_date"] = datetime.now().isoformat()
+    state["snapshot_date"] = datetime.now().isoformat()
 
-    guard_all = "." in targets
+    snap_all = "." in targets
 
-    if guard_all:
-        # Guard entire directory: move all contents, create symlinks
+    if snap_all:
+        # Snapshot entire directory: move all contents, create symlinks
         for item in XDG_CONFIG_DIR.iterdir():
             if item.name in (".", ".."):
                 continue
@@ -80,9 +93,9 @@ def _do_guard(targets: list[str]):
 
             # Create symlink back to original location
             item.symlink_to(dst)
-            click.echo(f"Guarded: {item.name}")
+            click.echo(f"Snapped: {item.name}")
     else:
-        # Guard specific targets
+        # Snapshot specific targets
         for target in targets:
             src = XDG_CONFIG_DIR / target
             dst = target_dir / target
@@ -113,32 +126,32 @@ def _do_guard(targets: list[str]):
 
             # Create symlink
             src.symlink_to(dst)
-            click.echo(f"Guarded: {target}")
+            click.echo(f"Snapped: {target}")
 
     _save_state(state)
-    click.echo(f"Config guarded. Files moved to: {target_dir}")
+    click.echo(f"Config snapped. Files moved to: {target_dir}")
 
 
-def _do_unguard():
-    """Unguard by restoring files and removing symlinks."""
-    if not _is_guarded():
-        click.echo("Config is not guarded.")
+def _do_restore():
+    """Restore by moving files back and removing symlinks."""
+    if not _is_snapped():
+        click.echo("Config is not snapped.")
         return
 
     state = _load_state()
     sentinel = state.get("sentinel")
     targets = state.get("targets", [])
-    target_dir = CONFGUARD_DATA_DIR / sentinel
+    target_dir = SNAPSHOT_DATA_DIR / sentinel
 
     if not target_dir.exists():
-        click.echo(f"Error: Guard directory not found: {target_dir}")
+        click.echo(f"Error: Snapshot directory not found: {target_dir}")
         click.echo("Cleaning up state file.")
-        _save_state({"guarded": False, "targets": [], "sentinel": None})
+        _save_state({"snapped": False, "targets": [], "sentinel": None})
         return
 
-    guard_all = "." in targets
+    snap_all = "." in targets
 
-    if guard_all:
+    if snap_all:
         # Restore entire directory contents
         for item in list(target_dir.iterdir()):
             src = XDG_CONFIG_DIR / item.name
@@ -149,7 +162,7 @@ def _do_unguard():
                 src.unlink()
             elif src.exists():
                 # Backup existing content
-                backup_name = f"{src.name}.pre-unguard-{uuid.uuid4().hex[:6]}"
+                backup_name = f"{src.name}.pre-restore-{uuid.uuid4().hex[:6]}"
                 backup = src.parent / backup_name
                 if src.is_dir():
                     shutil.move(str(src), str(backup))
@@ -167,7 +180,7 @@ def _do_unguard():
             dst = target_dir / target
 
             if not dst.exists():
-                click.echo(f"Warning: guarded file not found: {dst}")
+                click.echo(f"Warning: snapped file not found: {dst}")
                 continue
 
             # Remove symlink
@@ -175,7 +188,7 @@ def _do_unguard():
                 src.unlink()
             elif src.exists():
                 # If there's already something there, back it up
-                backup = src.with_suffix(f".pre-unguard-{uuid.uuid4().hex[:6]}{src.suffix}")
+                backup = src.with_suffix(f".pre-restore-{uuid.uuid4().hex[:6]}{src.suffix}")
                 if src.is_dir():
                     shutil.move(str(src), str(backup))
                 else:
@@ -191,15 +204,15 @@ def _do_unguard():
     if not any(target_dir.iterdir()):
         shutil.rmtree(str(target_dir))
     else:
-        click.echo(f"Note: guard directory not empty, keeping: {target_dir}")
+        click.echo(f"Note: snapshot directory not empty, keeping: {target_dir}")
 
     # Reset state
-    _save_state({"guarded": False, "targets": [], "sentinel": None})
-    click.echo("Config unguarded. Files restored.")
+    _save_state({"snapped": False, "targets": [], "sentinel": None})
+    click.echo("Config restored. Files restored.")
 
 
 def _show_status():
-    """Show current guard status."""
+    """Show current snapshot status."""
     _ensure_dirs()
 
     if not XDG_CONFIG_DIR.exists():
@@ -208,122 +221,122 @@ def _show_status():
 
     state = _load_state()
 
-    if state.get("guarded"):
-        click.echo(f"Config directory is GUARDED.")
+    if state.get("snapped"):
+        click.echo(f"Config directory is SNAPPED.")
         click.echo(f"  Source: {XDG_CONFIG_DIR}")
-        click.echo(f"  Guarded files in: {CONFGUARD_DATA_DIR / state['sentinel']}")
+        click.echo(f"  Snapped files in: {SNAPSHOT_DATA_DIR / state['sentinel']}")
         click.echo(f"  Targets: {', '.join(state.get('targets', []))}")
-        click.echo(f"  Guard date: {state.get('guard_date', 'unknown')}")
+        click.echo(f"  Snapshot date: {state.get('snapshot_date', 'unknown')}")
     else:
-        click.echo(f"Config directory is NOT guarded.")
+        click.echo(f"Config directory is NOT snapped.")
         click.echo(f"  Source: {XDG_CONFIG_DIR}")
 
 
-def _list_backups():
-    """List all backup (sentinel) directories."""
+def _list_snapshots():
+    """List all snapshot directories."""
     _ensure_dirs()
 
-    if not CONFGUARD_DATA_DIR.exists():
-        click.echo("No backups found.")
+    if not SNAPSHOT_DATA_DIR.exists():
+        click.echo("No snapshots found.")
         return
 
-    backups = sorted(
-        [d for d in CONFGUARD_DATA_DIR.iterdir() if d.is_dir() and d.name.startswith("fast-market-")],
+    snapshots = sorted(
+        [d for d in SNAPSHOT_DATA_DIR.iterdir() if d.is_dir() and d.name.startswith("fast-market-")],
         key=lambda x: x.stat().st_mtime,
         reverse=True,
     )
 
-    if not backups:
-        click.echo("No backups found.")
+    if not snapshots:
+        click.echo("No snapshots found.")
         return
 
     state = _load_state()
     current_sentinel = state.get("sentinel")
 
-    click.echo("Backups:")
-    for backup in backups:
-        marker = " (current)" if backup.name == current_sentinel else ""
-        mtime = datetime.fromtimestamp(backup.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-        click.echo(f"  {backup.name} - {mtime}{marker}")
+    click.echo("Snapshots:")
+    for snap in snapshots:
+        marker = " (current)" if snap.name == current_sentinel else ""
+        mtime = datetime.fromtimestamp(snap.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        click.echo(f"  {snap.name} - {mtime}{marker}")
 
 
 def _do_rollback(backup_name: str | None = None):
-    """Rollback to a specific backup or the current one."""
+    """Rollback to a specific snapshot or the current one."""
     _ensure_dirs()
 
-    if not CONFGUARD_DATA_DIR.exists():
-        click.echo("No backups found.")
+    if not SNAPSHOT_DATA_DIR.exists():
+        click.echo("No snapshots found.")
         return
 
     state = _load_state()
 
-    if not state.get("guarded"):
-        click.echo("Config is not currently guarded. Nothing to rollback.")
+    if not state.get("snapped"):
+        click.echo("Config is not currently snapped. Nothing to rollback.")
         return
 
     sentinel = state.get("sentinel")
-    backup_dir = CONFGUARD_DATA_DIR / sentinel
+    backup_dir = SNAPSHOT_DATA_DIR / sentinel
 
     if not backup_dir.exists():
-        click.echo(f"Error: backup directory not found: {backup_dir}")
+        click.echo(f"Error: snapshot directory not found: {backup_dir}")
         return
 
-    # First unguard to restore current state
-    _do_unguard()
+    # First restore to bring current state back
+    _do_restore()
 
-    # Then re-guard with the backup contents
+    # Then re-snap with the backup contents
     if backup_name:
-        backup_dir = CONFGUARD_DATA_DIR / backup_name
+        backup_dir = SNAPSHOT_DATA_DIR / backup_name
         if not backup_dir.exists():
-            click.echo(f"Error: backup not found: {backup_name}")
+            click.echo(f"Error: snapshot not found: {backup_name}")
             return
 
-    click.echo(f"Rolled back to backup: {sentinel}")
+    click.echo(f"Rolled back to snapshot: {sentinel}")
 
 
 def register():
     @click.group("conf", invoke_without_command=True)
     @click.pass_context
     def conf_cmd(ctx):
-        """Manage XDG config backup/restore.
+        """Manage XDG config snapshot/restore.
 
-        Guards ~/.config/fast-market by moving files to a safe location
-        and creating symlinks, allowing safe config changes with rollback.
+        Snapshots ~/.config/fast-market by moving files to a safe location
+        and creating symlinks, allowing safe config changes with restore.
         """
         if ctx.invoked_subcommand is None:
             ctx.invoke(conf_status)
 
-    @conf_cmd.command("guard")
+    @conf_cmd.command("snapshot")
     @click.option(
         "--target", "-t",
         "targets",
         multiple=True,
-        help="Specific files/dirs to guard (default: entire directory)",
+        help="Specific files/dirs to snapshot (default: entire directory)",
     )
-    def conf_guard(targets):
-        """Guard ~/.config/fast-market config files."""
+    def conf_snapshot(targets):
+        """Snapshot ~/.config/fast-market config files."""
         target_list = list(targets) if targets else ["."]
-        _do_guard(target_list)
+        _do_snapshot(target_list)
 
-    @conf_cmd.command("unguard")
-    def conf_unguard():
-        """Unguard ~/.config/fast-market, restoring original files."""
-        _do_unguard()
+    @conf_cmd.command("restore")
+    def conf_restore():
+        """Restore ~/.config/fast-market, moving files back."""
+        _do_restore()
 
     @conf_cmd.command("status")
     def conf_status():
-        """Show guard status of ~/.config/fast-market."""
+        """Show snapshot status of ~/.config/fast-market."""
         _show_status()
 
     @conf_cmd.command("list")
     def conf_list():
-        """List all backups."""
-        _list_backups()
+        """List all snapshots."""
+        _list_snapshots()
 
     @conf_cmd.command("rollback")
-    @click.argument("backup", required=False)
-    def conf_rollback(backup):
-        """Rollback to a specific backup or the current one."""
-        _do_rollback(backup)
+    @click.argument("snapshot_name", required=False)
+    def conf_rollback(snapshot_name):
+        """Rollback to a specific snapshot or the current one."""
+        _do_rollback(snapshot_name)
 
     return conf_cmd

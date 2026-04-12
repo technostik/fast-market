@@ -6,6 +6,7 @@ import yaml
 from commands.base import CommandManifest
 from common.core.yaml_utils import dump_yaml
 from common.core.config import _resolve_config_path
+from common.core.paths import get_tool_config_path, get_agent_config_path
 from commands.setup import (
     load_config,
     run_interactive_wizard,
@@ -71,6 +72,91 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def edit_cmd():
         """Edit the full configuration file in the default editor."""
         edit_task_config()
+
+    @setup_cmd.command("reset")
+    @click.option(
+        "--agent",
+        "target",
+        flag_value="agent",
+        help="Reset the shared agent configuration",
+    )
+    @click.option(
+        "--prompt",
+        "target",
+        flag_value="prompt",
+        default=True,
+        help="Reset the prompt LLM providers configuration (default)",
+    )
+    def reset_cmd(target):
+        """Reset configuration to defaults, keeping a backup."""
+        import shutil
+        from datetime import datetime
+
+        from common.agent.prompts import (
+            DEFAULT_AGENT_PROMPT_TEMPLATE,
+            DEFAULT_SYSTEM_COMMANDS,
+            default_fastmarket_tools_dict,
+            DEFAULT_EVALUATION_PROMPT,
+            DEFAULT_PLAN_PROMPT,
+            DEFAULT_PREPARATION_PROMPT,
+        )
+        from common.learn import SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE
+
+        if target == "agent":
+            config_path = get_agent_config_path()
+            click.echo("Resetting agent configuration...")
+        else:
+            config_path = get_tool_config_path("prompt")
+            click.echo("Resetting prompt configuration...")
+
+        if config_path.exists():
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            backup_path = Path(f"{config_path}.{timestamp}.bak")
+            shutil.copy2(config_path, backup_path)
+            click.echo(f"Backed up to: {backup_path}")
+
+        if target == "agent":
+            default_config = {
+                "fastmarket_tools": default_fastmarket_tools_dict(),
+                "system_commands": list(DEFAULT_SYSTEM_COMMANDS),
+                "max_iterations": 20,
+                "default_timeout": 60,
+                "agent_prompt": {
+                    "active": "default",
+                    "templates": {
+                        "default": {
+                            "description": "Default agent execution prompt",
+                            "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
+                        },
+                    },
+                },
+                "command_docs": {
+                    "active": "minimal",
+                    "templates": {
+                        "full": {
+                            "description": "Verbose with full documentation",
+                            "template": "{aliases}{fastmarket_tools}{system_commands}",
+                        },
+                        "minimal": {
+                            "description": "Brief with descriptions",
+                            "template": "{fastmarket_tools_brief}{system_commands_minimal}",
+                        },
+                    },
+                },
+                "preparation_prompt": DEFAULT_PREPARATION_PROMPT,
+                "evaluation_prompt": DEFAULT_EVALUATION_PROMPT,
+                "plan_prompt": DEFAULT_PLAN_PROMPT,
+                "skill_from_description_prompt": SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE,
+            }
+        else:
+            default_config = {}
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            dump_yaml(default_config, sort_keys=False),
+            encoding="utf-8",
+        )
+        click.echo(f"Default configuration written to: {config_path}")
 
     setup_cmd.add_command(providers)
     setup_cmd.add_command(task_commands)

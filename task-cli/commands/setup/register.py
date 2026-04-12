@@ -4,9 +4,47 @@ import click
 import sys
 from pathlib import Path
 
+from common.agent.prompts import (
+    DEFAULT_AGENT_PROMPT_TEMPLATE,
+    DEFAULT_COMMAND_DOCS_TEMPLATES,
+    DEFAULT_EVALUATION_PROMPT,
+    DEFAULT_PLAN_PROMPT,
+    DEFAULT_PREPARATION_PROMPT,
+    DEFAULT_SYSTEM_COMMANDS,
+    default_fastmarket_tools_dict,
+)
+from common.core.paths import get_agent_config_path
+from common.learn import SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE
 from common.core.yaml_utils import dump_yaml
 from commands.setup import init_task_config, load_task_config, save_task_config
 from commands.setup.task_edit import edit_task_config
+
+
+def _default_agent_config() -> dict:
+    """Return a fresh default agent config, matching skill-cli's default_skill_agent_config()."""
+    return {
+        "fastmarket_tools": default_fastmarket_tools_dict(),
+        "system_commands": list(DEFAULT_SYSTEM_COMMANDS),
+        "max_iterations": 20,
+        "default_timeout": 60,
+        "agent_prompt": {
+            "active": "default",
+            "templates": {
+                "default": {
+                    "description": "Default agent execution prompt",
+                    "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
+                },
+            },
+        },
+        "command_docs": {
+            "active": "minimal",
+            "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
+        },
+        "preparation_prompt": DEFAULT_PREPARATION_PROMPT,
+        "evaluation_prompt": DEFAULT_EVALUATION_PROMPT,
+        "plan_prompt": DEFAULT_PLAN_PROMPT,
+        "skill_from_description_prompt": SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE,
+    }
 
 
 def register(plugin_manifests: dict | None = None):
@@ -149,4 +187,26 @@ def register(plugin_manifests: dict | None = None):
         save_task_config(task)
         click.echo(f"Default workdir set to: {path}")
 
+    @setup_cmd.command("reset")
+    @click.option("--agent", "reset_agent", is_flag=True, help="Reset the shared agent config to defaults")
+    def reset_cmd(reset_agent):
+        """Reset the shared agent config to defaults.
+
+        The agent config is shared with skill at ~/.config/fast-market/common/agent/config.yaml.
+        Use task setup edit to modify it.
+        """
+        _reset_agent_config()
+        click.echo("Agent configuration reset to defaults.")
+
     return setup_cmd
+
+
+def _reset_agent_config() -> None:
+    """Reset the shared agent config to defaults."""
+    default_config = _default_agent_config()
+    agent_config_path = get_agent_config_path()
+    agent_config_path.parent.mkdir(parents=True, exist_ok=True)
+    agent_config_path.write_text(
+        dump_yaml(default_config, sort_keys=False),
+        encoding="utf-8",
+    )

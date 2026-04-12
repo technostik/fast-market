@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import shutil
+
 import click
 
 from commands.base import CommandManifest
-from common.core.paths import get_tool_config
+from common.core.paths import get_tool_config, get_tool_config_path
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -11,7 +13,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--show", "-s", is_flag=True, help="Display current configuration")
     @click.option("--locate", "-l", is_flag=True, help="Show config file path")
     @click.option("--create", "-c", is_flag=True, help="Create default config file")
-    def setup_cmd(show, locate, create, **kwargs):
+    @click.option("--reset", "-R", is_flag=True, help="Reset config to defaults (backs up existing)")
+    def setup_cmd(show, locate, create, reset, **kwargs):
         """Setup and show youtube-agent configuration."""
         from pathlib import Path
 
@@ -71,6 +74,16 @@ youtube:
                 click.echo(f"Created default config at {cfg_path}")
                 click.echo("\nEdit the file to add your channel_id:")
                 click.echo(f"  nano {cfg_path}")
+
+        elif reset:
+            cfg_path = get_tool_config_path("youtube")
+            if cfg_path.exists():
+                backup_path = cfg_path.with_name("config.yaml.bak")
+                shutil.copy2(str(cfg_path), str(backup_path))
+                click.echo(f"Backed up existing config to {backup_path}")
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            cfg_path.write_text(default_config)
+            click.echo(f"Reset configuration to defaults at {cfg_path}")
 
         else:
             click.echo("Usage: youtube setup [OPTIONS]")
