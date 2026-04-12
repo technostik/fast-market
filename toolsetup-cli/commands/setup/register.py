@@ -472,8 +472,17 @@ def _backup_and_reset(config_path: Path, name: str) -> None:
         click.echo(f"Backed up {name} to: {backup}")
 
     # Write appropriate defaults based on config type
+    common_config = get_common_config_path()
     llm_config = get_llm_config_path()
-    if config_path.resolve() == llm_config.resolve():
+
+    if config_path.resolve() == common_config.resolve():
+        # Common config: write workdir defaults
+        default_content = dump_yaml({
+            "workdir": str(Path.home() / "fast-market-work"),
+            "workdir_root": str(Path.home() / "fast-market-work"),
+            "workdir_prefix": "work-",
+        }, sort_keys=False)
+    elif config_path.resolve() == llm_config.resolve():
         # LLM config: write minimal working defaults
         default_content = dump_yaml({
             "default_provider": "ollama",
