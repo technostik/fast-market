@@ -292,17 +292,15 @@ def register():
 
     @setup_cmd.command("reset")
     @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompt")
-    @click.option("--agent", "reset_agent", is_flag=True, help="Reset agent config only")
-    @click.option("--common", "reset_common", is_flag=True, help="Reset common config only")
-    @click.option("--llm", "reset_llm", is_flag=True, help="Reset LLM config only")
+    @click.option("--agent", "reset_agent", is_flag=True, help="Reset agent config (common/agent/config.yaml)")
+    @click.option("--common", "reset_common", is_flag=True, help="Reset common config (common/config.yaml)")
+    @click.option("--llm", "reset_llm", is_flag=True, help="Reset LLM config (common/llm/config.yaml)")
     def reset_config(force, reset_agent, reset_common, reset_llm):
         """Reset config files to defaults (backs up existing).
 
         By default, resets ALL config files.
         Use --agent, --common, or --llm to reset specific files.
         """
-        xdg_config = Path.home() / ".config" / "fast-market"
-
         if not reset_agent and not reset_common and not reset_llm:
             reset_agent = True
             reset_common = True
@@ -311,31 +309,20 @@ def register():
         targets = []
         if reset_common:
             targets.append(("common config", get_common_config_path()))
-            targets.append(("LLM config", get_llm_config_path()))
         if reset_llm:
-            llm_path = get_llm_config_path()
-            if ("LLM config", llm_path) not in targets:
-                targets.append(("LLM config", llm_path))
+            targets.append(("LLM config", get_llm_config_path()))
         if reset_agent:
             targets.append(("agent config", get_agent_config_path()))
 
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_targets = []
-        for name, path in targets:
-            if path not in seen:
-                seen.add(path)
-                unique_targets.append((name, path))
-
         if not force:
             click.echo("This will reset the following config files to defaults:")
-            for name, path in unique_targets:
+            for name, path in targets:
                 click.echo(f"  {path}")
             if not click.confirm("Continue? (existing configs will be backed up)"):
                 click.echo("Cancelled.")
                 return
 
-        for name, config_path in unique_targets:
+        for name, config_path in targets:
             _backup_and_reset(config_path, name)
 
         click.echo("\nAll selected configs reset to defaults.")
@@ -478,6 +465,7 @@ def _backup_and_reset(config_path: Path, name: str) -> None:
     # Write appropriate defaults based on config type
     common_config = get_common_config_path()
     llm_config = get_llm_config_path()
+    agent_config_path = get_agent_config_path()
 
     if config_path.resolve() == common_config.resolve():
         # Common config: write workdir defaults
@@ -497,11 +485,53 @@ def _backup_and_reset(config_path: Path, name: str) -> None:
                 }
             }
         }, sort_keys=False)
+    elif config_path.resolve() == agent_config_path.resolve():
+        # Agent config: write full agentic loop defaults
+        default_content = _build_default_agent_config()
     else:
         default_content = ""
 
     config_path.write_text(default_content, encoding="utf-8")
     click.echo(f"Reset {name}: {config_path}")
+
+
+def _build_default_agent_config() -> str:
+    """Return full agent config as YAML string with all defaults for the agentic loop."""
+    from common.agent.prompts import (
+        DEFAULT_AGENT_PROMPT_TEMPLATE,
+        DEFAULT_SYSTEM_COMMANDS,
+        default_fastmarket_tools_dict,
+        DEFAULT_EVALUATION_PROMPT,
+        DEFAULT_PLAN_PROMPT,
+        DEFAULT_PREPARATION_PROMPT,
+        DEFAULT_COMMAND_DOCS_TEMPLATES,
+    )
+    from common.learn import SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE
+
+    agent_config = {
+        "fastmarket_tools": default_fastmarket_tools_dict(),
+        "system_commands": list(DEFAULT_SYSTEM_COMMANDS),
+        "max_iterations": 20,
+        "default_timeout": 60,
+        "agent_prompt": {
+            "active": "default",
+            "templates": {
+                "default": {
+                    "description": "Default agent execution prompt",
+                    "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
+                },
+            },
+        },
+        "command_docs": {
+            "active": "minimal",
+            "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
+        },
+        "preparation_prompt": DEFAULT_PREPARATION_PROMPT,
+        "evaluation_prompt": DEFAULT_EVALUATION_PROMPT,
+        "plan_prompt": DEFAULT_PLAN_PROMPT,
+        "skill_from_description_prompt": SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE,
+    }
+    return dump_yaml(agent_config, sort_keys=False)
 
 
 def _ensure_default_common() -> None:
@@ -538,41 +568,7 @@ def _ensure_default_common() -> None:
     agent_path = get_agent_config_path()
     agent_path.parent.mkdir(parents=True, exist_ok=True)
     if not agent_path.exists():
-        from common.agent.prompts import (
-            DEFAULT_AGENT_PROMPT_TEMPLATE,
-            DEFAULT_SYSTEM_COMMANDS,
-            default_fastmarket_tools_dict,
-            DEFAULT_EVALUATION_PROMPT,
-            DEFAULT_PLAN_PROMPT,
-            DEFAULT_PREPARATION_PROMPT,
-            DEFAULT_COMMAND_DOCS_TEMPLATES,
-        )
-        from common.learn import SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE
-
-        agent_config = {
-            "fastmarket_tools": default_fastmarket_tools_dict(),
-            "system_commands": list(DEFAULT_SYSTEM_COMMANDS),
-            "max_iterations": 20,
-            "default_timeout": 60,
-            "agent_prompt": {
-                "active": "default",
-                "templates": {
-                    "default": {
-                        "description": "Default agent execution prompt",
-                        "template": DEFAULT_AGENT_PROMPT_TEMPLATE,
-                    },
-                },
-            },
-            "command_docs": {
-                "active": "minimal",
-                "templates": dict(DEFAULT_COMMAND_DOCS_TEMPLATES),
-            },
-            "preparation_prompt": DEFAULT_PREPARATION_PROMPT,
-            "evaluation_prompt": DEFAULT_EVALUATION_PROMPT,
-            "plan_prompt": DEFAULT_PLAN_PROMPT,
-            "skill_from_description_prompt": SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE,
-        }
-        agent_path.write_text(dump_yaml(agent_config, sort_keys=False), encoding="utf-8")
+        agent_path.write_text(_build_default_agent_config(), encoding="utf-8")
         click.echo(f"  Created: {agent_path}")
 
     # YouTube common config
