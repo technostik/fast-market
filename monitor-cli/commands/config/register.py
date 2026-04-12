@@ -24,8 +24,7 @@ from core.rule_parser import RuleParseError, RuleParser
 def _get_config_path() -> Path:
     from common.core.paths import get_tool_config_path
 
-    p = get_tool_config_path("monitor")
-    return p.parent / "monitor.yaml"
+    return get_tool_config_path("monitor")
 
 
 def _load_yaml_config() -> dict | None:

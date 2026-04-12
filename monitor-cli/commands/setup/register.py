@@ -1464,7 +1464,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         storage = get_storage()
 
         db_path = Path(storage.db_path)
-        config_path = get_tool_config_path("monitor").parent / "monitor.yaml"
+        config_path = get_tool_config_path("monitor")
         config_paths = {
             "database": str(db_path),
             "config": str(config_path),

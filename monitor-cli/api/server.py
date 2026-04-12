@@ -313,7 +313,7 @@ def get_log_session(log_id: str) -> dict:
 
 @app.get("/api/config")
 def get_config() -> dict:
-    cfg_path = get_tool_config_path("monitor").parent / "monitor.yaml"
+    cfg_path = get_tool_config_path("monitor")
     if not cfg_path.exists():
         return {"error": "Config file not found"}
 
@@ -327,7 +327,7 @@ def get_config() -> dict:
 
 @app.post("/api/config/sync")
 def sync_config() -> dict:
-    cfg_path = get_tool_config_path("monitor").parent / "monitor.yaml"
+    cfg_path = get_tool_config_path("monitor")
     if not cfg_path.exists():
         return {"error": "Config file not found. Run 'monitor config export' first."}
 

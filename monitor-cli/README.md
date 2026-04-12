@@ -41,7 +41,7 @@ No YAML configuration file required — all settings are stored in the SQLite da
 
 ### Global Action Hooks (Optional)
 
-Add to `~/.config/fast-market/monitor/monitor.yaml`:
+Add to `~/.config/fast-market/monitor/config.yaml`:
 
 ```yaml
 # Global actions triggered when any rule's action fails
