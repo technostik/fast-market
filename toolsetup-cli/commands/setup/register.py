@@ -194,14 +194,18 @@ def register():
     @setup_cmd.command("edit")
     @click.option("--llm", "-l", "edit_llm", is_flag=True, help="Edit LLM config (common/llm/config.yaml)")
     @click.option("--common", "-c", "edit_common", is_flag=True, help="Edit common config (common/config.yaml)")
-    def edit_config(edit_llm, edit_common):
+    @click.option("--agent", "-a", "edit_agent", is_flag=True, help="Edit agent config (common/agent/config.yaml)")
+    def edit_config(edit_llm, edit_common, edit_agent):
         """Open config file(s) in your editor.
 
         By default, opens common/config.yaml.
         Use --llm to open common/llm/config.yaml.
+        Use --agent to open common/agent/config.yaml.
         """
         if edit_llm:
             config_path = get_llm_config_path()
+        elif edit_agent:
+            config_path = get_agent_config_path()
         else:
             config_path = get_common_config_path()
 
