@@ -54,7 +54,7 @@ def _is_snapped() -> bool:
 
 
 def _do_snapshot(targets: list[str]):
-    """Snapshot specified files/dirs by moving them and creating symlinks."""
+    """Snapshot specified files/dirs by copying them to a sentinel directory."""
     _ensure_dirs()
 
     if _is_snapped():
@@ -75,24 +75,18 @@ def _do_snapshot(targets: list[str]):
     snap_all = "." in targets
 
     if snap_all:
-        # Snapshot entire directory: move all contents, create symlinks
+        # Snapshot entire directory: copy all contents
         for item in XDG_CONFIG_DIR.iterdir():
             if item.name in (".", ".."):
                 continue
             dst = target_dir / item.name
 
-            # Move file/directory
+            # Copy file/directory
             if item.is_dir() and not item.is_symlink():
-                shutil.move(str(item), str(dst))
+                shutil.copytree(str(item), str(dst))
             elif item.is_file() or item.is_symlink():
                 shutil.copy2(str(item), str(dst))
-                if item.is_symlink():
-                    item.unlink()
-                else:
-                    item.unlink()
 
-            # Create symlink back to original location
-            item.symlink_to(dst)
             click.echo(f"Snapped: {item.name}")
     else:
         # Snapshot specific targets
@@ -107,33 +101,28 @@ def _do_snapshot(targets: list[str]):
             # Ensure parent directory exists in target
             dst.parent.mkdir(parents=True, exist_ok=True)
 
-            # Move file/directory
+            # Copy file/directory
             if src.is_dir() and not src.is_symlink():
-                shutil.move(str(src), str(dst))
+                shutil.copytree(str(src), str(dst))
             else:
                 if src.is_symlink():
                     # Follow the symlink and copy the target
                     real_src = src.resolve()
                     if real_src.is_dir():
                         shutil.copytree(str(real_src), str(dst))
-                        src.unlink()
                     else:
                         shutil.copy2(str(real_src), str(dst))
-                        src.unlink()
                 else:
                     shutil.copy2(str(src), str(dst))
-                    src.unlink()
 
-            # Create symlink
-            src.symlink_to(dst)
             click.echo(f"Snapped: {target}")
 
     _save_state(state)
-    click.echo(f"Config snapped. Files moved to: {target_dir}")
+    click.echo(f"Config snapped. Files copied to: {target_dir}")
 
 
 def _do_restore():
-    """Restore by moving files back and removing symlinks."""
+    """Restore by copying files back from snapshot."""
     if not _is_snapped():
         click.echo("Config is not snapped.")
         return
@@ -154,24 +143,26 @@ def _do_restore():
     if snap_all:
         # Restore entire directory contents
         for item in list(target_dir.iterdir()):
-            src = XDG_CONFIG_DIR / item.name
-            dst = item
+            dst = XDG_CONFIG_DIR / item.name
 
-            # Remove symlink if it exists
-            if src.is_symlink():
-                src.unlink()
-            elif src.exists():
-                # Backup existing content
-                backup_name = f"{src.name}.pre-restore-{uuid.uuid4().hex[:6]}"
-                backup = src.parent / backup_name
-                if src.is_dir():
-                    shutil.move(str(src), str(backup))
+            # If there's already something there, back it up
+            if dst.exists():
+                backup_name = f"{dst.name}.pre-restore-{uuid.uuid4().hex[:6]}"
+                backup = dst.parent / backup_name
+                if dst.is_dir():
+                    shutil.move(str(dst), str(backup))
                 else:
-                    shutil.copy2(str(src), str(backup))
-                    src.unlink()
+                    shutil.copy2(str(dst), str(backup))
+                    dst.unlink()
 
-            # Move file back
-            shutil.move(str(dst), str(src))
+            # Copy file back
+            if item.is_dir() and not item.is_symlink():
+                if dst.exists():
+                    shutil.rmtree(str(dst))
+                shutil.copytree(str(item), str(dst))
+            else:
+                shutil.copy2(str(item), str(dst))
+
             click.echo(f"Restored: {item.name}")
     else:
         # Restore specific targets
@@ -183,11 +174,8 @@ def _do_restore():
                 click.echo(f"Warning: snapped file not found: {dst}")
                 continue
 
-            # Remove symlink
-            if src.is_symlink():
-                src.unlink()
-            elif src.exists():
-                # If there's already something there, back it up
+            # If there's already something there, back it up
+            if src.exists():
                 backup = src.with_suffix(f".pre-restore-{uuid.uuid4().hex[:6]}{src.suffix}")
                 if src.is_dir():
                     shutil.move(str(src), str(backup))
@@ -195,16 +183,16 @@ def _do_restore():
                     shutil.copy2(str(src), str(backup))
                     src.unlink()
 
-            # Move file back
+            # Copy file back
             src.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(dst), str(src))
-            click.echo(f"Restored: {target}")
+            if dst.is_dir() and not dst.is_symlink():
+                if src.exists():
+                    shutil.rmtree(str(src))
+                shutil.copytree(str(dst), str(src))
+            else:
+                shutil.copy2(str(dst), str(src))
 
-    # Clean up sentinel directory if empty
-    if not any(target_dir.iterdir()):
-        shutil.rmtree(str(target_dir))
-    else:
-        click.echo(f"Note: snapshot directory not empty, keeping: {target_dir}")
+            click.echo(f"Restored: {target}")
 
     # Reset state
     _save_state({"snapped": False, "targets": [], "sentinel": None})
@@ -222,13 +210,13 @@ def _show_status():
     state = _load_state()
 
     if state.get("snapped"):
-        click.echo(f"Config directory is SNAPPED.")
+        click.echo("Config directory is SNAPPED.")
         click.echo(f"  Source: {XDG_CONFIG_DIR}")
         click.echo(f"  Snapped files in: {SNAPSHOT_DATA_DIR / state['sentinel']}")
         click.echo(f"  Targets: {', '.join(state.get('targets', []))}")
         click.echo(f"  Snapshot date: {state.get('snapshot_date', 'unknown')}")
     else:
-        click.echo(f"Config directory is NOT snapped.")
+        click.echo("Config directory is NOT snapped.")
         click.echo(f"  Source: {XDG_CONFIG_DIR}")
 
 
@@ -300,8 +288,8 @@ def register():
     def conf_cmd(ctx):
         """Manage XDG config snapshot/restore.
 
-        Snapshots ~/.config/fast-market by moving files to a safe location
-        and creating symlinks, allowing safe config changes with restore.
+        Snapshots ~/.config/fast-market by copying files to a safe location,
+        allowing safe config changes with restore.
         """
         if ctx.invoked_subcommand is None:
             ctx.invoke(conf_status)
