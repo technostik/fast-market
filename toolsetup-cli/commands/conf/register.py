@@ -57,10 +57,6 @@ def _do_snapshot(targets: list[str]):
     """Snapshot specified files/dirs by copying them to a sentinel directory."""
     _ensure_dirs()
 
-    if _is_snapped():
-        click.echo("Config is already snapped. Run 'toolsetup conf restore' first.")
-        return
-
     # Create sentinel directory
     sentinel = f"fast-market-{uuid.uuid4().hex[:8]}"
     target_dir = SNAPSHOT_DATA_DIR / sentinel

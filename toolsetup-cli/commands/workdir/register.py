@@ -56,10 +56,6 @@ def _do_snapshot():
     """Snapshot files directly in workdir_root (flat, no subdirs) by copying them to a sentinel directory."""
     _ensure_dirs()
 
-    if _is_snapped():
-        click.echo("Workdir is already snapped. Run 'toolsetup workdir restore' first.")
-        return
-
     workdir_root = _get_workdir_root()
     if workdir_root is None:
         click.echo("Error: workdir not configured in common/config.yaml.")

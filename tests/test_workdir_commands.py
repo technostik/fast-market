@@ -103,12 +103,13 @@ class TestSnapshot:
         # Verify content matches
         assert (sentinel_dir / "file1.txt").read_text(encoding="utf-8") == "content1"
 
-    def test_snapshot_fails_if_not_snapped_twice(self, tmp_workdir, mock_config, mock_paths, capsys):
+    def test_allows_multiple_snapshots(self, tmp_workdir, mock_config, mock_paths, capsys):
         _do_snapshot()
-        _do_snapshot()  # Second snap should fail
+        _do_snapshot()  # Second snap should succeed
 
         captured = capsys.readouterr()
-        assert "already snapped" in captured.out
+        assert "already snapped" not in captured.out
+        assert captured.out.count("Workdir snapped") == 2
 
     def test_snapshot_fails_if_workdir_not_configured(self, mock_paths, capsys):
         with patch("commands.workdir.register.load_common_config", return_value={}):
