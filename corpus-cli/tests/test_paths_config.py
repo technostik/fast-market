@@ -19,15 +19,17 @@ from storage.sqlite_store import SQLiteStore
 
 
 def test_paths_follow_xdg(monkeypatch, tmp_path: Path):
+    config_home = tmp_path / "xdg_config"
     data_home = tmp_path / "xdg_data"
     cache_home = tmp_path / "xdg_cache"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
     monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
     monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
 
     assert get_fastmarket_dir() == data_home / "fast-market"
     assert (
         get_tool_config("corpus")
-        == data_home / "fast-market" / "config" / "corpus.yaml"
+        == config_home / "fast-market" / "corpus" / "config.yaml"
     )
 
     corpus_dir = get_tool_data_dir("corpus")

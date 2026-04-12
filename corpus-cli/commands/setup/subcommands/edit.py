@@ -8,18 +8,19 @@ from commands.helpers import _configure_logging
 def register(plugin_manifests: dict) -> click.Command:
     @click.command(
         "edit",
-        help="Interactively edit config.yaml settings.",
+        help="Interactively edit corpus config settings.",
     )
     @click.pass_context
     def edit_cmd(ctx, **kwargs):
         _configure_logging(ctx.obj["verbose"])
         import yaml as _yaml
         from pathlib import Path as _Path
+        from common.core.paths import get_tool_config_path
 
-        cfg_path = _Path("config.yaml")
+        cfg_path = get_tool_config_path("corpus")
         if not cfg_path.exists():
             raise click.ClickException(
-                "config.yaml not found — run 'corpus setup run' first"
+                f"Config file not found at {cfg_path} — run 'corpus setup run' first"
             )
 
         config = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}

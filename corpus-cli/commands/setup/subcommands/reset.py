@@ -10,16 +10,17 @@ from commands.helpers import _configure_logging
 def register(plugin_manifests: dict) -> click.Command:
     @click.command(
         "reset",
-        help="Reset config.yaml to default values (backs up existing config).",
+        help="Reset corpus config to default values (backs up existing config).",
     )
     @click.pass_context
     def reset_cmd(ctx, **kwargs):
         _configure_logging(ctx.obj["verbose"])
         import yaml as _yaml
         from common.core.yaml_utils import dump_yaml as _dump_yaml
+        from common.core.paths import get_tool_config_path
 
-        cfg_path = Path("config.yaml")
-        bak_path = Path("config.yaml.bak")
+        cfg_path = get_tool_config_path("corpus")
+        bak_path = cfg_path.with_suffix(".yaml.bak")
 
         if cfg_path.exists():
             cfg_path.replace(bak_path)

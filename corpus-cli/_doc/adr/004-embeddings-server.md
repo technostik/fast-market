@@ -606,7 +606,7 @@ eliminating the ~5-10s model load time on every CLI invocation.
 4. Transparent fallback to local model if server unavailable
 
 ## Configuration
-Add to `~/.local/share/fast-market/config/corpus.yaml`:
+Add to `~/.config/fast-market/corpus/config.yaml`:
 ```yaml
 embeddings:
   model: paraphrase-multilingual-mpnet-base-v2
@@ -935,7 +935,7 @@ corpus embed-server status
 corpus embed-server stop
 ```
 
-Configure in `corpus.yaml`:
+Configure in `~/.config/fast-market/corpus/config.yaml`:
 ```yaml
 embeddings:
   model: paraphrase-multilingual-mpnet-base-v2  # Any sentence-transformers model

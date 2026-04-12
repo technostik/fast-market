@@ -45,16 +45,15 @@ Or edit config.yaml interactively:
 corpus setup edit
 ```
 
-This writes config/data under XDG-style paths:
+This writes config/data under XDG-compliant paths:
 
-- `~/.local/share/fast-market/config/corpus.yaml`
-- `~/.local/share/fast-market/config/.env` (stub, optional shared secrets)
+- `~/.config/fast-market/corpus/config.yaml`
 - `~/.local/share/fast-market/data/corpus/corpus.db`
 - `~/.cache/fast-market/corpus/`
 
 You can override config location for testing with `FASTMARKET_CONFIG_DIR`.
 
-**Manual config** — you can also write `~/.local/share/fast-market/config/corpus.yaml` directly:
+**Manual config** — you can also write `~/.config/fast-market/corpus/config.yaml` directly:
 
 ```yaml
 db_path: ~/.local/share/fast-market/data/corpus/corpus.db
@@ -77,11 +76,11 @@ To remove only corpus-agent data/config without affecting other fast-market tool
 
 ```bash
 rm -rf ~/.local/share/fast-market/data/corpus
-rm -f ~/.local/share/fast-market/config/corpus.yaml
+rm -f ~/.config/fast-market/corpus/config.yaml
 rm -rf ~/.cache/fast-market/corpus
 ```
 
-If you still use legacy `config.yaml` in your current directory, it is supported with a deprecation warning. Move it to `~/.local/share/fast-market/config/corpus.yaml`.
+If you still use legacy `config.yaml` in your current directory, it is supported with a deprecation warning. Move it to `~/.config/fast-market/corpus/config.yaml`.
 
 ---
 

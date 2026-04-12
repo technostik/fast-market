@@ -13,23 +13,28 @@ All fast-market data lives under: `~/.local/share/fast-market/`
 
 Structure:
 ```
-~/.local/share/fast-market/
-├── config/              # Shared configuration
-│   ├── corpus.yaml      # corpus-agent specific config
-│   ├── marketing.yaml   # future tool
-│   └── .env            # shared secrets (optional)
+~/.config/fast-market/         # Configuration (XDG_CONFIG_HOME)
+├── corpus/
+│   └── config.yaml      # corpus-agent specific config
+├── monitor/
+│   └── config.yaml      # monitor-agent specific config
+└── ...
+
+~/.local/share/fast-market/    # Data (XDG_DATA_HOME)
 ├── data/                # Tool-specific data
 │   ├── corpus/          # corpus-agent database and indexes
 │   │   └── corpus.db
-│   ├── marketing/       # future tool data
+│   ├── monitor/         # monitor-agent data
 │   └── ...
-└── cache/               # Tool-specific cache (optional)
-    └── corpus/
+└── ...
+
+~/.cache/fast-market/          # Cache (XDG_CACHE_HOME)
+└── corpus/
 ```
 
 ### 2. Modularity Preservation
 - Deleting `~/.local/share/fast-market/data/corpus/` should remove all corpus-agent data
-- Deleting `~/.local/share/fast-market/config/corpus.yaml` should reset corpus-agent config
+- Deleting `~/.config/fast-market/corpus/config.yaml` should reset corpus-agent config
 - Other tools remain unaffected
 
 ### 3. Code Changes Required
@@ -66,7 +71,7 @@ def get_tool_cache_dir(tool_name: str) -> Path:
 
 #### B. Update config loading
 `core/config.py` should:
-- Look for `corpus.yaml` in `~/.local/share/fast-market/config/`
+- Look for `config.yaml` in `~/.config/fast-market/corpus/`
 - Fall back to environment variable `FASTMARKET_CONFIG_DIR` for testing/overrides
 - Still support `:memory:` for database
 
@@ -90,7 +95,7 @@ def get_tool_cache_dir(tool_name: str) -> Path:
 If `config.yaml` exists in current directory, use it with a warning:
 ```python
 import warnings
-warnings.warn("config.yaml in current directory is deprecated. Move to ~/.local/share/fast-market/config/corpus.yaml")
+warnings.warn("config.yaml in current directory is deprecated. Move to ~/.config/fast-market/corpus/config.yaml")
 ```
 
 ### 5. Testing
