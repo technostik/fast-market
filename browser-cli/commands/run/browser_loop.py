@@ -179,7 +179,6 @@ class BrowserTaskLoop:
     provider: str
     model: str | None
     max_iterations: int = 20
-    default_timeout: int = 60          # seconds per agent-browser call
     llm_timeout: int = 0               # 0 = no limit
     temperature: float = 0.3
     cdp_port: int = 9222
@@ -431,7 +430,6 @@ class BrowserTaskLoop:
                 action=action,
                 args=args if isinstance(args, list) else [str(args)],
                 cdp_port=self.cdp_port,
-                timeout=self.default_timeout * 1000,  # convert s → ms
                 params=task_params,
             )
 

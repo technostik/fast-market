@@ -253,13 +253,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Max LLM turns before stopping (default: 20).",
     )
     @click.option(
-        "--timeout",
-        "-t",
-        type=int,
-        default=None,
-        help="Timeout per browser action in seconds (default: 60).",
-    )
-    @click.option(
         "--llm-timeout",
         type=int,
         default=0,
@@ -345,7 +338,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         provider: str | None,
         model: str | None,
         max_iterations: int | None,
-        timeout: int | None,
         llm_timeout: int,
         cdp_port: int,
         keep_browser: bool,
@@ -459,7 +451,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             provider=provider_name,
             model=model,
             max_iterations=max_iterations or 20,
-            default_timeout=timeout or 60,
             llm_timeout=llm_timeout,
             temperature=common_config.get("default_temperature", 0.3),
             cdp_port=cdp_port,

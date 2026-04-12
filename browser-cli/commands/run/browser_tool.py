@@ -127,12 +127,9 @@ def _build_agent_cmd(
     action: str,
     args: list[str],
     cdp_port: int,
-    timeout: int | None,
 ) -> list[str]:
     """Build the ``agent-browser`` command line."""
     cmd = [_AGENT_BROWSER, "--cdp", str(cdp_port), action, *args]
-    if timeout is not None:
-        cmd.extend(["--timeout", str(timeout)])
     return cmd
 
 
@@ -141,7 +138,6 @@ def execute_browse_action(
     args: list[str],
     *,
     cdp_port: int = 9222,
-    timeout: int | None = None,
     params: dict[str, str] | None = None,
 ) -> BrowseResult:
     """Execute a single browse action via ``agent-browser``.
@@ -153,14 +149,13 @@ def execute_browse_action(
     # Build the command-line string for display purposes
     cmd_for_display = shlex.join([_AGENT_BROWSER, action, *resolved_args])
 
-    cmd = _build_agent_cmd(action, resolved_args, cdp_port, timeout)
+    cmd = _build_agent_cmd(action, resolved_args, cdp_port)
 
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout / 1000 if timeout else None,
         )
         return BrowseResult(
             stdout=result.stdout.strip(),
