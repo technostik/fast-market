@@ -279,48 +279,48 @@ def _do_rollback(backup_name: str | None = None):
 
 
 def register():
-    @click.group("conf", invoke_without_command=True)
+    @click.group("config", invoke_without_command=True)
     @click.pass_context
-    def conf_cmd(ctx):
+    def config_cmd(ctx):
         """Manage XDG config snapshot/restore.
 
         Snapshots ~/.config/fast-market by copying files to a safe location,
         allowing safe config changes with restore.
         """
         if ctx.invoked_subcommand is None:
-            ctx.invoke(conf_status)
+            ctx.invoke(config_status)
 
-    @conf_cmd.command("snapshot")
+    @config_cmd.command("snapshot")
     @click.option(
         "--target", "-t",
         "targets",
         multiple=True,
         help="Specific files/dirs to snapshot (default: entire directory)",
     )
-    def conf_snapshot(targets):
+    def config_snapshot(targets):
         """Snapshot ~/.config/fast-market config files."""
         target_list = list(targets) if targets else ["."]
         _do_snapshot(target_list)
 
-    @conf_cmd.command("restore")
-    def conf_restore():
+    @config_cmd.command("restore")
+    def config_restore():
         """Restore ~/.config/fast-market, moving files back."""
         _do_restore()
 
-    @conf_cmd.command("status")
-    def conf_status():
+    @config_cmd.command("status")
+    def config_status():
         """Show snapshot status of ~/.config/fast-market."""
         _show_status()
 
-    @conf_cmd.command("list")
-    def conf_list():
+    @config_cmd.command("list")
+    def config_list():
         """List all snapshots."""
         _list_snapshots()
 
-    @conf_cmd.command("rollback")
+    @config_cmd.command("rollback")
     @click.argument("snapshot_name", required=False)
-    def conf_rollback(snapshot_name):
+    def config_rollback(snapshot_name):
         """Rollback to a specific snapshot or the current one."""
         _do_rollback(snapshot_name)
 
-    return conf_cmd
+    return config_cmd

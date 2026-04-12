@@ -24,5 +24,6 @@ packages = [
   "commands",
   "commands.setup",
   "commands.autocomplete",
-  "commands.conf",
+  "commands.config",
+  "commands.workdir",
 ]
