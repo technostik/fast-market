@@ -19,6 +19,24 @@ class FileUpdateRequest(BaseModel):
     content: str
 
 
+_VISIBLE_SUFFIXES = {
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+    ".md", ".txt", ".rst",
+    ".py", ".sh", ".bash", ".zsh",
+    ".js", ".ts", ".html", ".css", ".xml", ".sql",
+}
+
+
+def _is_listable_file(path: Path) -> bool:
+    if path.is_dir():
+        return True
+
+    if path.name in {"Makefile", "Dockerfile", ".env"}:
+        return True
+
+    return path.suffix.lower() in _VISIBLE_SUFFIXES
+
+
 def _roots() -> dict[str, Path | None]:
     common_config = load_common_config()
     workdir = common_config.get("workdir")
@@ -53,6 +71,8 @@ def _tree(path: Path, depth: int = 0, max_depth: int = 6) -> dict:
     children = []
     for child in sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
         if child.is_symlink():
+            continue
+        if not _is_listable_file(child):
             continue
         children.append(_tree(child, depth=depth + 1, max_depth=max_depth))
 
