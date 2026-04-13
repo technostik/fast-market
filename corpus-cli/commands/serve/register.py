@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import click
 
 from commands.base import CommandManifest
@@ -14,6 +16,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--port", "-p", type=int, default=8000)
     @click.pass_context
     def serve_cmd(ctx, port, **kwargs):
+        warnings.warn(
+            "corpus serve is deprecated. Use 'webux serve' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        click.echo("⚠️  corpus serve is deprecated. Use 'webux serve' instead.", err=True)
         import uvicorn
 
         _configure_logging(ctx.obj["verbose"])

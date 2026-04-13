@@ -35,6 +35,9 @@ dev = ["pytest>=8.0", "httpx>=0.27"]
 [project.scripts]
 corpus = "corpus_entry:main"
 
+[project.entry-points."fast_market.webux_plugins"]
+corpus = "webux.corpus.register:register"
+
 [tool.setuptools]
-packages = ["common", "common.core", "common.auth", "common.cli", "common.storage", "common.llm", "corpus_entry", "cli", "core", "storage", "plugins", "plugins.obsidian", "plugins.youtube", "api", "commands", "commands.sync", "commands.search", "commands.list", "commands.get_from_id", "commands.get_last", "commands.get_from_source", "commands.delete", "commands.status", "commands.serve", "commands.setup", "commands.embed_server"]
+packages = ["common", "common.core", "common.auth", "common.cli", "common.storage", "common.llm", "common.webux", "corpus_entry", "cli", "core", "storage", "plugins", "plugins.obsidian", "plugins.youtube", "api", "commands", "commands.sync", "commands.search", "commands.list", "commands.get_from_id", "commands.get_last", "commands.get_from_source", "commands.delete", "commands.status", "commands.serve", "commands.setup", "commands.embed_server", "webux", "webux.corpus"]
 py-modules = ["setup_wizard"]
