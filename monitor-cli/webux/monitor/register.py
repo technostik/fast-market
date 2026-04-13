@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, Query
 
@@ -8,6 +11,29 @@ from common.core.paths import get_tool_data_dir
 from common.webux.base import WebuxPluginManifest
 
 router = APIRouter()
+_CLI_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _get_monitor_storage_class():
+    """Load MonitorStorage from monitor-cli, avoiding cross-tool `core.*` collisions."""
+    saved_core_modules = {
+        name: module
+        for name, module in list(sys.modules.items())
+        if name == "core" or name.startswith("core.")
+    }
+    for name in saved_core_modules:
+        sys.modules.pop(name, None)
+
+    sys.path.insert(0, str(_CLI_ROOT))
+    try:
+        storage_module = importlib.import_module("core.storage")
+        return storage_module.MonitorStorage
+    finally:
+        sys.path.pop(0)
+        for name in list(sys.modules):
+            if name == "core" or name.startswith("core."):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved_core_modules)
 
 
 def _parse_since(since: str | None) -> datetime | None:
@@ -31,7 +57,7 @@ def logs(
     limit: int = Query(100, le=500),
     mismatch: bool = Query(False),
 ) -> list[dict]:
-    from core.storage import MonitorStorage
+    MonitorStorage = _get_monitor_storage_class()
 
     storage = MonitorStorage(get_tool_data_dir("monitor") / "monitor.db")
     since_dt = _parse_since(since)
@@ -78,7 +104,7 @@ def logs(
 
 @router.get("/status")
 def status() -> dict:
-    from core.storage import MonitorStorage
+    MonitorStorage = _get_monitor_storage_class()
 
     storage = MonitorStorage(get_tool_data_dir("monitor") / "monitor.db")
     return {
@@ -91,7 +117,7 @@ def status() -> dict:
 
 @router.get("/filters")
 def filters() -> dict[str, list[str]]:
-    from core.storage import MonitorStorage
+    MonitorStorage = _get_monitor_storage_class()
 
     storage = MonitorStorage(get_tool_data_dir("monitor") / "monitor.db")
     return {
