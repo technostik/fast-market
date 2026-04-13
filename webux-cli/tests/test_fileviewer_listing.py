@@ -29,7 +29,7 @@ def test_roots_use_config_data_and_workdir_root(monkeypatch, tmp_path):
     import webux.fileviewer.plugin as plugin
 
     monkeypatch.setattr(plugin, "get_common_config_path", lambda: Path("/home/user/.config/fast-market/common/config.yaml"))
-    monkeypatch.setattr(plugin, "get_data_dir", lambda: Path("/home/user/.local/share/fast-market"))
+    monkeypatch.setattr(plugin, "get_data_dir", lambda: Path("/home/user/.local/share/fast-market/data"))
     monkeypatch.setattr(plugin, "load_common_config", lambda: {"workdir": str(tmp_path)})
 
     roots = plugin._roots()

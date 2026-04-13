@@ -34,6 +34,8 @@ _FILEVIEWER_HTML = """<!doctype html>
     .left { width: 280px; border-right: 1px solid var(--border); overflow:auto; background:var(--bg-secondary); }
     .right { flex:1; display:flex; flex-direction:column; min-width:0; }
     .section { border-bottom: 1px solid var(--border); }
+    .filters { padding:10px; border-bottom: 1px solid var(--border); display:flex; gap:6px; flex-direction:column; }
+    .filters input { width:100%; box-sizing:border-box; }
     .section button { width:100%; text-align:left; padding:10px 12px; background:none; border:none; color:var(--text); cursor:pointer; }
     .section button:hover { background:var(--accent); }
     .tree { padding:8px 8px 12px 8px; display:none; }
@@ -75,6 +77,31 @@ const sections = [
 let currentFile = null;
 let editor = null;
 let activeElement = null;
+
+const defaultExtensions = ['yaml', 'yml', 'json', 'txt', 'sh', 'md'];
+
+function getActiveExtensions() {
+  const raw = document.getElementById('extFilter').value || '';
+  const parts = raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (!parts.length) return null;
+  return new Set(parts);
+}
+
+function applyFileFilter(node, extensions) {
+  if (!extensions) return node;
+
+  if (node.type === 'file') {
+    const ext = (node.name.split('.').pop() || '').toLowerCase();
+    if (!node.name.includes('.')) return null;
+    return extensions.has(ext) ? node : null;
+  }
+
+  const filteredChildren = (node.children || [])
+    .map(child => applyFileFilter(child, extensions))
+    .filter(Boolean);
+
+  return { ...node, children: filteredChildren };
+}
 
 function escapeHtml(text) {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -149,12 +176,25 @@ async function loadSection(rootKey, treeContainer) {
     return;
   }
   const tree = await resp.json();
+  const extensions = getActiveExtensions();
+  const filteredTree = applyFileFilter(tree, extensions) || { ...tree, children: [] };
+
   treeContainer.innerHTML = '';
-  renderNode(tree, treeContainer, true);
+  if (rootKey === 'config' && filteredTree.children) {
+    filteredTree.children.forEach(child => renderNode(child, treeContainer, true));
+    return;
+  }
+  renderNode(filteredTree, treeContainer, true);
 }
 
 function initSidebar() {
   const left = document.getElementById('left');
+
+  const filters = document.createElement('div');
+  filters.className = 'filters';
+  filters.innerHTML = '<label style="font-size:12px;color:var(--text-dim);">Visible extensions (comma-separated)</label><input id="extFilter" value="' + defaultExtensions.join(', ') + '" /><button id="applyFilter">Apply filter</button>';
+  left.appendChild(filters);
+
   sections.forEach(section => {
     const container = document.createElement('div');
     container.className = 'section';
@@ -177,6 +217,19 @@ function initSidebar() {
     container.appendChild(tree);
     left.appendChild(container);
   });
+
+  document.getElementById('applyFilter').onclick = async () => {
+    for (const sectionEl of document.querySelectorAll('.section')) {
+      const btn = sectionEl.querySelector('button');
+      const tree = sectionEl.querySelector('.tree');
+      if (tree.style.display === 'block') {
+        const sectionDef = sections.find(s => s.label === btn.textContent);
+        if (sectionDef) {
+          await loadSection(sectionDef.key, tree);
+        }
+      }
+    }
+  };
 }
 
 async function saveCurrent() {

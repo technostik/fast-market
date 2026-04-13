@@ -21,11 +21,11 @@ class FileUpdateRequest(BaseModel):
 
 def _roots() -> dict[str, Path | None]:
     common_config = load_common_config()
-    workdir = common_config.get("workdir")
+    workdir = common_config.get("workdir_root") or common_config.get("workdir")
     workdir_path = Path(workdir).expanduser().resolve() if workdir else None
     return {
         "config": get_common_config_path().parent.parent,
-        "data": get_data_dir(),
+        "data": get_data_dir().parent,
         "workdir_root": workdir_path,
     }
 
