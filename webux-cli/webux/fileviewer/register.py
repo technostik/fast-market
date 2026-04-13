@@ -180,7 +180,7 @@ async function loadSection(rootKey, treeContainer) {
   const filteredTree = applyFileFilter(tree, extensions) || { ...tree, children: [] };
 
   treeContainer.innerHTML = '';
-  if (rootKey === 'config' && filteredTree.children) {
+  if (filteredTree.children) {
     filteredTree.children.forEach(child => renderNode(child, treeContainer, true));
     return;
   }
