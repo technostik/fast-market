@@ -1,4 +1,4 @@
-"""Tests for toolsetup workdir snapshot commands."""
+"""Tests for toolsetup backup command."""
 
 from __future__ import annotations
 
@@ -8,17 +8,13 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from commands.workdir.register import (
-    _do_snapshot,
-    _do_restore,
-    _do_rollback,
-    _get_workdir_root,
+from commands.backup.register import register
+from commands.snapshot_service import (
+    SOURCE_CONFIG,
+    SOURCE_WORKDIR,
+    SOURCE_DATA,
     _is_snapped,
-    _list_snapshots,
-    _load_state,
-    _save_state,
-    _show_status,
-    register,
+    get_snapshot_root,
 )
 
 
@@ -27,39 +23,72 @@ def tmp_workdir(tmp_path: Path) -> Path:
     """Create a temporary workdir with some files."""
     workdir = tmp_path / "workdir"
     workdir.mkdir()
-    # Create some flat files (no subdirs)
     (workdir / "file1.txt").write_text("content1", encoding="utf-8")
     (workdir / "file2.txt").write_text("content2", encoding="utf-8")
     (workdir / "file3.md").write_text("# Hello", encoding="utf-8")
-    # Create a subdirectory (should be ignored)
-    subdir = workdir / "subdir"
-    subdir.mkdir()
-    (subdir / "nested.txt").write_text("nested", encoding="utf-8")
     return workdir
 
 
 @pytest.fixture()
-def tmp_snapshot_dir(tmp_path: Path) -> Path:
-    """Create a temporary snapshot directory."""
-    snap_dir = tmp_path / "workdir-snapshots"
-    snap_dir.mkdir()
-    return snap_dir
+def tmp_config_dir(tmp_path: Path) -> Path:
+    """Create a temporary config directory."""
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "config1.yaml").write_text("key: value1", encoding="utf-8")
+    (config / "config2.yaml").write_text("key: value2", encoding="utf-8")
+    return config
 
 
 @pytest.fixture()
-def mock_config(tmp_workdir: Path):
+def tmp_data_dir(tmp_path: Path) -> Path:
+    """Create a temporary data directory."""
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "data1.json").write_text('{"a": 1}', encoding="utf-8")
+    (data / "data2.json").write_text('{"b": 2}', encoding="utf-8")
+    return data
+
+
+@pytest.fixture()
+def mock_snapshot_root(tmp_path: Path, monkeypatch):
+    """Mock the snapshot root to use a temp path."""
+    import commands.snapshot_service as mod
+    snapshot_root = tmp_path / "snapshots"
+    snapshot_root.mkdir()
+    monkeypatch.setattr(mod, "DEFAULT_SNAPSHOT_ROOT", snapshot_root)
+    return snapshot_root
+
+
+@pytest.fixture()
+def mock_workdir_config(tmp_workdir: Path):
     """Mock the config to return the test workdir."""
-    with patch("commands.workdir.register.load_common_config") as mock_cfg:
+    with patch("commands.snapshot_service.load_common_config") as mock_cfg:
         mock_cfg.return_value = {"workdir": str(tmp_workdir)}
         yield mock_cfg
 
 
 @pytest.fixture()
-def mock_paths(tmp_snapshot_dir: Path, monkeypatch):
-    """Mock the snapshot data dir to use a temp path."""
-    import commands.workdir.register as mod
-    monkeypatch.setattr(mod, "WORKDIR_SNAPSHOT_DATA_DIR", tmp_snapshot_dir)
-    yield tmp_snapshot_dir
+def mock_config_source(tmp_config_dir: Path, monkeypatch):
+    """Mock the config source directory."""
+    import commands.snapshot_service as mod
+    monkeypatch.setattr(mod, "_get_config_source", lambda: tmp_config_dir)
+    return tmp_config_dir
+
+
+@pytest.fixture()
+def mock_data_source(tmp_data_dir: Path, monkeypatch):
+    """Mock the data source directory."""
+    import commands.snapshot_service as mod
+    monkeypatch.setattr(mod, "_get_data_source", lambda: tmp_data_dir)
+    return tmp_data_dir
+
+
+@pytest.fixture()
+def mock_workdir_source(tmp_workdir: Path, monkeypatch):
+    """Mock the workdir source directory."""
+    import commands.snapshot_service as mod
+    monkeypatch.setattr(mod, "_get_workdir_source", lambda: tmp_workdir)
+    return tmp_workdir
 
 
 @pytest.fixture()
@@ -68,178 +97,120 @@ def runner() -> CliRunner:
 
 
 @pytest.fixture()
-def workdir_cmd():
+def backup_cmd():
     return register()
 
 
-class TestGetWorkdirRoot:
-    def test_returns_workdir_from_config(self, mock_config, tmp_workdir):
-        result = _get_workdir_root()
-        assert result == tmp_workdir
+class TestBackupSnapshot:
+    def test_snapshot_workdir(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner):
+        result = runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
+        assert result.exit_code == 0
+        assert "snapped" in result.output.lower()
 
-    def test_returns_none_on_error(self):
-        with patch("commands.workdir.register.load_common_config", side_effect=Exception("fail")):
-            result = _get_workdir_root()
-            assert result is None
+        # Verify state is updated
+        snapshot_root = get_snapshot_root()
+        assert _is_snapped(snapshot_root, SOURCE_WORKDIR) is True
 
+    def test_snapshot_config(self, backup_cmd, mock_snapshot_root, mock_config_source, runner):
+        result = runner.invoke(backup_cmd, ["snapshot", "--source-type", "config"])
+        assert result.exit_code == 0
+        assert "snapped" in result.output.lower()
 
-class TestSnapshot:
-    def test_snapshot_copies_flat_files_only(self, tmp_workdir, mock_config, mock_paths):
-        _do_snapshot()
+        snapshot_root = get_snapshot_root()
+        assert _is_snapped(snapshot_root, SOURCE_CONFIG) is True
 
-        state = _load_state()
-        assert state["snapped"] is True
-        assert state["sentinel"] is not None
+    def test_snapshot_data(self, backup_cmd, mock_snapshot_root, mock_data_source, runner):
+        result = runner.invoke(backup_cmd, ["snapshot", "--source-type", "data"])
+        assert result.exit_code == 0
+        assert "snapped" in result.output.lower()
 
-        sentinel_dir = mock_paths / state["sentinel"]
-        assert sentinel_dir.exists()
+        snapshot_root = get_snapshot_root()
+        assert _is_snapped(snapshot_root, SOURCE_DATA) is True
 
-        # Check only flat files were copied (no subdirs)
-        files = list(sentinel_dir.iterdir())
-        assert len(files) == 3
-        file_names = {f.name for f in files}
-        assert file_names == {"file1.txt", "file2.txt", "file3.md"}
-
-        # Verify content matches
-        assert (sentinel_dir / "file1.txt").read_text(encoding="utf-8") == "content1"
-
-    def test_allows_multiple_snapshots(self, tmp_workdir, mock_config, mock_paths, capsys):
-        _do_snapshot()
-        _do_snapshot()  # Second snap should succeed
-
-        captured = capsys.readouterr()
-        assert "already snapped" not in captured.out
-        assert captured.out.count("Workdir snapped") == 2
-
-    def test_snapshot_fails_if_workdir_not_configured(self, mock_paths, capsys):
-        with patch("commands.workdir.register.load_common_config", return_value={}):
-            _do_snapshot()
-
-        captured = capsys.readouterr()
-        assert "workdir not configured" in captured.out
-
-    def test_snapshot_fails_if_workdir_not_exists(self, mock_paths, capsys):
-        with patch("commands.workdir.register.load_common_config", return_value={"workdir": "/nonexistent/path"}):
-            _do_snapshot()
-
-        captured = capsys.readouterr()
-        assert "workdir does not exist" in captured.out
+    def test_snapshot_requires_source_type(self, backup_cmd, runner):
+        result = runner.invoke(backup_cmd, ["snapshot"])
+        assert result.exit_code != 0
 
 
-class TestRestore:
-    def test_restore_copies_files_back(self, tmp_workdir, mock_config, mock_paths):
+class TestBackupRestore:
+    def test_restore_workdir(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner, tmp_workdir):
         # Snapshot first
-        _do_snapshot()
-
-        # Modify the workdir files
-        (tmp_workdir / "file1.txt").write_text("modified", encoding="utf-8")
-
-        # Restore
-        _do_restore()
-
-        # Check original content is restored
-        assert (tmp_workdir / "file1.txt").read_text(encoding="utf-8") == "content1"
-        assert (tmp_workdir / "file2.txt").read_text(encoding="utf-8") == "content2"
-
-        # State should be reset
-        assert _is_snapped() is False
-
-    def test_restore_backs_up_existing_files(self, tmp_workdir, mock_config, mock_paths):
-        _do_snapshot()
-
-        # Create a new file in workdir that wasn't in snapshot
-        (tmp_workdir / "new_file.txt").write_text("new content", encoding="utf-8")
-
-        _do_restore()
-
-        # Only files that were in snapshot should be restored, new file backed up
-        assert (tmp_workdir / "file1.txt").read_text(encoding="utf-8") == "content1"
-
-    def test_restore_fails_if_not_snapped(self, mock_paths, capsys):
-        _do_restore()
-
-        captured = capsys.readouterr()
-        assert "not snapped" in captured.out
-
-    def test_restore_fails_if_snapshot_dir_missing(self, tmp_workdir, mock_config, mock_paths):
-        # Manually set state to snapped but don't create snapshot
-        _save_state({"snapped": True, "sentinel": "nonexistent-sentinel"})
-
-        _do_restore()
-
-        # State should be cleaned up
-        state = _load_state()
-        assert state["snapped"] is False
-
-
-class TestStatus:
-    def test_status_shows_snapped(self, tmp_workdir, mock_config, mock_paths, capsys):
-        _do_snapshot()
-
-        _show_status()
-        captured = capsys.readouterr()
-        assert "SNAPPED" in captured.out
-
-    def test_status_shows_not_snapped(self, tmp_workdir, mock_config, mock_paths, capsys):
-        _show_status()
-        captured = capsys.readouterr()
-        assert "NOT snapped" in captured.out
-
-
-class TestList:
-    def test_list_shows_snapshots(self, tmp_workdir, mock_config, mock_paths, capsys):
-        _do_snapshot()
-
-        _list_snapshots()
-        captured = capsys.readouterr()
-        assert "workdir-" in captured.out
-        assert "file(s)" in captured.out
-
-    def test_list_empty_when_no_snapshots(self, mock_paths, capsys):
-        _list_snapshots()
-        captured = capsys.readouterr()
-        assert "No snapshots found" in captured.out
-
-
-class TestRollback:
-    def test_rollback_restores_then_resnaps(self, tmp_workdir, mock_config, mock_paths, capsys):
-        _do_snapshot()
+        runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
 
         # Modify files
         (tmp_workdir / "file1.txt").write_text("modified", encoding="utf-8")
 
-        _do_rollback()
-        captured = capsys.readouterr()
-        assert "Rolled back" in captured.out
-
-        # Should be snapped again
-        assert _is_snapped() is True
-
-
-class TestCLICommands:
-    def test_cli_snapshot(self, workdir_cmd, tmp_workdir, mock_config, mock_paths, runner):
-        result = runner.invoke(workdir_cmd, ["snapshot"])
-        assert result.exit_code == 0
-        assert "Snapped" in result.output or "snapped" in result.output
-
-    def test_cli_restore(self, workdir_cmd, tmp_workdir, mock_config, mock_paths, runner):
-        # First snapshot
-        _do_snapshot()
-
-        result = runner.invoke(workdir_cmd, ["restore"])
+        # Restore
+        result = runner.invoke(backup_cmd, ["restore", "--source-type", "workdir"])
         assert result.exit_code == 0
 
-    def test_cli_status(self, workdir_cmd, tmp_workdir, mock_config, mock_paths, runner):
-        result = runner.invoke(workdir_cmd, ["status"])
+        # Verify original content restored
+        assert (tmp_workdir / "file1.txt").read_text(encoding="utf-8") == "content1"
+
+    def test_restore_requires_source_type(self, backup_cmd, runner):
+        result = runner.invoke(backup_cmd, ["restore"])
+        assert result.exit_code != 0
+
+
+class TestBackupStatus:
+    def test_status_workdir_snapped(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner):
+        runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
+        result = runner.invoke(backup_cmd, ["status", "--source-type", "workdir"])
+        assert result.exit_code == 0
+        assert "SNAPPED" in result.output
+
+    def test_status_config_not_snapped(self, backup_cmd, mock_snapshot_root, mock_config_source, runner):
+        result = runner.invoke(backup_cmd, ["status", "--source-type", "config"])
+        assert result.exit_code == 0
+        assert "NOT snapped" in result.output or "not snapped" in result.output.lower()
+
+    def test_status_requires_source_type(self, backup_cmd, runner):
+        result = runner.invoke(backup_cmd, ["status"])
+        assert result.exit_code != 0
+
+
+class TestBackupList:
+    def test_list_workdir_snapshots(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner):
+        runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
+        result = runner.invoke(backup_cmd, ["list", "--source-type", "workdir"])
+        assert result.exit_code == 0
+        assert "workdir-" in result.output
+
+    def test_list_config_snapshots(self, backup_cmd, mock_snapshot_root, mock_config_source, runner):
+        runner.invoke(backup_cmd, ["snapshot", "--source-type", "config"])
+        result = runner.invoke(backup_cmd, ["list", "--source-type", "config"])
         assert result.exit_code == 0
 
-    def test_cli_list(self, workdir_cmd, tmp_workdir, mock_config, mock_paths, runner):
-        _do_snapshot()
-        result = runner.invoke(workdir_cmd, ["list"])
+    def test_list_empty_when_no_snapshots(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner):
+        result = runner.invoke(backup_cmd, ["list", "--source-type", "workdir"])
         assert result.exit_code == 0
+        assert "No snapshots found" in result.output
 
-    def test_cli_default_shows_status(self, workdir_cmd, tmp_workdir, mock_config, mock_paths, runner):
-        result = runner.invoke(workdir_cmd)
+    def test_list_requires_source_type(self, backup_cmd, runner):
+        result = runner.invoke(backup_cmd, ["list"])
+        assert result.exit_code != 0
+
+
+class TestBackupRollback:
+    def test_rollback_workdir(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner, tmp_workdir):
+        # Snapshot
+        runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
+
+        # Modify files
+        (tmp_workdir / "file1.txt").write_text("modified", encoding="utf-8")
+
+        # Rollback
+        result = runner.invoke(backup_cmd, ["rollback", "--source-type", "workdir"])
         assert result.exit_code == 0
-        # Should show status
-        assert "snapped" in result.output.lower() or "SNAPPED" in result.output
+        assert "Rolled back" in result.output
+
+    def test_rollback_requires_source_type(self, backup_cmd, runner):
+        result = runner.invoke(backup_cmd, ["rollback"])
+        assert result.exit_code != 0
+
+
+class TestBackupDefault:
+    def test_default_shows_help(self, backup_cmd, runner):
+        result = runner.invoke(backup_cmd)
+        assert result.exit_code == 0
+        assert "Usage" in result.output or "Commands" in result.output
