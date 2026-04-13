@@ -54,6 +54,7 @@ def logs(
     since: str | None = Query(None),
     rule_id: str | None = Query(None),
     source_id: str | None = Query(None),
+    action_id: str | None = Query(None),
     limit: int = Query(100, le=500),
     mismatch: bool = Query(False),
 ) -> list[dict]:
@@ -85,6 +86,7 @@ def logs(
         since=since_dt,
         rule_id=rule_id,
         source_id=source_id,
+        action_id=action_id,
         limit=limit,
     )
     return [
@@ -177,6 +179,10 @@ h2 { margin:0 0 12px 0; }
     <input id="since" placeholder="since (e.g. 1d, 2h)" style="width:140px;">
     <select id="ruleFilter" style="width:140px;"><option value="">All Rules</option></select>
     <select id="sourceFilter" style="width:140px;"><option value="">All Sources</option></select>
+    <select id="actionFilter" style="width:140px;"><option value="">All Actions</option></select>
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;">
+      <input type="checkbox" id="mismatchToggle"> Mismatches only
+    </label>
     <button id="loadLogs">📋 Load Logs</button>
     <button id="loadStatus">📊 Status</button>
   </div>
@@ -186,6 +192,8 @@ h2 { margin:0 0 12px 0; }
   const sinceInput = document.getElementById('since');
   const ruleFilter = document.getElementById('ruleFilter');
   const sourceFilter = document.getElementById('sourceFilter');
+  const actionFilter = document.getElementById('actionFilter');
+  const mismatchToggle = document.getElementById('mismatchToggle');
 
   function formatRelativeTime(isoString) {
     const now = new Date();
@@ -263,25 +271,43 @@ h2 { margin:0 0 12px 0; }
   async function loadFilters() {
     try {
       const r = await fetch('/api/monitor/filters');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
-      data.rule_ids?.forEach(id => { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; ruleFilter.appendChild(opt); });
-      data.source_ids?.forEach(id => { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; sourceFilter.appendChild(opt); });
+      (data.rule_ids || []).forEach(id => { if (![...ruleFilter.options].some(o => o.value === id)) { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; ruleFilter.appendChild(opt); } });
+      (data.source_ids || []).forEach(id => { if (![...sourceFilter.options].some(o => o.value === id)) { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; sourceFilter.appendChild(opt); } });
+      (data.action_ids || []).forEach(id => { if (![...actionFilter.options].some(o => o.value === id)) { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; actionFilter.appendChild(opt); } });
     } catch(e) { console.error('Failed to load filters:', e); }
+  }
+
+  function populateFiltersFromLogs(data) {
+    const ruleIds = new Set(), sourceIds = new Set(), actionIds = new Set();
+    data.forEach(r => {
+      if (r.rule_id) ruleIds.add(r.rule_id);
+      if (r.source_id) sourceIds.add(r.source_id);
+      if (r.action_id) actionIds.add(r.action_id);
+    });
+    ruleIds.forEach(id => { if (![...ruleFilter.options].some(o => o.value === id)) { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; ruleFilter.appendChild(opt); } });
+    sourceIds.forEach(id => { if (![...sourceFilter.options].some(o => o.value === id)) { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; sourceFilter.appendChild(opt); } });
+    actionIds.forEach(id => { if (![...actionFilter.options].some(o => o.value === id)) { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; actionFilter.appendChild(opt); } });
   }
 
   document.getElementById('loadLogs').onclick = async () => {
     const since = sinceInput.value.trim();
     const rule = ruleFilter.value;
     const source = sourceFilter.value;
+    const action = actionFilter.value;
+    const mismatch = mismatchToggle.checked;
     const params = new URLSearchParams();
     if (since) params.set('since', since);
     if (rule) params.set('rule_id', rule);
     if (source) params.set('source_id', source);
+    if (action) params.set('action_id', action);
+    if (mismatch) params.set('mismatch', 'true');
     const q = params.toString() ? '?' + params.toString() : '';
     const r = await fetch('/api/monitor/logs' + q);
     const data = await r.json();
-    // Detect mismatch logs by checking first item
-    const type = data.length > 0 && data[0].failed_conditions ? 'mismatch' : 'trigger';
+    const type = mismatch ? 'mismatch' : 'trigger';
+    populateFiltersFromLogs(data);
     out.innerHTML = renderCards(data, type);
   };
 
@@ -291,8 +317,10 @@ h2 { margin:0 0 12px 0; }
     out.innerHTML = renderStats(data);
   };
 
-  // Load filters on startup
-  loadFilters();
+  // Load filters then auto-load logs on startup
+  loadFilters().then(() => {
+    document.getElementById('loadLogs').click();
+  });
   </script>
 </body></html>
 """
