@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from common import structlog
 from common.youtube.models import ChannelInfo, Comment, ReplyResult, Video
 from common.youtube.quota import QuotaTracker
+from common.youtube.utils import format_count, is_short_video, iso_duration_to_seconds
 
 if TYPE_CHECKING:
     from googleapiclient.discovery import Resource
@@ -56,7 +58,7 @@ class YouTubeClient:
                 "or run 'youtube setup refresh'."
             )
         logger.info("auto_refreshing_auth", reason="insufficient_permissions")
-        from common.auth.youtube import SCOPE_FULL
+        from common.youtube.auth import SCOPE_FULL
 
         self._auth.refresh_auth(scopes=[SCOPE_FULL])
         # Rebuild the YouTube API client with new credentials

@@ -7,7 +7,7 @@ from pathlib import Path
 from common import structlog
 from common.youtube.transport import RSSPlaylistTransport, Transport
 from common.youtube.client import YouTubeClient
-from common.auth.youtube import YouTubeOAuth
+from common.youtube.auth import YouTubeOAuth
 
 from core.models import Document
 from core.sync_errors import (

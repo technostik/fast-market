@@ -185,7 +185,7 @@ See `youtube-agent/` for a complete example.
 
 ```python
 # core/engine.py
-from common.auth.youtube import YouTubeOAuth
+from common.youtube.auth import YouTubeOAuth
 from common.youtube import YouTubeClient
 from common.core.config import load_tool_config
 

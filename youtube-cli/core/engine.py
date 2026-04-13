@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Optional
 
 from common import structlog
-from common.auth.youtube import YouTubeOAuth, get_client_secret_path
-from common.core.config import load_tool_config
+from common.youtube.auth import YouTubeOAuth, get_client_secret_path
+from common.core.config import load_tool_config, load_youtube_config
 from common.youtube import YouTubeClient
 
 logger = structlog.get_logger(__name__)
@@ -18,6 +18,18 @@ def build_youtube_client(config: Optional[dict] = None) -> YouTubeClient:
 
     youtube_config = config.get("youtube", {})
     client_secret = youtube_config.get("client_secret_path")
+    channel_id = youtube_config.get("channel_id")
+    quota_limit = youtube_config.get("quota_limit")
+
+    # Fall back to common youtube config if values are empty
+    if not channel_id or not client_secret or quota_limit is None:
+        common_cfg = load_youtube_config()
+        if not channel_id:
+            channel_id = common_cfg.get("channel_id")
+        if not client_secret:
+            client_secret = common_cfg.get("client_secret_path")
+        if quota_limit is None:
+            quota_limit = common_cfg.get("quota_limit", 10000)
 
     if not client_secret:
         client_secret = get_client_secret_path()
@@ -37,8 +49,6 @@ def build_youtube_client(config: Optional[dict] = None) -> YouTubeClient:
 
     auth = YouTubeOAuth(client_secret)
     api_client = auth.get_client()
-    channel_id = youtube_config.get("channel_id")
-    quota_limit = youtube_config.get("quota_limit", 10000)
 
     logger.info("youtube_client_built", channel_id=channel_id, quota_limit=quota_limit)
     return YouTubeClient(api_client, channel_id=channel_id, quota_limit=quota_limit, auth=auth)
