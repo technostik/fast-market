@@ -8,6 +8,12 @@ from common.auth.base import AuthProvider
 
 logger = structlog.get_logger(__name__)
 
+# Scopes ordered from least to most permissive
+SCOPE_READONLY = "https://www.googleapis.com/auth/youtube.readonly"
+SCOPE_FULL = "https://www.googleapis.com/auth/youtube.force-ssl"
+
+DEFAULT_SCOPES = [SCOPE_FULL]
+
 
 def get_youtube_auth_dir() -> Path:
     """Get the shared YouTube auth directory (~/.config/fast-market/common/youtube/)."""
@@ -28,8 +34,12 @@ class YouTubeOAuth(AuthProvider):
         self.client_secret_path = client_secret_path
         self.token_path = Path(client_secret_path).expanduser().parent / "token.json"
 
-    def get_client(self):
-        """Return authenticated YouTube API client."""
+    def get_client(self, scopes: list[str] | None = None):
+        """Return authenticated YouTube API client.
+
+        Args:
+            scopes: OAuth scopes to request. Defaults to [SCOPE_FULL] for full access.
+        """
         try:
             from google_auth_oauthlib.flow import InstalledAppFlow
             from googleapiclient.discovery import build
@@ -40,9 +50,24 @@ class YouTubeOAuth(AuthProvider):
                 "pip install google-api-python-client google-auth-oauthlib"
             ) from exc
 
+        if scopes is None:
+            scopes = DEFAULT_SCOPES
+
         creds = None
         if self.token_path.exists():
             creds = Credentials.from_authorized_user_file(str(self.token_path))
+
+        # Check if current token has the required scopes
+        if creds and creds.valid:
+            token_scopes = set(getattr(creds, "scopes", []) or [])
+            required = set(scopes)
+            if not required.issubset(token_scopes):
+                logger.info(
+                    "oauth_scope_insufficient",
+                    current_scopes=sorted(token_scopes),
+                    required_scopes=sorted(required),
+                )
+                creds = None  # Force re-auth with new scopes
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
@@ -50,10 +75,30 @@ class YouTubeOAuth(AuthProvider):
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     str(Path(self.client_secret_path).expanduser()),
-                    scopes=["https://www.googleapis.com/auth/youtube.readonly"],
+                    scopes=scopes,
                 )
                 creds = flow.run_local_server(port=0)
             self.token_path.write_text(creds.to_json(), encoding="utf-8")
             logger.info("oauth_token_saved", path=str(self.token_path))
 
         return build("youtube", "v3", credentials=creds)
+
+    def refresh_auth(self, scopes: list[str] | None = None) -> None:
+        """Force re-authentication, deleting any existing token.
+
+        Use this when the user needs to grant additional scopes
+        (e.g. switching from readonly to full access for comments).
+
+        Args:
+            scopes: OAuth scopes to request. Defaults to [SCOPE_FULL].
+        """
+        if scopes is None:
+            scopes = DEFAULT_SCOPES
+
+        if self.token_path.exists():
+            self.token_path.unlink()
+            logger.info("oauth_token_deleted", path=str(self.token_path))
+
+        # Trigger a fresh OAuth flow
+        self.get_client(scopes=scopes)
+        logger.info("oauth_refresh_complete", scopes=scopes)

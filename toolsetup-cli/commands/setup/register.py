@@ -5,33 +5,29 @@ import shutil
 import sys
 import subprocess
 import click
-import yaml
 from pathlib import Path
 
 from common.core.yaml_utils import dump_yaml
 
 from common.core.config import (
-    load_common_config,
-    load_llm_config,
-    save_common_config,
-    save_llm_config,
-    ConfigError,
+    load_common_config,  # used by edit_config for editor resolution
 )
 from common.core.paths import (
-    get_common_config_path,
-    get_llm_config_path,
     get_tool_config_path,
-    get_agent_config_path,
-    get_aliases_path,
-    get_youtube_config_path,
 )
 from commands.completion import (
     AvailableProviderParamType,
     ProviderParamType,
-    ShellType,
     PathParamType,
 )
 from commands.setup.workdir import register as workdir_register
+
+# Import all plugins so they self-register
+from commands.setup.plugins import all_plugins, get_plugin  # noqa: F401
+from commands.setup.plugins import youtube as _yt_plugin  # noqa: F401
+from commands.setup.plugins import llm as _llm_plugin  # noqa: F401
+from commands.setup.plugins import agent as _agent_plugin  # noqa: F401
+from commands.setup.plugins import workdir as _workdir_plugin  # noqa: F401
 
 _PROVIDERS = {
     "anthropic": {
@@ -72,11 +68,11 @@ def register():
 
         if show_path:
             click.echo("Project config:")
-            click.echo(f"  common: {get_common_config_path()}")
-            click.echo(f"  llm:    {get_llm_config_path()}")
+            for name, plugin in sorted(all_plugins().items()):
+                click.echo(f"  {name:10s}: {plugin.config_path()}")
             click.echo("XDG config:")
-            click.echo(f"  aliases:    ~/.config/fast-market/aliases.yaml")
-            click.echo(f"  <tool>:     ~/.config/fast-market/{{tool}}/config.yaml")
+            click.echo("  aliases:    ~/.config/fast-market/aliases.yaml")
+            click.echo("  <tool>:     ~/.config/fast-market/{tool}/config.yaml")
             return
 
         if show:
@@ -94,7 +90,8 @@ def register():
     @llm_group.command("list")
     def llm_list():
         """List configured providers."""
-        config = load_llm_config()
+        plugin = get_plugin("llm")
+        config = plugin.load()
         providers = config.get("providers", {})
         default = config.get("default_provider", "")
         if not providers:
@@ -113,13 +110,14 @@ def register():
     @click.argument("provider", type=AvailableProviderParamType())
     def llm_add(provider):
         """Add or reconfigure a provider."""
-        config = load_llm_config()
+        plugin = get_plugin("llm")
+        config = plugin.load()
         settings = _prompt_provider_settings(provider)
         config.setdefault("providers", {})[provider] = settings
         if not config.get("default_provider"):
             config["default_provider"] = provider
             click.echo(f"Set {provider} as default provider.")
-        save_llm_config(config)
+        plugin.save(config)
         click.echo(f"Provider '{provider}' configured.")
         _print_env_reminder(provider, settings)
 
@@ -127,7 +125,8 @@ def register():
     @click.argument("provider", type=ProviderParamType())
     def llm_remove(provider):
         """Remove a provider."""
-        config = load_llm_config()
+        plugin = get_plugin("llm")
+        config = plugin.load()
         providers = config.get("providers", {})
         if provider not in providers:
             click.echo(f"Provider not configured: {provider}", err=True)
@@ -138,53 +137,63 @@ def register():
             config["default_provider"] = remaining[0] if remaining else ""
             if remaining:
                 click.echo(f"New default provider: {remaining[0]}")
-        save_llm_config(config)
+        plugin.save(config)
         click.echo(f"Provider '{provider}' removed.")
 
     @llm_group.command("set-default")
     @click.argument("provider", type=ProviderParamType())
     def llm_set_default(provider):
         """Set the default LLM provider."""
-        config = load_llm_config()
+        plugin = get_plugin("llm")
+        config = plugin.load()
         providers = config.get("providers", {})
         if provider not in providers:
             click.echo(f"Provider not configured: {provider}", err=True)
             click.echo(f"Add it first: toolsetup llm add {provider}", err=True)
             sys.exit(1)
         config["default_provider"] = provider
-        save_llm_config(config)
+        plugin.save(config)
         click.echo(f"Default provider set to: {provider}")
 
     @setup_cmd.command("path")
+    @click.option("--youtube", "path_type", flag_value="youtube", help="Show YouTube config path")
     @click.option(
-        "--common", "path_type", flag_value="common", help="Show common config path"
+        "--common", "path_type", flag_value="common", help="Show common config path (alias for --workdir)"
     )
+    @click.option("--workdir", "path_type", flag_value="workdir", help="Show workdir config path")
     @click.option("--llm", "path_type", flag_value="llm", help="Show LLM config path")
+    @click.option("--agent", "path_type", flag_value="agent", help="Show agent config path")
     @click.pass_context
     def show_path(ctx, path_type):
         """Show config file paths."""
-        common_path = get_common_config_path()
-        llm_path = get_llm_config_path()
-
-        if path_type == "common":
-            click.echo(common_path)
-        elif path_type == "llm":
-            click.echo(llm_path)
+        plugins_map = {
+            "youtube": "youtube",
+            "common": "workdir",
+            "workdir": "workdir",
+            "llm": "llm",
+            "agent": "agent",
+        }
+        if path_type:
+            plugin_name = plugins_map.get(path_type)
+            if plugin_name:
+                plugin = get_plugin(plugin_name)
+                click.echo(plugin.config_path())
         else:
-            click.echo(f"common: {common_path}")
-            click.echo(f"llm:    {llm_path}")
+            for name, plugin in sorted(all_plugins().items()):
+                click.echo(f"{name:10s}: {plugin.config_path()}")
 
     @setup_cmd.command("workdir")
     @click.argument("path", type=PathParamType(), required=False)
     def set_workdir(path):
         """Get or set the global default working directory."""
-        config = load_common_config()
+        plugin = get_plugin("workdir")
+        config = plugin.load()
         if path is None:
             current = config.get("workdir")
             click.echo(current or "(not set)")
             return
         config["workdir"] = path
-        save_common_config(config)
+        plugin.save(config)
         click.echo(f"Default workdir set to: {path}")
 
     # Register workdir subgroup
@@ -192,30 +201,86 @@ def register():
     setup_cmd.add_command(workdir_cmd, name="workdir")
 
     @setup_cmd.command("edit")
-    @click.option("--llm", "-l", "edit_llm", is_flag=True, help="Edit LLM config (common/llm/config.yaml)")
-    @click.option("--common", "-c", "edit_common", is_flag=True, help="Edit common config (common/config.yaml)")
-    @click.option("--agent", "-a", "edit_agent", is_flag=True, help="Edit agent config (common/agent/config.yaml)")
-    def edit_config(edit_llm, edit_common, edit_agent):
+    @click.option("--youtube", "-y", "edit_youtube", is_flag=True, help="Edit YouTube config")
+    @click.option("--llm", "-l", "edit_llm", is_flag=True, help="Edit LLM config")
+    @click.option("--workdir", "-w", "edit_workdir", is_flag=True, help="Edit workdir config (common/config.yaml)")
+    @click.option("--common", "-c", "edit_common", is_flag=True, help="Alias for --workdir")
+    @click.option("--agent", "-a", "edit_agent", is_flag=True, help="Edit agent config")
+    def edit_config(edit_youtube, edit_llm, edit_workdir, edit_common, edit_agent):
         """Open config file(s) in your editor.
 
-        By default, opens common/config.yaml.
-        Use --llm to open common/llm/config.yaml.
-        Use --agent to open common/agent/config.yaml.
+        By default, opens ALL config files.
+        Use --youtube, --llm, --workdir, or --agent to open specific ones.
         """
-        if edit_llm:
-            config_path = get_llm_config_path()
-        elif edit_agent:
-            config_path = get_agent_config_path()
-        else:
-            config_path = get_common_config_path()
+        # --common is alias for --workdir
+        if edit_common:
+            edit_workdir = True
 
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        if not config_path.exists():
-            config_path.write_text("", encoding="utf-8")
+        selected = []
+        if edit_youtube:
+            selected.append("youtube")
+        if edit_llm:
+            selected.append("llm")
+        if edit_workdir:
+            selected.append("workdir")
+        if edit_agent:
+            selected.append("agent")
+
+        # If nothing selected, edit all
+        if not selected:
+            selected = list(all_plugins().keys())
 
         common_cfg = load_common_config()
         editor = common_cfg.get("default_editor") or os.environ.get("EDITOR", "nano")
-        subprocess.run([editor, str(config_path)])
+
+        for name in selected:
+            plugin = get_plugin(name)
+            plugin.ensure_exists()
+            config_path = plugin.config_path()
+            click.echo(f"Opening {plugin.display_name}: {config_path}")
+            subprocess.run([editor, str(config_path)])
+
+    @setup_cmd.command("show")
+    @click.option("--youtube", "show_youtube", is_flag=True, help="Show YouTube config")
+    @click.option("--llm", "show_llm", is_flag=True, help="Show LLM config")
+    @click.option("--workdir", "show_workdir", is_flag=True, help="Show workdir config")
+    @click.option("--common", "show_common", is_flag=True, help="Alias for --workdir")
+    @click.option("--agent", "show_agent", is_flag=True, help="Show agent config")
+    def show_config(show_youtube, show_llm, show_workdir, show_common, show_agent):
+        """Show config file contents.
+
+        By default, shows ALL config files.
+        Use --youtube, --llm, --workdir, or --agent to show specific ones.
+        """
+        if show_common:
+            show_workdir = True
+
+        selected = []
+        if show_youtube:
+            selected.append("youtube")
+        if show_llm:
+            selected.append("llm")
+        if show_workdir:
+            selected.append("workdir")
+        if show_agent:
+            selected.append("agent")
+
+        # If nothing selected, show all
+        if not selected:
+            selected = list(all_plugins().keys())
+
+        first = True
+        for name in selected:
+            plugin = get_plugin(name)
+            config = plugin.load()
+            if not first:
+                click.echo("")
+            click.echo(f"=== {plugin.display_name} ({plugin.config_path()}) ===")
+            if config:
+                click.echo(dump_yaml(config, sort_keys=False))
+            else:
+                click.echo("(not configured)")
+            first = False
 
     @setup_cmd.command("clean-workdir")
     @click.option(
@@ -232,7 +297,8 @@ def register():
     )
     def clean_workdir(force, all):
         """Clean the global default working directory."""
-        config = load_common_config()
+        plugin = get_plugin("workdir")
+        config = plugin.load()
         workdir = config.get("workdir")
 
         if not workdir:
@@ -292,38 +358,46 @@ def register():
 
     @setup_cmd.command("reset")
     @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompt")
-    @click.option("--agent", "reset_agent", is_flag=True, help="Reset agent config (common/agent/config.yaml)")
-    @click.option("--common", "reset_common", is_flag=True, help="Reset common config (common/config.yaml)")
-    @click.option("--llm", "reset_llm", is_flag=True, help="Reset LLM config (common/llm/config.yaml)")
-    def reset_config(force, reset_agent, reset_common, reset_llm):
+    @click.option("--youtube", "reset_youtube", is_flag=True, help="Reset YouTube config")
+    @click.option("--agent", "reset_agent", is_flag=True, help="Reset agent config")
+    @click.option("--workdir", "reset_workdir", is_flag=True, help="Reset workdir config")
+    @click.option("--common", "reset_common", is_flag=True, help="Alias for --workdir")
+    @click.option("--llm", "reset_llm", is_flag=True, help="Reset LLM config")
+    def reset_config(force, reset_youtube, reset_agent, reset_workdir, reset_common, reset_llm):
         """Reset config files to defaults (backs up existing).
 
         By default, resets ALL config files.
-        Use --agent, --common, or --llm to reset specific files.
+        Use --youtube, --agent, --workdir, or --llm to reset specific files.
         """
-        if not reset_agent and not reset_common and not reset_llm:
+        if reset_common:
+            reset_workdir = True
+
+        if not reset_youtube and not reset_agent and not reset_workdir and not reset_llm:
+            reset_youtube = True
             reset_agent = True
-            reset_common = True
+            reset_workdir = True
             reset_llm = True
 
         targets = []
-        if reset_common:
-            targets.append(("common config", get_common_config_path()))
+        if reset_workdir:
+            targets.append(get_plugin("workdir"))
         if reset_llm:
-            targets.append(("LLM config", get_llm_config_path()))
+            targets.append(get_plugin("llm"))
         if reset_agent:
-            targets.append(("agent config", get_agent_config_path()))
+            targets.append(get_plugin("agent"))
+        if reset_youtube:
+            targets.append(get_plugin("youtube"))
 
         if not force:
             click.echo("This will reset the following config files to defaults:")
-            for name, path in targets:
-                click.echo(f"  {path}")
+            for plugin in targets:
+                click.echo(f"  {plugin.config_path()}")
             if not click.confirm("Continue? (existing configs will be backed up)"):
                 click.echo("Cancelled.")
                 return
 
-        for name, config_path in targets:
-            _backup_and_reset(config_path, name)
+        for plugin in targets:
+            _backup_and_reset_plugin(plugin)
 
         click.echo("\nAll selected configs reset to defaults.")
 
@@ -349,8 +423,9 @@ def register():
                 click.echo("Cancelled.")
                 return
 
-        # Ensure common configs exist
-        _ensure_default_common()
+        # Ensure common configs exist via plugins
+        for plugin in all_plugins().values():
+            plugin.ensure_exists()
 
         # Create default tool configs
         tools = [
@@ -370,15 +445,18 @@ def register():
 
 
 def _show_config():
-    common_cfg = load_common_config()
-    llm_cfg = load_llm_config()
-    if not common_cfg and not llm_cfg:
-        click.echo("No config found. Run: toolsetup")
-        return
-    click.echo("=== common/config.yaml ===")
-    click.echo(dump_yaml(common_cfg, sort_keys=False))
-    click.echo("=== common/llm/config.yaml ===")
-    click.echo(dump_yaml(llm_cfg, sort_keys=False))
+    """Show all plugin configs."""
+    first = True
+    for name, plugin in sorted(all_plugins().items()):
+        config = plugin.load()
+        if not first:
+            click.echo("")
+        click.echo(f"=== {plugin.display_name} ({plugin.config_path()}) ===")
+        if config:
+            click.echo(dump_yaml(config, sort_keys=False))
+        else:
+            click.echo("(not configured)")
+        first = False
 
 
 def _prompt_provider_settings(provider: str) -> dict:
@@ -402,8 +480,11 @@ def _print_env_reminder(provider: str, settings: dict):
 
 def _run_wizard():
     """Interactive first-time setup wizard."""
-    llm_cfg = load_llm_config()
-    common_cfg = load_common_config()
+    llm_plugin = get_plugin("llm")
+    workdir_plugin = get_plugin("workdir")
+
+    llm_cfg = llm_plugin.load()
+    common_cfg = workdir_plugin.load()
 
     click.echo("=== fast-market common setup ===\n")
 
@@ -438,23 +519,25 @@ def _run_wizard():
         )
         common_cfg["workdir"] = workdir
 
-    save_llm_config(llm_cfg)
-    save_common_config(common_cfg)
+    llm_plugin.save(llm_cfg)
+    workdir_plugin.save(common_cfg)
 
-    click.echo(f"\nConfig saved to:")
-    click.echo(f"  LLM:  {get_llm_config_path()}")
-    click.echo(f"  common: {get_common_config_path()}")
+    click.echo("\nConfig saved to:")
+    click.echo(f"  LLM:    {llm_plugin.config_path()}")
+    click.echo(f"  workdir: {workdir_plugin.config_path()}")
     _print_env_reminder(provider, settings)
     click.echo("\nYou can now use: prompt, task, skill")
     click.echo("Add more providers: toolsetup llm add <provider>")
 
 
-def _backup_and_reset(config_path: Path, name: str) -> None:
-    """Back up a config file and reset it to defaults."""
+def _backup_and_reset_plugin(plugin) -> None:
+    """Back up a plugin's config file and reset it to defaults."""
+    config_path = plugin.config_path()
+    name = plugin.display_name
+
     config_path.parent.mkdir(parents=True, exist_ok=True)
     if config_path.exists():
-        backup = config_path.with_suffix(f".bak")
-        # Handle multiple backups
+        backup = config_path.with_suffix(".bak")
         counter = 1
         while backup.exists():
             backup = config_path.with_suffix(f".bak.{counter}")
@@ -462,36 +545,7 @@ def _backup_and_reset(config_path: Path, name: str) -> None:
         shutil.copy2(str(config_path), str(backup))
         click.echo(f"Backed up {name} to: {backup}")
 
-    # Write appropriate defaults based on config type
-    common_config = get_common_config_path()
-    llm_config = get_llm_config_path()
-    agent_config_path = get_agent_config_path()
-
-    if config_path.resolve() == common_config.resolve():
-        # Common config: write workdir defaults
-        default_content = dump_yaml({
-            "workdir": str(Path.home() / "fast-market-work"),
-            "workdir_root": str(Path.home() / "fast-market-work"),
-            "workdir_prefix": "work-",
-        }, sort_keys=False)
-    elif config_path.resolve() == llm_config.resolve():
-        # LLM config: write minimal working defaults
-        default_content = dump_yaml({
-            "default_provider": "ollama",
-            "providers": {
-                "ollama": {
-                    "model": "llama3.2",
-                    "base_url": "http://127.0.0.1:11434",
-                }
-            }
-        }, sort_keys=False)
-    elif config_path.resolve() == agent_config_path.resolve():
-        # Agent config: write full agentic loop defaults
-        default_content = _build_default_agent_config()
-    else:
-        default_content = ""
-
-    config_path.write_text(default_content, encoding="utf-8")
+    plugin.save(plugin.default_config())
     click.echo(f"Reset {name}: {config_path}")
 
 
@@ -532,58 +586,6 @@ def _build_default_agent_config() -> str:
         "skill_from_description_prompt": SKILL_FROM_DESCRIPTION_PROMPT_TEMPLATE,
     }
     return dump_yaml(agent_config, sort_keys=False)
-
-
-def _ensure_default_common() -> None:
-    """Create default common config files if they don't exist."""
-    # Common config
-    common_path = get_common_config_path()
-    common_path.parent.mkdir(parents=True, exist_ok=True)
-    if not common_path.exists():
-        common_path.write_text(
-            dump_yaml({"workdir": str(Path.home() / "fast-market-work")}, sort_keys=False),
-            encoding="utf-8",
-        )
-        click.echo(f"  Created: {common_path}")
-
-    # LLM config
-    llm_path = get_llm_config_path()
-    llm_path.parent.mkdir(parents=True, exist_ok=True)
-    if not llm_path.exists():
-        llm_path.write_text(
-            dump_yaml({
-                "default_provider": "ollama",
-                "providers": {
-                    "ollama": {
-                        "model": "llama3.2",
-                        "base_url": "http://127.0.0.1:11434",
-                    }
-                }
-            }, sort_keys=False),
-            encoding="utf-8",
-        )
-        click.echo(f"  Created: {llm_path}")
-
-    # Agent config
-    agent_path = get_agent_config_path()
-    agent_path.parent.mkdir(parents=True, exist_ok=True)
-    if not agent_path.exists():
-        agent_path.write_text(_build_default_agent_config(), encoding="utf-8")
-        click.echo(f"  Created: {agent_path}")
-
-    # YouTube common config
-    yt_path = get_youtube_config_path()
-    yt_path.parent.mkdir(parents=True, exist_ok=True)
-    if not yt_path.exists():
-        yt_path.write_text(
-            dump_yaml({
-                "client_secret_path": "~/.config/fast-market/common/youtube/client_secret.json",
-                "channel_id": "",
-                "quota_limit": 10000,
-            }, sort_keys=False),
-            encoding="utf-8",
-        )
-        click.echo(f"  Created: {yt_path}")
 
 
 def _ensure_default_tool_config(tool: str, backup_existing: bool = False) -> None:

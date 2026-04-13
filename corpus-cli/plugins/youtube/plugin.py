@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
 
 from common import structlog
 from common.youtube.transport import RSSPlaylistTransport, Transport
@@ -12,7 +11,6 @@ from common.auth.youtube import YouTubeOAuth
 
 from core.models import Document
 from core.sync_errors import (
-    MembershipOnlyError,
     NetworkError,
     TranscriptUnavailableError,
     VideoBlockedError,
@@ -56,7 +54,7 @@ class YouTubePlugin(SourcePlugin):
             client_secret = yt_cfg.get("client_secret_path")
             oauth = YouTubeOAuth(client_secret_path=client_secret)
             api = oauth.get_client()
-            self._api_client = YouTubeClient(api, channel_id=self.channel_id)
+            self._api_client = YouTubeClient(api, channel_id=self.channel_id, auth=oauth)
         return self._api_client
 
     def _get_config(self) -> dict:

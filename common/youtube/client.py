@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from common import structlog
 from common.youtube.models import ChannelInfo, Comment, ReplyResult, Video
 from common.youtube.quota import QuotaTracker
-from common.youtube.utils import format_count, is_short_video, iso_duration_to_seconds
 
 if TYPE_CHECKING:
     from googleapiclient.discovery import Resource
@@ -16,23 +14,64 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
+def _is_insufficient_permissions_error(e: HttpError) -> bool:
+    """Check if an HttpError is an insufficientPermissions error."""
+    if e.resp.status != 403:
+        return False
+    body = str(e.content) if hasattr(e, "content") else str(e)
+    return "insufficientPermissions" in body or "Insufficient Permission" in body
+
+
+def _needs_scope_refresh(e: HttpError) -> bool:
+    """Check if the error indicates the token needs re-authentication with broader scopes."""
+    return _is_insufficient_permissions_error(e)
+
+
 class YouTubeClient:
-    """YouTube API client with quota tracking and error handling."""
+    """YouTube API client with quota tracking, error handling, and auto-scope refresh."""
 
     def __init__(
         self,
         api_client: Resource,
         channel_id: Optional[str] = None,
         quota_limit: int = 10000,
+        auth=None,
     ):
         self.youtube = api_client
         self.channel_id = channel_id
         self.quota = QuotaTracker(limit=quota_limit)
         self._analytics: Optional[Resource] = None
+        self._auth = auth  # YouTubeOAuth instance for auto-reauth
 
     def _track_quota(self, units: int) -> None:
         """Track quota usage."""
         self.quota.track(units)
+
+    def _refresh_auth_and_rebuild(self) -> None:
+        """Force re-auth with full scopes and rebuild the API client."""
+        if self._auth is None:
+            raise RuntimeError(
+                "No auth object available for re-authentication. "
+                "Pass auth=YouTubeOAuth(...) when creating YouTubeClient "
+                "or run 'youtube setup refresh'."
+            )
+        logger.info("auto_refreshing_auth", reason="insufficient_permissions")
+        from common.auth.youtube import SCOPE_FULL
+
+        self._auth.refresh_auth(scopes=[SCOPE_FULL])
+        # Rebuild the YouTube API client with new credentials
+        self.youtube = self._auth.get_client(scopes=[SCOPE_FULL])
+        logger.info("auth_refreshed_and_client_rebuilt")
+
+    def _with_scope_retry(self, fn: Callable[[], Any]) -> Any:
+        """Execute fn, retrying once with fresh auth on insufficientPermissions."""
+        try:
+            return fn()
+        except HttpError as e:
+            if _needs_scope_refresh(e):
+                self._refresh_auth_and_rebuild()
+                return fn()  # retry once
+            raise
 
     def get_quota_usage(self) -> dict[str, Any]:
         """Get current quota usage information."""
@@ -121,51 +160,54 @@ class YouTubeClient:
     ) -> list[Comment]:
         """Get comments for a video."""
         try:
-            request = self.youtube.commentThreads().list(
-                part="snippet",
-                videoId=video_id,
-                maxResults=min(max_results, 100),
-                textFormat="plainText",
-                order=order,
-            )
-            response = request.execute()
-            self._track_quota(1)
+            def _do():
+                request = self.youtube.commentThreads().list(
+                    part="snippet",
+                    videoId=video_id,
+                    maxResults=min(max_results, 100),
+                    textFormat="plainText",
+                    order=order,
+                )
+                response = request.execute()
+                self._track_quota(1)
 
-            comments = []
-            for item in response.get("items", []):
-                comments.append(Comment.from_api_response(item, video_id))
+                comments = []
+                for item in response.get("items", []):
+                    comments.append(Comment.from_api_response(item, video_id))
 
-            # Fetch video details to populate channel_name, channel_url, view_count
-            # We need snippet (for channel info) + statistics (for view count)
-            video_request = self.youtube.videos().list(
-                part="snippet,statistics",
-                id=video_id,
-            )
-            video_response = video_request.execute()
-            self._track_quota(1)
+                # Fetch video details to populate channel_name, channel_url, view_count
+                # We need snippet (for channel info) + statistics (for view count)
+                video_request = self.youtube.videos().list(
+                    part="snippet,statistics",
+                    id=video_id,
+                )
+                video_response = video_request.execute()
+                self._track_quota(1)
 
-            if video_response.get("items"):
-                video_item = video_response["items"][0]
-                snippet = video_item.get("snippet", {})
-                stats = video_item.get("statistics", {})
-                channel_id = snippet.get("channelId", "")
-                channel_title = snippet.get("channelTitle", "")
-                video_title = snippet.get("title", "")
-                channel_url = f"https://www.youtube.com/channel/{channel_id}" if channel_id else None
-                view_count = int(stats.get("viewCount", 0))
+                if video_response.get("items"):
+                    video_item = video_response["items"][0]
+                    snippet = video_item.get("snippet", {})
+                    stats = video_item.get("statistics", {})
+                    channel_id = snippet.get("channelId", "")
+                    channel_title = snippet.get("channelTitle", "")
+                    video_title = snippet.get("title", "")
+                    channel_url = f"https://www.youtube.com/channel/{channel_id}" if channel_id else None
+                    view_count = int(stats.get("viewCount", 0))
 
-                for comment in comments:
-                    comment.view_count = view_count
-                    comment.channel_name = channel_title
-                    comment.channel_url = channel_url
-                    comment.video_title = video_title
+                    for comment in comments:
+                        comment.view_count = view_count
+                        comment.channel_name = channel_title
+                        comment.channel_url = channel_url
+                        comment.video_title = video_title
 
-            logger.info(
-                "comments_retrieved",
-                video_id=video_id,
-                count=len(comments),
-            )
-            return comments
+                logger.info(
+                    "comments_retrieved",
+                    video_id=video_id,
+                    count=len(comments),
+                )
+                return comments
+
+            return self._with_scope_retry(_do)
         except HttpError as e:
             if e.resp.status == 403 and "commentsDisabled" in str(e):
                 logger.warning("comments_disabled", video_id=video_id)
@@ -182,25 +224,28 @@ class YouTubeClient:
             raise ValueError("channel_id required for posting replies")
 
         try:
-            request = self.youtube.comments().insert(
-                part="snippet",
-                body={
-                    "snippet": {
-                        "parentId": comment_id,
-                        "textOriginal": text,
-                    }
-                },
-            )
-            response = request.execute()
-            self._track_quota(50)
+            def _do():
+                request = self.youtube.comments().insert(
+                    part="snippet",
+                    body={
+                        "snippet": {
+                            "parentId": comment_id,
+                            "textOriginal": text,
+                        }
+                    },
+                )
+                response = request.execute()
+                self._track_quota(50)
 
-            result = ReplyResult.from_api_response(response)
-            logger.info(
-                "reply_posted",
-                comment_id=comment_id,
-                moderation_status=result.moderation_status,
-            )
-            return result
+                result = ReplyResult.from_api_response(response)
+                logger.info(
+                    "reply_posted",
+                    comment_id=comment_id,
+                    moderation_status=result.moderation_status,
+                )
+                return result
+
+            return self._with_scope_retry(_do)
         except HttpError as e:
             logger.error("api_error", operation="post_comment_reply", error=str(e))
             raise

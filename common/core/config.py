@@ -10,7 +10,6 @@ from common.core.paths import (
     get_llm_config_path,
     get_youtube_config_path,
     get_tool_config_path,
-    get_common_subconfig_path,
     get_agent_config_path,
 )
 from common.core.yaml_utils import dump_yaml
@@ -287,6 +286,54 @@ def _resolve_config_path(tool_name: str, path: str | None = None) -> Path:
 def load_config(path: str | None = None) -> dict:
     """Load corpus config for backward compatibility."""
     return load_tool_config("corpus", path)
+
+
+# ─── Smart config splitting for shared youtube config ─────────────────────────
+
+_YOUTUBE_KEYS = {"youtube"}
+_GLOBAL_ONLY_KEYS = {"llm"}  # llm.providers is global-only
+
+
+def _extract_youtube_config(merged: dict) -> dict:
+    """Extract only the youtube section from a merged config dict."""
+    result = {}
+    if "youtube" in merged:
+        result["youtube"] = dict(merged["youtube"])
+    return result
+
+
+def _extract_tool_config(merged: dict, tool_name: str) -> dict:
+    """Extract tool-specific keys from merged config (exclude shared sections)."""
+    result = {}
+    for key, value in merged.items():
+        if key in _YOUTUBE_KEYS:
+            continue
+        if key in _GLOBAL_ONLY_KEYS:
+            # Only keep tool-specific llm keys (not providers)
+            if isinstance(value, dict):
+                filtered = {k: v for k, v in value.items() if k != "providers"}
+                if filtered:
+                    result[key] = filtered
+            continue
+        result[key] = value
+    return result
+
+
+def split_and_save_config(tool_name: str, config: dict) -> None:
+    """Smart save: split config into shared youtube part + tool-specific part.
+
+    The youtube section is saved to common/youtube/config.yaml.
+    All other sections are saved to the tool's config file.
+    """
+    # Save shared youtube config
+    yt_cfg = _extract_youtube_config(config)
+    if yt_cfg:
+        save_youtube_config(yt_cfg["youtube"])
+
+    # Save tool-specific config
+    tool_cfg = _extract_tool_config(config, tool_name)
+    if tool_cfg:
+        save_tool_config(tool_name, tool_cfg)
 
 
 # Common config schema (~/.config/fast-market/common/config.yaml):

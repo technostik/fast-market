@@ -41,4 +41,4 @@ def build_youtube_client(config: Optional[dict] = None) -> YouTubeClient:
     quota_limit = youtube_config.get("quota_limit", 10000)
 
     logger.info("youtube_client_built", channel_id=channel_id, quota_limit=quota_limit)
-    return YouTubeClient(api_client, channel_id=channel_id, quota_limit=quota_limit)
+    return YouTubeClient(api_client, channel_id=channel_id, quota_limit=quota_limit, auth=auth)

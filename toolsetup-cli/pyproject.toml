@@ -23,6 +23,7 @@ packages = [
   "toolsetup_entry",
   "commands",
   "commands.setup",
+  "commands.setup.plugins",
   "commands.autocomplete",
   "commands.config",
   "commands.workdir",
