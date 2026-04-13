@@ -52,9 +52,18 @@ BROWSER_DEFAULT_PROMPTS = {
     "browser": (
         "You are an autonomous web browser agent. "
         "Your job is to accomplish the task described below by interacting with "
-        "a web browser through the ``browse`` tool. "
+        "a real web browser through the ``browse`` tool. "
         "You have **only one tool**: ``browse``.  You **cannot** execute shell "
-        "commands.  Every browser operation — navigation, clicking, filling "
+        "commands, fetch URLs, or use curl/wget.  This is NOT a web scraping tool — "
+        "it controls an actual Chromium browser instance via CLI commands.\n\n"
+        "**Understanding page content:** To discover what's on a page, you MUST use "
+        "the ``snapshot`` action first. This returns an accessibility tree showing all "
+        "visible elements with their refs (like ``@e2``, ``@e5``). The snapshot is your "
+        "map of the page — use it to identify buttons, links, form fields, and text.\n\n"
+        "**Interacting with elements:** Once you have a snapshot, use the element refs "
+        "to interact with specific elements: ``click @e2``, ``fill @e5 text``, etc. "
+        "Always work from the snapshot refs rather than guessing CSS selectors.\n\n"
+        "Every browser operation — navigation, clicking, filling "
         "forms, taking screenshots, extracting data — must be done through "
         "the ``browse`` tool."
     ),
@@ -69,13 +78,14 @@ BROWSER_DEFAULT_PROMPTS = {
         "and ``args`` maps to the remaining arguments."
     ),
     "browser-rules": (
-        "1. Use ``snapshot`` to get the accessibility tree with element refs "
-        "before interacting — this is the best way to understand the page.\n"
-        "2. Always use element refs from snapshot (e.g. ``@e2``) when possible "
-        "instead of CSS selectors — they are more reliable.\n"
-        "3. After navigating or interacting with the page, wait for the page "
-        "to load before taking the next action.\n"
-        "4. Use ``screenshot`` to capture visual state when needed.\n"
+        "1. **Always start with ``snapshot``** — this gives you the accessibility tree "
+        "with element refs (``@e2``, ``@e5``, etc.). This is your PRIMARY way to understand "
+        "what's on the page. Without a snapshot, you're flying blind.\n"
+        "2. Use element refs from snapshot directly: ``click @e2``, ``fill @e5 hello``. "
+        "These are far more reliable than CSS selectors.\n"
+        "3. After navigating or interacting with the page, take a new ``snapshot`` to see "
+        "the updated state before taking the next action.\n"
+        "4. Use ``screenshot`` to capture visual state when you need to see the actual rendering.\n"
         "5. When a file upload is needed and a ``{key}`` parameter contains "
         "the file path, pass it directly in the args.\n"
         "6. When the task is complete, provide a clear summary of what you "
@@ -124,9 +134,6 @@ def build_browser_system_prompt(
 
     # Role
     parts.append(role_prompt)
-
-    # Task
-    parts.append(f"## Task\n{task_description}")
 
     # Parameters
     if task_params:
