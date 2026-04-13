@@ -29,7 +29,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Setup and manage youtube-agent configuration.
 
         When called with no subcommand, acts as 'setup run' for backward compatibility.
-        Use 'setup refresh' to re-authenticate with full API access.
+        Use 'setup refresh-auth' to re-authenticate with full API access.
         """
         if ctx.invoked_subcommand is None:
             ctx.invoke(setup_cmd, show=show, locate=locate, wizard=wizard, reset=reset)
@@ -182,12 +182,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("  2. Ensure client_secret.json exists at the configured path")
             click.echo("  3. Run 'youtube search test' to authenticate")
 
-    @setup_group.command("refresh")
+    @setup_group.command("refresh-auth")
     def refresh_auth_cmd(**kwargs):
         """Re-authenticate with full API access (youtube.force-ssl scope).
 
         Use this when you get 'insufficientPermissions' errors.
-        This deletes the existing token and opens the browser for re-authentication.
+        This deletes the existing token, forces Google to re-show the
+        consent screen with full permissions, and re-authenticates.
         """
         yt_cfg = load_youtube_config()
         client_secret = yt_cfg.get("client_secret_path")
@@ -208,7 +209,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Client secret: {secret_path}")
         click.echo("")
         click.echo("This will delete your existing token and re-authenticate.")
-        click.echo("The browser will open. Grant all requested permissions.")
+        click.echo("The browser will open. You MUST grant ALL requested permissions.")
         click.echo("")
 
         auth = YouTubeOAuth(client_secret)

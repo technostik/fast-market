@@ -77,7 +77,9 @@ class YouTubeOAuth(AuthProvider):
                     str(Path(self.client_secret_path).expanduser()),
                     scopes=scopes,
                 )
-                creds = flow.run_local_server(port=0)
+                # prompt=consent forces Google to re-show the consent screen
+                # even if the user previously authorized a subset of these scopes
+                creds = flow.run_local_server(port=0, prompt="consent")
             self.token_path.write_text(creds.to_json(), encoding="utf-8")
             logger.info("oauth_token_saved", path=str(self.token_path))
 

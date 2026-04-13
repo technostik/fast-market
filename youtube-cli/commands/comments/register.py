@@ -10,8 +10,24 @@ import yaml
 from commands.base import CommandManifest
 from common.cli.helpers import out
 from common.core.yaml_utils import dump_yaml
+from common.youtube.utils import extract_video_id
 from core.config import load_config
 from core.engine import build_youtube_client
+
+
+def _resolve_video_id(raw: str) -> str:
+    """Extract video ID from a raw string that may be a full URL or bare ID."""
+    vid = extract_video_id(raw)
+    if vid is None:
+        # Maybe it's already a bare video ID
+        import re
+        if re.match(r'^[A-Za-z0-9_-]{11}$', raw):
+            return raw
+        raise click.ClickException(
+            f"Could not extract video ID from: {raw}\n"
+            f"Expected a video ID (e.g. 'BF3Z7J5Jv-U') or a YouTube URL."
+        )
+    return vid
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -62,14 +78,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     vid = item.get(field) or item.get("id") or item.get("video_id")
                     if not vid:
                         continue
+                    resolved_vid = _resolve_video_id(vid)
                     comments = client.get_comments(
-                        video_id=vid,
+                        video_id=resolved_vid,
                         max_results=max_results,
                         order=order,
                     )
                     for c in comments:
                         c_dict = c.to_dict()
-                        c_dict["source_video_id"] = vid
+                        c_dict["source_video_id"] = resolved_vid
                         all_comments.append(c_dict)
 
                 if output:
@@ -86,8 +103,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     click.echo("Video ID required when not using --stdin", err=True)
                     return
 
+                resolved_id = _resolve_video_id(video_id)
+
                 comments = client.get_comments(
-                    video_id=video_id,
+                    video_id=resolved_id,
                     max_results=max_results,
                     order=order,
                 )
