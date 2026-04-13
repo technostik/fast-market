@@ -60,8 +60,9 @@ corpus sync --retry-failure --include-blocked   # include blocked videos
 ### Setup Commands
 
 ```bash
-corpus setup run    # Run interactive setup wizard
-corpus setup edit  # Interactively edit config.yaml
+corpus setup run     # Run interactive setup wizard
+corpus setup wizard  # Interactively edit config.yaml
+corpus setup edit    # Open config.yaml in your default editor
 ```
 
 ## 📋 Core System Responsibilities

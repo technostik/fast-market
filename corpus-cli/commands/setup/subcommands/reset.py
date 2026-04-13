@@ -39,6 +39,7 @@ def register(plugin_manifests: dict) -> click.Command:
         cfg_path.write_text(_dump_yaml(default_config), encoding="utf-8")
         click.echo(f"Created fresh default config at {cfg_path}")
         click.echo("")
-        click.echo("Edit with: corpus setup edit")
+        click.echo("Open with: corpus setup edit")
+        click.echo("Or use wizard: corpus setup wizard")
 
     return reset_cmd

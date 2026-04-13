@@ -5,7 +5,8 @@ Implements the `corpus setup` CLI group with subcommands for configuration and s
 ## Subcommands
 
 - `corpus setup run` - Run the interactive setup wizard
-- `corpus setup edit` - Interactively edit config.yaml settings
+- `corpus setup wizard` - Run the interactive wizard to edit config.yaml settings
+- `corpus setup edit` - Open config.yaml in your default editor
 
 ## Extension points
 

@@ -39,7 +39,13 @@ Run the interactive wizard to configure sources, credentials, and preferences:
 corpus setup run
 ```
 
-Or edit config.yaml interactively:
+Or use the wizard to interactively edit config.yaml:
+
+```bash
+corpus setup wizard
+```
+
+Or open config.yaml directly in your editor:
 
 ```bash
 corpus setup edit
