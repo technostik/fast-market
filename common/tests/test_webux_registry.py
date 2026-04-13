@@ -89,3 +89,25 @@ def test_discover_webux_plugins_duplicate_name(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="duplicate webux plugin name"):
         discover_webux_plugins({})
+
+
+def test_discover_webux_plugins_falls_back_to_repo_layout(monkeypatch):
+    manifest = WebuxPluginManifest(
+        name="repo_plugin",
+        tab_label="Repo",
+        tab_icon="R",
+        frontend_html="<html><body>repo</body></html>",
+        order=5,
+    )
+
+    monkeypatch.setattr(
+        "common.webux.registry._discover_from_entry_points",
+        lambda config: {},
+    )
+    monkeypatch.setattr(
+        "common.webux.registry._discover_from_repo_layout",
+        lambda config: {"repo_plugin": manifest},
+    )
+
+    plugins = discover_webux_plugins({})
+    assert list(plugins.keys()) == ["repo_plugin"]

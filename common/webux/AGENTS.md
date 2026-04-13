@@ -45,3 +45,9 @@ Their router and HTML are loaded on first request. This means:
 - Never use names that conflict with existing plugins (hub raises on duplicates)
 - Never include nav markup in frontend_html (hub injects it)
 - Never hardcode the hub's port or base URL in your plugin
+
+
+## Monorepo Fallback Discovery
+- Primary discovery uses entry points.
+- In local development, if no entry points are installed, registry falls back to scanning `*-cli/webux/*/register.py` in the repository root.
+- This keeps `webux serve` working without reinstalling packages on each edit.
