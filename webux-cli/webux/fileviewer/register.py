@@ -41,7 +41,7 @@ _FILEVIEWER_HTML = """<!doctype html>
     .file { cursor:pointer; color:var(--text-dim); padding:2px 4px; border-radius:4px; }
     .file:hover { color:var(--text); background: #26395f; }
     .file.active { background:var(--accent); color:var(--text); }
-    .dir { color:var(--warning); margin: 4px 0; }
+    .dir { color:var(--warning); margin: 4px 0; cursor:pointer; user-select:none; }
     .toolbar { display:flex; gap:8px; align-items:center; padding:10px; border-bottom:1px solid var(--border); background:var(--bg-secondary); }
     .toolbar button { padding:8px 12px; border:1px solid var(--border); background:var(--bg); color:var(--text); border-radius:4px; cursor:pointer; }
     .toolbar button:hover { background:var(--accent); }
@@ -69,7 +69,7 @@ _FILEVIEWER_HTML = """<!doctype html>
 const sections = [
   { key: 'config', label: '⚙ Config (~/.config/fast-market)' },
   { key: 'data', label: '💾 Data (~/.local/share/fast-market)' },
-  { key: 'workdir', label: '🗂 Workdir' }
+  { key: 'workdir_root', label: '🗂 workdir_root (common/config.yaml)' }
 ];
 
 let currentFile = null;
@@ -87,16 +87,33 @@ function setStatus(msg, color = 'var(--success)') {
   setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 2600);
 }
 
-function renderNode(node, container) {
+function renderNode(node, container, expanded=false) {
   const wrap = document.createElement('div');
   wrap.className = 'node';
 
   if (node.type === 'dir') {
     const title = document.createElement('div');
     title.className = 'dir';
-    title.textContent = `📂 ${node.name}`;
+    const toggle = document.createElement('span');
+    toggle.textContent = expanded ? '▼' : '▶';
+    toggle.style.marginRight = '6px';
+    const label = document.createElement('span');
+    label.textContent = `📂 ${node.name}`;
+    title.appendChild(toggle);
+    title.appendChild(label);
+
+    const childrenWrap = document.createElement('div');
+    childrenWrap.style.display = expanded ? 'block' : 'none';
+    (node.children || []).forEach(child => renderNode(child, childrenWrap));
+
+    title.onclick = () => {
+      const open = childrenWrap.style.display === 'block';
+      childrenWrap.style.display = open ? 'none' : 'block';
+      toggle.textContent = open ? '▶' : '▼';
+    };
+
     wrap.appendChild(title);
-    (node.children || []).forEach(child => renderNode(child, wrap));
+    wrap.appendChild(childrenWrap);
   } else {
     const file = document.createElement('div');
     file.className = 'file';
@@ -133,7 +150,7 @@ async function loadSection(rootKey, treeContainer) {
   }
   const tree = await resp.json();
   treeContainer.innerHTML = '';
-  renderNode(tree, treeContainer);
+  renderNode(tree, treeContainer, true);
 }
 
 function initSidebar() {
