@@ -181,3 +181,7 @@ Used for YouTube video durations (`PT1H2M3S` format).
 - Never create paths outside the `fast-market` namespace for user data
 - Never write `llm.providers` to tool-specific config (it will be stripped)
 - Never call `load_tool_config()` without first calling `requires_common_config()`
+
+
+## Webux Plugin Registry
+- `common/webux/` provides the shared `WebuxPluginManifest` contract and entry-point discovery for the unified webux hub.

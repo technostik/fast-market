@@ -5,7 +5,6 @@ import os
 import signal
 import threading
 import webbrowser
-from pathlib import Path
 
 import click
 import uvicorn
@@ -13,13 +12,10 @@ import uvicorn
 from commands.base import CommandManifest
 from common import structlog
 from common.core.config import load_tool_config
-from common.core.registry import discover_plugins
+from common.webux.registry import discover_webux_plugins
 from core.server import build_app
 
 logger = structlog.get_logger(__name__)
-_TOOL_ROOT = Path(__file__).resolve().parents[2]
-
-
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("serve")
     @click.option("--host", default="localhost")
@@ -32,7 +28,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         )
 
         config = load_tool_config("webux")
-        discovered = discover_plugins(config, tool_root=_TOOL_ROOT)
+        discovered = discover_webux_plugins(config)
         logger.info("server_start", host=host, port=port, plugins=list(discovered.keys()))
 
         if open_browser:
@@ -44,7 +40,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         app = build_app(
             config=config,
             plugins=discovered,
-            tool_root=_TOOL_ROOT,
             shutdown_callback=_shutdown,
         )
         uvicorn.run(app, host=host, port=port)

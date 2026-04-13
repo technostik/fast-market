@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from common import structlog
-from common.core.registry import discover_plugins
-from plugins.base import PluginManifest
+from common.webux.base import WebuxPluginManifest
 
 logger = structlog.get_logger(__name__)
 
@@ -81,7 +79,7 @@ async function webuxExit() {
 """
 
 
-def _build_nav(plugins: dict[str, PluginManifest], active: str | None = None) -> str:
+def _build_nav(plugins: dict[str, WebuxPluginManifest], active: str | None = None) -> str:
     links = []
     for plugin in plugins.values():
         klass = "active" if plugin.name == active else ""
@@ -112,24 +110,63 @@ def _inject_nav(plugin_html: str, nav_html: str) -> str:
     return nav_html + plugin_html
 
 
+def _mount_plugin_router(
+    app: FastAPI,
+    plugin: WebuxPluginManifest,
+    mounted: set[str],
+) -> None:
+    if plugin.name in mounted:
+        return
+    if plugin.api_router is not None:
+        app.include_router(plugin.api_router, prefix=f"/api/{plugin.name}")
+    mounted.add(plugin.name)
+
+
+
+
+def _make_page_handler(
+    app: FastAPI,
+    manifests: dict[str, WebuxPluginManifest],
+    plugin: WebuxPluginManifest,
+    mounted: set[str],
+):
+    def _render_page() -> HTMLResponse:
+        if plugin.lazy and plugin.name not in mounted:
+            _mount_plugin_router(app, plugin, mounted)
+            logger.info("webux_plugin_lazy_mounted", name=plugin.name)
+        nav = _build_nav(manifests, active=plugin.name)
+        return HTMLResponse(_inject_nav(plugin.frontend_html, nav))
+
+    return _render_page
+
+
 def build_app(
     config: dict,
-    plugins: dict[str, PluginManifest] | None = None,
-    tool_root: Path | None = None,
+    plugins: dict[str, WebuxPluginManifest],
     shutdown_callback: Callable[[], None] | None = None,
 ) -> FastAPI:
+    del config
     app = FastAPI(title="webux-agent")
-
     manifests = plugins
-    if manifests is None:
-        if tool_root is None:
-            raise RuntimeError("tool_root is required when plugins are not passed")
-        manifests = discover_plugins(config, tool_root=tool_root)
 
     logger.info("plugins_discovered", count=len(manifests), names=list(manifests.keys()))
 
+    mounted_routers: set[str] = set()
     for plugin in manifests.values():
-        app.include_router(plugin.api_router, prefix=f"/api/{plugin.name}")
+        if not plugin.lazy:
+            _mount_plugin_router(app, plugin, mounted_routers)
+
+    @app.middleware("http")
+    async def lazy_api_mount(request: Request, call_next):
+        path = request.url.path
+        for plugin in manifests.values():
+            if plugin.lazy and plugin.name not in mounted_routers:
+                prefix = f"/api/{plugin.name}"
+                if path == prefix or path.startswith(f"{prefix}/"):
+                    _mount_plugin_router(app, plugin, mounted_routers)
+                    logger.info("webux_plugin_lazy_mounted", name=plugin.name)
+                    break
+        return await call_next(request)
 
     @app.get("/")
     def root() -> RedirectResponse:
@@ -154,17 +191,9 @@ def build_app(
         return HTMLResponse(html)
 
     for plugin in manifests.values():
-
-        def _make_page_handler(plugin_manifest: PluginManifest):
-            def _render_page() -> HTMLResponse:
-                nav = _build_nav(manifests, active=plugin_manifest.name)
-                return HTMLResponse(_inject_nav(plugin_manifest.frontend_html, nav))
-
-            return _render_page
-
         app.add_api_route(
             f"/{plugin.name}",
-            _make_page_handler(plugin),
+            _make_page_handler(app, manifests, plugin, mounted_routers),
             methods=["GET"],
             response_class=HTMLResponse,
         )

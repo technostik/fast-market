@@ -6,12 +6,12 @@ Provides a modular web UI server for fast-market where each plugin contributes o
 ## 🏗️ Essential Components
 - `webux_entry/__init__.py` — package entry point exporting CLI `main`
 - `cli/main.py` — CLI bootstrap and plugin/command auto-discovery
-- `core/server.py` — FastAPI app factory, plugin router mounting, shared nav injection
+- `core/server.py` — FastAPI app factory, lazy plugin router mounting, shared nav injection
 - `core/security.py` — shared path containment checker
-- `plugins/base.py` — `PluginManifest` contract for tab + API contribution
+- `common/webux/base.py` — `WebuxPluginManifest` contract for tab + API contribution
 - `commands/base.py` — `CommandManifest` for discoverable CLI commands
 - `commands/serve/register.py` — `webux serve` server command
-- `plugins/*/register.py` — plugin manifests discovered at runtime
+- `webux/*/register.py` — plugin manifests discovered at runtime via entry points
 
 ## 📦 Plugin Manifest Contract
 Each plugin `register(config)` must return `PluginManifest` with:
@@ -34,8 +34,8 @@ Each plugin `register(config)` must return `PluginManifest` with:
 - Avoid symlink traversal when building directory trees
 
 ## ✅ Do's
-- Keep plugins independent and discoverable (`plugins/*/register.py` only)
-- Use `common.core.registry.discover_plugins(..., tool_root=...)`
+- Keep plugins independent and discoverable via entry points from `webux/*/register.py`
+- Use `common.webux.registry.discover_webux_plugins(config)`
 - Fail loudly when plugin registration contract is invalid
 - Use `common.structlog` for server/plugin/API/subprocess logging
 - Keep API payloads backward compatible where feasible
@@ -54,3 +54,12 @@ Each plugin `register(config)` must return `PluginManifest` with:
 4. Ensure endpoints follow `/api/{name}/...` semantics.
 5. Provide full `frontend_html` (server injects shared nav automatically).
 6. Restart `webux serve` and verify tab appears automatically.
+
+
+## Lazy Loading
+- Plugins default to `lazy=True` and mount API routers on first tab hit.
+- Keep `register()` side-effect free and defer heavy imports to request handlers.
+
+## Plugin Directory Convention
+- Place webux plugins under `webux/{plugin_name}/` with `register.py` and optional `plugin.py`.
+- Backwards-compatible shims may exist in `plugins/{plugin_name}/`.

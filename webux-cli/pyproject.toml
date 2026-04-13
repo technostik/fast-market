@@ -18,14 +18,19 @@ dependencies = [
 [project.scripts]
 webux = "webux_entry:main"
 
+[project.entry-points."fast_market.webux_plugins"]
+fileviewer = "webux.fileviewer.register:register"
+yt_poster = "webux.yt_poster.register:register"
+
 [tool.setuptools]
 packages = [
     "webux_entry",
     "cli",
     "core",
     "plugins",
-    "plugins.fileviewer",
-    "plugins.yt_poster",
+    "webux",
+    "webux.fileviewer",
+    "webux.yt_poster",
     "commands",
     "commands.serve",
 ]

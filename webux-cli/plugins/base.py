@@ -1,14 +1,4 @@
-from __future__ import annotations
+# Compatibility shim — new code should import from common.webux.base directly.
+from common.webux.base import WebuxPluginManifest as PluginManifest
 
-from dataclasses import dataclass
-
-from fastapi import APIRouter
-
-
-@dataclass
-class PluginManifest:
-    name: str
-    tab_label: str
-    tab_icon: str
-    api_router: APIRouter
-    frontend_html: str
+__all__ = ["PluginManifest"]

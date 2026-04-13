@@ -35,6 +35,9 @@ dev = [
 [project.scripts]
 monitor = "monitor_entry:main"
 
+[project.entry-points."fast_market.webux_plugins"]
+monitor = "webux.monitor.register:register"
+
 [tool.setuptools]
 packages = [
     "api",
@@ -52,6 +55,8 @@ packages = [
     "commands.config",
     "commands.serve",
     "monitor_entry",
+    "webux",
+    "webux.monitor",
 ]
 
 [tool.ruff]
