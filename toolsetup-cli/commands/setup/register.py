@@ -645,7 +645,7 @@ def _get_tool_default_config(tool: str) -> dict | None:
             }
         },
         "monitor": {
-            "default_check_interval": "5m",
+            "default_slowdown": "5m",
             "sources": [],
             "actions": [],
             "rules": [],

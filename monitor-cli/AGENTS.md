@@ -59,9 +59,9 @@ monitor-agent/
 - Incremental tracking via `last_item_id`
 
 ### Source Cooldown
-- Each source has a `check_interval` (in seconds) for cooldown between fetches
+- Each source has a `slowdown` (in seconds) for cooldown between fetches
 - Default: 900 seconds (15 minutes)
-- Configured via `--check-interval` on source-add/source-edit
+- Configured via `--slowdown` on source-add/source-edit
 
 ### What's New Mode (is_new)
 - Each source has an `is_new` flag controlling trigger behavior:
@@ -279,7 +279,7 @@ These act as fallback hooks when a rule doesn't define its own `on_error_action_
 Path: `~/.local/share/fast-market/monitor/monitor.db`
 
 Tables:
-- `sources` — Monitored sources with `origin`, `last_item_id`, `check_interval`, and `is_new` fields
+- `sources` — Monitored sources with `origin`, `last_item_id`, `slowdown`, and `is_new` fields
 - `actions` — Shell commands with last_run status
 - `rules` — JSON conditions, action_ids, on_error_action_ids, on_execution_action_ids
 - `trigger_logs` — Execution history for debugging
@@ -294,7 +294,7 @@ monitor setup source-add --plugin youtube --identifier UC123456789 \
 
 # Add source with custom check interval (in seconds)
 monitor setup source-add --plugin youtube --identifier UC123456789 \
-  --check-interval 300
+  --slowdown 300
 
 # Add source in "what's new" mode (default - only trigger on new items)
 monitor setup source-add --plugin youtube --identifier UC123456789 --is-new
@@ -303,7 +303,7 @@ monitor setup source-add --plugin youtube --identifier UC123456789 --is-new
 monitor setup source-add --plugin youtube --identifier UC123456789 --no-is-new
 
 # Edit source to change check interval or is_new
-monitor setup source-edit my-source --check-interval 600
+monitor setup source-edit my-source --slowdown 600
 monitor setup source-edit my-source --no-is-new
 
 # Add an RSS feed source

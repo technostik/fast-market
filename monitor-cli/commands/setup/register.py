@@ -47,7 +47,7 @@ _DEFAULT_MONITOR_CONFIG = """\
 
 # Default cooldown between checks for all sources (unless overridden per-source)
 # Accepts: "5m", "1h", "30s", "900" (seconds)
-default_check_interval: "5m"
+default_slowdown: "5m"
 
 # =============================================================================
 # SOURCES — What content to monitor
@@ -68,7 +68,7 @@ default_check_interval: "5m"
 #                false → trigger on ALL items every check
 #   metadata:    Custom key-value pairs for your reference
 #                (available in rules as metadata.theme, metadata.priority, etc.)
-#   check_interval: Optional override of default_check_interval for this source
+#   slowdown: Optional override of default_slowdown for this source
 #
 # Available fields for conditions (see RULES section):
 #   Item fields:    id, title, url, content_type, published_at
@@ -90,7 +90,7 @@ sources: []
 #     metadata:
 #       theme: technology
 #       priority: high
-#     # check_interval: 15m        # override global default for this source
+#     # slowdown: 15m        # override global default for this source
 #
 #   - id: tech_news
 #     plugin: rss
@@ -271,7 +271,7 @@ rules: []
 """
 
 
-def _parse_check_interval(interval_str: str | None) -> int | None:
+def _parse_slowdown(interval_str: str | None) -> int | None:
     """Parse check interval string to seconds.
 
     Args:
@@ -682,7 +682,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--meta", multiple=True, help="Metadata key=value pairs (can be used multiple times)"
     )
     @click.option(
-        "--check-interval",
+        "--slowdown",
         type=str,
         help="Cooldown interval (e.g., '15m', '1h', '120s', or '900' for seconds)",
     )
@@ -693,7 +693,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="If true, only trigger on new items (what's new mode)",
     )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def source_add(custom_id, plugin, origin, description, meta, check_interval, is_new, fmt):
+    def source_add(custom_id, plugin, origin, description, meta, slowdown, is_new, fmt):
         """Add a new source to monitor with optional metadata."""
         storage = get_storage()
 
@@ -704,7 +704,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             key, value = m.split("=", 1)
             metadata[key.strip()] = value.strip()
 
-        parsed_check_interval = _parse_check_interval(check_interval)
+        parsed_slowdown = _parse_slowdown(slowdown)
 
         plugin_class = plugin_manifests[plugin].source_plugin_class
         temp_config = plugin_class({"origin": origin}, {"origin": origin})
@@ -720,7 +720,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             origin=origin,
             description=description,
             metadata=metadata,
-            check_interval=parsed_check_interval,
+            slowdown=parsed_slowdown,
             is_new=is_new,
             created_at=datetime.now(),
         )
@@ -733,7 +733,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "origin": source.origin,
                 "description": source.description,
                 "metadata": metadata,
-                "check_interval": parsed_check_interval,
+                "slowdown": parsed_slowdown,
                 "is_new": is_new,
                 "message": "Source added successfully",
             },
@@ -769,7 +769,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--description", help="New description")
     @click.option("--meta", multiple=True, help="Metadata key=value pairs (adds/updates)")
     @click.option(
-        "--check-interval",
+        "--slowdown",
         type=str,
         help="Cooldown interval (e.g., '15m', '1h', '120s', or '900' for seconds)",
     )
@@ -792,7 +792,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         interactive,
         description,
         meta,
-        check_interval,
+        slowdown,
         is_new,
         enable,
         editor,
@@ -805,7 +805,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             monitor setup source-edit my-source -i  # Interactive editor
             monitor setup source-edit my-source --description "New desc"
             monitor setup source-edit my-source --meta theme=tech --enable
-            monitor setup source-edit my-source --check-interval 5m
+            monitor setup source-edit my-source --slowdown 5m
             monitor setup source-edit my-source --is-new
             monitor setup source-edit my-source --clear-seen  # Reset seen items
         """
@@ -823,7 +823,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             description is None
             and not meta
             and enable is None
-            and check_interval is None
+            and slowdown is None
             and is_new is None
         ):
             editor_cmd = editor or get_editor()
@@ -839,8 +839,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             key, value = m.split("=", 1)
             existing.metadata[key.strip()] = value.strip()
 
-        if check_interval is not None:
-            existing.check_interval = _parse_check_interval(check_interval)
+        if slowdown is not None:
+            existing.slowdown = _parse_slowdown(slowdown)
 
         if is_new is not None:
             existing.is_new = is_new

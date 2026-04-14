@@ -37,11 +37,11 @@ def _get_global_on_execution_action_ids() -> list[str]:
         return []
 
 
-def _get_default_check_interval() -> str | None:
-    """Get default_check_interval from monitor config."""
+def _get_default_slowdown() -> str | None:
+    """Get default_slowdown from monitor config."""
     try:
         config = load_tool_config("monitor")
-        return config.get("default_check_interval")
+        return config.get("default_slowdown")
     except Exception:
         return None
 
@@ -163,11 +163,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 continue
 
             plugin_cls = plugin_manifests[source.plugin].source_plugin_class
-            default_check_interval = _get_default_check_interval()
-            effective_check_interval = source.check_interval or default_check_interval
+            default_slowdown = _get_default_slowdown()
+            effective_slowdown = source.slowdown or default_slowdown
             plugin_metadata = {**source.metadata}
-            if effective_check_interval:
-                plugin_metadata["check_interval"] = effective_check_interval
+            if effective_slowdown:
+                plugin_metadata["slowdown"] = effective_slowdown
             plugin_instance = plugin_cls(
                 config,
                 {
@@ -175,7 +175,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "origin": source.origin,
                     "metadata": plugin_metadata,
                     "last_check": source.last_check,
-                    "check_interval": effective_check_interval,
+                    "slowdown": effective_slowdown,
                 },
             )
 
@@ -202,7 +202,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             try:
                 if cooldown_active:
                     interval_display, remaining = _get_cooldown_remaining(
-                        plugin_instance, effective_check_interval
+                        plugin_instance, effective_slowdown
                     )
                     if force_mode:
                         if not cron:
@@ -263,7 +263,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 seen_filtered_count = 0
 
             # Filter by last_item_id (position-based, legacy optimization)
-            if source.last_item_id and not force_mode and source.last_item_id:
+            # Skip this for channel_list sources as they now handle per-channel last_item_id in the plugin
+            if source.last_item_id and not force_mode and source.last_item_id and source.plugin != "channel_list":
                 original_count = len(items)
                 filtered_items = []
                 for item in items:
@@ -280,7 +281,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if items and not force_mode:
                 newest_item = max(items, key=lambda x: x.published_at)
                 source.last_fetched_at = newest_item.published_at
-                source.last_item_id = newest_item.id
+                # For channel_list sources, update last_item_id from plugin metadata
+                # which now tracks per-channel last_item_ids
+                if source.plugin == "channel_list":
+                    channel_last_ids = source.metadata.get("last_item_ids_by_channel", {})
+                    if channel_last_ids:
+                        # Store the most recent across all channels for display purposes
+                        source.last_item_id = newest_item.id
+                        # Persist updated metadata back to storage
+                        storage.update_source_metadata(source.id, source.metadata)
+                else:
+                    source.last_item_id = newest_item.id
                 storage.update_source_last_fetched_at(source.id, source.last_fetched_at)
                 storage.update_source_last_item_id(source.id, source.last_item_id)
             elif not items and not force_mode and not source.last_item_id:
@@ -669,10 +680,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
 
 def _get_cooldown_remaining(
-    plugin_instance, check_interval: str | int | None = None
+    plugin_instance, slowdown: str | int | None = None
 ) -> tuple[str, str]:
     """Returns (interval_display, remaining_time)"""
-    interval_val = check_interval or plugin_instance.check_interval
+    interval_val = slowdown or plugin_instance.slowdown
     if not interval_val:
         return ("none", "none")
 

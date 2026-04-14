@@ -22,19 +22,19 @@ class SourcePlugin(ABC):
         self.source_config = source_config
         self.metadata = source_config.get("metadata", {})
         self.last_check = source_config.get("last_check")
-        self.check_interval = source_config.get("check_interval")
+        self.slowdown = source_config.get("slowdown")
 
     def _parse_interval(self, interval_str: str | int | None = None) -> int | None:
         """Parse interval string or integer to seconds.
 
         Args:
             interval_str: Interval string (e.g., '15m', '1h') or integer (e.g., 300).
-                          Defaults to self.check_interval.
+                          Defaults to self.slowdown.
 
         Returns:
             Interval in seconds, or None if no interval configured (no cooldown).
         """
-        interval = interval_str or self.check_interval
+        interval = interval_str or self.slowdown
         if not interval:
             return None
 

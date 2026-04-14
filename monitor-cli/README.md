@@ -63,25 +63,25 @@ All sources have a built-in cooldown to prevent excessive fetching:
 |--------|------------------|--------------|
 | All plugins | `15m` | Yes |
 
-Use `--check-interval` to control cooldown (supports `15m`, `1h`, `120s`, or plain seconds):
+Use `--slowdown` to control cooldown (supports `15m`, `1h`, `120s`, or plain seconds):
 
 ```bash
 # More frequent checks (5 minutes)
 monitor setup source-add --plugin youtube --identifier UC123456789 \
-  --check-interval 5m
+  --slowdown 5m
 
 # Less frequent checks (1 hour)
 monitor setup source-add --plugin rss --identifier https://example.com/feed.xml \
-  --check-interval 1h
+  --slowdown 1h
 
 # Or use plain seconds
 monitor setup source-add --plugin youtube --identifier UC123456789 \
-  --check-interval 900
+  --slowdown 900
 ```
 
-If no `check_interval` is set, all sources default to 15 minutes (900 seconds).
+If no `slowdown` is set, all sources default to 15 minutes (900 seconds).
 
-**Note:** For yt-search, you can also use `--meta check_interval=5m` (deprecated, use `--check-interval`).
+**Note:** For yt-search, you can also use `--meta slowdown=5m` (deprecated, use `--slowdown`).
 
 ## CLI Reference
 
@@ -107,9 +107,15 @@ monitor setup source-add --plugin yt-search \
   --meta min_views=5000 \
   --meta max_results=30
 
-# Add source with custom check interval (in seconds)
+# Channel list (monitor multiple YouTube channels)
+monitor setup source-add --plugin channel_list \
+  --identifier list \
+  --slowdown 15m \
+  --meta 'channels=[{"id":"UCX6OQ3DkcsbYNE6H8uQQuVA","title":"MrBeast"},{"id":"UCq-Fj5jknLsUf-MWSy4_brA","title":"T-Series"}]'
+
+# Add source with custom slowdown (in seconds)
 monitor setup source-add --plugin youtube --identifier UC123456789 \
-  --check-interval 300
+  --slowdown 300
 
 # Add source in "what's new" mode (default: only trigger on new items)
 monitor setup source-add --plugin youtube --identifier UC123456789 --is-new
@@ -122,18 +128,26 @@ monitor setup source-add --plugin youtube --identifier UC123456789 --no-is-new
 
 | Option | Description |
 |--------|-------------|
-| `--check-interval` | Cooldown interval in seconds between fetches (e.g., `300` for 5 minutes). Overrides metadata `check_interval`. |
+| `--slowdown` | Cooldown interval in seconds between fetches (e.g., `300` for 5 minutes). Overrides metadata `slowdown`. |
 | `--is-new` | If true (default), only trigger on new items since last check. If false, triggers on all items (like `--force`). |
-| `--meta` | Metadata key=value pairs. For yt-search: `theme`, `min_views`, `max_results` |
+| `--meta` | Metadata key=value pairs. For yt-search: `theme`, `min_views`, `max_results`; For channel_list: `channels`, `file`, `thematic` |
 
 **yt-search Metadata Options:**
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `check_interval` | `15m` | Minimum time between searches (e.g., `15m`, `1h`, `30m`) - deprecated, use `--check-interval` |
+| `slowdown` | `15m` | Minimum time between searches (e.g., `15m`, `1h`, `30m`) - deprecated, use `--slowdown` |
 | `min_views` | `1000` | Minimum view count to include (filters low-view videos) |
 | `max_results` | `50` | Maximum videos to fetch per search |
 | `theme` | - | User-defined theme (used in rules: `source_metadata.theme`) |
+
+**channel_list Metadata Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `channels` | - | List of `{id: "UC...", title: "Channel Name"}` dicts (or use `file` + `thematic`) |
+| `file` | - | Path to YAML channel list file (alternative to inline `channels`) |
+| `thematic` | - | Thematic name to use from external file (required with `file`) |
 
 **YouTube Search Advanced Syntax:**
 
@@ -179,6 +193,24 @@ monitor setup rule-add --name "Popular Tech Shorts" \
   --action-ids notify
 ```
 
+**Example: Channel List Rules**
+
+```bash
+# Trigger on all channels in the channel_list source
+monitor setup rule-add --name "Channel List Videos" \
+  --conditions "source_plugin == 'channel_list' and content_type == 'video'" \
+  --action-ids notify
+
+# Trigger only on specific channel
+monitor setup rule-add --name "MrBeast Videos" \
+  --conditions "source_plugin == 'channel_list' and extra.channel_name == 'MrBeast'" \
+  --action-ids notify
+
+# Use channel-specific URL and description in actions
+monitor setup action-add --id notify-channel \
+  --command 'echo "New from $SOURCE_DESC: $ITEM_TITLE ($SOURCE_URL)"'
+```
+
 #### `monitor setup source-list`
 
 List all configured sources.
@@ -211,12 +243,16 @@ monitor setup source-edit <source-id> \
 # Disable a source
 monitor setup source-edit <source-id> --disable
 
-# Update check interval (in seconds)
-monitor setup source-edit <source-id> --check-interval 600
+# Update slowdown (in seconds)
+monitor setup source-edit <source-id> --slowdown 600
 
 # Toggle "what's new" mode
 monitor setup source-edit <source-id> --is-new      # Only new items trigger
 monitor setup source-edit <source-id> --no-is-new   # All items trigger (like --force)
+
+# Update channel_list channels
+monitor setup source-edit <source-id> \
+  --meta 'channels=[{"id":"UCnew1234567890abcdef","title":"New Channel"}]'
 ```
 
 #### `monitor setup action-add`
@@ -265,9 +301,9 @@ monitor setup action-edit telegram-notify \
 | `$ITEM_CONTENT_TYPE` | video, short, article |
 | `$ITEM_PUBLISHED` | ISO timestamp |
 | `$SOURCE_ID` | Source UUID |
-| `$SOURCE_PLUGIN` | youtube, rss |
-| `$SOURCE_URL` | Channel/feed URL (e.g., `https://youtube.com/channel/UC...`) |
-| `$SOURCE_DESC` | Source description |
+| `$SOURCE_PLUGIN` | youtube, rss, channel_list |
+| `$SOURCE_URL` | Channel/feed URL (e.g., `https://youtube.com/channel/UC...`) — **For channel_list: channel-specific URL** |
+| `$SOURCE_DESC` | Source description — **For channel_list: "description (channel_name)"** |
 | `$SOURCE_ORIGIN` | Channel ID or RSS URL |
 | `$RULE_ID` | Rule identifier |
 | `$EXTRA_*` | Any field from item metadata |

@@ -155,6 +155,9 @@ class ChannelListPlugin(SourcePlugin):
 
         This plugin delegates to the YouTube plugin for each channel,
         then merges and sorts results by published date.
+
+        Each channel maintains its own last_item_id in source metadata
+        to properly track fetch progress per channel.
         """
         if not self._should_fetch(force):
             return []
@@ -165,30 +168,50 @@ class ChannelListPlugin(SourcePlugin):
         per_channel_limit = max(1, limit // len(self.channels)) if self.channels else limit
         all_items: list[ItemMetadata] = []
 
+        # Get per-channel last_item_ids from metadata
+        channel_last_ids: dict[str, str] = self.metadata.get("last_item_ids_by_channel", {})
+
         for channel in self.channels:
+            channel_id = channel["id"]
+            # Use channel-specific last_item_id instead of the source-level one
+            channel_last_id = channel_last_ids.get(channel_id)
+
             # Create a temporary YouTube plugin instance for this channel
             yt_source_config = {
-                "id": f"{self.source_id}__{channel['id']}",
-                "origin": channel["id"],
+                "id": f"{self.source_id}__{channel_id}",
+                "origin": channel_id,
                 "metadata": {},
                 "last_check": self.last_check,
-                "check_interval": self.check_interval,
+                "slowdown": self.slowdown,
             }
             yt_plugin = YouTubePlugin(self.config, yt_source_config)
 
             try:
                 items = await yt_plugin.fetch_new_items(
-                    last_item_id=last_item_id,
+                    last_item_id=channel_last_id,
                     limit=per_channel_limit,
                     force=force,
                 )
-                # Override source_id to the channel_list source so tracking works correctly
+                # Override source_id and add channel metadata to items
                 for item in items:
                     item.source_id = self.source_id
+                    # Set SOURCE_URL placeholder to YouTube channel URL
+                    item.extra["channel_url"] = f"https://www.youtube.com/channel/{channel_id}"
+                    # Set SOURCE_DESC placeholder to channel name
+                    item.extra["channel_name"] = channel["title"]
                     item.extra["channel_list_title"] = channel["title"]
                 all_items.extend(items)
+
+                # Update channel's last_item_id if we fetched new items
+                if items:
+                    newest_item = max(items, key=lambda x: x.published_at)
+                    channel_last_ids[channel_id] = newest_item.id
             except Exception as e:
-                print(f"⚠️ Failed to fetch channel {channel['id']}: {e}")
+                print(f"⚠️ Failed to fetch channel {channel_id}: {e}")
+
+        # Save updated per-channel last_item_ids back to metadata
+        if channel_last_ids:
+            self.metadata["last_item_ids_by_channel"] = channel_last_ids
 
         # Sort by published date, newest first
         all_items.sort(key=lambda x: x.published_at, reverse=True)

@@ -55,7 +55,7 @@ class SourceConfig(BaseModel):
     description: str | None = None
     enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
-    check_interval: int | None = None
+    slowdown: int | None = None
     is_new: bool = True
 
 
@@ -81,7 +81,7 @@ class RuleConfig(BaseModel):
 
 
 class MonitorConfig(BaseModel):
-    default_check_interval: str | None = None
+    default_slowdown: str | None = None
     seen_items_decay_days: int | None = Field(default=7, ge=1, le=365)
     sources: list[SourceConfig] = Field(default_factory=list)
     actions: list[ActionConfig] = Field(default_factory=list)
@@ -102,7 +102,7 @@ KNOWN_SOURCE_FIELDS = {
     "description",
     "enabled",
     "metadata",
-    "check_interval",
+    "slowdown",
     "is_new",
 }
 KNOWN_ACTION_FIELDS = {"id", "command", "description", "enabled"}
@@ -116,7 +116,16 @@ KNOWN_RULE_FIELDS = {
     "timezone",
 }
 KNOWN_SCHEDULE_FIELDS = {"cron", "interval"}
-KNOWN_META_FIELDS = {"priority", "theme", "min_views", "max_results", "channels", "command"}
+KNOWN_META_FIELDS = {
+    "priority",
+    "theme",
+    "min_views",
+    "max_results",
+    "channels",
+    "command",
+    "file",
+    "thematic",
+}
 
 VALID_CONDITION_FIELDS = get_valid_condition_fields()
 VALID_PLACEHOLDERS = {
@@ -340,10 +349,10 @@ def get_config_template() -> str:
 # =============================================================================
 # GLOBAL SETTINGS
 # =============================================================================
-# default_check_interval: Default cooldown between fetches (e.g., '15m', '1h')
+# default_slowdown: Default cooldown between fetches (e.g., '15m', '1h')
 # seen_items_decay_days: Days to keep seen items history (default: 7, max: 365)
 # =============================================================================
-# default_check_interval: "15m"
+# default_slowdown: "15m"
 # seen_items_decay_days: 7
 
 # =============================================================================
@@ -352,7 +361,7 @@ def get_config_template() -> str:
 # Each source defines a feed to monitor.
 #
 # Required fields: id, plugin, origin
-# Optional fields: description, enabled, metadata
+# Optional fields: description, enabled, metadata, slowdown
 #
 # Available plugins: youtube, rss, yt-search, channel_list, json
 #   - youtube: origin = Channel ID (UC...), @handle, or channel URL
@@ -361,12 +370,12 @@ def get_config_template() -> str:
 #   - channel_list: origin = placeholder, metadata.channels = [{id, title}, ...]
 #   - json: origin = placeholder, metadata.command = shell command returning JSON
 #
-# Metadata options:
-#   check_interval: 30s, 5m, 15m, 30m, 1h (default: 15m)
-#   priority: 1-100
-#   theme: string
-#   min_views: integer (yt-search only)
-#   max_results: integer (yt-search only)
+# Source options:
+#   slowdown: 30s, 5m, 15m, 30m, 1h (default: 15m)
+#   metadata.priority: 1-100
+#   metadata.theme: string
+#   metadata.min_views: integer (yt-search only)
+#   metadata.max_results: integer (yt-search only)
 # =============================================================================
 sources:
   # - id: my_youtube_channel
@@ -374,8 +383,8 @@ sources:
   #   origin: "@myhandle"
   #   description: "Monitor my channel"
   #   enabled: true
+  #   slowdown: 15m
   #   metadata:
-  #     check_interval: 15m
   #     priority: 50
 
 # =============================================================================

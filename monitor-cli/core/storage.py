@@ -144,13 +144,26 @@ class MonitorStorage:
                 pass
 
     def _migrate_sources_columns(self, conn: sqlite3.Connection) -> None:
+        # Migrate check_interval to slowdown
         try:
-            conn.execute("SELECT check_interval FROM sources LIMIT 1").fetchone()
+            conn.execute("SELECT slowdown FROM sources LIMIT 1").fetchone()
         except sqlite3.OperationalError:
+            # slowdown column doesn't exist, check for check_interval
             try:
-                conn.execute("ALTER TABLE sources ADD COLUMN check_interval INTEGER")
+                conn.execute("SELECT check_interval FROM sources LIMIT 1").fetchone()
+                # check_interval exists, rename it to slowdown
+                conn.execute("ALTER TABLE sources RENAME COLUMN check_interval TO slowdown")
             except sqlite3.OperationalError:
-                pass
+                # Neither exists, create slowdown
+                try:
+                    conn.execute("ALTER TABLE sources ADD COLUMN slowdown INTEGER")
+                except sqlite3.OperationalError:
+                    pass
+        
+        # Add is_new if it doesn't exist
+        try:
+            conn.execute("SELECT is_new FROM sources LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
             try:
                 conn.execute("ALTER TABLE sources ADD COLUMN is_new INTEGER DEFAULT 1")
             except sqlite3.OperationalError:
@@ -172,7 +185,7 @@ class MonitorStorage:
     def add_source(self, source: Source) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO sources (id, plugin, origin, description, metadata, enabled, last_check, last_fetched_at, last_item_id, check_interval, is_new, created_at)
+                """INSERT INTO sources (id, plugin, origin, description, metadata, enabled, last_check, last_fetched_at, last_item_id, slowdown, is_new, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     source.id,
@@ -184,7 +197,7 @@ class MonitorStorage:
                     source.last_check.isoformat() if source.last_check else None,
                     source.last_fetched_at.isoformat() if source.last_fetched_at else None,
                     source.last_item_id,
-                    source.check_interval,
+                    source.slowdown,
                     int(source.is_new),
                     source.created_at.isoformat(),
                 ),
@@ -194,7 +207,7 @@ class MonitorStorage:
         with self._get_conn() as conn:
             conn.execute(
                 """UPDATE sources SET plugin = ?, origin = ?, description = ?, metadata = ?, enabled = ?,
-                   last_check = ?, last_fetched_at = ?, last_item_id = ?, check_interval = ?, is_new = ? WHERE id = ?""",
+                   last_check = ?, last_fetched_at = ?, last_item_id = ?, slowdown = ?, is_new = ? WHERE id = ?""",
                 (
                     source.plugin,
                     source.origin,
@@ -204,7 +217,7 @@ class MonitorStorage:
                     source.last_check.isoformat() if source.last_check else None,
                     source.last_fetched_at.isoformat() if source.last_fetched_at else None,
                     source.last_item_id,
-                    source.check_interval,
+                    source.slowdown,
                     int(source.is_new),
                     source.id,
                 ),
@@ -236,6 +249,14 @@ class MonitorStorage:
             conn.execute(
                 "UPDATE sources SET last_item_id = ? WHERE id = ?",
                 (last_item_id, source_id),
+            )
+
+    def update_source_metadata(self, source_id: str, metadata: dict) -> None:
+        """Update the metadata field for a source."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sources SET metadata = ? WHERE id = ?",
+                (json.dumps(metadata), source_id),
             )
 
     def delete_source(self, source_id: str) -> None:
@@ -654,7 +675,7 @@ class MonitorStorage:
     def _row_to_source(self, row: sqlite3.Row) -> Source:
         last_fetched_at_val = row["last_fetched_at"] if "last_fetched_at" in row.keys() else None
         metadata_val = row["metadata"] if "metadata" in row.keys() else "{}"
-        check_interval_val = row["check_interval"] if "check_interval" in row.keys() else None
+        slowdown_val = row["slowdown"] if "slowdown" in row.keys() else None
         is_new_val = row["is_new"] if "is_new" in row.keys() else 0
         return Source(
             id=row["id"],
@@ -668,7 +689,7 @@ class MonitorStorage:
             if last_fetched_at_val
             else None,
             last_item_id=row["last_item_id"],
-            check_interval=check_interval_val,
+            slowdown=slowdown_val,
             is_new=bool(is_new_val),
             created_at=datetime.fromisoformat(row["created_at"]),
         )

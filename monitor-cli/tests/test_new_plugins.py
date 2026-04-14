@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -137,7 +137,7 @@ class TestChannelListPlugin:
                     "channels": [{"id": "UCabcdef123456ghijklmnop"}]
                 },
                 "last_check": recent.isoformat(),
-                "check_interval": "15m",
+                "slowdown": "15m",
             },
         )
         result = await plugin.fetch_new_items()
@@ -186,6 +186,86 @@ class TestChannelListPlugin:
             assert len(result) == 1
             assert result[0].source_id == "test_source"
             assert result[0].extra.get("channel_list_title") == "Channel A"
+
+    @pytest.mark.asyncio
+    async def test_fetch_new_items_per_channel_last_id(self):
+        """Test that each channel uses its own last_item_id."""
+        from core.models import ItemMetadata
+
+        # Initialize with existing per-channel last_item_ids
+        plugin = ChannelListPlugin(
+            {},
+            {
+                "id": "test_source",
+                "origin": "list",
+                "metadata": {
+                    "channels": [
+                        {"id": "UCabcdef1234567890abcdef", "title": "Channel A"},
+                        {"id": "UCqrstuvwxyz1234567890ab", "title": "Channel B"},
+                    ],
+                    "last_item_ids_by_channel": {
+                        "UCabcdef1234567890abcdef": "old_video_a",
+                        "UCqrstuvwxyz1234567890ab": "old_video_b",
+                    }
+                },
+            },
+        )
+
+        # Create mock items for each channel
+        mock_item_a = ItemMetadata(
+            id="new_video_a",
+            title="Video A",
+            url="https://youtube.com/watch?v=new_video_a",
+            published_at=datetime.now(timezone.utc),
+            content_type="video",
+            source_plugin="youtube",
+            source_id="test_source__UCabcdef1234567890abcdef",
+            extra={},
+        )
+
+        mock_item_b = ItemMetadata(
+            id="new_video_b",
+            title="Video B",
+            url="https://youtube.com/watch?v=new_video_b",
+            published_at=datetime.now(timezone.utc) + timedelta(seconds=1),  # Newer
+            content_type="video",
+            source_plugin="youtube",
+            source_id="test_source__UCqrstuvwxyz1234567890ab",
+            extra={},
+        )
+
+        captured_last_ids = {}
+
+        with patch("plugins.youtube.plugin.YouTubePlugin") as MockYTPlugin:
+            def create_mock_instance(config, source_config):
+                mock_yt_instance = MagicMock()
+                channel_id = source_config.get("origin", "")
+
+                async def mock_fetch(*args, last_item_id=None, **kwargs):
+                    captured_last_ids[channel_id] = last_item_id
+                    if channel_id == "UCabcdef1234567890abcdef":
+                        return [mock_item_a]
+                    else:
+                        return [mock_item_b]
+
+                mock_yt_instance.fetch_new_items = mock_fetch
+                return mock_yt_instance
+
+            MockYTPlugin.side_effect = create_mock_instance
+
+            result = await plugin.fetch_new_items()
+
+            # Verify we got both items
+            assert len(result) == 2
+
+            # Verify each channel was called with its own last_item_id
+            assert captured_last_ids.get("UCabcdef1234567890abcdef") == "old_video_a"
+            assert captured_last_ids.get("UCqrstuvwxyz1234567890ab") == "old_video_b"
+
+            # Verify metadata was updated with new last_item_ids
+            assert "last_item_ids_by_channel" in plugin.metadata
+            assert plugin.metadata["last_item_ids_by_channel"]["UCabcdef1234567890abcdef"] == "new_video_a"
+            assert plugin.metadata["last_item_ids_by_channel"]["UCqrstuvwxyz1234567890ab"] == "new_video_b"
 
 
 class TestJsonPlugin:
@@ -274,7 +354,7 @@ class TestJsonPlugin:
                 "origin": "api",
                 "metadata": {"command": "echo '[]'"},
                 "last_check": recent.isoformat(),
-                "check_interval": "15m",
+                "slowdown": "15m",
             },
         )
         result = await plugin.fetch_new_items()

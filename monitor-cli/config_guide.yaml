@@ -20,7 +20,7 @@
 #       metadata:
 #         theme: technology            # Optional: for your reference
 #         priority: high               # Optional: for your reference
-#       # check_interval: 15m          # Optional: cooldown between checks (no default)
+#       # slowdown: 15m          # Optional: cooldown between checks (no default)
 #
 # Available plugins:
 #   - youtube: origin = Channel ID (UC...)
@@ -113,7 +113,7 @@
 #   - enabled:     Whether to monitor this source
 #   - is_new:      If true, only trigger on items newer than last check
 #   - metadata:   Custom key-value pairs for your reference
-#   - check_interval: Cooldown between fetches (e.g., "5m", "1h"). Default: no cooldown
+#   - slowdown: Cooldown between fetches (e.g., "5m", "1h"). Default: no cooldown
 #
 # -----------------------------------------------------------------------------
 # ACTIONS
@@ -235,7 +235,7 @@
 # -----------------------------------------------------------------------------
 # Optional global settings:
 #
-#   default_check_interval: "15m"    # Default cooldown for all sources (if not set per source)
+#   default_slowdown: "15m"    # Default cooldown for all sources (if not set per source)
 #   global_on_error_action_ids:      # Actions to run when ANY rule's action fails
 #     - error_handler
 #   global_on_execution_action_ids:  # Actions to run when ANY rule's action succeeds
@@ -245,7 +245,7 @@
 # COMPLETE EXAMPLE
 # -----------------------------------------------------------------------------
 #
-# default_check_interval: "5m"
+# default_slowdown: "5m"
 #
 # sources:
 #   - id: my_youtube

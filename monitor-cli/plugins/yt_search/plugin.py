@@ -153,7 +153,7 @@ class YouTubeSearchPlugin(SourcePlugin):
                 "categories": video["categories"],
                 "availability": video["availability"],
                 "min_views_threshold": self.min_views,
-                "check_interval": self.check_interval,
+                "slowdown": self.slowdown,
             }
 
             if extra["is_short"]:

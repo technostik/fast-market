@@ -11,7 +11,14 @@ from core.models import Action, ItemMetadata, Source
 from common.rt_subprocess import rt_subprocess
 
 
-def _get_source_url(source: Source) -> str:
+def _get_source_url(source: Source, item: ItemMetadata | None = None) -> str:
+    """Get the source URL, preferring channel-specific URL for channel_list sources."""
+    # For channel_list sources, use channel-specific URL from item.extra if available
+    if source.plugin == "channel_list" and item:
+        channel_url = item.extra.get("channel_url")
+        if channel_url:
+            return channel_url
+
     identifier = source.origin
 
     if source.plugin == "youtube":
@@ -57,13 +64,20 @@ def execute_action(
 
     rule_time = datetime.now(timezone.utc).isoformat()
 
+    # For channel_list sources, use channel-specific description from item.extra
+    source_desc = source.description or ""
+    if source.plugin == "channel_list" and item:
+        channel_name = item.extra.get("channel_name")
+        if channel_name:
+            source_desc = f"{source_desc} ({channel_name})" if source_desc else channel_name
+
     placeholders = {
         "RULE_ID": rule_id,
         "SOURCE_ID": source.id,
         "SOURCE_PLUGIN": source.plugin,
         "SOURCE_ORIGIN": source.origin,
-        "SOURCE_URL": _get_source_url(source),
-        "SOURCE_DESC": source.description or "",
+        "SOURCE_URL": _get_source_url(source, item),
+        "SOURCE_DESC": source_desc,
         "ITEM_ID": item.id,
         "ITEM_TITLE": item.title,
         "ITEM_URL": item.url,
