@@ -197,8 +197,6 @@ class ChannelListPlugin(SourcePlugin):
             }
             yt_plugin = YouTubePlugin(self.config, yt_source_config)
 
-            print(f"    [{i + 1}/{len(self.channels)}] channel={channel['title'][:20]}")
-
             try:
                 items = await yt_plugin.fetch_new_items(
                     last_item_id=channel_last_id,

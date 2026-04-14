@@ -215,7 +215,7 @@ def _fetch_items_for_source(source, plugin_cls, config, limit, force, cron, stor
 
     fetch_time = time.time() - fetch_start
     raw_count = getattr(plugin_instance, "_rss_raw_count", len(items))
-    if not cron:
+    if not cron and raw_count > 0:
         click.echo(f"  → fetched {raw_count} items in {fetch_time:.1f}s", err=True)
 
     return {
