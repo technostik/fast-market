@@ -538,6 +538,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Open the configuration file in an editor and sync automatically."""
         cfg_path = _get_config_path()
 
+        # Check for existing load error (invalid YAML)
+        try:
+            from cli.main import get_load_error
+        except ImportError:
+            pass
+        else:
+            load_err = get_load_error()
+            if load_err:
+                click.echo(f"⚠️  Config file has errors: {load_err}", err=True)
+                click.echo(f"Opening file for editing: {cfg_path}")
+                click.echo("")
+
         if not cfg_path.exists():
             click.echo(f"Config file not found at {cfg_path}.")
             click.echo("Run 'monitor config export' first to create it.")
@@ -559,6 +571,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         click.echo(f"Config file saved: {cfg_path}")
+
+        # Validate the file after editing
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                yaml.safe_load(f)
+            click.echo("✓ YAML syntax OK")
+        except Exception as e:
+            click.echo(f"✗ YAML validation failed: {e}", err=True)
+            click.echo("Fix the file and run 'monitor config edit' again.")
+            return
 
         if no_sync:
             click.echo("Skipping sync (use 'monitor config sync' to sync manually)")
