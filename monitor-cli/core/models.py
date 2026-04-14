@@ -23,7 +23,7 @@ class Source:
     plugin: str
     origin: str
     description: str | None = None
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
     last_check: datetime | None = None
     last_fetched_at: datetime | None = None
@@ -77,7 +77,7 @@ class TriggerLog:
 
 @dataclass(slots=True)
 class TriggerLogWithMetadata(TriggerLog):
-    source_metadata: dict[str, str] | None = None
+    source_metadata: dict[str, Any] | None = None
     item_extra: dict[str, Any] | None = None
 
 

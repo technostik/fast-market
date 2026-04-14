@@ -8,6 +8,7 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from commands.common.channel_search import search_channels, format_channel_entry, select_channel_interactive
 from common.cli.helpers import out
 from common.core.yaml_utils import dump_yaml
 from core.config import load_config
@@ -43,72 +44,6 @@ def _save_state(state: dict) -> None:
 
 
 # ─── Channel search helper ───────────────────────────────────────────────────
-
-def _search_channels(query: str, max_results: int = 10) -> list[dict]:
-    """Search for YouTube channels by name. Returns list of {channel_id, title, custom_url, subscriber_count}."""
-    config = load_config()
-    client = build_youtube_client(config)
-
-    # Use the YouTube API search endpoint with type="channel"
-    try:
-        request = client.youtube.search().list(
-            part="snippet",
-            q=query,
-            type="channel",
-            maxResults=min(max_results, 50),
-            relevanceLanguage="en",
-        )
-        response = request.execute()
-        client._track_quota(100)
-    except Exception as e:
-        raise click.ClickException(f"Channel search failed: {e}") from e
-
-    # Enrich with channel statistics
-    channel_ids = [
-        item["snippet"]["channelId"]
-        for item in response.get("items", [])
-    ]
-
-    if not channel_ids:
-        return []
-
-    try:
-        channels_response = client.youtube.channels().list(
-            part="snippet,statistics",
-            id=",".join(channel_ids[:50]),
-        ).execute()
-        client._track_quota(1)
-    except Exception as e:
-        raise click.ClickException(f"Failed to fetch channel details: {e}") from e
-
-    results = []
-    for item in channels_response.get("items", []):
-        stats = item.get("statistics", {})
-        snippet = item.get("snippet", {})
-        results.append({
-            "channel_id": item["id"],
-            "title": snippet.get("title", "Unknown"),
-            "custom_url": snippet.get("customUrl"),
-            "subscriber_count": int(stats.get("subscriberCount", 0)),
-            "description": snippet.get("description", "")[:100],
-        })
-
-    return results
-
-
-def _format_channel_entry(ch: dict, index: int) -> str:
-    """Format a channel for display in the wizard."""
-    subs = f"{ch['subscriber_count']:,}" if ch['subscriber_count'] else "N/A"
-    url = f" (@{ch['custom_url']})" if ch.get("custom_url") else ""
-    return (
-        f"  [{index}] {ch['title']}{url}\n"
-        f"      ID: {ch['channel_id']} | Subs: {subs}\n"
-        f"      {ch.get('description', '')}"
-    )
-
-
-# ─── Main group ──────────────────────────────────────────────────────────────
-
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.group("hot", invoke_without_command=True)
     @click.pass_context
@@ -189,13 +124,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
             max_results = 10
             click.echo(f"\nSearching for channels matching '{query}'...")
 
-            results = _search_channels(query, max_results)
+            results = search_channels(query, max_results)
             if not results:
                 raise click.ClickException("No channels found.")
 
             click.echo(f"\nFound {len(results)} channels:")
             for i, ch in enumerate(results, 1):
-                click.echo(_format_channel_entry(ch, i))
+                click.echo(format_channel_entry(ch, i))
                 click.echo("")
 
             choice = input(f"Select channel (1-{len(results)}): ").strip()

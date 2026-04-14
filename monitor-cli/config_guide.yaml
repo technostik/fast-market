@@ -22,9 +22,46 @@
 #         priority: high               # Optional: for your reference
 #       # check_interval: 15m          # Optional: cooldown between checks (no default)
 #
+# Available plugins:
+#   - youtube: origin = Channel ID (UC...)
+#   - rss: origin = RSS/Atom feed URL
+#   - yt-search: origin = Search keywords
+#   - channel_list: origin = placeholder (unused), metadata.channels = list of {id, title}
+#   - json: origin = placeholder (unused), metadata.command = shell command returning JSON array
+#
+# channel_list example:
+#   sources:
+#     - id: competitor_channels
+#       plugin: channel_list
+#       origin: "list"
+#       description: "Monitor competitor channels"
+#       enabled: true
+#       is_new: true
+#       metadata:
+#         channels:
+#           - id: UCxxxxxxxxxxxxxxxxxxxx1
+#             title: "Competitor A"
+#           - id: UCxxxxxxxxxxxxxxxxxxxx2
+#             title: "Competitor B"
+#
+# json example:
+#   sources:
+#     - id: api_feed
+#       plugin: json
+#       origin: "api"
+#       description: "Monitor items from custom API"
+#       enabled: true
+#       is_new: true
+#       metadata:
+#         command: "curl -s https://api.example.com/items | jq '.data'"
+#
+# The json command must output a JSON array where each item has:
+#   item_id (required), item_title, item_url, item_content_type, item_published
+#   item_published can be ISO 8601 string or Unix timestamp
+#
 # Source Fields:
 #   - id:          Unique identifier for this source
-#   - plugin:      Plugin type: youtube, rss, yt-search
+#   - plugin:      Plugin type: youtube, rss, yt-search, channel_list, json
 #   - origin:      Plugin-specific identifier (channel ID, URL, keywords)
 #   - description: Human-readable description
 #   - enabled:     Whether to monitor this source
@@ -61,6 +98,7 @@
 #   $ITEM_URL          - URL to the item
 #   $ITEM_CONTENT_TYPE - Type: video, short, medium_video, long_video, article
 #   $ITEM_PUBLISHED    - ISO timestamp when item was published
+#   $EXTRA_CHANNEL_LIST_TITLE - Channel name from channel_list source (if applicable)
 #
 # Source Placeholders:
 #   $SOURCE_ID         - Source identifier (e.g., youtube_johannoriel)

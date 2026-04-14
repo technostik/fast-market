@@ -13,6 +13,8 @@ class PluginType(str, Enum):
     YOUTUBE = "youtube"
     RSS = "rss"
     YT_SEARCH = "yt-search"
+    CHANNEL_LIST = "channel_list"
+    JSON = "json"
 
 
 class ScheduleType(BaseModel):
@@ -52,7 +54,7 @@ class SourceConfig(BaseModel):
     origin: str = Field(min_length=1)
     description: str | None = None
     enabled: bool = True
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     check_interval: int | None = None
     is_new: bool = True
 
@@ -114,7 +116,7 @@ KNOWN_RULE_FIELDS = {
     "timezone",
 }
 KNOWN_SCHEDULE_FIELDS = {"cron", "interval"}
-KNOWN_META_FIELDS = {"priority", "theme", "min_views", "max_results"}
+KNOWN_META_FIELDS = {"priority", "theme", "min_views", "max_results", "channels", "command"}
 
 VALID_CONDITION_FIELDS = get_valid_condition_fields()
 VALID_PLACEHOLDERS = {
@@ -165,8 +167,10 @@ def validate_config(
                 manifest = plugin_manifests.get(source["plugin"])
                 if manifest and hasattr(manifest, "source_plugin_class"):
                     plugin_class = manifest.source_plugin_class
+                    source_metadata = source.get("metadata", {})
                     temp_config = plugin_class(
-                        {"origin": source["origin"]}, {"origin": source["origin"]}
+                        {"origin": source["origin"]},
+                        {"origin": source["origin"], "metadata": source_metadata},
                     )
                     if not temp_config.validate_identifier(source["origin"]):
                         errors.append(
@@ -350,10 +354,12 @@ def get_config_template() -> str:
 # Required fields: id, plugin, origin
 # Optional fields: description, enabled, metadata
 #
-# Available plugins: youtube, rss, yt-search
+# Available plugins: youtube, rss, yt-search, channel_list, json
 #   - youtube: origin = Channel ID (UC...), @handle, or channel URL
 #   - rss: origin = RSS/Atom feed URL
 #   - yt-search: origin = Search keywords
+#   - channel_list: origin = placeholder, metadata.channels = [{id, title}, ...]
+#   - json: origin = placeholder, metadata.command = shell command returning JSON
 #
 # Metadata options:
 #   check_interval: 30s, 5m, 15m, 30m, 1h (default: 15m)
