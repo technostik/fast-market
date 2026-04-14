@@ -55,6 +55,15 @@ def _get_seen_items_decay_days() -> int:
         return 7
 
 
+def _get_triggered_items_decay_days() -> int:
+    """Get triggered_items_decay_days from monitor config. Default: 7 days."""
+    try:
+        config = load_tool_config("monitor")
+        return config.get("triggered_items_decay_days", 7)
+    except Exception:
+        return 7
+
+
 def _build_hook_item_metadata(
     item: ItemMetadata, rule_id: str, rule_msg: str, content_type: str
 ) -> ItemMetadata:
@@ -141,6 +150,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     fmt,
                 )
             return
+
+        triggered_decay_days = _get_triggered_items_decay_days()
+        if triggered_decay_days > 0:
+            triggered_cutoff = datetime.now(timezone.utc) - timedelta(days=triggered_decay_days)
+            for rule in rules:
+                removed = storage.clean_old_triggered_items(rule.id, triggered_cutoff)
+                if removed > 0 and not cron:
+                    click.echo(
+                        f"[CLEANUP] rule='{rule.id}' removed {removed} expired triggered items",
+                        err=True,
+                    )
 
         triggered = []
         mismatches = []
@@ -264,7 +284,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             # Filter by last_item_id (position-based, legacy optimization)
             # Skip this for channel_list sources as they now handle per-channel last_item_id in the plugin
-            if source.last_item_id and not force_mode and source.last_item_id and source.plugin != "channel_list":
+            if (
+                source.last_item_id
+                and not force_mode
+                and source.last_item_id
+                and source.plugin != "channel_list"
+            ):
                 original_count = len(items)
                 filtered_items = []
                 for item in items:
@@ -312,10 +337,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 storage.add_seen_items(source.id, items_to_mark)
 
             matched_items = []
+            triggered_by_rule: dict[str, set[str]] = {
+                rule.id: storage.get_triggered_item_ids(rule.id) for rule in rules
+            }
+
             for item in items:
                 for rule in rules:
                     try:
                         if not should_run_rule(rule):
+                            continue
+                        if not force_mode and item.id in triggered_by_rule.get(rule.id, set()):
                             continue
                         result = evaluate_rule_with_details(rule, item, source)
                         if result.matched:
@@ -348,7 +379,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         errors.append(error_msg)
                         click.echo(f"[ERROR] {error_msg}", err=True)
 
-            filtered_count = fetched_count - len(set(matched_items))
+            matched_ids = set(matched_items)
+            triggered_filtered_count = 0
+            if not force_mode and source.is_new:
+                for rule in rules:
+                    prev_triggered = triggered_by_rule.get(rule.id, set())
+                    triggered_filtered_count += len(matched_ids & prev_triggered)
+
+            filtered_count = fetched_count - len(matched_ids)
 
             source_stats[source.id] = {
                 "fetched": fetched_count,
@@ -356,6 +394,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "filtered": filtered_count,
                 "seen_filtered": seen_filtered_count,
                 "lastid_filtered": lastid_filtered_count,
+                "triggered_filtered": triggered_filtered_count,
             }
 
             if not cron and not silent:
@@ -453,6 +492,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                 output=output,
                             )
                         )
+
+                        if not force_mode and source.is_new:
+                            storage.add_triggered_item(rule.id, item.id)
 
                         storage.update_rule_last_triggered_at(rule.id, triggered_at)
 
@@ -679,9 +721,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
 
 
-def _get_cooldown_remaining(
-    plugin_instance, slowdown: str | int | None = None
-) -> tuple[str, str]:
+def _get_cooldown_remaining(plugin_instance, slowdown: str | int | None = None) -> tuple[str, str]:
     """Returns (interval_display, remaining_time)"""
     interval_val = slowdown or plugin_instance.slowdown
     if not interval_val:

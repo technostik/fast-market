@@ -114,9 +114,21 @@ class MonitorStorage:
 
                 CREATE INDEX IF NOT EXISTS idx_seen_items_source_published
                 ON seen_items(source_id, published_at);
+
+                CREATE TABLE IF NOT EXISTS triggered_items (
+                    rule_id TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    triggered_at TEXT NOT NULL,
+                    PRIMARY KEY (rule_id, item_id),
+                    FOREIGN KEY (rule_id) REFERENCES rules(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_triggered_items_rule_triggered
+                ON triggered_items(rule_id, triggered_at);
             """)
             self._migrate_rules_columns(conn)
             self._migrate_sources_columns(conn)
+            self._migrate_triggered_items(conn)
 
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
@@ -159,13 +171,22 @@ class MonitorStorage:
                     conn.execute("ALTER TABLE sources ADD COLUMN slowdown INTEGER")
                 except sqlite3.OperationalError:
                     pass
-        
+
         # Add is_new if it doesn't exist
         try:
             conn.execute("SELECT is_new FROM sources LIMIT 1").fetchone()
         except sqlite3.OperationalError:
             try:
                 conn.execute("ALTER TABLE sources ADD COLUMN is_new INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+
+    def _migrate_triggered_items(self, conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute("SELECT triggered_at FROM triggered_items LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            try:
+                conn.execute("ALTER TABLE triggered_items ADD COLUMN triggered_at TEXT")
             except sqlite3.OperationalError:
                 pass
 
@@ -317,6 +338,29 @@ class MonitorStorage:
                 "SELECT COUNT(*) FROM seen_items WHERE source_id = ?", (source_id,)
             ).fetchone()
             return row[0] if row else 0
+
+    def add_triggered_item(self, rule_id: str, item_id: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO triggered_items (rule_id, item_id, triggered_at)
+                   VALUES (?, ?, ?)""",
+                (rule_id, item_id, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def get_triggered_item_ids(self, rule_id: str) -> set[str]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT item_id FROM triggered_items WHERE rule_id = ?", (rule_id,)
+            ).fetchall()
+            return {row["item_id"] for row in rows}
+
+    def clean_old_triggered_items(self, rule_id: str, older_than: datetime) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM triggered_items WHERE rule_id = ? AND triggered_at < ?",
+                (rule_id, older_than.isoformat()),
+            )
+            return cur.rowcount
 
     def get_seen_items_for_source(self, source_id: str) -> list[dict]:
         with self._get_conn() as conn:
@@ -535,9 +579,7 @@ class MonitorStorage:
     def get_trigger_log(self, log_id: str) -> TriggerLog | None:
         """Get a single trigger log by ID."""
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM trigger_logs WHERE id = ?", (log_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM trigger_logs WHERE id = ?", (log_id,)).fetchone()
             return self._row_to_trigger_log(row) if row else None
 
     def get_rule_mismatch_log(self, log_id: str) -> RuleMismatchLog | None:
