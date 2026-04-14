@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
 import click
@@ -13,6 +15,7 @@ from common.youtube.channel_list import (
     save_channel_list_file,
     ChannelListFile,
     create_channel_entry,
+    slugify,
 )
 from core.config import load_config
 from core.engine import build_youtube_client
@@ -54,12 +57,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("  add    Add a channel to the list")
             click.echo("  list   List all channels")
             click.echo("  remove Remove a channel from the list")
+            click.echo("  edit   Edit the channel list file in editor")
             click.echo("")
             click.echo("Examples:")
             click.echo("  youtube channels add                    # Interactive wizard")
             click.echo("  youtube channels list                   # List all channels")
             click.echo("  youtube channels list -f json           # JSON output")
             click.echo("  youtube channels remove UC...           # Remove by channel ID")
+            click.echo("  youtube channels edit                   # Edit channel list file")
 
     # ─── ADD ────────────────────────────────────────────────────────────
 
@@ -103,36 +108,54 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             selected = results[idx]
             channel_id = selected["channel_id"]
-            name = selected["title"]
+            title = selected["title"]
+            subscribers = selected.get("subscriber_count", 0)
+            description = selected.get("description", "")
         else:
-            # Fetch name if not provided
+            # Fetch full details if not provided
             if not name:
                 try:
                     config = load_config()
                     client = build_youtube_client(config)
                     info = client.get_channel_info(channel_id)
                     if info:
-                        name = info.title
+                        title = info.title
+                        subscribers = info.subscriber_count
+                        description = info.description
                     else:
-                        name = channel_id
+                        title = channel_id
+                        subscribers = 0
+                        description = ""
                 except Exception:
-                    name = channel_id
+                    title = channel_id
+                    subscribers = 0
+                    description = ""
+            else:
+                title = name
+                subscribers = 0
+                description = ""
 
         # Check if channel already exists
-        if channel_list.get_channel_by_name(name):
-            raise click.ClickException(f"Channel '{name}' already exists in the list.")
+        channel_name = slugify(title)
+        if channel_list.get_channel_by_name(channel_name):
+            raise click.ClickException(f"Channel '{title}' already exists in the list.")
 
         # Create channel entry
         channel_entry = create_channel_entry(
             channel_id=channel_id,
-            name=name,
+            title=title,
+            name=channel_name,
+            subscribers=subscribers,
+            description=description,
         )
 
         # Add to global channels list
         channel_list.channels.append(channel_entry)
         _save_channel_list(channel_list)
 
-        click.echo(f"\nAdded '{name}' ({channel_id}) to channel list.")
+        click.echo(f"\nAdded '{title}' ({channel_id}) to channel list.")
+        click.echo(f"  Name (slugified): {channel_name}")
+        click.echo(f"  Subscribers: {subscribers:,}")
 
     # ─── LIST ───────────────────────────────────────────────────────────
 
@@ -154,9 +177,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             for ch in channels:
                 subs = f" ({ch.subscribers:,} subscribers)" if ch.subscribers > 0 else ""
-                click.echo(f"  {ch.name}{subs}")
+                click.echo(f"  {ch.title}{subs}")
+                click.echo(f"    Name (slugified): {ch.name}")
                 click.echo(f"    ID: {ch.id}")
                 click.echo(f"    Added: {ch.date_added}")
+                
+                if ch.description:
+                    desc = ch.description[:100] + "..." if len(ch.description) > 100 else ch.description
+                    click.echo(f"    Description: {desc}")
                 
                 # Show which thematics this channel belongs to
                 thematics = [
@@ -213,6 +241,44 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         _save_channel_list(channel_list)
         click.echo(f"Removed '{channel_entry.name}' ({channel_id}) from channel list.")
+
+    # ─── EDIT ─────────────────────────────────────────────────────────
+
+    @channels_group.command("edit")
+    @click.option("--editor", help="Editor to use (default: $EDITOR or nano)")
+    def edit_cmd(editor: str):
+        """Edit the channel list file in your preferred editor."""
+        from common.core.config import load_common_config
+
+        channel_list_path = Path(_get_channel_list_path())
+
+        # Determine editor
+        if not editor:
+            common_cfg = load_common_config()
+            editor = common_cfg.get("default_editor") or os.environ.get("EDITOR", "nano")
+
+        # Ensure file exists
+        if not channel_list_path.exists():
+            # Create empty file with structure
+            from common.youtube.channel_list import ChannelListFile, save_channel_list_file
+            save_channel_list_file(channel_list_path, ChannelListFile())
+
+        click.echo(f"Opening channel list file in {editor}...")
+        click.echo(f"  File: {channel_list_path}")
+        click.echo("")
+        
+        subprocess.run([editor, str(channel_list_path)])
+
+        # Validate after editing
+        try:
+            channel_list = _load_channel_list()
+            click.echo(f"")
+            click.echo(f"Channel list file saved successfully.")
+            click.echo(f"  Channels: {len(channel_list.channels)}")
+            click.echo(f"  Thematics: {', '.join(channel_list.list_thematic_names()) or 'none'}")
+        except Exception as e:
+            click.echo(f"")
+            click.echo(f"Warning: Failed to validate edited file: {e}", err=True)
 
     return CommandManifest(
         name="channels",

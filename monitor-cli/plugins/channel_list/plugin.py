@@ -78,7 +78,8 @@ class ChannelListPlugin(SourcePlugin):
             
             channels.append({
                 "id": ch_entry.id,
-                "title": ch_entry.name,
+                "title": ch_entry.title,
+                "name": ch_entry.name,
             })
 
         if not channels:

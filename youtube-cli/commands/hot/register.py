@@ -20,6 +20,7 @@ from common.youtube.channel_list import (
     ThematicList,
     ChannelEntry,
     create_channel_entry,
+    slugify,
 )
 from core.config import load_config
 from core.engine import build_youtube_client
@@ -153,7 +154,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             selected = results[idx]
             channel_id = selected["channel_id"]
-            name = selected["title"]
+            title = selected["title"]
+            subscribers = selected.get("subscriber_count", 0)
+            description = selected.get("description", "")
         else:
             # Fetch name if not provided
             if not name:
@@ -162,27 +165,42 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     client = build_youtube_client(config)
                     info = client.get_channel_info(channel_id)
                     if info:
-                        name = info.title
+                        title = info.title
+                        subscribers = info.subscriber_count
+                        description = info.description
                     else:
-                        name = channel_id
+                        title = channel_id
+                        subscribers = 0
+                        description = ""
                 except Exception:
-                    name = channel_id
+                    title = channel_id
+                    subscribers = 0
+                    description = ""
+            else:
+                title = name
+                subscribers = 0
+                description = ""
 
         # Create channel entry if not exists
-        channel_entry = channel_list.get_channel_by_name(name)
+        channel_name = slugify(title)
+        channel_entry = channel_list.get_channel_by_name(channel_name)
         if channel_entry is None:
             channel_entry = create_channel_entry(
                 channel_id=channel_id,
-                name=name,
+                title=title,
+                name=channel_name,
+                subscribers=subscribers,
+                description=description,
             )
             # Add to global channels list
             channel_list.channels.append(channel_entry)
 
         # Add to thematic (just the name)
-        channel_list.add_channel_to_thematic(name, theme)
+        channel_list.add_channel_to_thematic(channel_name, theme)
         _save_channel_list(channel_list)
 
-        click.echo(f"\nAdded '{name}' ({channel_id}) to theme '{theme}'.")
+        click.echo(f"\nAdded '{title}' ({channel_id}) to theme '{theme}'.")
+        click.echo(f"  Name (slugified): {channel_name}")
 
     # ─── LIST ─────────────────────────────────────────────────────────────
 
@@ -220,6 +238,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "name": ch_entry.name,
                     "title": ch_entry.title,
                     "subscribers": ch_entry.subscribers,
+                    "description": ch_entry.description,
                     "date_added": ch_entry.date_added,
                 }
                 results.append(entry)
@@ -236,7 +255,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     click.echo(f"\n=== {current_theme} ===")
 
                 subs = f" ({entry['subscribers']:,} subscribers)" if entry["subscribers"] > 0 else ""
-                click.echo(f"  {entry['name']}{subs} ({entry['channel_id']})")
+                click.echo(f"  {entry['title']}{subs} ({entry['channel_id']})")
+                click.echo(f"    Name: {entry['name']}")
+                if entry.get("description"):
+                    desc = entry["description"][:100] + "..." if len(entry["description"]) > 100 else entry["description"]
+                    click.echo(f"    Description: {desc}")
                 click.echo(f"    Added: {entry['date_added']}")
             click.echo("")
         else:
@@ -275,7 +298,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.argument("channel_name")
     @click.option("--theme", "-t", default=None, help="Remove from specific theme only")
     def delete_cmd(channel_name: str, theme: str):
-        """Remove a channel from a thematic list."""
+        """Remove a channel from a thematic list.
+        
+        CHANNEL_NAME: The slugified channel name.
+        """
         channel_list = _load_channel_list()
         thematics = channel_list.thematics
 
@@ -312,7 +338,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--target", required=True, help="Target theme")
     @click.option("--duplicate", is_flag=True, help="Copy instead of move (keep in source)")
     def assign_cmd(channel_name: str, theme: str, target: str, duplicate: bool):
-        """Move or duplicate a channel to another thematic list."""
+        """Move or duplicate a channel to another thematic list.
+        
+        CHANNEL_NAME: The slugified channel name.
+        """
         channel_list = _load_channel_list()
 
         source_thematic = channel_list.get_thematic(theme)
@@ -348,7 +377,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         _save_channel_list(channel_list)
         click.echo(
-            f"{ch_entry.name} ({ch_entry.id}) {action} from '{theme}' to '{target}'."
+            f"{ch_entry.title} ({ch_entry.id}) {action} from '{theme}' to '{target}'."
         )
 
     # ─── FETCH-COMMENT ────────────────────────────────────────────────────
@@ -388,7 +417,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             last_fetch = ch_entry.metadata.get("last_fetch")
 
             if debug:
-                click.echo(f"\n[DEBUG] Processing channel: {ch_name} ({ch_id})", err=True)
+                click.echo(f"\n[DEBUG] Processing channel: {ch_entry.title} ({ch_id})", err=True)
                 click.echo(f"[DEBUG] Last fetch: {last_fetch}", err=True)
 
             # Get last video
@@ -447,11 +476,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 comment_dict = comment.to_dict()
                 comment_dict["source_video_id"] = video_id
                 comment_dict["source_channel_id"] = ch_id
-                comment_dict["source_channel_name"] = ch_name
+                comment_dict["source_channel_name"] = ch_entry.title
                 new_comments.append(comment_dict)
 
             if debug:
-                click.echo(f"[DEBUG] Found {len(new_comments)} new comments from {ch_name}", err=True)
+                click.echo(f"[DEBUG] Found {len(new_comments)} new comments from {ch_entry.title}", err=True)
 
             all_comments.extend(new_comments)
 
@@ -508,7 +537,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             ch_id = ch_entry.id
 
             if debug:
-                click.echo(f"\n[DEBUG] Processing channel: {ch_name} ({ch_id})", err=True)
+                click.echo(f"\n[DEBUG] Processing channel: {ch_entry.title} ({ch_id})", err=True)
 
             # Get last video
             try:
@@ -525,7 +554,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             last_video = videos[0]
             video_data = {
                 "channel_id": ch_id,
-                "channel_name": ch_name,
+                "channel_name": ch_entry.title,
                 "video_id": last_video.video_id,
                 "title": last_video.title,
                 "url": f"https://youtube.com/watch?v={last_video.video_id}",

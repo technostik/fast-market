@@ -284,7 +284,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     ch_entry = channel_list.get_channel_by_name(ch_name)
                     if ch_entry:
                         subs = f" ({ch_entry.subscribers:,} subscribers)" if ch_entry.subscribers > 0 else ""
-                        click.echo(f"  {ch_entry.name}{subs}")
+                        click.echo(f"  {ch_entry.title}{subs}")
+                        click.echo(f"    Name: {ch_entry.name}")
                         click.echo(f"    ID: {ch_entry.id}")
                     else:
                         click.echo(f"  {ch_name} (not found in channel list)")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -10,20 +11,36 @@ from pydantic import BaseModel, Field
 from common.core.yaml_utils import dump_yaml
 
 
+def _slugify(text: str) -> str:
+    """Convert text to lowercase, no spaces, no special chars."""
+    text = text.lower().strip()
+    text = re.sub(r'[^a-z0-9]+', '-', text)
+    text = text.strip('-')
+    return text
+
+
+def slugify(text: str) -> str:
+    """Public slugify function."""
+    return _slugify(text)
+
+
 class ChannelEntry(BaseModel):
     """A single channel entry in the channel list."""
 
     name: str
-    """Display name for the channel."""
+    """Slugified name (lowercase, no spaces, no special chars). Used as key in thematics."""
 
     title: str = ""
-    """Channel title (from YouTube API)."""
+    """Channel title (from YouTube API, display name)."""
 
     id: str
     """YouTube channel ID (UC...)."""
 
     subscribers: int = 0
     """Subscriber count (if known)."""
+
+    description: str = ""
+    """Channel description."""
 
     date_added: str = ""
     """ISO 8601 date when channel was added to the list."""
@@ -220,15 +237,23 @@ def save_channel_list_file(path: Path, channel_list: ChannelListFile) -> None:
 
 def create_channel_entry(
     channel_id: str,
-    name: str,
-    title: str = "",
+    title: str,
+    name: str = "",
     subscribers: int = 0,
+    description: str = "",
 ) -> ChannelEntry:
-    """Create a new channel entry with current date."""
+    """Create a new channel entry with current date.
+    
+    If name is not provided, it will be slugified from title.
+    """
+    if not name:
+        name = _slugify(title)
+    
     return ChannelEntry(
         name=name,
         title=title,
         id=channel_id,
         subscribers=subscribers,
+        description=description,
         date_added=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     )

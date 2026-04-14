@@ -52,8 +52,11 @@ def search_channels(query: str, max_results: int = 10) -> list[dict]:
             "title": snippet.get("title", "Unknown"),
             "custom_url": snippet.get("customUrl"),
             "subscriber_count": int(stats.get("subscriberCount", 0)),
-            "description": snippet.get("description", "")[:100],
+            "description": snippet.get("description", ""),
         })
+
+    # Sort by subscriber count (most first)
+    results.sort(key=lambda x: x["subscriber_count"], reverse=True)
 
     return results
 
