@@ -56,7 +56,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
           list-themes  List all thematic lists
           delete       Remove a channel from a list
           assign       Move or duplicate a channel to another theme
-          fetch        Fetch new comments from last videos in a thematic list
+          fetch-comment  Fetch new comments from last videos in a thematic list
+          fetch-video    Fetch the last video from a thematic list
         """
         if ctx.invoked_subcommand is None:
             click.echo("Usage: youtube hot <command>")
@@ -67,12 +68,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("  list-themes  List all thematic lists")
             click.echo("  delete       Remove a channel from a list")
             click.echo("  assign       Move or duplicate a channel to another theme")
-            click.echo("  fetch        Fetch new comments from last videos")
+            click.echo("  fetch-comment  Fetch new comments from last videos")
+            click.echo("  fetch-video    Fetch the last video from a theme")
             click.echo("")
             click.echo("Examples:")
             click.echo("  youtube hot add                    # Interactive wizard")
             click.echo("  youtube hot list tech              # List 'tech' channels")
-            click.echo("  youtube hot fetch tech -n 5        # Fetch 5 comments per channel")
+            click.echo("  youtube hot fetch-comment tech -n 5  # Fetch 5 comments per channel")
+            click.echo("  youtube hot fetch-video tech         # Get last video")
             click.echo("  youtube hot assign UC... --theme tech --target ai --duplicate")
 
     # ─── ADD (wizard) ─────────────────────────────────────────────────────
@@ -338,15 +341,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
             f"{ch_info['name']} ({channel_id}) {action} from '{theme}' to '{target}'."
         )
 
-    # ─── FETCH ────────────────────────────────────────────────────────────
+    # ─── FETCH-COMMENT ────────────────────────────────────────────────────
 
-    @hot_group.command("fetch")
+    @hot_group.command("fetch-comment")
     @click.argument("theme", required=True)
     @click.option("--max-comments", "-n", type=int, default=3, help="Max comments per video (default: 3)")
     @click.option("--format", "-f", "fmt", type=click.Choice(["json", "yaml", "text"]), default="text")
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.option("--debug", is_flag=True, help="Show debug information")
-    def fetch_cmd(theme: str, max_comments: int, fmt: str, output: str, debug: bool):
+    def fetch_comment_cmd(theme: str, max_comments: int, fmt: str, output: str, debug: bool):
         """Fetch new comments from the last video of each channel in a theme."""
         state = _load_state()
         themes = state.get("lists", {})
@@ -464,6 +467,74 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Saved {len(all_comments)} comments to {output}")
         else:
             out(all_comments, fmt)
+
+    # ─── FETCH-VIDEO ──────────────────────────────────────────────────────
+
+    @hot_group.command("fetch-video")
+    @click.argument("theme", required=True)
+    @click.option("--format", "-f", "fmt", type=click.Choice(["json", "yaml", "text"]), default="text")
+    @click.option("--output", "-o", type=click.Path(), help="Save to file")
+    @click.option("--debug", is_flag=True, help="Show debug information")
+    def fetch_video_cmd(theme: str, fmt: str, output: str, debug: bool):
+        """Fetch the last video from each channel in a theme."""
+        state = _load_state()
+        themes = state.get("lists", {})
+
+        if theme not in themes:
+            raise click.ClickException(f"Theme '{theme}' not found.")
+
+        channels = themes[theme].get("channels", {})
+        if not channels:
+            raise click.ClickException(f"No channels in theme '{theme}'.")
+
+        config = load_config()
+        client = build_youtube_client(config)
+
+        all_videos = []
+
+        for ch_id, ch_info in channels.items():
+            ch_name = ch_info.get("name", ch_id)
+
+            if debug:
+                click.echo(f"\n[DEBUG] Processing channel: {ch_name} ({ch_id})", err=True)
+
+            # Get last video
+            try:
+                videos = client.get_channel_videos(ch_id, max_results=1)
+            except Exception as e:
+                click.echo(f"Error fetching videos for {ch_name}: {e}", err=True)
+                continue
+
+            if not videos:
+                if debug:
+                    click.echo(f"[DEBUG] No videos found for {ch_name}", err=True)
+                continue
+
+            last_video = videos[0]
+            video_data = {
+                "channel_id": ch_id,
+                "channel_name": ch_name,
+                "video_id": last_video.video_id,
+                "title": last_video.title,
+                "url": f"https://youtube.com/watch?v={last_video.video_id}",
+                "published_at": last_video.published_at if hasattr(last_video, "published_at") else None,
+            }
+
+            if debug:
+                click.echo(f"[DEBUG] Last video: {video_data['title']} ({video_data['video_id']})", err=True)
+
+            all_videos.append(video_data)
+
+        # Output
+        if output:
+            Path(output).write_text(
+                json.dumps(all_videos, ensure_ascii=False, default=str)
+                if fmt == "json"
+                else dump_yaml(all_videos)
+            )
+            click.echo(f"Saved {len(all_videos)} videos to {output}")
+        else:
+            out(all_videos, fmt)
 
     return CommandManifest(
         name="hot",
