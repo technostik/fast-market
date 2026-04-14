@@ -115,6 +115,7 @@ class YouTubeSearchPlugin(SourcePlugin):
         last_item_id: str | None = None,
         limit: int = 50,
         force: bool = False,
+        seen_item_ids: set[str] | None = None,
     ) -> list[ItemMetadata]:
         if not self._should_fetch(force):
             return []

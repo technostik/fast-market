@@ -24,7 +24,7 @@ class ChannelListPlugin(SourcePlugin):
         super().__init__(config, source_config)
         self.source_id = source_config.get("id", "")
         self.use_external_file = "file" in self.metadata or "thematic" in self.metadata
-        
+
         if self.use_external_file:
             self.channels: list[dict[str, str]] = self._load_from_external_file()
         else:
@@ -75,12 +75,14 @@ class ChannelListPlugin(SourcePlugin):
             ch_entry = channel_list.get_channel_by_name(ch_name)
             if ch_entry is None:
                 continue  # Skip if channel was removed from global list
-            
-            channels.append({
-                "id": ch_entry.id,
-                "title": ch_entry.title,
-                "name": ch_entry.name,
-            })
+
+            channels.append(
+                {
+                    "id": ch_entry.id,
+                    "title": ch_entry.title,
+                    "name": ch_entry.name,
+                }
+            )
 
         if not channels:
             raise ValueError(f"No channels in thematic '{thematic_name}'")
@@ -108,9 +110,7 @@ class ChannelListPlugin(SourcePlugin):
             try:
                 raw = yaml.safe_load(raw)
             except Exception:
-                raise ValueError(
-                    "metadata.channels must be a list of {id, title} objects"
-                )
+                raise ValueError("metadata.channels must be a list of {id, title} objects")
 
         if not isinstance(raw, list):
             raise ValueError("metadata.channels must be a list")
@@ -150,6 +150,7 @@ class ChannelListPlugin(SourcePlugin):
         limit: int = 50,
         last_fetched_at: Any | None = None,
         force: bool = False,
+        seen_item_ids: set[str] | None = None,
     ) -> list[ItemMetadata]:
         """Fetch new videos from all channels in the list.
 
@@ -158,6 +159,9 @@ class ChannelListPlugin(SourcePlugin):
 
         Each channel maintains its own last_item_id in source metadata
         to properly track fetch progress per channel.
+
+        Args:
+            seen_item_ids: Only call yt-dlp for details on items NOT in this set.
         """
         if not self._should_fetch(force):
             return []
@@ -171,7 +175,9 @@ class ChannelListPlugin(SourcePlugin):
         # Get per-channel last_item_ids from metadata
         channel_last_ids: dict[str, str] = self.metadata.get("last_item_ids_by_channel", {})
 
-        for channel in self.channels:
+        print(f"  → channel_list: {len(self.channels)} channels, {per_channel_limit} videos each")
+
+        for i, channel in enumerate(self.channels):
             channel_id = channel["id"]
             # Use channel-specific last_item_id instead of the source-level one
             channel_last_id = channel_last_ids.get(channel_id)
@@ -186,11 +192,14 @@ class ChannelListPlugin(SourcePlugin):
             }
             yt_plugin = YouTubePlugin(self.config, yt_source_config)
 
+            print(f"    [{i + 1}/{len(self.channels)}] channel={channel['title'][:20]}")
+
             try:
                 items = await yt_plugin.fetch_new_items(
                     last_item_id=channel_last_id,
                     limit=per_channel_limit,
                     force=force,
+                    seen_item_ids=seen_item_ids,
                 )
                 # Override source_id and add channel metadata to items
                 for item in items:

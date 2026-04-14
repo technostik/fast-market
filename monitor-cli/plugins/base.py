@@ -95,7 +95,19 @@ class SourcePlugin(ABC):
         limit: int = 50,
         last_fetched_at: datetime | None = None,
         force: bool = False,
+        seen_item_ids: set[str] | None = None,
     ) -> list[ItemMetadata]:
+        """Fetch items from the source.
+
+        Args:
+            last_item_id: Only return items newer than this ID.
+            limit: Maximum items to return.
+            last_fetched_at: Deprecated, use last_item_id.
+            force: Bypass cooldown.
+            seen_item_ids: Only call expensive APIs (yt-dlp) for details on items
+                        that are NOT in this set. Items in seen_item_ids use fast
+                        basic data only (RSS, cache, etc).
+        """
         pass
 
     @abstractmethod

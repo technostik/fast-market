@@ -113,13 +113,13 @@ class YouTubePlugin(SourcePlugin):
                         video_id = entry.get("id")
                         if not video_id:
                             continue
-                        
+
                         # Skip items until we find last_item_id, then collect the rest
                         if not found_last:
                             if video_id == last_item_id:
                                 found_last = True
                             continue
-                        
+
                         upload_date = None
                         if entry.get("upload_date"):
                             try:
@@ -323,8 +323,14 @@ class YouTubePlugin(SourcePlugin):
         last_item_id: str | None = None,
         limit: int = 50,
         force: bool = False,
+        seen_item_ids: set[str] | None = None,
     ) -> list[ItemMetadata]:
-        """Fetch new videos from YouTube channel with RSS fallback to yt-dlp"""
+        """Fetch new videos from YouTube channel with RSS fallback to yt-dlp
+
+        Args:
+            seen_item_ids: Only call yt-dlp for details on items NOT in this set.
+                       Items in seen_item_ids use basic RSS data (faster, avoids bot detection).
+        """
         if not self._should_fetch(force):
             return []
 
@@ -358,8 +364,17 @@ class YouTubePlugin(SourcePlugin):
                 if last_item_id and parsed["id"] == last_item_id:
                     break
 
-                # Get detailed info with yt-dlp
-                details = await self._get_video_details_async(parsed["id"])
+                video_id = parsed["id"]
+                is_new = seen_item_ids is None or video_id not in seen_item_ids
+
+                if is_new:
+                    details = await self._get_video_details_async(video_id)
+                    fetch_method = "rss+yt-dlp"
+                    print(f"  🎬 {video_id}: yt-dlp details (is_new=True)")
+                else:
+                    details = {}
+                    fetch_method = "rss-only"
+                    print(f"  📄 {video_id}: rss-only (is_new=False)")
 
                 extra = {
                     "channel_id": self.channel_id,
@@ -374,10 +389,14 @@ class YouTubePlugin(SourcePlugin):
                     "categories": details.get("categories", []),
                     "age_limit": details.get("age_limit", 0),
                     "availability": details.get("availability", "public"),
-                    "fetch_method": "rss+yt-dlp",
+                    "fetch_method": fetch_method,
                 }
 
-                published_at = details.get("upload_date", parsed["published"])
+                published_at = (
+                    details.get("upload_date", parsed["published"])
+                    if is_new
+                    else parsed["published"]
+                )
                 if extra["is_short"]:
                     content_type = "short"
                 elif extra["duration_seconds"] > 3600:
@@ -389,7 +408,7 @@ class YouTubePlugin(SourcePlugin):
 
                 items.append(
                     ItemMetadata(
-                        id=parsed["id"],
+                        id=video_id,
                         title=parsed["title"],
                         url=parsed["url"],
                         published_at=published_at,
@@ -400,12 +419,12 @@ class YouTubePlugin(SourcePlugin):
                     )
                 )
 
-                await asyncio.sleep(0.1)
+                if is_new:
+                    await asyncio.sleep(0.1)
 
             return items
 
         except Exception as e:
-            # Any other error, try yt-dlp as fallback
             print(f"⚠️ RSS fetch failed for {self.channel_id}: {e}, falling back to yt-dlp")
             return await self._fetch_via_yt_dlp(last_item_id, limit)
 
