@@ -142,20 +142,26 @@ def save_youtube_config(config: dict) -> None:
 def load_youtube_channel_list_config() -> dict:
     """Load the channel list file path from youtube config.
 
-    Returns dict with 'channel_list_path' key (defaults to channels.yaml if not set).
+    Returns dict with 'channel_list_path' and 'default_thematic' keys.
     """
     yt_cfg = load_youtube_config()
     return {
         "channel_list_path": yt_cfg.get(
             "channel_list_path", str(get_youtube_channel_list_path())
-        )
+        ),
+        "default_thematic": yt_cfg.get("default_thematic", ""),
     }
 
 
-def save_youtube_channel_list_config(channel_list_path: str) -> None:
-    """Save the channel list file path to youtube config."""
+def save_youtube_channel_list_config(
+    channel_list_path: str = "", default_thematic: str = ""
+) -> None:
+    """Save the channel list file path and default thematic to youtube config."""
     yt_cfg = load_youtube_config()
-    yt_cfg["channel_list_path"] = channel_list_path
+    if channel_list_path:
+        yt_cfg["channel_list_path"] = channel_list_path
+    if default_thematic:
+        yt_cfg["default_thematic"] = default_thematic
     save_youtube_config(yt_cfg)
 
 

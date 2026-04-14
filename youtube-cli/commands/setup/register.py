@@ -172,6 +172,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         click.echo("")
 
+        # default_thematic
+        current_default_thematic = existing.get("default_thematic", "")
+        click.echo("youtube.default_thematic (default thematic for hot commands)")
+        click.echo(f"  current: {current_default_thematic or '(not set)'}")
+        default_thematic = _ask("  default_thematic", default=current_default_thematic)
+        if default_thematic and default_thematic != current_default_thematic:
+            click.echo(f"  → {default_thematic}")
+        elif not default_thematic:
+            click.echo("  → unchanged (not set)")
+        else:
+            click.echo("  → unchanged")
+
+        click.echo("")
+
         # Save
         new_yt_cfg = {}
         if channel_id:
@@ -181,6 +195,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         new_yt_cfg["quota_limit"] = quota_limit
         if channel_list_path:
             new_yt_cfg["channel_list_path"] = channel_list_path
+        if default_thematic:
+            new_yt_cfg["default_thematic"] = default_thematic
 
         save_youtube_config(new_yt_cfg)
         click.echo(f"Saved shared youtube config to {yt_cfg_path}")
@@ -241,13 +257,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @setup_group.group("channel-list", invoke_without_command=True)
     @click.pass_context
     def channel_list_group(ctx):
-        """Manage the channel list file."""
+        """Manage the channel list file.
+
+        Subcommands:
+          show           Display channel list file
+          locate         Show channel list file path
+          set-default    Set the default thematic for hot commands
+        """
         if ctx.invoked_subcommand is None:
             click.echo("Usage: youtube setup channel-list <command>")
             click.echo("")
             click.echo("Commands:")
             click.echo("  show           Display channel list file")
             click.echo("  locate         Show channel list file path")
+            click.echo("  set-default    Set default thematic for hot commands")
             click.echo("")
 
     @channel_list_group.command("show")
@@ -310,6 +333,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("  Status: exists")
         else:
             click.echo("  Status: does not exist")
+
+    @channel_list_group.command("set-default")
+    @click.argument("thematic")
+    def channel_list_set_default_cmd(thematic: str):
+        """Set the default thematic for hot commands."""
+        from common.core.config import save_youtube_channel_list_config
+        
+        save_youtube_channel_list_config(default_thematic=thematic)
+        click.echo(f"Default thematic set to: {thematic}")
+        click.echo("")
+        click.echo("Now you can run:")
+        click.echo("  youtube hot fetch-comment   # without specifying a theme")
+        click.echo("  youtube hot fetch-video     # without specifying a theme")
 
     return CommandManifest(
         name="setup",

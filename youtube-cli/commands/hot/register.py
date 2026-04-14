@@ -10,7 +10,7 @@ import yaml
 from commands.base import CommandManifest
 from commands.common.channel_search import search_channels, format_channel_entry, select_channel_interactive
 from common.cli.helpers import out
-from common.core.config import load_youtube_config
+from common.core.config import load_youtube_config, load_youtube_channel_list_config
 from common.core.paths import get_youtube_channel_list_path
 from common.core.yaml_utils import dump_yaml
 from common.youtube.channel_list import (
@@ -383,13 +383,28 @@ def register(plugin_manifests: dict) -> CommandManifest:
     # ─── FETCH-COMMENT ────────────────────────────────────────────────────
 
     @hot_group.command("fetch-comment")
-    @click.argument("theme", required=True)
+    @click.argument("theme", required=False)
     @click.option("--max-comments", "-n", type=int, default=3, help="Max comments per video (default: 3)")
     @click.option("--format", "-f", "fmt", type=click.Choice(["json", "yaml", "text"]), default="text")
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.option("--debug", is_flag=True, help="Show debug information")
     def fetch_comment_cmd(theme: str, max_comments: int, fmt: str, output: str, debug: bool):
-        """Fetch new comments from the last video of each channel in a theme."""
+        """Fetch new comments from the last video of each channel in a theme.
+
+        THEME: Optional thematic name. If not provided, uses default_thematic from config.
+        """
+        # Resolve theme from argument or config
+        if not theme:
+            yt_channel_list_cfg = load_youtube_channel_list_config()
+            theme = yt_channel_list_cfg.get("default_thematic", "")
+            if not theme:
+                raise click.ClickException(
+                    "No thematic list specified. "
+                    "Provide THEME argument or set 'default_thematic' in youtube config."
+                )
+            if debug:
+                click.echo(f"[DEBUG] Using default thematic from config: {theme}", err=True)
+
         channel_list = _load_channel_list()
         thematic = channel_list.get_thematic(theme)
 
@@ -505,12 +520,27 @@ def register(plugin_manifests: dict) -> CommandManifest:
     # ─── FETCH-VIDEO ──────────────────────────────────────────────────────
 
     @hot_group.command("fetch-video")
-    @click.argument("theme", required=True)
+    @click.argument("theme", required=False)
     @click.option("--format", "-f", "fmt", type=click.Choice(["json", "yaml", "text"]), default="text")
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.option("--debug", is_flag=True, help="Show debug information")
     def fetch_video_cmd(theme: str, fmt: str, output: str, debug: bool):
-        """Fetch the last video from each channel in a theme."""
+        """Fetch the last video from each channel in a theme.
+
+        THEME: Optional thematic name. If not provided, uses default_thematic from config.
+        """
+        # Resolve theme from argument or config
+        if not theme:
+            yt_channel_list_cfg = load_youtube_channel_list_config()
+            theme = yt_channel_list_cfg.get("default_thematic", "")
+            if not theme:
+                raise click.ClickException(
+                    "No thematic list specified. "
+                    "Provide THEME argument or set 'default_thematic' in youtube config."
+                )
+            if debug:
+                click.echo(f"[DEBUG] Using default thematic from config: {theme}", err=True)
+
         channel_list = _load_channel_list()
         thematic = channel_list.get_thematic(theme)
 
@@ -557,6 +587,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "channel_name": ch_entry.title,
                 "video_id": last_video.video_id,
                 "title": last_video.title,
+                "description": last_video.description if hasattr(last_video, "description") else "",
                 "url": f"https://youtube.com/watch?v={last_video.video_id}",
                 "published_at": last_video.published_at if hasattr(last_video, "published_at") else None,
             }
