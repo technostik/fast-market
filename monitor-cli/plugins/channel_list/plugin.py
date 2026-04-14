@@ -162,7 +162,12 @@ class ChannelListPlugin(SourcePlugin):
 
         Args:
             seen_item_ids: Only call yt-dlp for details on items NOT in this set.
+
+        Returns:
+            List of ItemMetadata. Total RSS raw count is stored in
+            self._rss_raw_count.
         """
+        self._rss_raw_count = 0
         if not self._should_fetch(force):
             return []
 
@@ -201,6 +206,16 @@ class ChannelListPlugin(SourcePlugin):
                     force=force,
                     seen_item_ids=seen_item_ids,
                 )
+                # rss_raw is the total we asked for, not what was actually returned
+                self._rss_raw_count += per_channel_limit
+                if channel_last_id:
+                    print(
+                        f"    [{i + 1}/{len(self.channels)}] channel={channel['title'][:20]} returned={len(items)} (last_id={channel_last_id[:12]}...)"
+                    )
+                else:
+                    print(
+                        f"    [{i + 1}/{len(self.channels)}] channel={channel['title'][:20]} returned={len(items)} (no last_id)"
+                    )
                 # Override source_id and add channel metadata to items
                 for item in items:
                     item.source_id = self.source_id

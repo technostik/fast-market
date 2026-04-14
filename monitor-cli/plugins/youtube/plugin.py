@@ -330,9 +330,15 @@ class YouTubePlugin(SourcePlugin):
         Args:
             seen_item_ids: Only call yt-dlp for details on items NOT in this set.
                        Items in seen_item_ids use basic RSS data (faster, avoids bot detection).
+
+        Returns:
+            List of ItemMetadata. The number of RSS entries processed is stored in
+            self._rss_raw_count for reporting purposes.
         """
         if not self._should_fetch(force):
             return []
+
+        self._rss_raw_count = 0
 
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
 
@@ -361,6 +367,8 @@ class YouTubePlugin(SourcePlugin):
                 if not parsed["id"]:
                     continue
 
+                self._rss_raw_count += 1
+
                 if last_item_id and parsed["id"] == last_item_id:
                     break
 
@@ -380,6 +388,13 @@ class YouTubePlugin(SourcePlugin):
                     details = {}
                     fetch_method = "rss-only"
                     print(f"  📄 {video_id}: rss-only (is_new=False)")
+
+            # If we stopped due to last_item_id, we still fetched up to that point
+            # But if we processed ALL entries without hitting last_item_id,
+            # rss_raw_count is correct (all entries)
+            if not (last_item_id and self._rss_raw_count > 0):
+                # We didn't break early, count is already correct
+                pass
 
                 extra = {
                     "channel_id": self.channel_id,

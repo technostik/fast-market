@@ -214,15 +214,18 @@ def _fetch_items_for_source(source, plugin_cls, config, limit, force, cron, stor
         return {"error": str(e), "items": [], "plugin": plugin_instance}
 
     fetch_time = time.time() - fetch_start
+    raw_count = getattr(plugin_instance, "_rss_raw_count", len(items))
     if not cron:
-        click.echo(f"  → fetched {len(items)} items in {fetch_time:.1f}s", err=True)
+        click.echo(
+            f"  → fetched {len(items)} items in {fetch_time:.1f}s (rss_raw={raw_count})", err=True
+        )
 
     return {
         "items": items,
         "plugin": plugin_instance,
         "plugin_metadata": plugin_instance.metadata,
         "cooldown": cooldown_info,
-        "raw_fetched_count": len(items),
+        "raw_fetched_count": raw_count,
         "fetch_time": fetch_time,
     }
 
@@ -599,26 +602,21 @@ def _display_source_summary(
 
     is_new_note = " (is_new mode)" if is_new else ""
 
-    if fetched_count == 0:
-        checked_note = f", {source.last_item_id} known" if source.last_item_id else ""
-        click.echo(
-            f"  → source='{source.id}' checked={fetched_count}, new=0{checked_note}{is_new_note}",
-            err=True,
-        )
-    else:
-        detail_parts = []
-        if seen_filtered_count > 0:
-            detail_parts.append(f"seen={seen_filtered_count}")
-        if lastid_filtered_count > 0:
-            detail_parts.append(f"by_id={lastid_filtered_count}")
-        if triggered_filtered_count > 0:
-            detail_parts.append(f"triggered={triggered_filtered_count}")
-        detail_str = f" ({', '.join(detail_parts)})" if detail_parts else ""
-        click.echo(
-            f"  → source='{source.id}' fetched={raw_fetched_count}, "
-            f"checked={fetched_count}, new={matched_count}{detail_str}{is_new_note}",
-            err=True,
-        )
+    detail_parts = []
+    if seen_filtered_count > 0:
+        detail_parts.append(f"seen={seen_filtered_count}")
+    if lastid_filtered_count > 0:
+        detail_parts.append(f"by_id={lastid_filtered_count}")
+    if triggered_filtered_count > 0:
+        detail_parts.append(f"triggered={triggered_filtered_count}")
+    detail_str = f" (filtered: {', '.join(detail_parts)})" if detail_parts else ""
+
+    last_id_note = f" last_id={source.last_item_id}" if source.last_item_id else ""
+
+    click.echo(
+        f"  → source='{source.id}' fetched={raw_fetched_count}, new={matched_count}{last_id_note}{detail_str}{is_new_note}",
+        err=True,
+    )
 
 
 def _log_mismatches(storage, mismatches):
