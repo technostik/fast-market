@@ -169,7 +169,24 @@ class YouTubePlugin(SourcePlugin):
             )
             videos = all_videos + all_shorts
             videos.sort(key=lambda v: v["published"], reverse=True)
-            videos = videos[:limit]
+
+            # Filter by last_item_id: keep only items NEWER than last_item_id
+            # Since list is sorted newest-first, we scan to find last_item_id,
+            # then take items BEFORE it (the newer ones)
+            if last_item_id:
+                idx = None
+                for i, v in enumerate(videos):
+                    if v["id"] == last_item_id:
+                        idx = i
+                        break
+                if idx is not None:
+                    videos = videos[:idx]  # Take items before last_item_id (newer)
+                else:
+                    videos = []  # last_item_id not found, no new items
+            else:
+                videos = videos[:limit]
+
+            self._rss_raw_count = len(videos)
 
             items = []
             for video in videos:
@@ -354,7 +371,6 @@ class YouTubePlugin(SourcePlugin):
             feed = feedparser.parse(rss_url)
 
             if hasattr(feed, "bozo_exception") and feed.bozo_exception:
-                # RSS parsing failed, fall back to yt-dlp
                 print(f"⚠️ RSS parsing failed for {self.channel_id}, falling back to yt-dlp")
                 return await self._fetch_via_yt_dlp(last_item_id, limit)
 
@@ -389,12 +405,12 @@ class YouTubePlugin(SourcePlugin):
                     fetch_method = "rss-only"
                     print(f"  📄 {video_id}: rss-only (is_new=False)")
 
-            # If we stopped due to last_item_id, we still fetched up to that point
-            # But if we processed ALL entries without hitting last_item_id,
-            # rss_raw_count is correct (all entries)
-            if not (last_item_id and self._rss_raw_count > 0):
-                # We didn't break early, count is already correct
-                pass
+                # If we stopped due to last_item_id, we still fetched up to that point
+                # But if we processed ALL entries without hitting last_item_id,
+                # rss_raw_count is correct (all entries)
+                if not (last_item_id and self._rss_raw_count > 0):
+                    # We didn't break early, count is already correct
+                    pass
 
                 extra = {
                     "channel_id": self.channel_id,

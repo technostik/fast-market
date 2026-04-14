@@ -69,7 +69,7 @@ class SourcePlugin(ABC):
             return True
 
         if self.last_check is None:
-            return False
+            return True  # Never checked before, allow fetch
 
         try:
             now = datetime.now(timezone.utc)
