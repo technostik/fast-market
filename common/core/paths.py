@@ -43,6 +43,13 @@ def get_youtube_config_path() -> Path:
     return p
 
 
+def get_youtube_channel_list_path() -> Path:
+    """~/.config/fast-market/common/youtube/channels.yaml"""
+    p = _xdg_common_config_home() / "youtube" / "channels.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def get_common_subconfig_path(subconfig: str) -> Path:
     """~/.config/fast-market/common/{subconfig}/config.yaml"""
     p = _xdg_common_config_home() / subconfig / "config.yaml"

@@ -27,9 +27,10 @@
 #   - rss: origin = RSS/Atom feed URL
 #   - yt-search: origin = Search keywords
 #   - channel_list: origin = placeholder (unused), metadata.channels = list of {id, title}
+#                 OR metadata.file + metadata.thematic for external YAML file
 #   - json: origin = placeholder (unused), metadata.command = shell command returning JSON array
 #
-# channel_list example:
+# channel_list example (legacy - inline channels):
 #   sources:
 #     - id: competitor_channels
 #       plugin: channel_list
@@ -43,6 +44,51 @@
 #             title: "Competitor A"
 #           - id: UCxxxxxxxxxxxxxxxxxxxx2
 #             title: "Competitor B"
+#
+# channel_list example (new - external YAML file):
+#   sources:
+#     - id: tech_channels
+#       plugin: channel_list
+#       origin: "list"
+#       description: "Monitor tech channels from shared list"
+#       enabled: true
+#       is_new: true
+#       metadata:
+#         thematic: tech  # Uses default channel list file from youtube config
+#
+#   OR specify custom file path:
+#   sources:
+#     - id: custom_channels
+#       plugin: channel_list
+#       origin: "list"
+#       description: "Monitor custom channels"
+#       enabled: true
+#       is_new: true
+#       metadata:
+#         file: /path/to/channels.yaml
+#         thematic: ai
+#
+# The external YAML file format (common/youtube/channels.yaml):
+#   channels:
+#     - name: "Tech Channel A"
+#       title: "Channel Title"
+#       id: "UCxxxxxxxxxxxxxxxxxxxx1"
+#       subscribers: 1000000
+#       date_added: "2024-01-01T00:00:00Z"
+#       metadata:
+#         last_fetch: "2024-01-01T12:00:00Z"
+#     - name: "Tech Channel B"
+#       id: "UCxxxxxxxxxxxxxxxxxxxx2"
+#     - name: "AI Channel"
+#       id: "UCxxxxxxxxxxxxxxxxxxxx3"
+#   thematics:
+#     - name: "tech"
+#       channels:
+#         - "Tech Channel A"
+#         - "Tech Channel B"
+#     - name: "ai"
+#       channels:
+#         - "AI Channel"
 #
 # json example:
 #   sources:

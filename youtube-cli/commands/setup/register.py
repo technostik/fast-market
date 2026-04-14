@@ -6,9 +6,14 @@ from pathlib import Path
 import click
 
 from commands.base import CommandManifest
-from common.core.paths import get_tool_config, get_youtube_config_path
+from common.core.paths import get_tool_config, get_youtube_config_path, get_youtube_channel_list_path
 from common.core.config import load_youtube_config, save_youtube_config
 from common.youtube.auth import YouTubeOAuth, SCOPE_FULL
+from common.youtube.channel_list import (
+    load_channel_list_file,
+    save_channel_list_file,
+    ChannelListFile,
+)
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -32,6 +37,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("  wizard         Interactive setup wizard")
             click.echo("  reset          Reset config to defaults (backs up existing)")
             click.echo("  refresh-auth   Re-authenticate with full API access")
+            click.echo("  channel-list   Manage channel list file")
             click.echo("")
             click.echo("First time setup:")
             click.echo("  1. youtube setup wizard")
@@ -63,6 +69,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("  Status: exists")
         else:
             click.echo("  Status: does not exist (use 'setup wizard' to create)")
+
+        channel_list_path = get_youtube_channel_list_path()
+        click.echo(f"Channel list file: {channel_list_path}")
+        if channel_list_path.exists():
+            click.echo("  Status: exists")
+        else:
+            click.echo("  Status: does not exist (use 'youtube hot add' to create)")
 
         click.echo(f"Tool config (legacy): {cfg_path}")
         if cfg_path.exists():
@@ -143,6 +156,22 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         click.echo("")
 
+        # channel_list_path
+        current_channel_list = existing.get(
+            "channel_list_path", str(get_youtube_channel_list_path())
+        )
+        click.echo("youtube.channel_list_path (shared channel list file)")
+        click.echo(f"  current: {current_channel_list or '(not set)'}")
+        channel_list_path = _ask("  channel_list_path", default=current_channel_list)
+        if channel_list_path and channel_list_path != current_channel_list:
+            click.echo(f"  → {channel_list_path}")
+        elif not channel_list_path:
+            click.echo("  → unchanged (using default)")
+        else:
+            click.echo("  → unchanged")
+
+        click.echo("")
+
         # Save
         new_yt_cfg = {}
         if channel_id:
@@ -150,6 +179,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if client_secret:
             new_yt_cfg["client_secret_path"] = client_secret
         new_yt_cfg["quota_limit"] = quota_limit
+        if channel_list_path:
+            new_yt_cfg["channel_list_path"] = channel_list_path
 
         save_youtube_config(new_yt_cfg)
         click.echo(f"Saved shared youtube config to {yt_cfg_path}")
@@ -206,6 +237,78 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo("")
         click.echo("Authentication refreshed successfully.")
         click.echo("You now have full API access (youtube.force-ssl scope).")
+
+    @setup_group.group("channel-list", invoke_without_command=True)
+    @click.pass_context
+    def channel_list_group(ctx):
+        """Manage the channel list file."""
+        if ctx.invoked_subcommand is None:
+            click.echo("Usage: youtube setup channel-list <command>")
+            click.echo("")
+            click.echo("Commands:")
+            click.echo("  show           Display channel list file")
+            click.echo("  locate         Show channel list file path")
+            click.echo("")
+
+    @channel_list_group.command("show")
+    @click.option("--format", "-f", "fmt", type=click.Choice(["json", "yaml", "text"]), default="text")
+    def channel_list_show_cmd(fmt: str):
+        """Display current channel list file."""
+        from common.cli.helpers import out
+        from common.core.yaml_utils import dump_yaml
+        import json
+
+        yt_cfg = load_youtube_config()
+        channel_list_path = Path(
+            yt_cfg.get("channel_list_path", str(get_youtube_channel_list_path()))
+        ).expanduser()
+
+        if not channel_list_path.exists():
+            click.echo(f"No channel list file at {channel_list_path}")
+            click.echo("Use 'youtube hot add' to create one.")
+            return
+
+        channel_list = load_channel_list_file(channel_list_path)
+
+        if fmt == "text":
+            click.echo(f"# Channel list file: {channel_list_path}")
+            click.echo(f"# Total channels: {len(channel_list.channels)}")
+            click.echo(f"# Thematics: {', '.join(channel_list.list_thematic_names()) or 'none'}")
+            click.echo("")
+            
+            # Show thematics
+            for thematic in channel_list.thematics:
+                click.echo(f"=== {thematic.name} ({len(thematic.channels)} channels) ===")
+                for ch_name in thematic.channels:
+                    # Resolve channel from global list
+                    ch_entry = channel_list.get_channel_by_name(ch_name)
+                    if ch_entry:
+                        subs = f" ({ch_entry.subscribers:,} subscribers)" if ch_entry.subscribers > 0 else ""
+                        click.echo(f"  {ch_entry.name}{subs}")
+                        click.echo(f"    ID: {ch_entry.id}")
+                    else:
+                        click.echo(f"  {ch_name} (not found in channel list)")
+                click.echo("")
+        else:
+            data = channel_list.to_dict()
+            if fmt == "json":
+                click.echo(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+            else:
+                click.echo(dump_yaml(data))
+
+    @channel_list_group.command("locate")
+    def channel_list_locate_cmd():
+        """Show channel list file path."""
+        yt_cfg = load_youtube_config()
+        channel_list_path = Path(
+            yt_cfg.get("channel_list_path", str(get_youtube_channel_list_path()))
+        ).expanduser()
+
+        click.echo(f"Channel list file: {channel_list_path}")
+        if channel_list_path.exists():
+            click.echo("  Status: exists")
+        else:
+            click.echo("  Status: does not exist")
 
     return CommandManifest(
         name="setup",

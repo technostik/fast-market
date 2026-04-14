@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from plugins.base import SourcePlugin, ItemMetadata
 
 
 class ChannelListPlugin(SourcePlugin):
-    """Monitor a list of YouTube channels defined in metadata.
+    """Monitor a list of YouTube channels defined in metadata or external YAML file.
 
-    Metadata:
+    Metadata (legacy):
         channels: List of {"id": "UC...", "title": "Channel Name"} dicts
+
+    External file (new):
+        file: Path to YAML channel list file (uses common youtube channel list format)
+        thematic: Name of thematic to use from the file
     """
 
     name = "channel_list"
@@ -18,7 +23,68 @@ class ChannelListPlugin(SourcePlugin):
     def __init__(self, config: dict, source_config: dict):
         super().__init__(config, source_config)
         self.source_id = source_config.get("id", "")
-        self.channels: list[dict[str, str]] = self._parse_channels()
+        self.use_external_file = "file" in self.metadata or "thematic" in self.metadata
+        
+        if self.use_external_file:
+            self.channels: list[dict[str, str]] = self._load_from_external_file()
+        else:
+            self.channels: list[dict[str, str]] = self._parse_channels()
+
+    def _load_from_external_file(self) -> list[dict[str, str]]:
+        """Load channels from external YAML channel list file."""
+        from common.core.config import load_youtube_config
+        from common.core.paths import get_youtube_channel_list_path
+        from common.youtube.channel_list import load_channel_list_file
+
+        # Get file path from metadata or use default
+        file_path = self.metadata.get("file")
+        if file_path:
+            path = Path(file_path).expanduser()
+        else:
+            # Check youtube config for channel_list_path
+            yt_cfg = load_youtube_config()
+            path = Path(
+                yt_cfg.get("channel_list_path", str(get_youtube_channel_list_path()))
+            ).expanduser()
+
+        if not path.exists():
+            raise ValueError(f"Channel list file not found: {path}")
+
+        # Load the channel list file
+        channel_list = load_channel_list_file(path)
+
+        # Get thematic name from metadata
+        thematic_name = self.metadata.get("thematic")
+        if not thematic_name:
+            raise ValueError(
+                "When using external file, you must specify 'thematic' in metadata. "
+                "Example: metadata: {file: /path/to/channels.yaml, thematic: tech}"
+            )
+
+        # Get channels from the specified thematic
+        thematic = channel_list.get_thematic(thematic_name)
+        if thematic is None:
+            raise ValueError(
+                f"Thematic '{thematic_name}' not found in {path}. "
+                f"Available: {', '.join(channel_list.list_thematic_names()) or 'none'}"
+            )
+
+        channels = []
+        for ch_name in thematic.channels:
+            # Resolve channel entry from global list
+            ch_entry = channel_list.get_channel_by_name(ch_name)
+            if ch_entry is None:
+                continue  # Skip if channel was removed from global list
+            
+            channels.append({
+                "id": ch_entry.id,
+                "title": ch_entry.name,
+            })
+
+        if not channels:
+            raise ValueError(f"No channels in thematic '{thematic_name}'")
+
+        return channels
 
     def _parse_channels(self) -> list[dict[str, str]]:
         """Parse the channels list from metadata.

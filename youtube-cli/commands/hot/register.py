@@ -10,37 +10,41 @@ import yaml
 from commands.base import CommandManifest
 from commands.common.channel_search import search_channels, format_channel_entry, select_channel_interactive
 from common.cli.helpers import out
+from common.core.config import load_youtube_config
+from common.core.paths import get_youtube_channel_list_path
 from common.core.yaml_utils import dump_yaml
+from common.youtube.channel_list import (
+    load_channel_list_file,
+    save_channel_list_file,
+    ChannelListFile,
+    ThematicList,
+    ChannelEntry,
+    create_channel_entry,
+)
 from core.config import load_config
 from core.engine import build_youtube_client
 
-# ─── State file management ───────────────────────────────────────────────────
-
-_STATE_FILE = Path(
-    "~/.config/fast-market/youtube/hot_lists.yaml"
-).expanduser()
+# ─── Channel list file helpers ───────────────────────────────────────────────
 
 
-def _load_state() -> dict:
-    """Load the hot lists state from YAML."""
-    if not _STATE_FILE.exists():
-        return {"lists": {}}
-    try:
-        data = yaml.safe_load(_STATE_FILE.read_text(encoding="utf-8"))
-        if data is None:
-            return {"lists": {}}
-        return data
-    except yaml.YAMLError as exc:
-        raise click.ClickException(f"Invalid YAML in {_STATE_FILE}: {exc}") from exc
+def _get_channel_list_path() -> Path:
+    """Get the channel list file path from config or default."""
+    yt_cfg = load_youtube_config()
+    return Path(
+        yt_cfg.get("channel_list_path", str(get_youtube_channel_list_path()))
+    ).expanduser()
 
 
-def _save_state(state: dict) -> None:
-    """Save the hot lists state to YAML."""
-    _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _STATE_FILE.write_text(
-        dump_yaml(state, sort_keys=False),
-        encoding="utf-8",
-    )
+def _load_channel_list() -> ChannelListFile:
+    """Load the channel list file."""
+    path = _get_channel_list_path()
+    return load_channel_list_file(path)
+
+
+def _save_channel_list(channel_list: ChannelListFile) -> None:
+    """Save the channel list file."""
+    path = _get_channel_list_path()
+    save_channel_list_file(path, channel_list)
 
 
 # ─── Channel search helper ───────────────────────────────────────────────────
@@ -49,6 +53,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.pass_context
     def hot_group(ctx):
         """Manage thematic channel lists and fetch hot comments.
+
+        Channels are stored in a YAML file (configurable via youtube.channel_list_path).
 
         Subcommands:
           add          Add a channel to a thematic list (interactive wizard)
@@ -86,16 +92,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--name", default=None, help="Channel display name (auto-fetched if not given)")
     def add_cmd(theme: str, channel_id: str, name: str):
         """Add a channel to a thematic list via interactive wizard."""
-        state = _load_state()
+        channel_list = _load_channel_list()
 
         # Determine theme
         if not theme:
             # Show existing themes
-            themes = list(state.get("lists", {}).keys())
+            themes = channel_list.list_thematic_names()
             if themes:
                 click.echo("Existing themes:")
                 for i, t in enumerate(themes, 1):
-                    ch_count = len(state["lists"][t].get("channels", {}))
+                    thematic = channel_list.get_thematic(t)
+                    ch_count = len(thematic.channels) if thematic else 0
                     click.echo(f"  [{i}] {t} ({ch_count} channel{'s' if ch_count != 1 else ''})")
                 click.echo(f"  [{len(themes) + 1}] Create new theme")
 
@@ -161,23 +168,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 except Exception:
                     name = channel_id
 
-        # Initialize theme if needed
-        if "lists" not in state:
-            state["lists"] = {}
-        if theme not in state["lists"]:
-            state["lists"][theme] = {"channels": {}}
+        # Create channel entry if not exists
+        channel_entry = channel_list.get_channel_by_name(name)
+        if channel_entry is None:
+            channel_entry = create_channel_entry(
+                channel_id=channel_id,
+                name=name,
+            )
+            # Add to global channels list
+            channel_list.channels.append(channel_entry)
 
-        # Add channel
-        theme_data = state["lists"][theme]
-        if "channels" not in theme_data:
-            theme_data["channels"] = {}
+        # Add to thematic (just the name)
+        channel_list.add_channel_to_thematic(name, theme)
+        _save_channel_list(channel_list)
 
-        theme_data["channels"][channel_id] = {
-            "name": name,
-            "last_fetch": None,
-        }
-
-        _save_state(state)
         click.echo(f"\nAdded '{name}' ({channel_id}) to theme '{theme}'.")
 
     # ─── LIST ─────────────────────────────────────────────────────────────
@@ -187,31 +191,36 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--format", "-f", "fmt", type=click.Choice(["json", "yaml", "text"]), default="text")
     def list_cmd(theme: str, fmt: str):
         """List channels, optionally filtered by theme."""
-        state = _load_state()
-        themes = state.get("lists", {})
+        channel_list = _load_channel_list()
+        thematics = channel_list.thematics
 
-        if not themes:
+        if not thematics:
             click.echo("No thematic lists configured. Use 'youtube hot add' to create one.")
             return
 
-        target_themes = [theme] if theme else sorted(themes.keys())
+        target_themes = [theme] if theme else [t.name for t in thematics]
 
         results = []
-        for t in target_themes:
-            if t not in themes:
+        for t_name in target_themes:
+            thematic = channel_list.get_thematic(t_name)
+            if thematic is None:
                 if theme:
                     raise click.ClickException(f"Theme '{theme}' not found.")
                 continue
 
-            theme_data = themes[t]
-            channels = theme_data.get("channels", {})
+            for ch_name in thematic.channels:
+                # Resolve channel entry from global list
+                ch_entry = channel_list.get_channel_by_name(ch_name)
+                if ch_entry is None:
+                    continue  # Skip if channel was removed from global list
 
-            for ch_id, ch_info in channels.items():
                 entry = {
-                    "theme": t,
-                    "channel_id": ch_id,
-                    "name": ch_info.get("name", "Unknown"),
-                    "last_fetch": ch_info.get("last_fetch"),
+                    "theme": t_name,
+                    "channel_id": ch_entry.id,
+                    "name": ch_entry.name,
+                    "title": ch_entry.title,
+                    "subscribers": ch_entry.subscribers,
+                    "date_added": ch_entry.date_added,
                 }
                 results.append(entry)
 
@@ -226,9 +235,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     current_theme = entry["theme"]
                     click.echo(f"\n=== {current_theme} ===")
 
-                last_fetch = entry["last_fetch"] or "never"
-                click.echo(f"  {entry['name']} ({entry['channel_id']})")
-                click.echo(f"    Last fetch: {last_fetch}")
+                subs = f" ({entry['subscribers']:,} subscribers)" if entry["subscribers"] > 0 else ""
+                click.echo(f"  {entry['name']}{subs} ({entry['channel_id']})")
+                click.echo(f"    Added: {entry['date_added']}")
             click.echo("")
         else:
             out(results, fmt)
@@ -239,19 +248,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--format", "-f", "fmt", type=click.Choice(["json", "yaml", "text"]), default="text")
     def list_themes_cmd(fmt: str):
         """List all thematic lists."""
-        state = _load_state()
-        themes = state.get("lists", {})
+        channel_list = _load_channel_list()
+        thematics = channel_list.thematics
 
-        if not themes:
+        if not thematics:
             click.echo("No thematic lists configured. Use 'youtube hot add' to create one.")
             return
 
         results = []
-        for t in sorted(themes.keys()):
-            channels = themes[t].get("channels", {})
+        for t in thematics:
             results.append({
-                "theme": t,
-                "channel_count": len(channels),
+                "theme": t.name,
+                "channel_count": len(t.channels),
             })
 
         if fmt == "text":
@@ -264,81 +272,83 @@ def register(plugin_manifests: dict) -> CommandManifest:
     # ─── DELETE ───────────────────────────────────────────────────────────
 
     @hot_group.command("delete")
-    @click.argument("channel_id")
+    @click.argument("channel_name")
     @click.option("--theme", "-t", default=None, help="Remove from specific theme only")
-    def delete_cmd(channel_id: str, theme: str):
+    def delete_cmd(channel_name: str, theme: str):
         """Remove a channel from a thematic list."""
-        state = _load_state()
-        themes = state.get("lists", {})
+        channel_list = _load_channel_list()
+        thematics = channel_list.thematics
 
-        if not themes:
+        if not thematics:
             raise click.ClickException("No thematic lists configured.")
 
         if theme:
-            if theme not in themes:
+            target_themes = [channel_list.get_thematic(theme)]
+            if not target_themes[0]:
                 raise click.ClickException(f"Theme '{theme}' not found.")
-            target_themes = [theme]
         else:
-            target_themes = sorted(themes.keys())
+            target_themes = thematics
 
         removed_from = []
-        for t in target_themes:
-            channels = themes[t].get("channels", {})
-            if channel_id in channels:
-                ch_name = channels[channel_id].get("name", channel_id)
-                del channels[channel_id]
-                removed_from.append((t, ch_name))
+        for thematic in target_themes:
+            if thematic.has_channel(channel_name):
+                thematic.remove_channel(channel_name)
+                removed_from.append((thematic.name, channel_name))
 
         if not removed_from:
             raise click.ClickException(
-                f"Channel '{channel_id}' not found in {'theme' if theme else 'any theme'}."
+                f"Channel '{channel_name}' not found in {'theme' if theme else 'any theme'}."
             )
 
-        _save_state(state)
+        _save_channel_list(channel_list)
         for t, name in removed_from:
-            click.echo(f"Removed '{name}' ({channel_id}) from theme '{t}'.")
+            click.echo(f"Removed '{name}' from theme '{t}'.")
 
     # ─── ASSIGN (move/duplicate) ──────────────────────────────────────────
 
     @hot_group.command("assign")
-    @click.argument("channel_id")
+    @click.argument("channel_name")
     @click.option("--theme", "-t", required=True, help="Source theme")
     @click.option("--target", required=True, help="Target theme")
     @click.option("--duplicate", is_flag=True, help="Copy instead of move (keep in source)")
-    def assign_cmd(channel_id: str, theme: str, target: str, duplicate: bool):
+    def assign_cmd(channel_name: str, theme: str, target: str, duplicate: bool):
         """Move or duplicate a channel to another thematic list."""
-        state = _load_state()
-        themes = state.get("lists", {})
+        channel_list = _load_channel_list()
 
-        if theme not in themes:
+        source_thematic = channel_list.get_thematic(theme)
+        if not source_thematic:
             raise click.ClickException(f"Source theme '{theme}' not found.")
-        if channel_id not in themes[theme].get("channels", {}):
-            raise click.ClickException(f"Channel '{channel_id}' not found in theme '{theme}'.")
+        
+        if not source_thematic.has_channel(channel_name):
+            raise click.ClickException(f"Channel '{channel_name}' not found in theme '{theme}'.")
 
-        ch_info = themes[theme]["channels"][channel_id]
+        # Verify channel exists in global list
+        ch_entry = channel_list.get_channel_by_name(channel_name)
+        if not ch_entry:
+            raise click.ClickException(f"Channel '{channel_name}' not found in channel list.")
 
-        # Initialize target theme if needed
-        if target not in themes:
-            themes[target] = {"channels": {}}
-        if "channels" not in themes[target]:
-            themes[target]["channels"] = {}
+        # Get or create target theme
+        target_thematic = channel_list.get_thematic(target)
+        if not target_thematic:
+            target_thematic = ThematicList(name=target)
+            channel_list.add_thematic(target_thematic)
 
-        # Add to target (preserve last_fetch)
-        themes[target]["channels"][channel_id] = dict(ch_info)
+        # Add to target (just the name)
+        target_thematic.add_channel(channel_name)
 
         # Remove from source unless duplicating
         if not duplicate:
-            del themes[theme]["channels"][channel_id]
+            source_thematic.remove_channel(channel_name)
             # Clean up empty theme
-            if not themes[theme]["channels"]:
-                del themes[theme]
+            if not source_thematic.channels:
+                channel_list.remove_thematic(theme)
             action = "moved"
         else:
             action = "duplicated"
 
-        _save_state(state)
+        _save_channel_list(channel_list)
         click.echo(
-            f"{ch_info['name']} ({channel_id}) {action} from '{theme}' to '{target}'."
+            f"{ch_entry.name} ({ch_entry.id}) {action} from '{theme}' to '{target}'."
         )
 
     # ─── FETCH-COMMENT ────────────────────────────────────────────────────
@@ -351,14 +361,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--debug", is_flag=True, help="Show debug information")
     def fetch_comment_cmd(theme: str, max_comments: int, fmt: str, output: str, debug: bool):
         """Fetch new comments from the last video of each channel in a theme."""
-        state = _load_state()
-        themes = state.get("lists", {})
+        channel_list = _load_channel_list()
+        thematic = channel_list.get_thematic(theme)
 
-        if theme not in themes:
+        if thematic is None:
             raise click.ClickException(f"Theme '{theme}' not found.")
 
-        channels = themes[theme].get("channels", {})
-        if not channels:
+        channel_names = thematic.channels
+        if not channel_names:
             raise click.ClickException(f"No channels in theme '{theme}'.")
 
         config = load_config()
@@ -366,9 +376,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         all_comments = []
 
-        for ch_id, ch_info in channels.items():
-            ch_name = ch_info.get("name", ch_id)
-            last_fetch = ch_info.get("last_fetch")
+        for ch_name in channel_names:
+            # Resolve channel entry from global list
+            ch_entry = channel_list.get_channel_by_name(ch_name)
+            if ch_entry is None:
+                if debug:
+                    click.echo(f"[DEBUG] Channel '{ch_name}' not found in global list, skipping", err=True)
+                continue
+
+            ch_id = ch_entry.id
+            last_fetch = ch_entry.metadata.get("last_fetch")
 
             if debug:
                 click.echo(f"\n[DEBUG] Processing channel: {ch_name} ({ch_id})", err=True)
@@ -439,23 +456,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
             all_comments.extend(new_comments)
 
             # Update last_fetch timestamp for this channel
-            # Use the earliest comment time or current time
-            if new_comments:
-                # Update to now so next fetch only gets newer ones
-                channels[ch_id]["last_fetch"] = datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                )
+            ch_entry.metadata["last_fetch"] = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
 
-        # Update last_fetch for channels with no comments too (they were checked)
-        for ch_id, ch_info in channels.items():
-            if ch_info.get("last_fetch") is None or ch_id in [
-                c["source_channel_id"] for c in all_comments
-            ]:
-                channels[ch_id]["last_fetch"] = datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                )
-
-        _save_state(state)
+        _save_channel_list(channel_list)
 
         # Output
         if output:
@@ -477,14 +482,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--debug", is_flag=True, help="Show debug information")
     def fetch_video_cmd(theme: str, fmt: str, output: str, debug: bool):
         """Fetch the last video from each channel in a theme."""
-        state = _load_state()
-        themes = state.get("lists", {})
+        channel_list = _load_channel_list()
+        thematic = channel_list.get_thematic(theme)
 
-        if theme not in themes:
+        if thematic is None:
             raise click.ClickException(f"Theme '{theme}' not found.")
 
-        channels = themes[theme].get("channels", {})
-        if not channels:
+        channel_names = thematic.channels
+        if not channel_names:
             raise click.ClickException(f"No channels in theme '{theme}'.")
 
         config = load_config()
@@ -492,8 +497,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         all_videos = []
 
-        for ch_id, ch_info in channels.items():
-            ch_name = ch_info.get("name", ch_id)
+        for ch_name in channel_names:
+            # Resolve channel entry from global list
+            ch_entry = channel_list.get_channel_by_name(ch_name)
+            if ch_entry is None:
+                if debug:
+                    click.echo(f"[DEBUG] Channel '{ch_name}' not found in global list, skipping", err=True)
+                continue
+
+            ch_id = ch_entry.id
 
             if debug:
                 click.echo(f"\n[DEBUG] Processing channel: {ch_name} ({ch_id})", err=True)

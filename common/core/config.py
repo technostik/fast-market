@@ -9,7 +9,9 @@ from common.core.paths import (
     get_common_config_path,
     get_llm_config_path,
     get_youtube_config_path,
+    get_youtube_channel_list_path,
     get_tool_config_path,
+    get_common_subconfig_path,
     get_agent_config_path,
 )
 from common.core.yaml_utils import dump_yaml
@@ -135,6 +137,26 @@ def load_youtube_config() -> dict:
 def save_youtube_config(config: dict) -> None:
     """Save to ~/.config/fast-market/common/youtube/config.yaml."""
     _save_yaml(get_youtube_config_path(), config)
+
+
+def load_youtube_channel_list_config() -> dict:
+    """Load the channel list file path from youtube config.
+
+    Returns dict with 'channel_list_path' key (defaults to channels.yaml if not set).
+    """
+    yt_cfg = load_youtube_config()
+    return {
+        "channel_list_path": yt_cfg.get(
+            "channel_list_path", str(get_youtube_channel_list_path())
+        )
+    }
+
+
+def save_youtube_channel_list_config(channel_list_path: str) -> None:
+    """Save the channel list file path to youtube config."""
+    yt_cfg = load_youtube_config()
+    yt_cfg["channel_list_path"] = channel_list_path
+    save_youtube_config(yt_cfg)
 
 
 def load_agent_config() -> dict:
