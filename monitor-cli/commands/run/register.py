@@ -187,7 +187,8 @@ def _fetch_items_for_source(source, plugin_cls, config, limit, force, cron, stor
 
     seen_item_ids = None if force_mode else storage.get_seen_item_ids(source.id)
     if seen_item_ids and not cron:
-        click.echo(f"  seen_item_ids={len(seen_item_ids)}", err=True)
+        sample = list(seen_item_ids)[:3]
+        click.echo(f"  seen_item_ids={len(seen_item_ids)} (sample: {sample})", err=True)
 
     fetch_start = time.time()
     try:
@@ -219,6 +220,7 @@ def _fetch_items_for_source(source, plugin_cls, config, limit, force, cron, stor
     return {
         "items": items,
         "plugin": plugin_instance,
+        "plugin_metadata": plugin_instance.metadata,
         "cooldown": cooldown_info,
         "raw_fetched_count": len(items),
         "fetch_time": fetch_time,
@@ -757,6 +759,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 continue
 
             items = fetch_result["items"]
+
+            if "plugin_metadata" in fetch_result:
+                source.metadata = fetch_result["plugin_metadata"]
 
             items, seen_filtered_count = _filter_by_seen(items, source, storage, force_mode)
             items, lastid_filtered_count = _filter_by_last_item_id(items, source, force_mode)

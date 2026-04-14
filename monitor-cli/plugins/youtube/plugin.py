@@ -367,6 +367,11 @@ class YouTubePlugin(SourcePlugin):
                 video_id = parsed["id"]
                 is_new = seen_item_ids is None or video_id not in seen_item_ids
 
+                if seen_item_ids is not None and not is_new:
+                    pass  # Already in seen_item_ids
+                elif seen_item_ids is not None:
+                    print(f"  🔍 {video_id}: not in seen_item_ids (has {len(seen_item_ids)} items)")
+
                 if is_new:
                     details = await self._get_video_details_async(video_id)
                     fetch_method = "rss+yt-dlp"
