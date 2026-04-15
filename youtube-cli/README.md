@@ -260,7 +260,7 @@ youtube batch-reply INPUT_FILE [OPTIONS]
 | `-s, --shell` | Shell command to generate replies. Receives comment via env vars: AUTHOR, COMMENT, VIDEO_URL, VIDEO_ID, VIDEO_TITLE, COMMENT_ID | - |
 | `-m, --metadata` | Key-value pairs to include in output (repeatable). Format: `key=value` | - |
 | `--filter` | JSON list of comment IDs to process (in rewrite mode: IDs to regenerate) | - |
-| `--rewrite` | Rewrite existing output file: regenerate filtered IDs, keep others. Requires --filter. Cannot use with --output | - |
+| `--rewrite` | Rewrite output file: regenerate filtered IDs, keep others. Requires --filter and --output | - |
 | `-f, --format` | Output: json, yaml, text | json |
 | `-o, --output` | Save results to file | stdout |
 
@@ -323,19 +323,21 @@ youtube batch-reply comments.json \
 youtube batch-reply replies.json \
   --filter '["comment_id_1", "comment_id_2"]' \
   --rewrite \
+  -o replies.json \
   -p "New prompt for regeneration"
 
 # Regenerate all replies (requires --filter to list all IDs)
 youtube batch-reply replies.json \
   --filter '["all_ids_from_file"]' \
   --rewrite \
+  -o replies.json \
   -p "New prompt"
 ```
 
 **Rewrite mode:**
-- Reads existing output file
+- Reads existing output file (specified as INPUT_FILE)
 - Regenerates only the replies matching `--filter` IDs
-- Updates the same file in place
+- Writes merged results to `--output` file
 - Preserves non-regenerated entries unchanged
 
 ### batch-post

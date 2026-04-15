@@ -94,8 +94,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         **kwargs,
     ):
         # Validate rewrite options
-        if rewrite and output:
-            click.echo("Error: Cannot use --output with --rewrite", err=True)
+        if rewrite and not output:
+            click.echo("Error: --rewrite requires --output", err=True)
             return
 
         if rewrite and not filter_ids:
@@ -307,7 +307,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         # Output results
         if rewrite:
-            # Read original file again to preserve non-regenerated entries
+            # Read original input file again to preserve non-regenerated entries
             try:
                 original_data = json.loads(input_path.read_text())
             except json.JSONDecodeError:
@@ -330,8 +330,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 else:
                     merged.append(item)
 
-            # Write back to input file
-            input_path.write_text(json.dumps(merged, ensure_ascii=False, default=str))
+            # Write to output file
+            output_path = Path(output)
+            output_path.write_text(json.dumps(merged, ensure_ascii=False, default=str))
+            click.echo(f"Updated {len(results)} replies in {output}", err=True)
             click.echo(f"Updated {len(results)} replies in {input_file}", err=True)
         elif output:
             output_fmt = fmt if fmt else _detect_format_from_filename(output)
