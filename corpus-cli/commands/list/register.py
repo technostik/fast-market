@@ -50,7 +50,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         type=int,
         default=10,
         show_default=True,
-        help="Number of items to return (use 1 for get-last behavior).",
+        help="Number of items to return (use 0 for all items, 1 for get-last behavior).",
     )
     @click.option(
         "--offset",
@@ -83,8 +83,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.pass_context
     def list_cmd(ctx, limit, offset, source, order_by, reverse, fmt, **kwargs):
         """List indexed documents with filtering, sorting, and pagination."""
-        if limit < 1:
-            raise click.ClickException("--limit must be >= 1")
+        if limit < 0:
+            raise click.ClickException("--limit must be >= 0")
         if offset < 0:
             raise click.ClickException("--offset must be >= 0")
 
@@ -95,14 +95,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         config = load_config()
         store = SQLiteStore(config.get("db_path"))
         filters = make_filters(source=source, **kwargs)
+        
+        # If limit is 0, fetch all items (use a large limit)
+        effective_limit = limit if limit > 0 else 999999
+        
         all_docs = store.list_documents_extended(
             source=source,
             filters=filters,
             order_by=order_by,
             reverse=reverse,
-            limit=limit + offset,
+            limit=effective_limit + offset,
         )
-        docs = all_docs[offset : offset + limit]
+        docs = all_docs[offset : offset + effective_limit]
 
         if not docs:
             click.echo("No documents found.", err=True)
@@ -139,7 +143,7 @@ def _print_text(docs: list[dict]) -> None:
         handle = doc["handle"]
         date = doc.get("updated_at", "")[:10] if doc.get("updated_at") else ""
 
-        meta_parts = [f"source={plugin}"]
+        meta_parts = []
         if date:
             meta_parts.append(f"date={date}")
         if doc.get("duration_seconds"):
@@ -150,9 +154,8 @@ def _print_text(docs: list[dict]) -> None:
             size = len(doc.get("raw_text", "") or "")
             meta_parts.append(f"size={size}chars")
 
-        click.echo(f"[{handle}] {title}")
-        click.echo(f"  {' · '.join(meta_parts)}")
-        click.echo()
+        meta_str = f"  {' · '.join(meta_parts)}" if meta_parts else ""
+        click.echo(f"[{handle}] {title}{meta_str}")
 
 
 def _print_table(docs: list[dict], source: str | None) -> None:
@@ -204,7 +207,7 @@ def _build_router(source_choices: list[str]) -> APIRouter:
 
     @router.get("/list")
     def list_documents(
-        limit: int = Query(10, ge=1, le=1000, description="Number of items to return"),
+        limit: int = Query(10, ge=0, le=10000, description="Number of items to return (0 for all)"),
         offset: int = Query(0, ge=0, description="Number of items to skip"),
         source: str | None = Query(None, description="Filter by source plugin"),
         order_by: str = Query(
@@ -253,16 +256,20 @@ def _build_router(source_choices: list[str]) -> APIRouter:
             max_size=max_size,
             privacy_status=privacy_status,
         )
+        
+        # If limit is 0, fetch all items
+        effective_limit = limit if limit > 0 else 10000
+        
         all_docs = store.list_documents_extended(
             source=source,
             filters=filters,
             order_by=order_by,
             reverse=reverse,
-            limit=limit + offset + 100,
+            limit=effective_limit + offset + 100,
         )
 
         total = len(all_docs)
-        docs = all_docs[offset : offset + limit]
+        docs = all_docs[offset : offset + effective_limit]
         return Response(
             content=json.dumps(docs, default=str),
             media_type="application/json",
