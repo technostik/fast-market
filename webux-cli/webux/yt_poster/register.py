@@ -470,12 +470,18 @@ async function postSelected(){
   spinner.style.display = 'none';
   const body = await resp.json().catch(() => ({}));
   output.style.display = 'block';
+  const rawOutput = body.output || '';
+  const hasFailed = rawOutput.includes('Failed:') || rawOutput.includes('post_status":"error"');
+  const hasErrors = rawOutput.includes('Error:') || rawOutput.includes('✗') || rawOutput.includes('quota');
   const code = body.exit_code ?? -1;
-  exitCode.textContent = `Exit code: ${code}`;
-  exitCode.style.color = code === 0 ? 'var(--success)' : 'var(--error)';
+  const effectiveCode = (code === 0 && (hasFailed || hasErrors)) ? 1 : code;
+  exitCode.textContent = `Exit code: ${effectiveCode}`;
+  exitCode.style.color = effectiveCode === 0 ? 'var(--success)' : 'var(--error)';
+  if (effectiveCode !== 0) exitCode.textContent += ' ⚠️';
+  errorEl.textContent = hasFailed ? 'Some posts failed - check output below' : (hasErrors ? 'Errors in output' : '');
   const reportPath = body.report ? `\nReport: ${body.report}` : '';
   const mode = body.dry_run ? '[dry-run] ' : '';
-  logEl.textContent = `${mode}${body.output || ''}${reportPath}`;
+  logEl.textContent = `${mode}${rawOutput}${reportPath}`;
 }
 
 loadBtn.addEventListener('click', loadFile);
