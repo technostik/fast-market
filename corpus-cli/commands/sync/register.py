@@ -122,14 +122,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     else _DEFAULT_LIMITS.get(name, _FALLBACK_LIMIT)
                 )
                 vault_path = obsidian_vault_path if name == "obsidian" else None
-                result = engine.sync(
-                    plugins[name],
-                    mode=mode,
-                    limit=effective_limit,
-                    vault_path=vault_path,
-                    use_api=use_api if name == "youtube" else False,
-                    non_public=non_public if name == "youtube" else False,
-                )
+                try:
+                    result = engine.sync(
+                        plugins[name],
+                        mode=mode,
+                        limit=effective_limit,
+                        vault_path=vault_path,
+                        use_api=use_api if name == "youtube" else False,
+                        non_public=non_public if name == "youtube" else False,
+                    )
+                except RuntimeError as e:
+                    if "quota" in str(e).lower():
+                        raise click.ClickException(
+                            "YouTube API quota exceeded. Try again later or use without --non-public flag (RSS mode)."
+                        )
+                    raise
                 result_dict = {
                     "source": result.source,
                     "indexed": result.indexed,

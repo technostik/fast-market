@@ -85,6 +85,8 @@ class YouTubePlugin(SourcePlugin):
         known_id_dates: dict[str, datetime | None] | None = None,
         include_non_public: bool = False,
     ) -> list[ItemMeta]:
+        from googleapiclient.errors import HttpError
+
         known = set(known_id_dates or {})
         all_new: list[ItemMeta] = []
         skipped_privacy = 0
@@ -97,7 +99,15 @@ class YouTubePlugin(SourcePlugin):
         if include_non_public:
             max_fetch = max(max_fetch, 200)
 
-        videos = client.get_channel_videos(self.channel_id, max_results=max_fetch)
+        try:
+            videos = client.get_channel_videos(self.channel_id, max_results=max_fetch)
+        except HttpError as e:
+            if e.resp.status == 403 and "quota" in str(e).lower():
+                logger.error("youtube_api_quota_exceeded", channel_id=self.channel_id)
+                raise RuntimeError(
+                    "YouTube API quota exceeded. Try again later or use RSS mode."
+                ) from e
+            raise
 
         for video in videos:
             if video.video_id in known:

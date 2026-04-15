@@ -156,7 +156,10 @@ class SyncEngine:
                 failures.append(SyncFailure(source_id=item.source_id, error=str(exc)))
 
         if processed == 0 and len(items) == 0:
-            warning = f"No items found for {plugin.name}. Check RSS feed or network connection."
+            if "quota" in str(getattr(engine, "_last_error", "")).lower():
+                warning = f"YouTube API quota exceeded. Try again later."
+            else:
+                warning = f"No items found for {plugin.name}. Check API credentials, RSS feed, or network connection."
             logger.warning("sync_no_items", source=plugin.name, warning=warning)
         elif processed == 0 and len(items) > 0:
             warning = f"All {len(items)} items skipped (all permanent failures or already indexed)."
