@@ -40,7 +40,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             "name": prompt.name,
             "description": prompt.description,
             "content": prompt.content,
-            "placeholders": extract_placeholders(prompt.content),
+            "parameters": extract_placeholders(prompt.content),
             "provider": prompt.model_provider,
             "model": prompt.model_name,
             "temperature": prompt.temperature,
@@ -55,7 +55,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(prompt.name)
         if prompt.description:
             click.echo(f"Description: {prompt.description}")
-        click.echo(f"Placeholders: {', '.join(payload['placeholders']) or '(none)'}")
+        click.echo(f"Parameters: {', '.join(payload['parameters']) or '(none)'}")
         if prompt.model_provider:
             click.echo(f"Provider: {prompt.model_provider}")
         if prompt.model_name:

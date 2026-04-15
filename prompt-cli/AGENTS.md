@@ -1,7 +1,7 @@
 # prompt-agent
 
 ## 🎯 Purpose
-Provide a unified CLI for managing reusable LLM prompt templates with pluggable providers, enabling consistent prompt execution with placeholder substitution across different LLM backends.
+Provide a unified CLI for managing reusable LLM prompt templates with pluggable providers, enabling consistent prompt execution with parameter substitution across different LLM backends.
 
 ## 🏗️ Essential Components
 
@@ -10,7 +10,7 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - `commands/task/register.py` — Agentic task execution with LLM-driven CLI loop
 - `commands/alias/register.py` — Command alias management with description support
 - `commands/setup/register.py` — Configuration wizard for provider, task prompts, and task management
-- `core/substitution.py` — Placeholder resolution with file/stdin injection
+- `core/substitution.py` — Parameter resolution with file/stdin injection
 - `core/models.py` — Domain models (Prompt, PromptExecution)
 - `core/session.py` — Task session tracking and serialization
 - `core/task_prompt.py` — Task prompt configuration (TaskPromptConfig)
@@ -27,13 +27,13 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 
 ## 📋 Core Responsibilities
 
-- Manage prompt templates (CRUD operations) with placeholders like `{var}`
+- Manage prompt templates (CRUD operations) with parameters like `{var}`
 - Execute prompts with three input modes (saved/direct/stdin)
-- Resolve placeholders from CLI args, files (`@file`), or stdin (`-`)
+- Resolve parameters from CLI args, files (`@file`), inline `@filename`, or stdin (`-`)
 - Dispatch to appropriate LLM provider with proper model/parameter overrides
 - Record all executions for audit/telemetry
 - Handle provider configuration through setup wizard or direct config editing
-- Fail loudly with clear error messages for missing placeholders/files/providers
+- Fail loudly with clear error messages for missing parameters/files/providers
 
 ## 🔗 Dependencies & Integration
 
@@ -44,9 +44,9 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 ## ✅ Do's
 
 - **Use common infrastructure** — Reuse `common.core.config`, `common.cli.helpers`, `common.storage` instead of reinventing
-- **Fail loudly** — Validate all inputs: missing placeholders → ValueError with list, missing files → FileNotFoundError with path, missing provider → exit with setup instructions
+- **Fail loudly** — Validate all inputs: missing parameters → ValueError with list, missing files → FileNotFoundError with path, missing provider → exit with setup instructions
 - **Support three input modes** — Saved prompts (DB), direct strings (inline), stdin (piping)
-- **Resolve placeholders consistently** — `key=value` (literal), `key=-` (stdin), `key=@file` (file)
+- **Resolve parameters consistently** — `key=value` (literal), `key=-` (stdin), `key=@file` (file), `@filename` (inline file)
 - **Record all executions** — Store prompt name (or `<direct>`/`<stdin>`), input args, resolved content, output, model, timestamp
 - **Use lazy provider initialization** — Only load provider SDKs when first used, handle missing env vars gracefully
 - **Make configuration XDG-compliant** — `~/.config/`, `~/.local/share/`, `~/.cache/`
@@ -54,7 +54,7 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 ## ❌ Don'ts
 
 - **Don't hardcode provider logic** — All providers must implement `LLMProvider` interface
-- **Don't swallow errors** — No silent failures for missing API keys, missing files, or missing placeholders
+- **Don't swallow errors** — No silent failures for missing API keys, missing files, or missing parameters
 - **Don't store API keys in config** — Use environment variables referenced via `api_key_env`
 - **Don't duplicate registry logic** — Use `common.core.registry.discover_commands`/`discover_plugins`
 - **Don't assume tty** — Support non-interactive usage with `--yes` flags and proper stdin handling
@@ -75,7 +75,7 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 3. Return `CommandManifest(name="newcmd", click_command=cmd)`
 4. Command auto-discovered via registry
 
-**To modify placeholder resolution:**
+**To modify parameter resolution:**
 - Extend `resolve_arguments()` in `core/substitution.py`
 - Keep injection patterns (`@file`, `-`) consistent
 
@@ -105,7 +105,7 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 4. Use `prompt setup command-docs-prompts edit <name>` to customize a prompt
 5. Use `prompt setup command-docs-prompts import <file>` to import from YAML
 6. Command docs prompts are stored in `~/.local/share/fast-market/command_docs_prompts/`
-7. Default template uses placeholders: `{aliases}`, `{fastmarket_tools}`, `{system_commands}`, `{other_commands}`, `{skills}`
+7. Default template uses parameters: `{aliases}`, `{fastmarket_tools}`, `{system_commands}`, `{other_commands}`, `{skills}`
 
 **To manage skills:**
 1. Skills are now managed by the standalone `skill-agent` CLI
@@ -139,7 +139,7 @@ max_tokens: 4096
 created_at: "2026-03-20T10:00:00"
 updated_at: "2026-03-20T10:00:00"
 ---
-Your prompt content here with {placeholders}.
+Your prompt content here with {parameters}.
 ```
 
 **Shell-friendly operations:**

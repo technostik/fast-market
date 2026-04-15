@@ -1,7 +1,7 @@
 # commands/apply
 
 ## Purpose
-Execute prompts with placeholder substitution. Supports both saved prompts and direct prompt strings.
+Execute prompts with parameter substitution. Supports both saved prompts and direct prompt strings.
 
 ## Three Input Modes
 
@@ -36,11 +36,30 @@ cat template.txt | prompt apply --stdin var=value
 3. If found: use saved prompt
 4. If not found: treat as direct prompt
 
-## Placeholder Resolution
+## Parameter Resolution
 Same for all modes:
 - `key=value`: literal substitution
 - `key=-`: read from stdin
 - `key=@file.txt`: read from file
+- `@filename`: inline file reference (resolved relative to workdir)
+
+## Inline File References
+Files can be referenced directly in prompt content with `@filename`:
+```bash
+prompt apply "Review this: @config.yaml"
+prompt apply "Summarize @docs/readme.txt and explain @data.json"
+```
+
+**Security constraints:**
+- No absolute paths (paths starting with `/`)
+- No home directory expansion (no `~`)
+- Files not found are left as-is (not substituted)
+- Escape `@` with `\@` for literal `@` character
+
+**Workdir resolution:**
+1. CLI `--workdir`/`-w` option
+2. Common config `workdir` (`~/.config/fast-market/common/config.yaml`)
+3. Current working directory (fallback)
 
 ## Provider/Model Selection
 Saved prompts:
@@ -62,7 +81,7 @@ All executions recorded with:
 - Stdin: `<stdin>`
 
 ## Error Conditions (FAIL LOUDLY)
-- Missing placeholder: ValueError with list of missing args
+- Missing parameter: ValueError with list of missing args
 - Missing file: FileNotFoundError with path
 - Missing provider: Exit with setup instructions
 - No stdin when expected: Exit with clear message
@@ -70,7 +89,8 @@ All executions recorded with:
 
 ## Dependencies
 - `PromptStore`: for saved prompt lookup and execution recording
-- `resolve_arguments`: for placeholder substitution
+- `resolve_arguments`: for parameter substitution
+- `resolve_inline_file_references`: for inline @filename resolution
 - `build_engine`: for provider initialization
 - `get_default_provider`: for fallback provider
 

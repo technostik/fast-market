@@ -1,6 +1,6 @@
 # prompt-agent
 
-CLI tool for managing reusable LLM prompt templates with placeholder substitution and pluggable providers (Anthropic, OpenAI, OpenAI-compatible, Ollama).
+CLI tool for managing reusable LLM prompt templates with parameter substitution and pluggable providers (Anthropic, OpenAI, OpenAI-compatible, Ollama).
 
 ## Installation
 
@@ -84,7 +84,7 @@ All commands support:
 
 ### `prompt create`
 
-Create a new prompt template with placeholders like `{placeholder}`.
+Create a new prompt template with parameters like `{parameter}`.
 
 ```bash
 # Create from inline content
@@ -136,7 +136,7 @@ translate
 
 ### `prompt get`
 
-Show a stored prompt with its placeholders.
+Show a stored prompt with its parameters.
 
 ```bash
 prompt get summarize
@@ -147,7 +147,7 @@ prompt get translate --format json
 ```
 summarize
 Description: Summarization prompt
-Placeholders: text
+Parameters: text
 Provider: anthropic
 Model: claude-sonnet-4-20250514
 
@@ -189,12 +189,12 @@ prompt delete unused-prompt --yes  # Skip confirmation
 
 ### `prompt apply` — **Main Command**
 
-Apply a prompt with placeholder substitution. Supports three input modes.
+Apply a prompt with parameter substitution. Supports three input modes.
 
 #### Mode 1: Saved Prompt (Database Lookup)
 
 ```bash
-# Basic usage with placeholders
+# Basic usage with parameters
 prompt apply summarize text=@article.txt
 
 # Override provider/model
@@ -210,7 +210,7 @@ prompt apply code-review code=@script.py --format json | jq '.output'
 # Use a literal string as prompt
 prompt apply "Explain {topic} in simple terms" topic="quantum physics"
 
-# Multiple placeholders
+# Multiple parameters
 prompt apply "Translate from {source} to {target}: {text}" source=en target=es text="Hello world"
 ```
 
@@ -227,10 +227,11 @@ cat template.txt | prompt apply --stdin var=value
 echo "Summarize: {text}" | prompt apply - text=@long-article.txt | prompt apply "Translate to Spanish: {text}" text=-
 ```
 
-**Placeholder Resolution:**
+**Parameter Resolution:**
 - `key=value` — Literal substitution
 - `key=-` — Read from stdin
 - `key=@file.txt` — Read from file
+- `@filename` — Inline file reference (resolved relative to workdir)
 
 **Options:**
 | Option | Description |
@@ -240,9 +241,10 @@ echo "Summarize: {text}" | prompt apply - text=@long-article.txt | prompt apply 
 | `--temperature` | Override temperature |
 | `--max-tokens` | Override max tokens |
 | `--stdin` | Read prompt from stdin |
+| `--workdir` | Working directory for @filename resolution |
 
 **Error Handling (Fails Loudly):**
-- Missing placeholder → `ValueError` with list of missing args
+- Missing parameter → `ValueError` with list of missing args
 - Missing file → `FileNotFoundError` with path
 - Missing provider → Exit with setup instructions
 - No stdin when expected → Clear error message

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import click
 from common import structlog
@@ -34,6 +35,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Read prompt content from stdin (for piping)",
     )
+    @click.option(
+        "--workdir",
+        "-w",
+        type=click.Path(),
+        default=None,
+        help="Working directory for @filename resolution (default: current directory)",
+    )
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
     @click.pass_context
     def apply_cmd(
@@ -45,27 +53,42 @@ def register(plugin_manifests: dict) -> CommandManifest:
         max_tokens,
         fmt,
         stdin,
+        workdir,
         args,
     ):
-        """Apply a prompt with placeholder substitution.
+        """Apply a prompt with parameter substitution.
 
         PROMPT_NAME_OR_CONTENT can be:
         - A saved prompt name (e.g., 'summarize')
         - A direct prompt string (e.g., "Explain {topic}")
         - "-" to read from stdin (or use --stdin flag)
 
+        Supports inline @filename references in prompt content (resolved relative to workdir).
+        Escape @ with \\@ if you need a literal @.
+
         Examples:
           prompt apply summarize text=@article.txt
           prompt apply "Explain {topic}" topic="quantum physics"
+          prompt apply "Review this: @config.yaml"
           echo "What is AI?" | prompt apply -
           cat prompt.txt | prompt apply --stdin
         """
-        from common.core.config import load_tool_config
+        from common.core.config import load_common_config, load_tool_config
         from commands.helpers import build_engine, get_default_provider
         from core.models import PromptExecution
         from core.substitution import resolve_arguments
         from common.llm.base import LLMRequest
         from storage.store import PromptStore
+
+        if workdir:
+            workdir_path = Path(workdir)
+        else:
+            common_config = load_common_config()
+            configured_workdir = common_config.get("workdir")
+            if configured_workdir:
+                workdir_path = Path(configured_workdir)
+            else:
+                workdir_path = Path.cwd()
 
         # Determine if this is a direct prompt or a saved prompt
         is_direct_prompt = False
@@ -100,9 +123,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
                         placeholders = extract_placeholders(maybe_saved_prompt.content)
                         if placeholders:
-                            placeholder_list = " ".join(
-                                f"{p}=-" for p in placeholders
-                            )
+                            placeholder_list = " ".join(f"{p}=-" for p in placeholders)
                             click.echo(
                                 f"Error: --stdin is not compatible with applying a named prompt.\n"
                                 f"Named prompt '{prompt_name_or_content}' has placeholders: {', '.join(placeholders)}\n"
@@ -146,6 +167,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
                 prompt_content = saved_prompt.content
                 from core.substitution import extract_placeholders
+
                 placeholders = extract_placeholders(prompt_content)
 
                 if len(placeholders) == 0:
@@ -199,7 +221,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         # Resolve placeholders in the prompt
         try:
-            resolved = resolve_arguments(prompt_content, placeholder_args)
+            resolved = resolve_arguments(prompt_content, placeholder_args, workdir_path)
         except (FileNotFoundError, ValueError) as exc:
             click.echo(f"Error: {exc}", err=True)
             sys.exit(1)

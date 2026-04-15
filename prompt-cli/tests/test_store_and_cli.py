@@ -39,7 +39,7 @@ def test_prompt_cli_create_list_get_delete(
     result = runner.invoke(main, ["get", "summary", "--format", "json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["placeholders"] == ["content"]
+    assert payload["parameters"] == ["content"]
 
     result = runner.invoke(main, ["delete", "summary", "--yes"])
     assert result.exit_code == 0, result.output
