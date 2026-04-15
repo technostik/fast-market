@@ -221,8 +221,8 @@ def execute_skill_script(
         )
 
         # Decode output with error handling for non-UTF-8 bytes
-        stdout_text = result.stdout.decode('utf-8', errors='replace')
-        stderr_text = result.stderr.decode('utf-8', errors='replace')
+        stdout_text = result.stdout.decode("utf-8", errors="replace")
+        stderr_text = result.stderr.decode("utf-8", errors="replace")
 
         # Write artificial session file for script skills when requested
         if save_session:
@@ -244,8 +244,12 @@ def execute_skill_script(
             exit_code=result.returncode,
         )
     except subprocess.TimeoutExpired as exc:
-        stdout_text = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        stderr_text = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        stdout_text = (
+            exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        )
+        stderr_text = (
+            exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        )
         if not stderr_text:
             stderr_text = f"Skill script timed out after {effective_timeout} seconds"
         return SkillResult(
@@ -266,26 +270,30 @@ def execute_skill_run(
     save_session: Path | None = None,
 ) -> SkillResult:
     """
-    Execute the skill's run: frontmatter command.
+    Execute the skill's run: frontmatter command(s).
 
     Supports {param} substitution and SKILL_* environment variables.
+    Accepts run: as a single string or a list of strings for multiple commands.
     """
-    cmd = skill.run
-    for key, value in (params or {}).items():
-        cmd = cmd.replace(f"{{{key}}}", str(value))
+    run_value = skill.run
+    if isinstance(run_value, str):
+        commands = [run_value] if run_value.strip() else []
+    else:
+        commands = [c for c in run_value if c and c.strip()]
 
-    unresolved = sorted(set(re.findall(r"\{(\w+)\}", cmd)))
-    if unresolved:
+    if not commands:
         return SkillResult(
             skill_name=skill.name,
             script_name="run:",
             stdout="",
-            stderr=(
-                f"Unresolved parameters: {', '.join(unresolved)}. "
-                "Pass them as KEY=VALUE arguments."
-            ),
+            stderr="No commands to execute",
             exit_code=1,
         )
+
+    all_stdout: list[str] = []
+    all_stderr: list[str] = []
+    final_exit_code = 0
+    timed_out = False
 
     env = os.environ.copy()
     for key, value in (params or {}).items():
@@ -296,63 +304,90 @@ def execute_skill_run(
         effective_timeout = 60
     effective_timeout = parse_duration(effective_timeout)
     if effective_timeout == 0:
-        effective_timeout = None  # 0 means no timeout
+        effective_timeout = None
 
-    logger.debug(
-        "executing skill run command",
-        skill=skill.name,
-        command=cmd,
-        workdir=str(workdir),
-        timeout=effective_timeout,
-    )
+    for i, cmd in enumerate(commands):
+        for key, value in (params or {}).items():
+            cmd = cmd.replace(f"{{{key}}}", str(value))
 
-    try:
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            cwd=workdir,
-            env=env,
-            capture_output=True,
-            timeout=effective_timeout if effective_timeout else None,
-        )
-
-        # Decode output with error handling for non-UTF-8 bytes
-        stdout_text = result.stdout.decode('utf-8', errors='replace')
-        stderr_text = result.stderr.decode('utf-8', errors='replace')
-
-        # Write artificial session file for run: skills when requested
-        if save_session:
-            _write_script_session(
+        unresolved = sorted(set(re.findall(r"\{(\w+)\}", cmd)))
+        if unresolved:
+            return SkillResult(
                 skill_name=skill.name,
                 script_name="run:",
-                params=params or {},
-                stdout=stdout_text,
-                stderr=stderr_text,
-                exit_code=result.returncode,
-                save_path=save_session,
+                stdout="\n".join(all_stdout),
+                stderr=(
+                    f"Command {i + 1}: Unresolved parameters: {', '.join(unresolved)}. "
+                    "Pass them as KEY=VALUE arguments."
+                ),
+                exit_code=1,
             )
 
-        return SkillResult(
+        logger.debug(
+            "executing skill run command",
+            skill=skill.name,
+            command=cmd,
+            workdir=str(workdir),
+            timeout=effective_timeout,
+            index=i + 1,
+        )
+
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=workdir,
+                env=env,
+                capture_output=True,
+                timeout=effective_timeout if effective_timeout else None,
+            )
+
+            stdout_text = result.stdout.decode("utf-8", errors="replace")
+            stderr_text = result.stderr.decode("utf-8", errors="replace")
+
+            if stdout_text:
+                all_stdout.append(stdout_text)
+            if stderr_text:
+                all_stderr.append(stderr_text)
+
+            if result.returncode != 0:
+                final_exit_code = result.returncode
+                break
+
+        except subprocess.TimeoutExpired as exc:
+            stdout_text = exc.stdout.decode() if isinstance(exc.stdout, bytes) else ""
+            stderr_text = exc.stderr.decode() if isinstance(exc.stderr, bytes) else ""
+            timeout_msg = f"Command {i + 1} timed out after {effective_timeout}s"
+            if not stderr_text:
+                stderr_text = timeout_msg
+            all_stdout.append(stdout_text)
+            all_stderr.append(timeout_msg)
+            final_exit_code = 124
+            timed_out = True
+            break
+
+    combined_stdout = "\n".join(all_stdout)
+    combined_stderr = "\n".join(all_stderr)
+
+    if save_session and (combined_stdout or combined_stderr):
+        _write_script_session(
             skill_name=skill.name,
             script_name="run:",
-            stdout=stdout_text,
-            stderr=stderr_text,
-            exit_code=result.returncode,
+            params=params or {},
+            stdout=combined_stdout,
+            stderr=combined_stderr,
+            exit_code=final_exit_code,
+            save_path=save_session,
         )
-    except subprocess.TimeoutExpired as exc:
-        stdout_text = exc.stdout.decode() if isinstance(exc.stdout, bytes) else ""
-        stderr_text = exc.stderr.decode() if isinstance(exc.stderr, bytes) else ""
-        timeout_msg = f"Skill run timed out after {effective_timeout}s"
-        if not stderr_text:
-            stderr_text = timeout_msg
-        return SkillResult(
-            skill_name=skill.name,
-            script_name="run:",
-            stdout=stdout_text,
-            stderr=stderr_text,
-            exit_code=124,
-            timed_out=True,
-        )
+
+    return SkillResult(
+        skill_name=skill.name,
+        script_name="run:",
+        stdout=combined_stdout,
+        stderr=combined_stderr,
+        exit_code=final_exit_code,
+        timed_out=timed_out,
+    )
 
 
 def execute_skill_prompt(

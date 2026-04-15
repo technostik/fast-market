@@ -9,6 +9,7 @@ import yaml
 
 class SkillParseError(Exception):
     """Raised when SKILL.md frontmatter YAML is malformed."""
+
     pass
 
 
@@ -21,9 +22,11 @@ class Skill:
     description: str = ""
     has_scripts: bool = False
     parameters: list[dict] = field(default_factory=list)
-    run: str = ""
+    run: str | list[str] = ""
     max_iterations: int | None = None
-    timeout: int | str | None = None  # Can be seconds (int) or duration string like '10m', '1h'
+    timeout: int | str | None = (
+        None  # Can be seconds (int) or duration string like '10m', '1h'
+    )
     llm_timeout: int | str | None = None  # Can be seconds (int) or duration string
     autocompact_lines: int | None = None
     stop_condition: str = ""
@@ -31,7 +34,7 @@ class Skill:
     @classmethod
     def from_path(cls, path: Path, strict: bool = False) -> Optional[Skill]:
         """Load skill from directory if valid.
-        
+
         Args:
             path: Path to skill directory
             strict: If True, raise SkillParseError on malformed YAML.
@@ -47,13 +50,14 @@ class Skill:
             if len(parts) >= 3:
                 try:
                     frontmatter = yaml.safe_load(parts[1])
+                    run_value = frontmatter.get("run", "")
                     return cls(
                         name=frontmatter.get("name", path.name),
                         path=path,
                         description=frontmatter.get("description", ""),
                         has_scripts=(path / "scripts").exists(),
                         parameters=frontmatter.get("parameters", []),
-                        run=frontmatter.get("run", ""),
+                        run=run_value,
                         max_iterations=frontmatter.get("max_iterations"),
                         timeout=frontmatter.get("timeout"),
                         llm_timeout=frontmatter.get("llm_timeout"),
@@ -92,7 +96,7 @@ class Skill:
                     issues.append("scripts/ directory empty")
         elif not self.run and not (self.path / "SKILL.md").exists():
             issues.append("no scripts, no run: command, no SKILL.md")
-        
+
         # Check for malformed YAML by attempting strict parse
         skill_file = self.path / "SKILL.md"
         if skill_file.exists():
@@ -104,7 +108,7 @@ class Skill:
                         yaml.safe_load(parts[1])
                     except Exception as exc:
                         issues.append(f"malformed frontmatter: {exc}")
-        
+
         return issues
 
     def get_body(self) -> str:
