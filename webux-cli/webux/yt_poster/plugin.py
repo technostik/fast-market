@@ -31,6 +31,20 @@ class SaveReplyRequest(BaseModel):
     reply: str
 
 
+class RegenerateRequest(BaseModel):
+    file: str
+    indices: list[int]
+
+
+class GetPromptRequest(BaseModel):
+    name: str
+
+
+class SavePromptRequest(BaseModel):
+    name: str
+    content: str
+
+
 def _workdir() -> Path:
     workdir = load_common_config().get("workdir")
     if not workdir:
@@ -53,7 +67,9 @@ def _load_array(path: Path) -> list:
         else:
             data = json.loads(raw)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}") from exc
+        raise HTTPException(
+            status_code=422, detail=f"Failed to parse file: {exc}"
+        ) from exc
 
     if not isinstance(data, list):
         raise HTTPException(status_code=422, detail="Expected top-level array")
@@ -151,3 +167,113 @@ def save_reply(payload: SaveReplyRequest) -> dict[str, str]:
     )
 
     return {"status": "ok"}
+
+
+@router.post("/get_prompt")
+def get_prompt(payload: GetPromptRequest) -> dict[str, str]:
+    cmd = ["prompt", "get", payload.name, "--content"]
+    logger.info("yt_poster_get_prompt", prompt_name=payload.name)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return {"status": "ok", "content": proc.stdout}
+    except subprocess.CalledProcessError as exc:
+        logger.error("yt_poster_get_prompt_failed", error=exc.stderr)
+        raise HTTPException(status_code=500, detail=exc.stderr.strip())
+
+
+@router.post("/save_prompt")
+def save_prompt(payload: SavePromptRequest) -> dict[str, str]:
+    cmd = ["prompt", "edit", payload.name, "--content"]
+    logger.info("yt_poster_save_prompt", prompt_name=payload.name)
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=payload.content,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return {"status": "ok"}
+    except subprocess.CalledProcessError as exc:
+        logger.error("yt_poster_save_prompt_failed", error=exc.stderr)
+        raise HTTPException(status_code=500, detail=exc.stderr.strip())
+
+
+@router.post("/regenerate")
+def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
+    source_path = _resolve_workdir_relative(payload.file)
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Input file not found")
+
+    data = _load_array(source_path)
+    selected = [data[idx] for idx in payload.indices if 0 <= idx < len(data)]
+
+    if not selected:
+        raise HTTPException(status_code=400, detail="No valid rows selected")
+
+    prompt_name = selected[0].get("metadata", {}).get("prompt-name")
+    promote_url = selected[0].get("metadata", {}).get("promote-url")
+
+    if not prompt_name:
+        raise HTTPException(status_code=400, detail="No prompt-name in metadata")
+
+    comment_ids = [
+        item.get("original_comment", {}).get("id")
+        for item in selected
+        if item.get("original_comment", {}).get("id")
+    ]
+
+    temp_input = Path(tempfile.gettempdir()) / f"webux_regen_{uuid4().hex}.json"
+    temp_output = Path(tempfile.gettempdir()) / f"webux_regen_out_{uuid4().hex}.json"
+    temp_input.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    cmd = [
+        "youtube",
+        "batch-reply",
+        str(temp_input),
+        "-s",
+        f"prompt apply {prompt_name}",
+        "-o",
+        str(temp_output),
+        "--filter",
+        json.dumps(comment_ids),
+        "--rewrite",
+    ]
+
+    if promote_url:
+        cmd.extend(["-p", f"URL={promote_url}"])
+
+    logger.info(
+        "yt_poster_regenerate",
+        cmd=" ".join(cmd),
+        indices=payload.indices,
+        prompt_name=prompt_name,
+    )
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        output = (proc.stdout or "") + (proc.stderr or "")
+
+        if proc.returncode != 0:
+            return {
+                "exit_code": proc.returncode,
+                "output": output,
+                "error": f"batch-reply failed: {output}",
+            }
+
+        if temp_output.exists():
+            updated_data = json.loads(temp_output.read_text(encoding="utf-8"))
+            source_path.write_text(
+                json.dumps(updated_data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return {
+                "exit_code": 0,
+                "output": output,
+                "updated_count": len(comment_ids),
+            }
+
+        return {"exit_code": proc.returncode, "output": output}
+    finally:
+        temp_input.unlink(missing_ok=True)
+        temp_output.unlink(missing_ok=True)

@@ -70,11 +70,13 @@ _YT_POSTER_HTML = """<!doctype html>
   </div>
   <div id=\"error\" class=\"error\"></div>
 
-  <div id=\"controls\" class=\"controls\">
-    <button id=\"selectAll\">Select all</button>
-    <button id=\"deselectAll\">Deselect all</button>
-    <label style=\"display:flex;align-items:center;gap:6px;\">
-      <input type=\"checkbox\" id=\"dryRun\"> Dry run
+  <div id="controls" class="controls">
+    <button id="selectAll">Select all</button>
+    <button id="deselectAll">Deselect all</button>
+    <button id="regenerateSelected" style="background:var(--warning);color:#000;">🔄 Regenerate selected</button>
+    <button id="editPromptBtn" style="display:none;">📝 Edit Prompt</button>
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" id="dryRun"> Dry run
     </label>
   </div>
 
@@ -98,18 +100,34 @@ _YT_POSTER_HTML = """<!doctype html>
     <pre id=\"log\"></pre>
   </div>
 
-  <div id=\"modalOverlay\" class=\"modal-overlay\">
-    <div class=\"modal\">
-      <div class=\"modal-header\">
-        <h3 id=\"modalTitle\">Comment</h3>
-        <button class=\"modal-close\" id=\"modalCloseBtn\">&times;</button>
+  <div id="modalOverlay" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Comment</h3>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
       </div>
-      <div class=\"modal-body\" id=\"modalBody\">
-        <pre id=\"modalText\"></pre>
+      <div class="modal-body" id="modalBody">
+        <pre id="modalText"></pre>
       </div>
-      <div class=\"modal-footer\" id=\"modalFooter\" style=\"display:none;\">
-        <button class=\"btn-cancel\" id=\"modalCancelBtn\">Cancel</button>
-        <button class=\"btn-save\" id=\"modalSaveBtn\">Save</button>
+      <div class="modal-footer" id="modalFooter" style="display:none;">
+        <button class="btn-cancel" id="modalCancelBtn">Cancel</button>
+        <button class="btn-save" id="modalSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="promptModalOverlay" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="promptModalTitle">Edit Prompt</h3>
+        <button class="modal-close" id="promptModalCloseBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <textarea id="promptModalTextarea" class="modal-edit-area" style="min-height:200px;"></textarea>
+      </div>
+      <div class="modal-footer" id="promptModalFooter" style="display:flex;">
+        <button class="btn-cancel" id="promptModalCancelBtn">Cancel</button>
+        <button class="btn-save" id="promptModalSaveBtn">Save</button>
       </div>
     </div>
   </div>
@@ -140,8 +158,17 @@ const modalFooter = document.getElementById('modalFooter');
 const modalCloseBtn = document.getElementById('modalCloseBtn');
 const modalCancelBtn = document.getElementById('modalCancelBtn');
 const modalSaveBtn = document.getElementById('modalSaveBtn');
+const promptModalOverlay = document.getElementById('promptModalOverlay');
+const promptModalTitle = document.getElementById('promptModalTitle');
+const promptModalTextarea = document.getElementById('promptModalTextarea');
+const promptModalCloseBtn = document.getElementById('promptModalCloseBtn');
+const promptModalCancelBtn = document.getElementById('promptModalCancelBtn');
+const promptModalSaveBtn = document.getElementById('promptModalSaveBtn');
+const editPromptBtn = document.getElementById('editPromptBtn');
+const regenerateSelectedBtn = document.getElementById('regenerateSelected');
 
 let editingRowIndex = -1;
+let editingPromptName = '';
 let currentSourceFile = '';
 
 function trunc(v, n=100) { if (!v) return '—'; return v.length > n ? v.slice(0,n) + '…' : v; }
@@ -225,7 +252,97 @@ modalCloseBtn.addEventListener('click', closeModal);
 modalCancelBtn.addEventListener('click', closeModal);
 modalSaveBtn.addEventListener('click', saveReply);
 
+function showPromptModal(promptName){
+  editingPromptName = promptName;
+  promptModalTitle.textContent = 'Edit Prompt: ' + promptName;
+  promptModalTextarea.value = '';
+  promptModalOverlay.style.display = 'flex';
+  fetch('/api/yt_poster/get_prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: promptName }),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.content !== undefined) {
+      promptModalTextarea.value = data.content;
+    } else {
+      promptModalTextarea.value = data.detail || 'Failed to load prompt';
+    }
+  })
+  .catch(() => { promptModalTextarea.value = 'Error loading prompt'; });
+}
+
+function closePromptModal(){
+  promptModalOverlay.style.display = 'none';
+  editingPromptName = '';
+}
+
+async function savePrompt(){
+  const newContent = promptModalTextarea.value;
+  const resp = await fetch('/api/yt_poster/save_prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: editingPromptName, content: newContent }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: 'Save failed' }));
+    errorEl.textContent = err.detail || 'Save failed';
+  } else {
+    errorEl.textContent = '';
+  }
+  closePromptModal();
+}
+
+promptModalOverlay.addEventListener('click', (e)=>{ if (e.target === promptModalOverlay) closePromptModal(); });
+document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closePromptModal(); });
+promptModalCloseBtn.addEventListener('click', closePromptModal);
+promptModalCancelBtn.addEventListener('click', closePromptModal);
+promptModalSaveBtn.addEventListener('click', savePrompt);
+editPromptBtn.addEventListener('click', () => {
+  const promptName = getPromptNameFromRows();
+  if (promptName) showPromptModal(promptName);
+});
+
+function getPromptNameFromRows(){
+  for (const row of rows) {
+    const pn = row.metadata?.['prompt-name'];
+    if (pn) return pn;
+  }
+  return null;
+}
+
+async function regenerateRows(indices){
+  if (!indices.length) return;
+  spinner.style.display = 'block';
+  output.style.display = 'none';
+  errorEl.textContent = '';
+
+  const resp = await fetch('/api/yt_poster/regenerate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: currentSourceFile, indices }),
+  });
+
+  spinner.style.display = 'none';
+  const body = await resp.json().catch(() => ({}));
+  output.style.display = 'block';
+  const code = body.exit_code ?? -1;
+  exitCode.textContent = `Exit code: ${code}`;
+  exitCode.style.color = code === 0 ? 'var(--success)' : 'var(--error)';
+
+  if (body.updated_count) {
+    exitCode.textContent += ` (${body.updated_count} replies regenerated)`;
+    loadFile();
+  } else {
+    logEl.textContent = body.output || body.error || 'Regeneration failed';
+  }
+}
+
 function renderTable(){
+  const hasPrompt = !!getPromptNameFromRows();
+  editPromptBtn.style.display = hasPrompt ? 'inline-block' : 'none';
+
   tbody.innerHTML = rows.map((row, i) => {
     const oc = row.original_comment || {};
     const title = oc.video_title || trunc(row.video_url || '', 40);
@@ -235,6 +352,7 @@ function renderTable(){
     const viewCount = oc.view_count != null ? formatNumber(oc.view_count) : '—';
     const likeCount = oc.like_count != null ? formatNumber(oc.like_count) : '—';
     const dateAge = oc.published_at ? formatRelativeDate(oc.published_at) : '';
+    const hasPromptName = row.metadata?.['prompt-name'];
 
     const stats = [];
     if (viewCount !== '—') stats.push(`<span>👁 ${viewCount}</span>`);
@@ -243,16 +361,17 @@ function renderTable(){
 
     return `<tr>
       <td>${i}</td>
-      <td><input type=\"checkbox\" data-i=\"${i}\" ${row.selected ? 'checked' : ''}></td>
+      <td><input type="checkbox" data-i="${i}" ${row.selected ? 'checked' : ''}></td>
       <td>
-        <a href=\"${esc(videoUrl)}\" class=\"video-link\" target=\"_blank\">${esc(title)}</a>
-        <div class=\"stats\">${stats.join('')}</div>
+        <a href="${esc(videoUrl)}" class="video-link" target="_blank">${esc(title)}</a>
+        <div class="stats">${stats.join('')}</div>
       </td>
-      <td><a href=\"${esc(channelUrl)}\" class=\"channel-link\" target=\"_blank\">${esc(channelName)}</a></td>
-      <td><span class=\"clickable\" data-full=\"orig-${i}\">${esc(trunc(oc.text || oc.comment || ''))}</span></td>
+      <td><a href="${esc(channelUrl)}" class="channel-link" target="_blank">${esc(channelName)}</a></td>
+      <td><span class="clickable" data-full="orig-${i}">${esc(trunc(oc.text || oc.comment || ''))}</span></td>
       <td>
-        <span class=\"clickable\" data-full=\"reply-${i}\">${esc(trunc(row.reply || row.generated_reply || ''))}</span>
-        <button class=\"edit-reply-btn\" data-i=\"${i}\" style=\"margin-left:6px;padding:2px 6px;font-size:11px;cursor:pointer;\">✏️</button>
+        <span class="clickable" data-full="reply-${i}">${esc(trunc(row.reply || row.generated_reply || ''))}</span>
+        <button class="edit-reply-btn" data-i="${i}" style="margin-left:6px;padding:2px 6px;font-size:11px;cursor:pointer;">✏️</button>
+        ${hasPromptName ? `<button class="regen-btn" data-i="${i}" style="margin-left:4px;padding:2px 6px;font-size:11px;cursor:pointer;background:var(--warning);color:#000;">🔄</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -282,6 +401,13 @@ function renderTable(){
       const row = rows[idx];
       const replyText = row.reply || row.generated_reply || '';
       showModal(replyText, true, idx);
+    });
+  });
+
+  tbody.querySelectorAll('.regen-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.i);
+      regenerateRows([idx]);
     });
   });
 
@@ -339,6 +465,10 @@ loadBtn.addEventListener('click', loadFile);
 postBtn.addEventListener('click', postSelected);
 selectAllBtn.addEventListener('click', () => { rows.forEach(r => r.selected = true); renderTable(); });
 deselectAllBtn.addEventListener('click', () => { rows.forEach(r => r.selected = false); renderTable(); });
+regenerateSelectedBtn.addEventListener('click', () => {
+  const indices = rows.map((r, i) => r.selected ? i : -1).filter(i => i >= 0);
+  regenerateRows(indices);
+});
 
 const params = new URLSearchParams(window.location.search);
 const preset = params.get('file') || 'replies.json';
