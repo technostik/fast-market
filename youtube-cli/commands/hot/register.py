@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from common.core.config import (
 )
 from common.core.paths import get_youtube_channel_list_path
 from common.core.yaml_utils import dump_yaml
+from common.youtube.utils import extract_video_id
 from common.youtube.channel_list import (
     load_channel_list_file,
     save_channel_list_file,
@@ -618,8 +620,51 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
     # ─── FETCH-VIDEO ──────────────────────────────────────────────────────
 
+    def _resolve_video_id(raw: str) -> str:
+        """Extract video ID from a raw string that may be a full URL or bare ID."""
+        import re
+
+        vid = extract_video_id(raw)
+        if vid is None:
+            if re.match(r"^[A-Za-z0-9_-]{11}$", raw):
+                return raw
+            raise click.ClickException(
+                f"Could not extract video ID from: {raw}\n"
+                f"Expected a video ID (e.g. 'BF3Z7J5Jv-U') or a YouTube URL."
+            )
+            return vid
+
+    def _video_to_output_dict(video) -> dict:
+        """Convert a Video object to the standard output dictionary format."""
+        return {
+            "channel_id": video.channel_id,
+            "channel_name": video.channel_title,
+            "video_id": video.video_id,
+            "title": video.title,
+            "description": video.description if hasattr(video, "description") else "",
+            "url": video.url
+            if hasattr(video, "url")
+            else f"https://youtube.com/watch?v={video.video_id}",
+            "published_at": video.published_at
+            if hasattr(video, "published_at")
+            else None,
+        }
+
+    def _is_video_input(raw: str) -> bool:
+        """Check if the input looks like a YouTube URL or bare video ID."""
+        import re
+
+        if not raw:
+            return False
+        if extract_video_id(raw) is not None:
+            return True
+        if re.match(r"^[A-Za-z0-9_-]{11}$", raw):
+            return True
+        return False
+
     @hot_group.command("fetch-video")
     @click.argument("theme", required=False)
+    @click.option("--stdin", is_flag=True, help="Read video ID from stdin")
     @click.option(
         "--format",
         "-f",
@@ -629,42 +674,95 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.option("--debug", is_flag=True, help="Show debug information")
-    def fetch_video_cmd(theme: str, fmt: str, output: str, debug: bool):
-        """Fetch the last video from each channel in a theme.
+    def fetch_video_cmd(theme: str, stdin: bool, fmt: str, output: str, debug: bool):
+        """Fetch the last video from each channel in a theme, or a specific video by URL/ID.
 
-        THEME: Optional thematic name. If not provided, uses default_thematic from config.
+        THEME: Optional thematic name, video URL, or video ID.
+        If a YouTube URL or video ID is provided, fetches that specific video.
+        If a thematic name is provided, fetches the last video from each channel in that theme.
+        If not provided, uses default_thematic from config.
         """
-        # Resolve theme from argument or config
-        if not theme:
+        config = load_config()
+        client = build_youtube_client(config)
+
+        if stdin:
+            if sys.stdin.isatty():
+                click.echo("No input provided via stdin", err=True)
+                return
+            try:
+                data = json.load(sys.stdin)
+            except json.JSONDecodeError:
+                data = yaml.safe_load(sys.stdin)
+            if not isinstance(data, list):
+                data = [data]
+            all_videos = []
+            for item in data:
+                vid = item.get("video_id") or item.get("id") or item.get("url")
+                if not vid:
+                    continue
+                resolved_vid = _resolve_video_id(vid)
+                video = client.get_video_infos(resolved_vid)
+                if video:
+                    all_videos.append(_video_to_output_dict(video))
+            if output:
+                resolved_output = _resolve_output_path(output)
+                Path(resolved_output).write_text(
+                    json.dumps(all_videos, ensure_ascii=False, default=str)
+                    if fmt == "json"
+                    else dump_yaml(all_videos)
+                )
+                click.echo(f"Saved {len(all_videos)} videos to {resolved_output}")
+            else:
+                out(all_videos, fmt)
+            return
+
+        raw_input = theme
+        if not raw_input:
             yt_channel_list_cfg = load_youtube_channel_list_config()
-            theme = yt_channel_list_cfg.get("default_thematic", "")
-            if not theme:
+            raw_input = yt_channel_list_cfg.get("default_thematic", "")
+            if not raw_input:
                 raise click.ClickException(
-                    "No thematic list specified. "
-                    "Provide THEME argument or set 'default_thematic' in youtube config."
+                    "No thematic or video specified. "
+                    "Provide THEME/URL argument, set 'default_thematic' in config, or use --stdin."
                 )
             if debug:
                 click.echo(
-                    f"[DEBUG] Using default thematic from config: {theme}", err=True
+                    f"[DEBUG] Using default thematic from config: {raw_input}", err=True
                 )
 
+        if _is_video_input(raw_input):
+            video_id = _resolve_video_id(raw_input)
+            if debug:
+                click.echo(f"[DEBUG] Fetching specific video: {video_id}", err=True)
+            video = client.get_video_infos(video_id)
+            if not video:
+                raise click.ClickException(f"Video not found: {video_id}")
+            all_videos = [_video_to_output_dict(video)]
+            if output:
+                resolved_output = _resolve_output_path(output)
+                Path(resolved_output).write_text(
+                    json.dumps(all_videos, ensure_ascii=False, default=str)
+                    if fmt == "json"
+                    else dump_yaml(all_videos)
+                )
+                click.echo(f"Saved {len(all_videos)} video to {resolved_output}")
+            else:
+                out(all_videos, fmt)
+            return
+
         channel_list = _load_channel_list()
-        thematic = channel_list.get_thematic(theme)
+        thematic = channel_list.get_thematic(raw_input)
 
         if thematic is None:
-            raise click.ClickException(f"Theme '{theme}' not found.")
+            raise click.ClickException(f"Theme '{raw_input}' not found.")
 
         channel_names = thematic.channels
         if not channel_names:
-            raise click.ClickException(f"No channels in theme '{theme}'.")
-
-        config = load_config()
-        client = build_youtube_client(config)
+            raise click.ClickException(f"No channels in theme '{raw_input}'.")
 
         all_videos = []
 
         for ch_name in channel_names:
-            # Resolve channel entry from global list
             ch_entry = channel_list.get_channel_by_name(ch_name)
             if ch_entry is None:
                 if debug:
@@ -682,7 +780,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     err=True,
                 )
 
-            # Get last video
             try:
                 videos = client.get_channel_videos(ch_id, max_results=1)
             except Exception as e:
@@ -717,7 +814,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             all_videos.append(video_data)
 
-        # Output
         if output:
             resolved_output = _resolve_output_path(output)
             Path(resolved_output).write_text(

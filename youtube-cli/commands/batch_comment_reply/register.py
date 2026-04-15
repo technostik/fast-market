@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -27,6 +28,50 @@ def _detect_format_from_filename(filename: str) -> str:
     elif filename.endswith(".json"):
         return "json"
     return "text"
+
+
+def _sanitize_key(key: str) -> str:
+    sanitized = key.upper()
+    sanitized = re.sub(r"[^A-Z0-9_]", "_", sanitized)
+    sanitized = re.sub(r"_+", "_", sanitized)
+    return sanitized.strip("_")
+
+
+def _flatten_dict(data: dict, parent_key: str = "", sep: str = "_") -> dict:
+    items = {}
+    for key, value in data.items():
+        new_key = f"{parent_key}{sep}{key}" if parent_key else key
+        if isinstance(value, dict):
+            items.update(_flatten_dict(value, new_key, sep))
+        elif isinstance(value, list):
+            items[new_key] = json.dumps(value)
+        else:
+            items[new_key] = str(value) if value is not None else ""
+    return items
+
+
+def _item_to_env_vars(item: dict) -> dict:
+    all_vars = {}
+    fixed_vars = {
+        "AUTHOR": item.get("author", ""),
+        "COMMENT": item.get("text", ""),
+        "COMMENT_TEXT": item.get("text", ""),
+        "VIDEO_URL": item.get("video_url", ""),
+        "VIDEO_ID": item.get("video_id", ""),
+        "VIDEO_TITLE": item.get("video_title", ""),
+        "COMMENT_ID": item.get("id", ""),
+    }
+    for k, v in fixed_vars.items():
+        if v:
+            all_vars[k] = v
+
+    flattened = _flatten_dict(item)
+    for key, value in flattened.items():
+        env_key = _sanitize_key(key)
+        if env_key and value:
+            all_vars[env_key] = value
+
+    return all_vars
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -272,13 +317,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 # Execute shell command with env vars
                 env = {
                     **os.environ,
-                    "AUTHOR": author,
-                    "COMMENT": comment_text,
-                    "COMMENT_TEXT": comment_text,
-                    "VIDEO_URL": video_url,
-                    "VIDEO_ID": video_id,
-                    "VIDEO_TITLE": video_title,
-                    "COMMENT_ID": comment_id,
+                    **_item_to_env_vars(item),
                 }
 
                 try:

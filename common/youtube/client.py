@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+import click
+
 from common import structlog
 from common.youtube.models import (
     ChannelInfo,
@@ -28,6 +30,33 @@ def _is_insufficient_permissions_error(e: HttpError) -> bool:
         return False
     body = str(e.content) if hasattr(e, "content") else str(e)
     return "insufficientPermissions" in body or "Insufficient Permission" in body
+
+
+def _is_quota_exceeded_error(e: HttpError) -> bool:
+    """Check if an HttpError is a quota exceeded error."""
+    if e.resp.status != 403:
+        return False
+    body = str(e.content) if hasattr(e, "content") else str(e)
+    return "quotaExceeded" in body or "quota" in body.lower()
+
+
+def _format_quota_error(e: HttpError) -> str:
+    """Format a quota exceeded error into a user-friendly message."""
+    state = None
+    body = str(e.content) if hasattr(e, "content") else str(e)
+
+    if "quotaExceeded" in body:
+        return (
+            "YouTube API quota exceeded!\n\n"
+            "The request cannot be completed because you have exceeded your daily quota.\n\n"
+            "Possible solutions:\n"
+            "  1. Wait until the quota resets (typically midnight PT)\n"
+            "  2. Request a quota increase from Google Cloud Console\n"
+            "  3. Use batch operations to reduce the number of API calls\n\n"
+            "To check your current quota usage, run: youtube setup status"
+        )
+
+    return str(e)
 
 
 def _needs_scope_refresh(e: HttpError) -> bool:
@@ -80,6 +109,12 @@ class YouTubeClient:
                 self._refresh_auth_and_rebuild()
                 return fn()  # retry once
             raise
+
+    def _handle_quota_error(self, e: HttpError, operation: str) -> None:
+        """Handle quota exceeded errors with a user-friendly message."""
+        if _is_quota_exceeded_error(e):
+            raise click.ClickException(_format_quota_error(e))
+        logger.error("api_error", operation=operation, error=str(e))
 
     def get_quota_usage(self) -> dict[str, Any]:
         """Get current quota usage information."""
@@ -150,9 +185,11 @@ class YouTubeClient:
                 "duration": content.get("duration", ""),
                 "title": snippet.get("title", ""),
                 "published_at": snippet.get("publishedAt", ""),
+                "channel_id": snippet.get("channelId", ""),
+                "channel_title": snippet.get("channelTitle", ""),
             }
         except HttpError as e:
-            logger.error("api_error", operation="get_video_details", error=str(e))
+            self._handle_quota_error(e, "get_video_details")
             raise
         except Exception as e:
             logger.error(
@@ -584,8 +621,8 @@ class YouTubeClient:
             video_id=video_id,
             title=details.get("title", "N/A"),
             description=details.get("description", ""),
-            channel_id="",
-            channel_title="",
+            channel_id=details.get("channel_id", ""),
+            channel_title=details.get("channel_title", ""),
             view_count=details.get("view_count", 0),
             like_count=details.get("like_count", 0),
             comment_count=details.get("comment_count", 0),

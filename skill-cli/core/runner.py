@@ -42,10 +42,20 @@ def _write_script_session(
     stderr: str,
     exit_code: int,
     save_path: Path,
+    is_inline: bool = False,
 ) -> None:
     """Write an artificial session.yaml for script skills."""
     import yaml
     from datetime import datetime, timezone
+
+    if is_inline:
+        display_script = skill_name
+        display_command = script_name
+        display_content = f"Run skill script: {skill_name}"
+    else:
+        display_script = script_name
+        display_command = f"{skill_name}/{script_name}"
+        display_content = f"Run skill script: {skill_name}/{script_name}"
 
     session_data = {
         "task_description": f"Skill: {skill_name}",
@@ -60,15 +70,15 @@ def _write_script_session(
         "turns": [
             {
                 "role": "assistant",
-                "content": f"Run skill script: {skill_name}/{script_name}",
+                "content": display_content,
                 "tool_calls": [
                     {
                         "name": "script_execution",
                         "arguments": {
                             "skill": skill_name,
-                            "script": script_name,
+                            "script": display_script,
                             "params": params,
-                            "command": f"{skill_name}/{script_name}",
+                            "command": display_command,
                         },
                         "stdout": stdout,
                         "error": stderr if exit_code != 0 else None,
@@ -281,10 +291,15 @@ def execute_skill_run(
     else:
         commands = [c for c in run_value if c and c.strip()]
 
+    if len(commands) == 1:
+        script_display = commands[0]
+    else:
+        script_display = " && ".join(commands)
+
     if not commands:
         return SkillResult(
             skill_name=skill.name,
-            script_name="run:",
+            script_name=script_display,
             stdout="",
             stderr="No commands to execute",
             exit_code=1,
@@ -314,7 +329,7 @@ def execute_skill_run(
         if unresolved:
             return SkillResult(
                 skill_name=skill.name,
-                script_name="run:",
+                script_name=script_display,
                 stdout="\n".join(all_stdout),
                 stderr=(
                     f"Command {i + 1}: Unresolved parameters: {', '.join(unresolved)}. "
@@ -372,17 +387,18 @@ def execute_skill_run(
     if save_session and (combined_stdout or combined_stderr):
         _write_script_session(
             skill_name=skill.name,
-            script_name="run:",
+            script_name=script_display,
             params=params or {},
             stdout=combined_stdout,
             stderr=combined_stderr,
             exit_code=final_exit_code,
             save_path=save_session,
+            is_inline=True,
         )
 
     return SkillResult(
         skill_name=skill.name,
-        script_name="run:",
+        script_name=script_display,
         stdout=combined_stdout,
         stderr=combined_stderr,
         exit_code=final_exit_code,

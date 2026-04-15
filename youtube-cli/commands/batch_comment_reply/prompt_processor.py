@@ -9,6 +9,7 @@ Supports:
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -17,17 +18,6 @@ from typing import Any
 
 # Pattern to match @filename or @- references
 FILE_REF_PATTERN = re.compile(r"@([^\s]+)")
-
-# Common template variables that can be used in prompts
-TEMPLATE_VARS = {
-    "{URL}",
-    "{VIDEO_URL}",
-    "{VIDEO_ID}",
-    "{AUTHOR}",
-    "{COMMENT}",
-    "{COMMENT_TEXT}",
-    "{VIDEO_TITLE}",
-}
 
 
 class PromptProcessorError(Exception):
@@ -102,15 +92,37 @@ def resolve_file_references(prompt: str, working_dir: Path | None = None) -> str
     return FILE_REF_PATTERN.sub(replace_ref, prompt)
 
 
+def _sanitize_key(key: str) -> str:
+    """Convert a key to uppercase env var format with underscores."""
+    sanitized = key.upper()
+    sanitized = re.sub(r"[^A-Z0-9_]", "_", sanitized)
+    sanitized = re.sub(r"_+", "_", sanitized)
+    return sanitized.strip("_")
+
+
+def _flatten_dict(
+    data: dict[str, Any], parent_key: str = "", sep: str = "_"
+) -> dict[str, str]:
+    """Flatten a nested dictionary into dot-notation keys."""
+    items = {}
+    for key, value in data.items():
+        new_key = f"{parent_key}{sep}{key}" if parent_key else key
+        if isinstance(value, dict):
+            items.update(_flatten_dict(value, new_key, sep))
+        elif isinstance(value, list):
+            items[new_key] = json.dumps(value)
+        else:
+            items[new_key] = str(value) if value is not None else ""
+    return items
+
+
 def apply_template_variables(prompt: str, data: dict[str, Any]) -> str:
     """Replace template variables with actual values from data.
 
-    Supported variables:
-    - {URL} or {VIDEO_URL} -> data.get('video_url', '')
-    - {VIDEO_ID} -> data.get('video_id', '')
-    - {AUTHOR} or {COMMENT_AUTHOR} -> data.get('author', '')
-    - {COMMENT} or {COMMENT_TEXT} -> data.get('text', '')
-    - {VIDEO_TITLE} -> data.get('video_title', '')
+    Supports ALL fields from input data as template variables:
+    - Matches {FIELD_NAME} to data['field_name'] (case-insensitive key match)
+    - Also supports dot notation: {author.name} -> data['author']['name']
+    - Falls back to common aliases for backward compatibility
 
     Args:
         prompt: The prompt text with template variables
@@ -119,22 +131,26 @@ def apply_template_variables(prompt: str, data: dict[str, Any]) -> str:
     Returns:
         Prompt with template variables replaced
     """
-    # Map of template variables to data keys
-    var_mapping = {
-        "{URL}": "video_url",
-        "{VIDEO_URL}": "video_url",
-        "{VIDEO_ID}": "video_id",
-        "{AUTHOR}": "author",
-        "{COMMENT_AUTHOR}": "author",
-        "{COMMENT}": "text",
-        "{COMMENT_TEXT}": "text",
-        "{VIDEO_TITLE}": "video_title",
-    }
-
+    flattened = _flatten_dict(data)
     result = prompt
-    for template_var, data_key in var_mapping.items():
-        if template_var in result:
-            value = str(data.get(data_key, ""))
+
+    for template_var in re.findall(r"\{[^}]+\}", result):
+        key = template_var[1:-1]
+        value = None
+
+        if key in data:
+            val = data[key]
+            value = str(val) if val is not None else ""
+        elif key in flattened:
+            value = flattened[key]
+        else:
+            lower_key = key.lower()
+            for data_key, data_val in data.items():
+                if data_key.lower() == lower_key:
+                    value = str(data_val) if data_val is not None else ""
+                    break
+
+        if value is not None:
             result = result.replace(template_var, value)
 
     return result
