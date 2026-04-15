@@ -246,33 +246,24 @@ youtube batch-comments videos.json -n 5 --format json -o comments.json
 
 ### batch-reply
 
-Generate LLM-powered replies to comments from a batch-comments output file.
+Generate replies to comments from a batch-comments output file. Supports two modes:
+- **LLM mode**: Uses an LLM to generate replies (default)
+- **Shell mode**: Uses a custom shell command to generate replies
 
 ```bash
-youtube batch-reply INPUT_FILE --prompt "PROMPT" [OPTIONS]
+youtube batch-reply INPUT_FILE [OPTIONS]
 ```
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-p, --prompt` | Prompt template for generating replies. Can be used multiple times. Supports `@filename` to include file contents, `@-` for stdin, and template variables like `{URL}`, `{AUTHOR}`, `{COMMENT}` | required |
+| `-p, --prompt` | Prompt template for LLM mode. Can be used multiple times. Supports `@filename`, `@-` for stdin, and template variables `{URL}`, `{AUTHOR}`, `{COMMENT}` | - |
+| `-s, --shell` | Shell command to generate replies. Receives comment via env vars: AUTHOR, COMMENT, VIDEO_URL, VIDEO_ID, VIDEO_TITLE, COMMENT_ID | - |
+| `-m, --metadata` | Key-value pairs to include in output (repeatable). Format: `key=value` | - |
 | `-f, --format` | Output: json, yaml, text | json |
-| `-o, --output` | Save results to file | None |
+| `-o, --output` | Save results to file | stdout |
 
-**Prompt Features:**
+**LLM Mode (default):**
 
-1. **Multiple Prompts**: Use `-p` multiple times to combine instructions
-2. **File References**: Use `@filename` to include file contents (e.g., `@transcript.txt`)
-3. **Stdin Piping**: Use `@-` to read from stdin
-4. **Template Variables**: Use `{URL}`, `{AUTHOR}`, `{COMMENT}`, `{VIDEO_TITLE}`, etc.
-
-**Supported Template Variables:**
-- `{URL}` or `{VIDEO_URL}` - The video URL
-- `{VIDEO_ID}` - The video ID
-- `{AUTHOR}` or `{COMMENT_AUTHOR}` - The comment author
-- `{COMMENT}` or `{COMMENT_TEXT}` - The comment text
-- `{VIDEO_TITLE}` - The video title
-
-**Examples:**
 ```bash
 # Simple reply generation
 youtube batch-reply comments.json \
@@ -284,28 +275,43 @@ youtube batch-reply comments.json \
   -p 'Write a response that agrees with the comment and promotes my video {URL}.' \
   -p 'Use this transcript for context: @transcript.txt' \
   -o replies.json
+```
 
-# Using stdin for transcript
-cat transcript.txt | youtube batch-reply comments.json \
-  -p 'Base your response on this transcript: @-' \
-  -p 'Always mention {URL} in your reply' \
-  -o replies.json
+**Shell Mode:**
 
-# Complex example with multiple files and variables
+```bash
+# Using prompt CLI to generate replies
 youtube batch-reply comments.json \
-  -p 'Context from guidelines: @content-guidelines.md' \
-  -p 'Video transcript: @transcript.txt' \
-  -p 'Reply to {AUTHOR} in a friendly tone, promoting {URL}' \
+  -s 'prompt get my-prompt --content | claude --no-stream' \
+  -m prompt_name=my-prompt \
   -o replies.json
 
-# replies.json format:
-# [
-#   {
-#     "video_url": "https://www.youtube.com/watch?v=...",
-#     "original_comment": { ... full original comment object ... },
-#     "reply": "Generated reply text..."
-#   }
-# ]
+# Using custom script
+youtube batch-reply comments.json \
+  -s './generate_reply.sh' \
+  -m source=custom \
+  -o replies.json
+```
+
+**Environment variables in shell mode:**
+- `AUTHOR` - Comment author name
+- `COMMENT` or `COMMENT_TEXT` - The comment text
+- `VIDEO_URL` - URL of the video
+- `VIDEO_ID` - YouTube video ID
+- `VIDEO_TITLE` - Video title
+- `COMMENT_ID` - YouTube comment ID
+
+**Output format:**
+```json
+[
+  {
+    "video_url": "https://www.youtube.com/watch?v=...",
+    "original_comment": { ... },
+    "reply": "Generated reply text...",
+    "metadata": { "prompt_name": "my-prompt" },
+    "error": null  // present if shell command failed
+  }
+]
 ```
 
 ### batch-post
@@ -334,25 +340,34 @@ youtube batch-post replies.json --delay 2 -o posted_results.json
 
 ### reply
 
-Post replies to YouTube comments.
+Generate reply text for YouTube comments. Use `batch-post` to actually post replies to YouTube.
 
 ```bash
 youtube reply [COMMENT_ID] [TEXT] [OPTIONS]
 ```
 
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `COMMENT_ID` | YouTube comment ID to reply to (required unless using --from-file or --stdin) |
+| `TEXT` | Reply text to post (required unless using --from-file or --stdin) |
+
+**Options:**
+
 | Option | Description |
 |--------|-------------|
-| `--from-file` | JSON/YAML file with array of {comment_id, text} |
-| `-f, --format` | Output: json, yaml, text |
-| `-o, --output` | Save results to file |
-| `--stdin` | Read from stdin (JSON array) |
+| `--from-file` | JSON/YAML file containing array of `{comment_id, text}` objects |
+| `-f, --format` | Output format: `json`, `yaml`, or `text` (default: `text`) |
+| `-o, --output` | Save results to file instead of stdout |
+| `--stdin` | Read input from stdin (JSON array of `{comment_id, text}` objects) |
 
 **Examples:**
 ```bash
-# Single reply
+# Generate a single reply
 youtube reply COMMENT_ID "Thanks for watching!"
 
-# Batch replies from file
+# Batch generate replies from file
 youtube reply --from-file replies.json
 
 # replies.json format:
@@ -366,6 +381,8 @@ youtube comments VIDEO_ID -n 5 --format json \
   | jq '.[] | {comment_id: .id, text: "Thanks!"}' \
   | youtube reply --stdin
 ```
+
+**Output:** Generated reply objects with `comment_id` and `text` (use `batch-post` to post to YouTube)
 
 ## Features
 

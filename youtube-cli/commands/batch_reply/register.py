@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import click
@@ -33,11 +35,27 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--prompt",
         "-p",
-        required=True,
         multiple=True,
-        help="Prompt template for generating replies. Can be used multiple times. "
-             "Supports @filename to include file contents, @- for stdin, "
-             "and template variables like {URL}, {AUTHOR}, {COMMENT}.",
+        help="Prompt template for generating replies (LLM mode). Can be used multiple times. "
+        "Supports @filename to include file contents, @- for stdin, "
+        "and template variables like {URL}, {AUTHOR}, {COMMENT}. "
+        "Use --shell for custom command mode.",
+    )
+    @click.option(
+        "--shell",
+        "-s",
+        type=str,
+        default=None,
+        help="Shell command to generate replies. Receives comment via env vars: "
+        "AUTHOR, COMMENT, VIDEO_URL, VIDEO_ID, VIDEO_TITLE, COMMENT_ID. "
+        "Output should be plain text reply.",
+    )
+    @click.option(
+        "--metadata",
+        "-m",
+        "metadata",
+        multiple=True,
+        help="Key-value pairs to include in output (repeatable). Format: key=value",
     )
     @click.option(
         "--format",
@@ -53,19 +71,38 @@ def register(plugin_manifests: dict) -> CommandManifest:
         type=str,
         default=None,
         help="JSON list of comment IDs to process only those comments. "
-             "Example: '[\"comment_id_1\", \"comment_id_2\"]'",
+        'Example: \'["comment_id_1", "comment_id_2"]\'',
     )
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.pass_context
-    def batch_reply_cmd(ctx, input_file, prompt, fmt, filter_ids, output, **kwargs):
-        try:
-            # Load LLM config and discover providers
+    def batch_reply_cmd(
+        ctx, input_file, prompt, shell, metadata, fmt, filter_ids, output, **kwargs
+    ):
+        # Parse metadata into dict
+        metadata_dict = {}
+        for m in metadata:
+            if "=" in m:
+                key, value = m.split("=", 1)
+                metadata_dict[key] = value
+
+        # Determine generation mode
+        use_shell = bool(shell)
+        use_llm = bool(prompt) and not use_shell
+
+        if not use_shell and not use_llm:
+            click.echo("Error: Either --prompt or --shell is required", err=True)
+            return
+
+        # Initialize provider if using LLM mode
+        provider = None
+        if use_llm:
             config = load_tool_config("youtube")
             providers = discover_providers(config)
             if not providers:
-                click.echo("Error: No LLM providers configured. Run: toolsetup", err=True)
+                click.echo(
+                    "Error: No LLM providers configured. Run: toolsetup", err=True
+                )
                 return
-
             provider_name = get_default_provider_name(config)
             provider = providers.get(provider_name)
             if provider is None:
@@ -74,47 +111,84 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 )
                 return
 
-            # Read input file
-            input_path = Path(input_file)
+        # Read input file
+        input_path = Path(input_file)
+        try:
+            data = json.loads(input_path.read_text())
+        except json.JSONDecodeError:
+            data = yaml.safe_load(input_path.read_text())
+
+        if not isinstance(data, list):
+            data = [data]
+
+        # Apply filter if provided
+        if filter_ids:
             try:
-                data = json.loads(input_path.read_text())
-            except json.JSONDecodeError:
-                data = yaml.safe_load(input_path.read_text())
-
-            if not isinstance(data, list):
-                data = [data]
-
-            # Apply filter if provided
-            if filter_ids:
-                try:
-                    filter_list = json.loads(filter_ids)
-                    if not isinstance(filter_list, list):
-                        click.echo("Error: --filter must be a JSON list of comment IDs", err=True)
-                        return
-                    filter_set = set(filter_list)
-                    data = [item for item in data if item.get("id") in filter_set]
-                    click.echo(f"Filtered to {len(data)} comments matching filter IDs", err=True)
-                except json.JSONDecodeError as e:
-                    click.echo(f"Error: --filter contains invalid JSON: {e}", err=True)
+                filter_list = json.loads(filter_ids)
+                if not isinstance(filter_list, list):
+                    click.echo(
+                        "Error: --filter must be a JSON list of comment IDs", err=True
+                    )
                     return
+                filter_set = set(filter_list)
+                data = [item for item in data if item.get("id") in filter_set]
+                click.echo(
+                    f"Filtered to {len(data)} comments matching filter IDs", err=True
+                )
+            except json.JSONDecodeError as e:
+                click.echo(f"Error: --filter contains invalid JSON: {e}", err=True)
+                return
 
-            # Process comments sequentially
-            results = []
-            total = len(data)
-            for idx, item in enumerate(data, 1):
-                comment_text = item.get("text", "")
-                author = item.get("author", "")
-                video_url = item.get("video_url", "")
+        # Process comments sequentially
+        results = []
+        total = len(data)
+        for idx, item in enumerate(data, 1):
+            comment_text = item.get("text", "")
+            author = item.get("author", "")
+            video_url = item.get("video_url", "")
+            video_id = item.get("video_id", "")
+            video_title = item.get("video_title", "")
+            comment_id = item.get("id", "")
 
-                if not comment_text:
-                    continue
+            if not comment_text:
+                continue
 
-                # Build prompt using the prompt processor
-                # The processor handles:
-                # - Multiple -p flags (concatenation)
-                # - @filename references (file inclusion)
-                # - @- for stdin
-                # - Template variables like {URL}, {AUTHOR}, {COMMENT}
+            reply_text = None
+            error = None
+
+            if use_shell:
+                # Execute shell command with env vars
+                env = {
+                    **os.environ,
+                    "AUTHOR": author,
+                    "COMMENT": comment_text,
+                    "COMMENT_TEXT": comment_text,
+                    "VIDEO_URL": video_url,
+                    "VIDEO_ID": video_id,
+                    "VIDEO_TITLE": video_title,
+                    "COMMENT_ID": comment_id,
+                }
+                try:
+                    result = subprocess.run(
+                        shell,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                        timeout=30,
+                    )
+                    if result.returncode != 0:
+                        error = (
+                            result.stderr.strip() or f"Exit code: {result.returncode}"
+                        )
+                    else:
+                        reply_text = result.stdout.strip()
+                except subprocess.TimeoutExpired:
+                    error = "Command timed out after 30 seconds"
+                except Exception as e:
+                    error = str(e)
+            else:
+                # Use LLM mode
                 try:
                     processed_prompt = process_prompts(
                         prompts=list(prompt),
@@ -122,56 +196,60 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         working_dir=input_path.parent,
                     )
                 except PromptProcessorError as e:
-                    click.echo(f"Error processing prompt for comment {idx}: {e}", err=True)
-                    continue
+                    error = f"Error processing prompt: {e}"
+                    click.echo(f"[{idx}/{total}] {error}", err=True)
 
-                # Add the actual comment context to the prompt
-                user_prompt = f"{processed_prompt}\n\n---\nComment by: {author}\nVideo: {video_url}\nComment: {comment_text}\n---\n\nGenerate a reply:"
+                if not error:
+                    user_prompt = f"{processed_prompt}\n\n---\nComment by: {author}\nVideo: {video_url}\nComment: {comment_text}\n---\n\nGenerate a reply:"
+                    request = LLMRequest(
+                        prompt=user_prompt,
+                        temperature=0.7,
+                        max_tokens=512,
+                    )
+                    try:
+                        response = provider.complete(request)
+                        reply_text = response.content.strip()
+                    except Exception as e:
+                        error = f"LLM error: {e}"
 
-                # Call LLM
-                request = LLMRequest(
-                    prompt=user_prompt,
-                    temperature=0.7,
-                    max_tokens=512,
+            # Build result entry with full original data
+            result = {
+                "video_url": video_url,
+                "original_comment": item,
+                "reply": reply_text,
+            }
+            if metadata_dict:
+                result["metadata"] = metadata_dict
+            if error:
+                result["error"] = error
+            results.append(result)
+
+            if error:
+                click.echo(
+                    f"[{idx}/{total}] Error for comment by {author}: {error}", err=True
                 )
-                response = provider.complete(request)
-                reply_text = response.content.strip()
-
-                # Build result entry with full original data
-                result = {
-                    "video_url": video_url,
-                    "original_comment": item,
-                    "reply": reply_text,
-                }
-                results.append(result)
-
-                # Progress output
-                click.echo(f"[{idx}/{total}] Generated reply for comment by {author}", err=True)
-
-            # Output results
-            if output:
-                # Auto-detect format from filename if not explicitly specified
-                output_fmt = fmt if fmt else _detect_format_from_filename(output)
-
-                if output_fmt == "json":
-                    Path(output).write_text(
-                        json.dumps(results, ensure_ascii=False, default=str)
-                    )
-                elif output_fmt == "yaml":
-                    Path(output).write_text(dump_yaml(results))
-                else:
-                    # text format - write as JSON
-                    Path(output).write_text(
-                        json.dumps(results, ensure_ascii=False, default=str)
-                    )
-                click.echo(f"Saved {len(results)} replies to {output}", err=True)
             else:
-                # Default to json if no output file and no format specified
-                out(results, fmt if fmt else "json")
+                click.echo(
+                    f"[{idx}/{total}] Generated reply for comment by {author}", err=True
+                )
 
-        except Exception as e:
-            click.echo(f"Error: {e}", err=True)
-            raise
+        # Output results
+        if output:
+            output_fmt = fmt if fmt else _detect_format_from_filename(output)
+
+            if output_fmt == "json":
+                Path(output).write_text(
+                    json.dumps(results, ensure_ascii=False, default=str)
+                )
+            elif output_fmt == "yaml":
+                Path(output).write_text(dump_yaml(results))
+            else:
+                Path(output).write_text(
+                    json.dumps(results, ensure_ascii=False, default=str)
+                )
+            click.echo(f"Saved {len(results)} replies to {output}", err=True)
+        else:
+            out(results, fmt if fmt else "json")
 
     return CommandManifest(
         name="batch-reply",
