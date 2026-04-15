@@ -95,7 +95,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--input",
         "-f",
         "input_file",
-        type=click.Path(exists=True, path_type=Path),
+        type=click.Path(path_type=Path),
         default=None,
         help="Input JSON/YAML file (default: stdin)",
     )
@@ -128,6 +128,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Limit number of records to process",
     )
+    @click.option(
+        "--workdir",
+        "-w",
+        type=click.Path(),
+        default=None,
+        help="Working directory for file paths (default: current directory or common config)",
+    )
     @click.pass_context
     def batch_apply_cmd(
         ctx,
@@ -144,6 +151,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         max_tokens,
         dry_run,
         limit,
+        workdir,
     ):
         """Apply a prompt to each record in a JSON array.
 
@@ -157,7 +165,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
           prompt batch-apply -n summarize -A max_length=50 -i description -o summary -f items.yaml
           cat data.json | prompt batch-apply -p "Summarize: {desc}" -i desc -o summary
         """
-        from common.core.config import load_tool_config
+        from common.core.config import load_common_config, load_tool_config
         from commands.helpers import build_engine, get_default_provider
         from core.substitution import resolve_arguments, extract_placeholders
         from storage.store import PromptStore
@@ -170,6 +178,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("Error: cannot use both --prompt and --prompt-name", err=True)
             sys.exit(1)
 
+        if workdir:
+            workdir_path = Path(workdir)
+        else:
+            common_config = load_common_config()
+            configured_workdir = common_config.get("workdir")
+            if configured_workdir:
+                workdir_path = Path(configured_workdir)
+            else:
+                workdir_path = Path.cwd()
+
         input_path = input_file
 
         if input_path is None and sys.stdin.isatty():
@@ -178,6 +196,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         try:
             if input_path:
+                if not input_path.is_absolute():
+                    input_path = workdir_path / input_path
+                if not input_path.exists():
+                    click.echo(f"Error: input file not found: {input_path}", err=True)
+                    sys.exit(1)
                 records = _load_file(input_path)
             else:
                 if not sys.stdin.isatty():
@@ -296,7 +319,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if (idx + 1) % 10 == 0:
                 click.echo(f"Processed {idx + 1}/{len(records)}", err=True)
 
-        _save_file(output_file, results)
+        output_path = output_file
+        if output_path and not output_path.is_absolute():
+            output_path = workdir_path / output_path
+
+        _save_file(output_path, results)
         click.echo(f"Done. Processed {len(results)} records.", err=True)
 
     return CommandManifest(name="batch-apply", click_command=batch_apply_cmd)
