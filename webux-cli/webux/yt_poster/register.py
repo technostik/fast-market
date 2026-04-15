@@ -362,10 +362,10 @@ function renderTable(){
 
   tbody.innerHTML = rows.map((row, i) => {
     const oc = row.original_comment || {};
-    const title = oc.video_title || trunc(row.video_url || '', 40);
-    const videoUrl = row.video_url || '#';
-    const channelName = oc.channel_name || '—';
-    const channelUrl = oc.channel_url || '#';
+    const title = oc.video_title || row.title || trunc(row.url || row.video_url || '', 40);
+    const videoUrl = row.url || row.video_url || '#';
+    const channelName = oc.channel_name || row.channel_name || '—';
+    const channelUrl = oc.channel_url || (row.channel_id ? `https://www.youtube.com/channel/${row.channel_id}` : '#');
     const viewCount = oc.view_count != null ? formatNumber(oc.view_count) : '—';
     const likeCount = oc.like_count != null ? formatNumber(oc.like_count) : '—';
     const dateAge = oc.published_at ? formatRelativeDate(oc.published_at) : '';
