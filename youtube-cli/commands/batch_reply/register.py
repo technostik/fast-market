@@ -70,14 +70,53 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "filter_ids",
         type=str,
         default=None,
-        help="JSON list of comment IDs to process only those comments. "
-        'Example: \'["comment_id_1", "comment_id_2"]\'',
+        help="JSON list of comment IDs to process. In rewrite mode, specifies which replies to regenerate.",
+    )
+    @click.option(
+        "--rewrite",
+        is_flag=True,
+        default=False,
+        help="Rewrite existing output file: regenerate filtered IDs, keep others unchanged. "
+        "Requires --filter. Cannot be used with --output.",
     )
     @click.option("--output", "-o", type=click.Path(), help="Save to file")
     @click.pass_context
     def batch_reply_cmd(
-        ctx, input_file, prompt, shell, metadata, fmt, filter_ids, output, **kwargs
+        ctx,
+        input_file,
+        prompt,
+        shell,
+        metadata,
+        fmt,
+        filter_ids,
+        rewrite,
+        output,
+        **kwargs,
     ):
+        # Validate rewrite options
+        if rewrite and output:
+            click.echo("Error: Cannot use --output with --rewrite", err=True)
+            return
+
+        if rewrite and not filter_ids:
+            click.echo("Error: --rewrite requires --filter", err=True)
+            return
+
+        # Parse filter_ids
+        filter_ids_set = None
+        if filter_ids:
+            try:
+                filter_ids_list = json.loads(filter_ids)
+                if not isinstance(filter_ids_list, list):
+                    click.echo(
+                        "Error: --filter must be a JSON list of comment IDs",
+                        err=True,
+                    )
+                    return
+                filter_ids_set = set(filter_ids_list)
+            except json.JSONDecodeError as e:
+                click.echo(f"Error: --filter contains invalid JSON: {e}", err=True)
+                return
         # Parse metadata into dict
         metadata_dict = {}
         for m in metadata:
@@ -121,23 +160,56 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not isinstance(data, list):
             data = [data]
 
-        # Apply filter if provided
-        if filter_ids:
-            try:
-                filter_list = json.loads(filter_ids)
-                if not isinstance(filter_list, list):
+        # Handle rewrite mode
+        if rewrite:
+            # Input is existing results, not raw comments
+            # We need to regenerate only the specified IDs
+            existing_results = data
+            existing_map = {
+                item.get("original_comment", {}).get("id"): idx
+                for idx, item in enumerate(existing_results)
+                if item.get("original_comment", {}).get("id")
+            }
+
+            # Process only the filtered IDs
+            data_to_process = []
+            for comment_id in filter_ids_set:
+                if comment_id in existing_map:
+                    idx = existing_map[comment_id]
+                    data_to_process.append(existing_results[idx]["original_comment"])
+                else:
                     click.echo(
-                        "Error: --filter must be a JSON list of comment IDs", err=True
+                        f"Warning: ID {comment_id} not found in input file", err=True
                     )
-                    return
-                filter_set = set(filter_list)
-                data = [item for item in data if item.get("id") in filter_set]
-                click.echo(
-                    f"Filtered to {len(data)} comments matching filter IDs", err=True
-                )
-            except json.JSONDecodeError as e:
-                click.echo(f"Error: --filter contains invalid JSON: {e}", err=True)
+
+            if not data_to_process:
+                click.echo("Error: No matching IDs found in input file", err=True)
                 return
+
+            click.echo(
+                f"Rewriting {len(data_to_process)} replies in existing file", err=True
+            )
+            data = data_to_process
+        else:
+            # Apply filter if provided (only in non-rewrite mode)
+            if filter_ids:
+                try:
+                    filter_list = json.loads(filter_ids)
+                    if not isinstance(filter_list, list):
+                        click.echo(
+                            "Error: --filter must be a JSON list of comment IDs",
+                            err=True,
+                        )
+                        return
+                    filter_set = set(filter_list)
+                    data = [item for item in data if item.get("id") in filter_set]
+                    click.echo(
+                        f"Filtered to {len(data)} comments matching filter IDs",
+                        err=True,
+                    )
+                except json.JSONDecodeError as e:
+                    click.echo(f"Error: --filter contains invalid JSON: {e}", err=True)
+                    return
 
         # Process comments sequentially
         results = []
@@ -234,7 +306,34 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 )
 
         # Output results
-        if output:
+        if rewrite:
+            # Read original file again to preserve non-regenerated entries
+            try:
+                original_data = json.loads(input_path.read_text())
+            except json.JSONDecodeError:
+                original_data = yaml.safe_load(input_path.read_text())
+
+            if not isinstance(original_data, list):
+                original_data = [original_data]
+
+            # Build map of regenerated results by comment ID
+            regenerated_map = {
+                item.get("original_comment", {}).get("id"): item for item in results
+            }
+
+            # Merge: keep original for non-regenerated, use new for regenerated
+            merged = []
+            for item in original_data:
+                comment_id = item.get("original_comment", {}).get("id")
+                if comment_id in regenerated_map:
+                    merged.append(regenerated_map[comment_id])
+                else:
+                    merged.append(item)
+
+            # Write back to input file
+            input_path.write_text(json.dumps(merged, ensure_ascii=False, default=str))
+            click.echo(f"Updated {len(results)} replies in {input_file}", err=True)
+        elif output:
             output_fmt = fmt if fmt else _detect_format_from_filename(output)
 
             if output_fmt == "json":
