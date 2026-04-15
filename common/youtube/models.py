@@ -129,6 +129,30 @@ class ReplyResult(BaseModel):
         return self.model_dump()
 
 
+class CommentResult(BaseModel):
+    id: str
+    video_id: str
+    text: str
+    author: str
+    published_at: str
+    moderation_status: str = "unknown"
+
+    @classmethod
+    def from_api_response(cls, response: dict, video_id: str) -> "CommentResult":
+        snippet = response.get("snippet", {})
+        return cls(
+            id=response.get("id", ""),
+            video_id=video_id,
+            text=snippet.get("textOriginal", ""),
+            author=snippet.get("authorDisplayName", "Unknown"),
+            published_at=snippet.get("publishedAt", ""),
+            moderation_status=snippet.get("moderationStatus", "unknown"),
+        )
+
+    def to_dict(self) -> dict:
+        return self.model_dump()
+
+
 class ChannelInfo(BaseModel):
     channel_id: str
     title: str

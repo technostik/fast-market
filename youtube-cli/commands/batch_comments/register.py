@@ -12,6 +12,21 @@ from core.config import load_config
 from core.engine import build_youtube_client
 
 
+def _resolve_path(file_path: str) -> Path:
+    """Resolve relative file path to workdir."""
+    from common.core.config import load_common_config
+
+    path = Path(file_path)
+    if not path.is_absolute():
+        common_config = load_common_config()
+        workdir = common_config.get("workdir")
+        if workdir:
+            workdir_path = Path(workdir).expanduser().resolve()
+            return workdir_path / file_path
+        return Path.cwd() / file_path
+    return path
+
+
 def _detect_format_from_filename(filename: str) -> str:
     """Auto-detect output format from file extension."""
     if filename.endswith(".yaml") or filename.endswith(".yml"):
@@ -23,7 +38,7 @@ def _detect_format_from_filename(filename: str) -> str:
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("batch-comments")
-    @click.argument("input_file", type=click.Path(exists=True))
+    @click.argument("input_file", type=str)
     @click.option(
         "--limit",
         "-n",
@@ -57,8 +72,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
             config = load_config()
             client = build_youtube_client(config)
 
-            # Read input file
-            input_path = Path(input_file)
+            # Resolve input file path
+            input_path = _resolve_path(input_file)
+
+            if not input_path.exists():
+                raise click.ClickException(
+                    f"Error: Invalid value for 'INPUT_FILE': Path '{input_file}' does not exist."
+                )
             try:
                 data = json.loads(input_path.read_text())
             except json.JSONDecodeError:
@@ -96,7 +116,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if output:
                 # Auto-detect format from filename if not explicitly specified
                 output_fmt = fmt if fmt else _detect_format_from_filename(output)
-                
+
                 if output_fmt == "json":
                     Path(output).write_text(
                         json.dumps(all_comments, ensure_ascii=False, default=str)

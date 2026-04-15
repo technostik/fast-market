@@ -6,7 +6,13 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from common import structlog
-from common.youtube.models import ChannelInfo, Comment, ReplyResult, Video
+from common.youtube.models import (
+    ChannelInfo,
+    Comment,
+    CommentResult,
+    ReplyResult,
+    Video,
+)
 from common.youtube.quota import QuotaTracker
 from common.youtube.utils import format_count, is_short_video, iso_duration_to_seconds
 
@@ -162,6 +168,7 @@ class YouTubeClient:
     ) -> list[Comment]:
         """Get comments for a video."""
         try:
+
             def _do():
                 request = self.youtube.commentThreads().list(
                     part="snippet",
@@ -193,7 +200,11 @@ class YouTubeClient:
                     channel_id = snippet.get("channelId", "")
                     channel_title = snippet.get("channelTitle", "")
                     video_title = snippet.get("title", "")
-                    channel_url = f"https://www.youtube.com/channel/{channel_id}" if channel_id else None
+                    channel_url = (
+                        f"https://www.youtube.com/channel/{channel_id}"
+                        if channel_id
+                        else None
+                    )
                     view_count = int(stats.get("viewCount", 0))
 
                     for comment in comments:
@@ -226,6 +237,7 @@ class YouTubeClient:
             raise ValueError("channel_id required for posting replies")
 
         try:
+
             def _do():
                 request = self.youtube.comments().insert(
                     part="snippet",
@@ -257,6 +269,49 @@ class YouTubeClient:
             )
             raise
 
+    def post_comment(self, video_id: str, text: str) -> Optional[CommentResult]:
+        """Post a top-level comment on a video."""
+        if not self.channel_id:
+            raise ValueError("channel_id required for posting comments")
+
+        try:
+
+            def _do():
+                request = self.youtube.commentThreads().insert(
+                    part="snippet",
+                    body={
+                        "snippet": {
+                            "videoId": video_id,
+                            "topLevelComment": {
+                                "snippet": {
+                                    "textOriginal": text,
+                                }
+                            },
+                        }
+                    },
+                )
+                response = request.execute()
+                self._track_quota(50)
+
+                snippet = response.get("snippet", {})
+                top_level_comment = snippet.get("topLevelComment", {})
+                result = CommentResult.from_api_response(top_level_comment, video_id)
+                logger.info(
+                    "comment_posted",
+                    video_id=video_id,
+                    comment_id=result.id,
+                    moderation_status=result.moderation_status,
+                )
+                return result
+
+            return self._with_scope_retry(_do)
+        except HttpError as e:
+            logger.error("api_error", operation="post_comment", error=str(e))
+            raise
+        except Exception as e:
+            logger.error("unexpected_error", operation="post_comment", error=str(e))
+            raise
+
     def search_videos(
         self,
         query: str,
@@ -267,14 +322,14 @@ class YouTubeClient:
         language_filter: bool = False,
     ) -> list[Video]:
         """Search for videos on YouTube.
-        
+
         Args:
             query: Search query string
             max_results: Maximum number of results to return
             order: Sort order (relevance, date, rating, title, viewCount)
             language: Language code for relevance ranking (ISO 639-1, e.g., 'en', 'fr', 'es')
             combine_keywords: If True, replaces spaces with ' | ' for OR logic
-            language_filter: If True, strictly filter results to only videos with 
+            language_filter: If True, strictly filter results to only videos with
                            matching audio language. Requires additional API calls.
         """
         try:
@@ -335,13 +390,13 @@ class YouTubeClient:
                         continue
                     video_id = item["id"]["videoId"]
                     details = video_details_map.get(video_id)
-                    
+
                     # Apply strict language filter if requested
                     if language_filter and details:
                         snippet = details.get("snippet", {})
                         audio_lang = snippet.get("defaultAudioLanguage", "")
                         default_lang = snippet.get("defaultLanguage", "")
-                        
+
                         # Check if either language matches the requested language
                         if audio_lang != language and default_lang != language:
                             logger.debug(
@@ -352,7 +407,7 @@ class YouTubeClient:
                                 requested_language=language,
                             )
                             continue
-                    
+
                     video = Video.from_search_result(item, details)
                     videos.append(video)
 

@@ -31,7 +31,7 @@ def _detect_format_from_filename(filename: str) -> str:
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("batch-reply")
-    @click.argument("input_file", type=click.Path())
+    @click.argument("input_file", type=str)
     @click.option(
         "--prompt",
         "-p",

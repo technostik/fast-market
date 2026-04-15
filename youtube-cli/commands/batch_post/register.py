@@ -14,9 +14,24 @@ from core.config import load_config
 from core.engine import build_youtube_client
 
 
+def _resolve_path(file_path: str) -> Path:
+    """Resolve relative file path to workdir."""
+    from common.core.config import load_common_config
+
+    path = Path(file_path)
+    if not path.is_absolute():
+        common_config = load_common_config()
+        workdir = common_config.get("workdir")
+        if workdir:
+            workdir_path = Path(workdir).expanduser().resolve()
+            return workdir_path / file_path
+        return Path.cwd() / file_path
+    return path
+
+
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("batch-post")
-    @click.argument("input_file", type=click.Path(exists=True))
+    @click.argument("input_file", type=str)
     @click.option(
         "--dry-run",
         is_flag=True,
@@ -49,8 +64,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
             config = load_config()
             client = build_youtube_client(config)
 
-            # Read input file
-            input_path = Path(input_file)
+            # Resolve input file path
+            input_path = _resolve_path(input_file)
+
+            if not input_path.exists():
+                raise click.ClickException(
+                    f"Error: Invalid value for 'INPUT_FILE': Path '{input_file}' does not exist."
+                )
             try:
                 data = json.loads(input_path.read_text())
             except json.JSONDecodeError:
@@ -65,7 +85,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             total = len(data)
 
             if dry_run:
-                click.echo("[DRY RUN] The following replies would be posted:\n", err=True)
+                click.echo(
+                    "[DRY RUN] The following replies would be posted:\n", err=True
+                )
 
             for idx, item in enumerate(data, 1):
                 reply_text = item.get("reply", "")
@@ -111,7 +133,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                             entry["post_status"] = "failed"
                             entry["error"] = "API returned no result"
                             errors.append(
-                                {"index": idx, "comment_id": comment_id, "error": "API returned no result"}
+                                {
+                                    "index": idx,
+                                    "comment_id": comment_id,
+                                    "error": "API returned no result",
+                                }
                             )
                             click.echo(
                                 f"  [{idx}/{total}] ✗ Failed: API returned no result",
@@ -136,7 +162,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             # Summary
             success_count = sum(1 for r in results if r["post_status"] == "success")
-            failed_count = sum(1 for r in results if r["post_status"] in ("failed", "error"))
+            failed_count = sum(
+                1 for r in results if r["post_status"] in ("failed", "error")
+            )
             dry_count = sum(1 for r in results if r["post_status"] == "dry_run")
 
             click.echo(f"\n--- Summary ---", err=True)
@@ -157,8 +185,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             # Output results
             if output:
-                # Update the original data with post status
-                Path(output).write_text(
+                output_path = _resolve_path(output)
+                output_path.write_text(
                     json.dumps(results, ensure_ascii=False, default=str)
                     if fmt == "json"
                     else dump_yaml(results)

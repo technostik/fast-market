@@ -9,7 +9,14 @@ from common.youtube.auth import (
     get_youtube_auth_dir,
 )
 from common.youtube.client import YouTubeClient
-from common.youtube.models import ChannelInfo, Comment, QuotaUsage, ReplyResult, Video
+from common.youtube.models import (
+    ChannelInfo,
+    Comment,
+    CommentResult,
+    QuotaUsage,
+    ReplyResult,
+    Video,
+)
 from common.youtube.quota import QuotaState, QuotaTracker
 from common.youtube.transport import RSSPlaylistTransport, Transport
 from common.youtube.utils import (
@@ -29,6 +36,7 @@ __all__ = [
     "YouTubeClient",
     "ChannelInfo",
     "Comment",
+    "CommentResult",
     "QuotaUsage",
     "QuotaState",
     "QuotaTracker",
