@@ -10,7 +10,7 @@ import yaml
 
 from commands.base import CommandManifest
 from common.cli.helpers import out
-from common.core.config import load_tool_config
+from common.core.config import load_tool_config, load_common_config
 from common.core.yaml_utils import dump_yaml
 from common.llm.base import LLMRequest
 from common.llm.registry import discover_providers, get_default_provider_name
@@ -31,7 +31,7 @@ def _detect_format_from_filename(filename: str) -> str:
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("batch-reply")
-    @click.argument("input_file", type=click.Path(exists=True))
+    @click.argument("input_file", type=click.Path())
     @click.option(
         "--prompt",
         "-p",
@@ -124,11 +124,48 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 key, value = m.split("=", 1)
                 metadata_dict[key] = value
 
+        # Resolve input file path
+        input_path = Path(input_file)
+        if not input_path.is_absolute():
+            # First, try the configured workdir
+            common_config = load_common_config()
+            workdir = common_config.get("workdir")
+            if workdir:
+                workdir_path = Path(workdir).expanduser().resolve()
+                workdir_input = workdir_path / input_file
+                if workdir_input.exists():
+                    input_path = workdir_input
+                else:
+                    # Fall back to current working directory
+                    input_path = Path.cwd() / input_file
+            else:
+                # No workdir configured, use current directory
+                input_path = Path.cwd() / input_file
+
+        if not input_path.exists():
+            click.echo(f"Error: Invalid value for 'INPUT_FILE': Path '{input_file}' does not exist.", err=True)
+            return
+
+        # Resolve output file path if provided
+        if output:
+            output_path = Path(output)
+            if not output_path.is_absolute():
+                # Use workdir if configured, otherwise current directory
+                common_config = load_common_config()
+                workdir = common_config.get("workdir")
+                if workdir:
+                    workdir_path = Path(workdir).expanduser().resolve()
+                    output_path = workdir_path / output
+                else:
+                    output_path = Path.cwd() / output
+            output = str(output_path)
+
         # Determine generation mode
         use_shell = bool(shell)
         use_llm = bool(prompt) and not use_shell
+        use_shell_with_prompt = use_shell and prompt  # Shell mode with prompt variables
 
-        if not use_shell and not use_llm:
+        if not use_shell and not prompt:
             click.echo("Error: Either --prompt or --shell is required", err=True)
             return
 
@@ -151,7 +188,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 return
 
         # Read input file
-        input_path = Path(input_file)
         try:
             data = json.loads(input_path.read_text())
         except json.JSONDecodeError:
@@ -229,6 +265,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
             error = None
 
             if use_shell:
+                # Build the actual command to execute
+                actual_command = shell
+                
+                # If using shell with prompt variables, append them as command-line arguments
+                if use_shell_with_prompt and prompt:
+                    prompt_args = " ".join(prompt)
+                    actual_command = f"{shell} {prompt_args}"
+                
                 # Execute shell command with env vars
                 env = {
                     **os.environ,
@@ -240,9 +284,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "VIDEO_TITLE": video_title,
                     "COMMENT_ID": comment_id,
                 }
+
                 try:
                     result = subprocess.run(
-                        shell,
+                        actual_command,
                         shell=True,
                         capture_output=True,
                         text=True,
