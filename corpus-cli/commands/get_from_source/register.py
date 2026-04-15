@@ -26,7 +26,7 @@ _BARE_VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 def _extract_youtube_id(id_input: str) -> str | None:
     match = _YOUTUBE_URL_RE.search(id_input)
     if match:
-        return match.group(1)
+        return next(g for g in match.groups() if g is not None)
     if _BARE_VIDEO_ID_RE.match(id_input):
         return id_input
     return None
@@ -139,7 +139,9 @@ def _sync_youtube(plugin, video_id: str, engine, store) -> None:
             ).replace(tzinfo=None)
         else:
             updated = datetime.utcnow()
-        duration = parse_iso_duration(detail.get("contentDetails", {}).get("duration", 0))
+        duration = parse_iso_duration(
+            detail.get("contentDetails", {}).get("duration", 0)
+        )
         item_meta = ItemMeta(
             source_id=video_id,
             updated_at=updated,
