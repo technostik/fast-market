@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -101,6 +102,11 @@ def resolve_arguments(
     required = set(re.findall(r"\{(\w+)\}|\{['\"](\w+)['\"]\}", template))
     required = {k1 or k2 for k1, k2 in required}
     missing = required - set(resolved)
+    for key in list(missing):
+        env_value = os.environ.get(key)
+        if env_value is not None:
+            resolved[key] = env_value
+            missing.remove(key)
     if missing:
         raise ValueError(f"Missing required arguments: {', '.join(sorted(missing))}")
 
