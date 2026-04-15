@@ -64,12 +64,13 @@ The cache dir `~/.cache/fast-market/skill-router/` is no longer used.
 
 ### Workdir isolation
 Each step creates an isolated subdirectory: `{run_root}/{iteration:02d}_{label}/`
-where `run_root = {workdir}/{run_id}` with `run_id = skill_run_{uuid}` (or `{skill_name}_{uuid}` for skill-specific runs).
+where `run_root = {workdir_root}/skill_run_{uuid}/` (or `{workdir}/skill_run_{uuid}/` if `workdir_root` is not configured).
 
 This ensures:
 - Sequential or concurrent runs using the same workdir do not collide
 - The router session file (`router.session.yaml`) lives inside `run_root`, not directly in workdir
 - All filesystem writes go into `run_root`; the external `workdir` argument is only used for logging
+- Isolated runs are placed in `workdir_root` to keep them separate from regular work
 
 If `run_root.mkdir` fails, the exception propagates — fail loudly.
 

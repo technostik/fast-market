@@ -36,8 +36,8 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 The router supports three isolation modes for skill execution directories:
 
 - **Default (`isolation_mode="none"`)**: All skills execute directly in the workdir. Skills can see and modify each other's files, enabling file-based cooperation.
-- **`--run-isolated`**: Creates one isolated directory `{workdir}/run_{uuid}/` for the entire run. All skills share this directory.
-- **`--skill-isolated`** (current default behavior): Creates `{workdir}/run_{uuid}/` with subdirectories `{iteration:02d}_{skill_name}/` for each skill. Skills cannot see each other's files.
+- **`--run-isolated`**: Creates one isolated directory `{workdir_root}/skill_run_{uuid}/` for the entire run. All skills share this directory. Falls back to `{workdir}` if `workdir_root` is not configured.
+- **`--skill-isolated`** (current default behavior): Creates `{workdir_root}/skill_run_{uuid}/` with subdirectories `{iteration:02d}_{skill_name}/` for each skill. Skills cannot see each other's files. Falls back to `{workdir}` if `workdir_root` is not configured.
 
 ### Context Passing
 - Two-part distillation: `runner_summary` (≤15 lines for planner) + `context` (transferable to next skill)

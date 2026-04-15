@@ -93,9 +93,11 @@ class SkillAttempt:
 
 # SkillPlanStep and SkillPlan are imported from core.models
 
+
 @dataclass
 class SkillExecutionLog:
     """A log of actual skill executions during a run."""
+
     goal: str
     attempts: list[dict] = None  # simplified attempt info
     start_time: str = ""
@@ -169,6 +171,7 @@ class CLIInteractionPlugin(InteractionPlugin):
 @dataclass
 class ApprovalResult:
     """Result of an interactive step approval."""
+
     action: str  # "accept", "skip", "edit", "replan", "quit"
     modified_plan: dict | None = None
 
@@ -189,20 +192,28 @@ class InteractiveApprovalPlugin:
                 for k, v in plan["params"].items():
                     click.echo(f"  {k}: {v}")
             if plan.get("inject"):
-                click.echo(f"  Inject: {plan['inject'][:80]}{'...' if len(plan['inject']) > 80 else ''}")
+                click.echo(
+                    f"  Inject: {plan['inject'][:80]}{'...' if len(plan['inject']) > 80 else ''}"
+                )
         elif action == "task":
             desc = plan.get("description", "")
             click.echo(f"  {desc[:100]}{'...' if len(desc) > 100 else ''}")
             if plan.get("instructions"):
-                click.echo(f"  Instructions: {plan['instructions'][:80]}{'...' if len(plan['instructions']) > 80 else ''}")
+                click.echo(
+                    f"  Instructions: {plan['instructions'][:80]}{'...' if len(plan['instructions']) > 80 else ''}"
+                )
         elif action == "ask":
             click.echo(f"  Question: {plan.get('question', '')}")
 
         if plan.get("context_hint"):
-            click.echo(f"  Context: {plan['context_hint'][:80]}{'...' if len(plan['context_hint']) > 80 else ''}")
+            click.echo(
+                f"  Context: {plan['context_hint'][:80]}{'...' if len(plan['context_hint']) > 80 else ''}"
+            )
 
         if plan.get("reason"):
-            click.echo(f"  Reason: {plan['reason'][:80]}{'...' if len(plan['reason']) > 80 else ''}")
+            click.echo(
+                f"  Reason: {plan['reason'][:80]}{'...' if len(plan['reason']) > 80 else ''}"
+            )
 
         click.echo()
 
@@ -226,12 +237,21 @@ class InteractiveApprovalPlugin:
         elif choice == "e":
             # Open plan dict in editor
             editable = {k: v for k, v in plan.items()}
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-                yaml_lib.dump(editable, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", delete=False
+            ) as f:
+                yaml_lib.dump(
+                    editable,
+                    f,
+                    default_flow_style=False,
+                    sort_keys=False,
+                    allow_unicode=True,
+                )
                 temp_path = Path(f.name)
 
             try:
                 import subprocess
+
                 open_editor(temp_path)
                 modified = yaml_lib.safe_load(temp_path.read_text())
                 if not isinstance(modified, dict) or "action" not in modified:
@@ -338,7 +358,9 @@ def _format_history(attempts: list[SkillAttempt]) -> str:
     return "\n".join(lines)
 
 
-def _make_subdir(run_root: Path, iteration: int, label: str, isolation_mode: str = "skill") -> Path:
+def _make_subdir(
+    run_root: Path, iteration: int, label: str, isolation_mode: str = "skill"
+) -> Path:
     """Create a subdirectory for a skill/task execution.
 
     isolation_mode:
@@ -512,7 +534,9 @@ def _load_tools_description_simple(agent_config: dict) -> str:
     if fastmarket_tools:
         lines.append("## Available Tools")
         for tool_name, tool_info in fastmarket_tools.items():
-            desc = tool_info.get("description", "") if isinstance(tool_info, dict) else ""
+            desc = (
+                tool_info.get("description", "") if isinstance(tool_info, dict) else ""
+            )
             lines.append(f"- {tool_name}: {desc}")
     return "\n".join(lines) or "(no tools available)"
 
@@ -829,7 +853,9 @@ def _plan_to_yaml(plan: SkillPlan) -> str:
 
         data["plan"].append(step_dict)
 
-    return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    return yaml.dump(
+        data, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
 
 
 def _execution_log_to_yaml(state: RouterState) -> str:
@@ -873,7 +899,9 @@ def _execution_log_to_yaml(state: RouterState) -> str:
 
         data["execution"].append(attempt_dict)
 
-    return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    return yaml.dump(
+        data, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
 
 
 def _export_plan_to_file(plan: SkillPlan, filepath: str) -> None:
@@ -956,7 +984,9 @@ def _export_successful_plan(state: RouterState, filepath: str) -> None:
 
     data["plan"] = successful_steps
 
-    yaml_content = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    yaml_content = yaml.dump(
+        data, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
 
     if filepath == "-":
         print(yaml_content)
@@ -978,6 +1008,7 @@ def _export_successful_plan(state: RouterState, filepath: str) -> None:
 @dataclass
 class RunStatistics:
     """Statistics about a completed router run."""
+
     total_duration_seconds: float
     total_steps: int  # router steps + all internal steps
     router_steps: int  # top-level router iterations
@@ -996,22 +1027,26 @@ def calculate_run_statistics(state: RouterState) -> RunStatistics:
     router_steps = len(state.attempts)
     internal_steps = sum(a.internal_steps for a in state.attempts)
     total_steps = router_steps + internal_steps
-    
+
     successful_steps = sum(1 for a in state.attempts if a.success)
     failed_steps = sum(1 for a in state.attempts if not a.success and a.exit_code != 0)
-    skipped_steps = sum(1 for a in state.attempts if a.exit_code == 0 and not a.success and "skipped" in a.runner_summary.lower())
-    
+    skipped_steps = sum(
+        1
+        for a in state.attempts
+        if a.exit_code == 0 and not a.success and "skipped" in a.runner_summary.lower()
+    )
+
     run_actions = sum(1 for a in state.attempts if a.action == "run")
     task_actions = sum(1 for a in state.attempts if a.action == "task")
     ask_actions = sum(1 for a in state.attempts if a.action == "ask")
-    
+
     unique_skills = set()
     for a in state.attempts:
         if a.action == "run":
             unique_skills.add(a.skill_name)
-    
+
     total_duration = state.end_time - state.start_time if state.end_time > 0 else 0.0
-    
+
     return RunStatistics(
         total_duration_seconds=total_duration,
         total_steps=total_steps,
@@ -1031,12 +1066,12 @@ def format_statistics(stats: RunStatistics) -> str:
     """Format statistics as a human-readable string."""
     minutes = int(stats.total_duration_seconds // 60)
     seconds = stats.total_duration_seconds % 60
-    
+
     if minutes > 0:
         time_str = f"{minutes}m {seconds:.1f}s"
     else:
         time_str = f"{seconds:.1f}s"
-    
+
     lines = [
         "=" * 60,
         "RUN STATISTICS",
@@ -1131,14 +1166,33 @@ def run_router(
 
     workdir_path = Path(workdir).expanduser().resolve()
 
+    # Determine where to create isolated run directories
+    # When isolation is enabled, use workdir_root (if configured) instead of workdir
+    if isolation_mode != "none":
+        from common.core.config import load_common_config
+
+        common_config = load_common_config()
+        workdir_root = common_config.get("workdir_root")
+        if workdir_root:
+            isolation_base = Path(workdir_root).expanduser().resolve()
+        else:
+            isolation_base = workdir_path
+    else:
+        isolation_base = None
+
     # Create run_root based on isolation mode
     if isolation_mode == "none":
         run_root = None  # Will use workdir_path directly
         run_dir_value = "."  # No isolation, use workdir
     else:
-        run_root = make_run_root(workdir_path)
+        run_root = make_run_root(isolation_base)
         # Calculate RUN_DIR as relative path from workdir to run_root
-        run_dir_value = str(run_root.relative_to(workdir_path))
+        try:
+            run_dir_value = str(run_root.relative_to(workdir_path))
+        except ValueError:
+            # run_root is not a subpath of workdir_path (e.g., run in workdir_root while workdir is a subdir)
+            # Fall back to absolute path
+            run_dir_value = str(run_root)
 
     # Inject RUN_DIR into import_params for plan substitution
     if import_params is None:
@@ -1172,11 +1226,16 @@ def run_router(
             if export_path.is_absolute():
                 # If absolute path provided, use it as-is
                 plan_export_path = export_path
-                execution_export_path = export_path.parent / f"{export_path.stem}.execution{export_path.suffix}"
+                execution_export_path = (
+                    export_path.parent
+                    / f"{export_path.stem}.execution{export_path.suffix}"
+                )
             else:
                 # Relative path or filename - place in export_target
                 plan_export_path = export_target / export_path
-                execution_export_path = export_target / f"{export_path.stem}.execution{export_path.suffix}"
+                execution_export_path = (
+                    export_target / f"{export_path.stem}.execution{export_path.suffix}"
+                )
 
     # Handle export_successful_path - redirect to export_target if it's just a filename
     if export_successful_path:
@@ -1188,12 +1247,20 @@ def run_router(
     # Import plan if provided
     if import_plan_path:
         try:
-            state.imported_plan = _import_plan_from_yaml(import_plan_path, workdir, params=import_params)
-            logger.info("plan_imported", path=import_plan_path, steps=len(state.imported_plan.steps))
+            state.imported_plan = _import_plan_from_yaml(
+                import_plan_path, workdir, params=import_params
+            )
+            logger.info(
+                "plan_imported",
+                path=import_plan_path,
+                steps=len(state.imported_plan.steps),
+            )
             if verbose:
                 print(f"\n[router] Imported plan from: {import_plan_path}")
                 if import_params:
-                    print(f"[router] Substituted params: {', '.join(import_params.keys())}")
+                    print(
+                        f"[router] Substituted params: {', '.join(import_params.keys())}"
+                    )
                 print(f"[router] Plan has {len(state.imported_plan.steps)} steps")
 
             # Extract resolved global params for injection into skills
@@ -1202,6 +1269,7 @@ def run_router(
             # Add defaults from global params section (CLI params already override them)
             from core.plan_utils import parse_global_params, build_params_dict
             import yaml as _yaml
+
             _raw_data = _yaml.safe_load(Path(import_plan_path).read_text())
             if isinstance(_raw_data, dict):
                 raw_param_defs = _raw_data.get("params", [])
@@ -1290,7 +1358,9 @@ def run_router(
                     "reason": f"From imported plan (step {plan_step.step})",
                 }
                 if verbose:
-                    print(f"\n[router] Using imported plan step {plan_step.step}: {plan_step.action}")
+                    print(
+                        f"\n[router] Using imported plan step {plan_step.step}: {plan_step.action}"
+                    )
             else:
                 # Plan exhausted, mark as done
                 plan = {"action": "done", "reason": "Imported plan exhausted"}
@@ -1308,7 +1378,9 @@ def run_router(
         action = plan.get("action", "").strip()
         logger.debug("router_plan", iteration=state.iteration, action=action)
         if verbose:
-            print(f"\n[router] Iteration {state.iteration}: planner chose action='{action}'")
+            print(
+                f"\n[router] Iteration {state.iteration}: planner chose action='{action}'"
+            )
             if action == "run":
                 print(f"  skill_name: {plan.get('skill_name')}")
                 print(f"  params: {plan.get('params')}")
@@ -1357,8 +1429,12 @@ def run_router(
                 click.echo(f"[interactive] Step skipped by user", err=True)
                 attempt = SkillAttempt(
                     action=action,
-                    skill_name=plan.get("skill_name", "(task)") if action == "run" else "(task)",
-                    params={str(k): str(v) for k, v in (plan.get("params") or {}).items()},
+                    skill_name=plan.get("skill_name", "(task)")
+                    if action == "run"
+                    else "(task)",
+                    params={
+                        str(k): str(v) for k, v in (plan.get("params") or {}).items()
+                    },
                     exit_code=0,
                     runner_summary="Skipped by user in interactive mode",
                     context="",
@@ -1373,11 +1449,16 @@ def run_router(
                 continue
 
             if approval.action == "replan":
-                click.echo(f"[interactive] Asking planner for an alternative...", err=True)
+                click.echo(
+                    f"[interactive] Asking planner for an alternative...", err=True
+                )
                 # Call planner again with rejection feedback
                 try:
                     plan = _call_plan(
-                        state, provider, model, skills,
+                        state,
+                        provider,
+                        model,
+                        skills,
                         prompt_template=plan_prompt,
                         extra_context="User rejected the previous proposed step. Please propose a different approach.",
                     )
@@ -1388,7 +1469,10 @@ def run_router(
                             step=state.iteration,
                             action=action,
                             skill_name=plan.get("skill_name", ""),
-                            params={str(k): str(v) for k, v in (plan.get("params") or {}).items()},
+                            params={
+                                str(k): str(v)
+                                for k, v in (plan.get("params") or {}).items()
+                            },
                             inject=plan.get("inject", ""),
                             description=plan.get("description", ""),
                             instructions=plan.get("instructions", ""),
@@ -1403,7 +1487,9 @@ def run_router(
                         break
                     if action == "fail":
                         state.failed = True
-                        state.failure_reason = str(plan.get("reason", "Router declared failure"))
+                        state.failure_reason = str(
+                            plan.get("reason", "Router declared failure")
+                        )
                         break
                     if action == "ask":
                         question = str(plan.get("question", "What should I do next?"))
@@ -1430,7 +1516,10 @@ def run_router(
                     # Fall through to execute the new plan
                     click.echo(f"[interactive] New plan: {action}", err=True)
                 except Exception as exc:
-                    click.echo(f"[interactive] Replan failed: {exc}. Proceeding with original.", err=True)
+                    click.echo(
+                        f"[interactive] Replan failed: {exc}. Proceeding with original.",
+                        err=True,
+                    )
 
             if approval.action == "edit" and approval.modified_plan:
                 plan = approval.modified_plan
@@ -1485,8 +1574,10 @@ def run_router(
             # 3. Filter to only include params that the skill actually expects
             # 4. Validate all required params are satisfied
             params = {}
-            skill_param_names = {p.get("name") for p in (matched.parameters or []) if "name" in p}
-            
+            skill_param_names = {
+                p.get("name") for p in (matched.parameters or []) if "name" in p
+            }
+
             if state.resolved_params and skill_param_names:
                 # Only inject params that the skill expects
                 for key, value in state.resolved_params.items():
@@ -1494,7 +1585,9 @@ def run_router(
                         params[key] = value
 
             # Merge planner-provided params for this step (these take precedence)
-            planner_params = {str(k): str(v) for k, v in (plan.get("params") or {}).items()}
+            planner_params = {
+                str(k): str(v) for k, v in (plan.get("params") or {}).items()
+            }
             if skill_param_names:
                 for key, value in planner_params.items():
                     if key in skill_param_names:
@@ -1502,11 +1595,18 @@ def run_router(
 
             # Check for missing required params and fail loudly
             missing_required = []
-            for skill_param in (matched.parameters or []):
+            for skill_param in matched.parameters or []:
                 param_name = skill_param.get("name", "")
                 is_required = skill_param.get("required", False)
-                has_default = "default" in skill_param and skill_param["default"] is not None
-                if is_required and param_name and param_name not in params and not has_default:
+                has_default = (
+                    "default" in skill_param and skill_param["default"] is not None
+                )
+                if (
+                    is_required
+                    and param_name
+                    and param_name not in params
+                    and not has_default
+                ):
                     missing_required.append(param_name)
 
             if missing_required:
@@ -1602,12 +1702,18 @@ def run_router(
                 workdir_for_skill = workdir_path
                 subdir_for_record = Path("")
             else:
-                subdir_for_record = _make_subdir(run_root, state.iteration, skill_name, isolation_mode)
+                subdir_for_record = _make_subdir(
+                    run_root, state.iteration, skill_name, isolation_mode
+                )
                 workdir_for_skill = subdir_for_record
 
             # Display step being executed (without changing line)
             step_label = f"Step {state.iteration}: {skill_name}"
-            click.echo(f"\r{step_label} ... [{_format_elapsed(state.start_time)}]", err=True, nl=False)
+            click.echo(
+                f"\r{step_label} ... [{_format_elapsed(state.start_time)}]",
+                err=True,
+                nl=False,
+            )
 
             exit_code, session_output, session_path, skill_internal_steps = _run_skill(
                 skill=matched,
@@ -1627,7 +1733,10 @@ def run_router(
 
             # Update display with result
             status = "✓" if exit_code == 0 else "✗"
-            click.echo(f"\r{step_label} {status} [{_format_elapsed(state.start_time)}]", err=True)
+            click.echo(
+                f"\r{step_label} {status} [{_format_elapsed(state.start_time)}]",
+                err=True,
+            )
 
         # Free-form task
         elif action == "task":
@@ -1647,12 +1756,18 @@ def run_router(
                 workdir_for_task = workdir_path
                 subdir_for_record = Path("")
             else:
-                subdir_for_record = _make_subdir(run_root, state.iteration, "task", isolation_mode)
+                subdir_for_record = _make_subdir(
+                    run_root, state.iteration, "task", isolation_mode
+                )
                 workdir_for_task = subdir_for_record
 
             # Display step being executed (without changing line)
             step_label = f"Step {state.iteration}: (task) {description[:50]}"
-            click.echo(f"\r{step_label} ... [{_format_elapsed(state.start_time)}]", err=True, nl=False)
+            click.echo(
+                f"\r{step_label} ... [{_format_elapsed(state.start_time)}]",
+                err=True,
+                nl=False,
+            )
 
             exit_code, session_output, session_path, task_internal_steps = _run_task(
                 description=description,
@@ -1667,7 +1782,10 @@ def run_router(
 
             # Update display with result
             status = "✓" if exit_code == 0 else "✗"
-            click.echo(f"\r{step_label} {status} [{_format_elapsed(state.start_time)}]", err=True)
+            click.echo(
+                f"\r{step_label} {status} [{_format_elapsed(state.start_time)}]",
+                err=True,
+            )
 
         else:
             state.failed = True
@@ -1816,7 +1934,9 @@ def run_router(
         try:
             _export_successful_plan(state, str(export_successful_path))
             if verbose:
-                print(f"\n[router] Successful plan exported to: {export_successful_path}")
+                print(
+                    f"\n[router] Successful plan exported to: {export_successful_path}"
+                )
         except Exception as exc:
             logger.warning("successful_plan_export_failed", error=str(exc))
             if verbose:

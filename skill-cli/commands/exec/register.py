@@ -14,7 +14,13 @@ from common.core.config import (
 )
 from common.llm.registry import discover_providers, get_default_provider_name
 from core.plan_utils import RunPlanFileType
-from core.router import CLIInteractionPlugin, run_router, calculate_run_statistics, format_statistics, _execution_log_to_yaml
+from core.router import (
+    CLIInteractionPlugin,
+    run_router,
+    calculate_run_statistics,
+    format_statistics,
+    _execution_log_to_yaml,
+)
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -164,8 +170,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         Isolation modes:
         - Default: skills use the workdir directly (cooperation enabled)
-        - --run-isolated: create one isolated dir for the entire run
-        - --skill-isolated: create one run dir + subdirectory per skill
+        - --run-isolated: create one isolated dir in workdir_root for the entire run
+        - --skill-isolated: create one run dir + subdirectory per skill in workdir_root
 
         Interactive mode (--interactive):
         - Before each step, you can approve, skip, edit, or replan
@@ -206,31 +212,43 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 k, v = p.split("=", 1)
                 import_params[k.strip()] = v.strip()
             else:
-                click.echo(f"Warning: invalid param format '{p}', expected KEY=VALUE", err=True)
+                click.echo(
+                    f"Warning: invalid param format '{p}', expected KEY=VALUE", err=True
+                )
 
         # Create shared context if enabled
         shared_ctx = None
         if shared_context:
             from common.agent.shared_context import SharedContext
+
             shared_ctx = SharedContext()
 
         plan_path = str(plan)
         click.echo(f"Router executing plan: '{plan_path}'", err=True)
         click.echo(f"Provider: {provider_name}, model: {model or 'default'}", err=True)
         click.echo(f"Isolation mode: {isolation_mode}", err=True)
-        click.echo(f"Shared context: {'enabled' if shared_ctx else 'disabled'}", err=True)
-        click.echo(f"Interactive mode: {'enabled' if interactive else 'disabled'}", err=True)
+        click.echo(
+            f"Shared context: {'enabled' if shared_ctx else 'disabled'}", err=True
+        )
+        click.echo(
+            f"Interactive mode: {'enabled' if interactive else 'disabled'}", err=True
+        )
 
         # Import the plan early to extract the goal
         # We need to set up RUN_DIR placeholder before importing
-        run_dir_value = "." if isolation_mode == "none" else "runs/ISOLATED"  # Will be recalculated by router
+        run_dir_value = (
+            "." if isolation_mode == "none" else "runs/ISOLATED"
+        )  # Will be recalculated by router
         import_params_with_rundir = dict(import_params)
         if "RUN_DIR" not in import_params_with_rundir:
             import_params_with_rundir["RUN_DIR"] = run_dir_value
-        
+
         from core.plan_utils import import_plan_from_yaml
+
         try:
-            imported_plan = import_plan_from_yaml(plan_path, workdir, params=import_params_with_rundir)
+            imported_plan = import_plan_from_yaml(
+                plan_path, workdir, params=import_params_with_rundir
+            )
             goal_from_plan = imported_plan.goal
         except Exception as exc:
             click.echo(f"Error: Failed to import plan: {exc}", err=True)
@@ -265,13 +283,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo("\n" + stats_output, err=True)
 
         # Display detailed error report for failed steps
-        failed_attempts = [a for a in state.attempts if not a.success and a.exit_code != 0]
+        failed_attempts = [
+            a for a in state.attempts if not a.success and a.exit_code != 0
+        ]
         if failed_attempts:
             click.echo("\n" + "=" * 60, err=True)
             click.echo("FAILED STEPS ERROR REPORT", err=True)
             click.echo("=" * 60, err=True)
             for attempt in failed_attempts:
-                click.echo(f"\nStep {attempt.iteration}: {attempt.skill_name} ({attempt.action})", err=True)
+                click.echo(
+                    f"\nStep {attempt.iteration}: {attempt.skill_name} ({attempt.action})",
+                    err=True,
+                )
                 click.echo(f"Exit code: {attempt.exit_code}", err=True)
                 if attempt.params:
                     click.echo(f"Params: {attempt.params}", err=True)
@@ -286,6 +309,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         # Write full error log to run_dir
         if failed_attempts:
             from pathlib import Path
+
             # Write to run_root (the actual run directory) if available, otherwise workdir
             if state.run_root is not None:
                 log_path = state.run_root / "error_log.yaml"
