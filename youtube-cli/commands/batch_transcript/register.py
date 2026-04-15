@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import click
@@ -11,6 +12,8 @@ from common.cli.helpers import out
 from common.core.yaml_utils import dump_yaml
 from common.youtube.transport import RSSPlaylistTransport
 from common.youtube.utils import extract_video_id
+
+log = logging.getLogger(__name__)
 
 
 def _resolve_input_path(input_file: str) -> Path:
@@ -107,12 +110,45 @@ def register(plugin_manifests: dict) -> CommandManifest:
             transcript_raw = None
 
             if video_id:
+                method_used = None
+
+                click.echo(f"[{idx}/{total}] Trying yt-dlp...", err=True)
                 try:
-                    transcript = transport.get_transcript(video_id, cookies)
-                    if transcript is None:
-                        error = "Transcript unavailable"
+                    transcript = transport._get_transcript_ytdlp(video_id, cookies)
+                    if transcript:
+                        method_used = "yt-dlp"
                 except Exception as e:
-                    error = str(e)
+                    click.echo(f"  yt-dlp failed: {str(e)[:40]}", err=True)
+
+                if not transcript:
+                    click.echo(
+                        f"[{idx}/{total}] Trying youtube-transcript-api...", err=True
+                    )
+                    try:
+                        transcript = transport._get_transcript_youtube_api(video_id)
+                        if transcript:
+                            method_used = "youtube-transcript-api"
+                    except Exception as e:
+                        click.echo(
+                            f"  youtube-transcript-api failed: {str(e)[:40]}", err=True
+                        )
+
+                if not transcript:
+                    click.echo(f"[{idx}/{total}] Trying youtube-api-v3...", err=True)
+                    try:
+                        transcript = transport._get_transcript_api_v3(video_id)
+                        if transcript:
+                            method_used = "youtube-api-v3"
+                    except Exception as e:
+                        click.echo(f"  youtube-api-v3 failed: {str(e)[:40]}", err=True)
+
+                if transcript is None:
+                    error = "Transcript unavailable"
+                else:
+                    click.echo(
+                        f"[{idx}/{total}] Got {len(transcript)} chars via {method_used}",
+                        err=True,
+                    )
 
             detail = all_details.get(video_id, {})
             snippet = detail.get("snippet", {})
@@ -135,9 +171,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
             results.append(result)
 
             if error:
-                click.echo(f"[{idx}/{total}] Error for {video_id}: {error}", err=True)
+                click.echo(f"[{idx}/{total}] Error: {error} ({video_id})", err=True)
             else:
-                click.echo(f"[{idx}/{total}] Got transcript for {video_id}", err=True)
+                click.echo(
+                    f"[{idx}/{total}] Transcript: {len(transcript)} chars ({video_id})",
+                    err=True,
+                )
 
         output_path = None
         if output:

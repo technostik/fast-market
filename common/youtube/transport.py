@@ -172,14 +172,58 @@ class RSSPlaylistTransport(Transport):
         return out
 
     def get_transcript(self, video_id: str, cookies: str | None) -> str | None:
+        transcript = None
+        methods_tried = []
+
+        # Method 1: yt-dlp (try first - most reliable)
+        methods_tried.append("yt-dlp")
+        logger.info("trying_transcript_ytdlp", video_id=video_id)
         try:
-            from youtube_transcript_api import (
-                YouTubeTranscriptApi,
-                NoTranscriptFound,
-                TranscriptsDisabled,
+            transcript = self._get_transcript_ytdlp(video_id, cookies)
+            if transcript:
+                logger.info("transcript_fetched_ytdlp", video_id=video_id)
+                return transcript
+        except Exception as e:
+            logger.warning("transcript_ytdlp_failed", video_id=video_id, error=str(e))
+
+        # Method 2: youtube-transcript-api (fallback)
+        methods_tried.append("youtube-transcript-api")
+        logger.info("trying_transcript_youtube_api", video_id=video_id)
+        try:
+            transcript = self._get_transcript_youtube_api(video_id)
+            if transcript:
+                logger.info("transcript_fetched_youtube_api", video_id=video_id)
+                return transcript
+        except Exception as e:
+            logger.warning(
+                "transcript_youtube_api_failed", video_id=video_id, error=str(e)
             )
-        except ImportError as exc:
-            raise RuntimeError("pip install youtube-transcript-api") from exc
+
+        # Method 3: YouTube Data API v3 (final fallback)
+        methods_tried.append("youtube-api-v3")
+        logger.info("trying_transcript_api_v3", video_id=video_id)
+        try:
+            transcript = self._get_transcript_api_v3(video_id)
+            if transcript:
+                logger.info("transcript_fetched_api_v3", video_id=video_id)
+                return transcript
+        except Exception as e:
+            logger.warning("transcript_api_v3_failed", video_id=video_id, error=str(e))
+
+        if not transcript:
+            logger.info(
+                "no_transcript_any_method",
+                video_id=video_id,
+                methods_tried=methods_tried,
+            )
+        return transcript
+
+    def _get_transcript_youtube_api(self, video_id: str) -> str | None:
+        from youtube_transcript_api import (
+            YouTubeTranscriptApi,
+            NoTranscriptFound,
+            TranscriptsDisabled,
+        )
 
         try:
             api = YouTubeTranscriptApi()
@@ -192,8 +236,6 @@ class RSSPlaylistTransport(Transport):
         except (NoTranscriptFound, TranscriptsDisabled) as exc:
             logger.info("no_transcript", video_id=video_id, reason=str(exc))
             return None
-        except OSError:
-            raise
         except Exception as exc:
             error_msg = str(exc).lower()
             if "rate" in error_msg or "429" in error_msg:
@@ -209,6 +251,136 @@ class RSSPlaylistTransport(Transport):
                     f"Video {video_id} blocked by YouTube (IP blocked)"
                 ) from exc
             raise
+
+    def _get_transcript_ytdlp(self, video_id: str, cookies: str | None) -> str | None:
+        try:
+            import yt_dlp
+        except ImportError as exc:
+            raise RuntimeError("pip install yt-dlp") from exc
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        ydl_opts: dict = {
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitlelangs": ["en", "fr"],
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": False,
+        }
+
+        use_cookies = cookies or self.cookies
+        if use_cookies:
+            ydl_opts["cookiefile"] = use_cookies
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    return None
+
+                subtitles = (
+                    info.get("subtitles") or info.get("automatic_captions") or {}
+                )
+                for lang in ["en", "fr"]:
+                    if lang in subtitles:
+                        sub_data = subtitles[lang]
+                        if sub_data and isinstance(sub_data, list):
+                            data = sub_data[0]
+                            if "data" in data:
+                                text = data["data"]
+                                logger.info(
+                                    "transcript_fetched_ytdlp",
+                                    video_id=video_id,
+                                    chars=len(text),
+                                )
+                                return text
+                return None
+        except Exception as e:
+            logger.warning("ytdlp_transcript_failed", video_id=video_id, error=str(e))
+            return None
+
+    def _get_transcript_api_v3(self, video_id: str) -> str | None:
+        try:
+            from googleapiclient.errors import HttpError
+            from googleapiclient.discovery import build
+        except ImportError:
+            logger.warning("google_api_client_not_installed", video_id=video_id)
+            return None
+
+        try:
+            http_auth = self._create_api_v3_auth()
+            if http_auth is None:
+                return None
+
+            youtube = build("youtube", "v3", http=http_auth)
+
+            captions = (
+                youtube.captions().list(part="snippet", videoId=video_id).execute()
+            )
+
+            caption_id = None
+            for item in captions.get("items", []):
+                lang = item.get("snippet", {}).get("language", "")
+                if lang in ["en", "fr"]:
+                    caption_id = item.get("id")
+                    if lang == "en":
+                        break
+
+            if not caption_id:
+                return None
+
+            caption_data = (
+                youtube.captions().download(id=caption_id, tfmt="srt").execute()
+            )
+
+            if caption_data:
+                text = self._parse_srt_caption(caption_data)
+                logger.info(
+                    "transcript_fetched_api_v3", video_id=video_id, chars=len(text)
+                )
+                return text
+
+        except HttpError as e:
+            logger.warning("api_v3_http_error", video_id=video_id, status=e.resp.status)
+        except Exception as e:
+            logger.warning("api_v3_error", video_id=video_id, error=str(e))
+
+        return None
+
+    def _parse_srt_caption(self, srt_data: str) -> str:
+        import re
+
+        lines = srt_data.strip().split("\n")
+        text_lines = []
+        for line in lines:
+            line = line.strip()
+            if not line or re.match(r"^\d+$", line):
+                continue
+            if "-->" in line:
+                continue
+            text_lines.append(line)
+
+        return " ".join(text_lines)
+
+    def _create_api_v3_auth(self):
+        try:
+            import httplib2
+            from google.oauth2.credentials import Credentials
+
+            token_path = Path.home() / ".config" / "youtube-agent" / "token.json"
+            if not token_path.exists():
+                logger.info("api_v3_token_not_found")
+                return None
+
+            creds = Credentials.from_authorized_user_info(
+                json.loads(token_path.read_text())
+            )
+            http = httplib2.Http()
+            return creds.authorize(http)
+        except Exception as e:
+            logger.warning("api_v3_auth_error", error=str(e))
+            return None
 
     def download_audio(self, video_id: str, cookies: str | None) -> Path | None:
         try:
