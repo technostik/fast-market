@@ -143,7 +143,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 input_path = Path.cwd() / input_file
 
         if not input_path.exists():
-            click.echo(f"Error: Invalid value for 'INPUT_FILE': Path '{input_file}' does not exist.", err=True)
+            click.echo(
+                f"Error: Invalid value for 'INPUT_FILE': Path '{input_file}' does not exist.",
+                err=True,
+            )
             return
 
         # Resolve output file path if provided
@@ -267,12 +270,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if use_shell:
                 # Build the actual command to execute
                 actual_command = shell
-                
+
                 # If using shell with prompt variables, append them as command-line arguments
                 if use_shell_with_prompt and prompt:
                     prompt_args = " ".join(prompt)
                     actual_command = f"{shell} {prompt_args}"
-                
+
                 # Execute shell command with env vars
                 env = {
                     **os.environ,
@@ -371,7 +374,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
             for item in original_data:
                 comment_id = item.get("original_comment", {}).get("id")
                 if comment_id in regenerated_map:
-                    merged.append(regenerated_map[comment_id])
+                    new_item = regenerated_map[comment_id]
+                    # Preserve original metadata
+                    original_metadata = item.get("metadata", {})
+                    if original_metadata:
+                        new_item["metadata"] = original_metadata
+                    merged.append(new_item)
                 else:
                     merged.append(item)
 

@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List
 from uuid import uuid4
 
 import yaml
@@ -21,7 +22,7 @@ router = APIRouter()
 
 class PostRequest(BaseModel):
     file: str
-    indices: list[int]
+    indices: List[int]
     dry_run: bool = False
 
 
@@ -33,7 +34,7 @@ class SaveReplyRequest(BaseModel):
 
 class RegenerateRequest(BaseModel):
     file: str
-    indices: list[int]
+    indices: List[int]
 
 
 class GetPromptRequest(BaseModel):
@@ -201,6 +202,9 @@ def save_prompt(payload: SavePromptRequest) -> dict[str, str]:
 
 @router.post("/regenerate")
 def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
+    logger.info(
+        "yt_poster_regenerate_request", file=payload.file, indices=payload.indices
+    )
     source_path = _resolve_workdir_relative(payload.file)
     if not source_path.exists() or not source_path.is_file():
         raise HTTPException(status_code=404, detail="Input file not found")

@@ -94,7 +94,7 @@ _YT_POSTER_HTML = """<!doctype html>
   <div id=\"footer\" class=\"footer\">
     <button id=\"postBtn\">📤 Post selected (0)</button>
   </div>
-  <div id=\"spinner\" class=\"spinner\">Posting... (this may take a while)</div>
+  <div id="spinner" class="spinner">Processing... (this may take a while)</div>
   <div id=\"output\" class=\"output\">
     <div id=\"exitCode\"></div>
     <pre id=\"log\"></pre>
@@ -313,7 +313,14 @@ function getPromptNameFromRows(){
 }
 
 async function regenerateRows(indices){
-  if (!indices.length) return;
+  if (!indices.length) {
+    errorEl.textContent = 'No rows selected';
+    return;
+  }
+  if (!currentSourceFile) {
+    errorEl.textContent = 'No file loaded';
+    return;
+  }
   spinner.style.display = 'block';
   output.style.display = 'none';
   errorEl.textContent = '';
@@ -325,8 +332,18 @@ async function regenerateRows(indices){
   });
 
   spinner.style.display = 'none';
-  const body = await resp.json().catch(() => ({}));
   output.style.display = 'block';
+
+  let body;
+  if (!resp.ok) {
+    body = await resp.json().catch(() => ({}));
+    exitCode.textContent = `Error: ${resp.status}`;
+    exitCode.style.color = 'var(--error)';
+    logEl.textContent = body.detail || `HTTP ${resp.status}: ${resp.statusText}`;
+    return;
+  }
+
+  body = await resp.json().catch(() => ({}));
   const code = body.exit_code ?? -1;
   exitCode.textContent = `Exit code: ${code}`;
   exitCode.style.color = code === 0 ? 'var(--success)' : 'var(--error)';
@@ -335,7 +352,7 @@ async function regenerateRows(indices){
     exitCode.textContent += ` (${body.updated_count} replies regenerated)`;
     loadFile();
   } else {
-    logEl.textContent = body.output || body.error || 'Regeneration failed';
+    logEl.textContent = body.output || body.error || body.detail || 'Regeneration failed';
   }
 }
 
