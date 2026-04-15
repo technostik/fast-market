@@ -17,7 +17,7 @@ class PromptNameParamType(click.ParamType):
 
         completions = []
         for prompt in prompts:
-            if incomplete.lower() in prompt.name.lower():
+            if prompt.name.lower().startswith(incomplete.lower()):
                 desc = f" - {prompt.description}" if prompt.description else ""
                 completions.append(CompletionItem(prompt.name, help=desc))
 

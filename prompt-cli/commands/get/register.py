@@ -15,8 +15,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--format", "fmt", type=click.Choice(["text", "json"]), default="text"
     )
+    @click.option(
+        "--content",
+        "show_content_only",
+        is_flag=True,
+        help="Output only the prompt content without frontmatter",
+    )
     @click.pass_context
-    def get_cmd(ctx, name, fmt):
+    def get_cmd(ctx, name, fmt, show_content_only):
         """Show a stored prompt."""
         from storage.store import PromptStore
 
@@ -25,6 +31,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not prompt:
             click.echo(f"Prompt not found: {name}", err=True)
             sys.exit(1)
+
+        if show_content_only:
+            click.echo(prompt.content)
+            return
 
         payload = {
             "name": prompt.name,
