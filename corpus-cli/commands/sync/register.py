@@ -60,6 +60,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Use YouTube API instead of RSS (for full channel sync)",
     )
     @click.option(
+        "--non-public",
+        is_flag=True,
+        default=False,
+        help="Sync non-public videos (private/unlisted/members-only) via API",
+    )
+    @click.option(
         "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
     )
     @click.pass_context
@@ -71,6 +77,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         clean,
         silent,
         use_api,
+        non_public,
         fmt,
         retry_failure,
         clear_permanent,
@@ -121,6 +128,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     limit=effective_limit,
                     vault_path=vault_path,
                     use_api=use_api if name == "youtube" else False,
+                    non_public=non_public if name == "youtube" else False,
                 )
                 result_dict = {
                     "source": result.source,

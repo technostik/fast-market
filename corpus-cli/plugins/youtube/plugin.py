@@ -54,7 +54,9 @@ class YouTubePlugin(SourcePlugin):
             client_secret = yt_cfg.get("client_secret_path")
             oauth = YouTubeOAuth(client_secret_path=client_secret)
             api = oauth.get_client()
-            self._api_client = YouTubeClient(api, channel_id=self.channel_id, auth=oauth)
+            self._api_client = YouTubeClient(
+                api, channel_id=self.channel_id, auth=oauth
+            )
         return self._api_client
 
     def _get_config(self) -> dict:
@@ -67,7 +69,12 @@ class YouTubePlugin(SourcePlugin):
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
         use_api: bool = False,
+        non_public: bool = False,
     ) -> list[ItemMeta]:
+        if non_public:
+            return self._list_items_via_api(
+                limit, known_id_dates, include_non_public=True
+            )
         if use_api:
             return self._list_items_via_api(limit, known_id_dates)
         return self._list_items_via_rss(limit, known_id_dates)
@@ -76,6 +83,7 @@ class YouTubePlugin(SourcePlugin):
         self,
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
+        include_non_public: bool = False,
     ) -> list[ItemMeta]:
         known = set(known_id_dates or {})
         all_new: list[ItemMeta] = []
@@ -86,6 +94,9 @@ class YouTubePlugin(SourcePlugin):
         client = self._get_api_client()
 
         max_fetch = limit * 50
+        if include_non_public:
+            max_fetch = max(max_fetch, 200)
+
         videos = client.get_channel_videos(self.channel_id, max_results=max_fetch)
 
         for video in videos:
@@ -94,7 +105,11 @@ class YouTubePlugin(SourcePlugin):
                 continue
 
             privacy = video.privacy_status or "unknown"
-            if not self.index_non_public and privacy not in _PUBLIC_STATUSES:
+
+            if include_non_public:
+                if privacy in _PUBLIC_STATUSES:
+                    continue
+            elif not self.index_non_public and privacy not in _PUBLIC_STATUSES:
                 logger.info(
                     "video_skipped_privacy",
                     video_id=video.video_id,
@@ -279,34 +294,39 @@ class YouTubePlugin(SourcePlugin):
             privacy_status=privacy_status,
         )
 
+        is_non_public = privacy_status not in _PUBLIC_STATUSES
+
         transcript = None
         last_error = None
 
-        # Fallback 1: youtube-transcript-api
-        try:
-            transcript = self.transport.get_transcript(video_id, self.cookies)
-        except VideoBlockedError as exc:
-            logger.info("transcript_api_blocked_trying_yt_dlp", video_id=video_id)
-            last_error = exc
-        except TranscriptUnavailableError:
-            logger.info("transcript_unavailable_trying_yt_dlp", video_id=video_id)
-        except Exception as exc:
-            logger.warning(
-                "transcript_api_error", video_id=video_id, error=str(exc)[:100]
-            )
-            last_error = exc
-
-        # Fallback 2: yt-dlp subtitles
-        if transcript is None:
+        if is_non_public:
+            logger.info("non_public_video_using_api_captions", video_id=video_id)
+        else:
+            # Fallback 1: youtube-transcript-api (only for public videos)
             try:
-                transcript = self._try_yt_dlp_subs(video_id)
+                transcript = self.transport.get_transcript(video_id, self.cookies)
+            except VideoBlockedError as exc:
+                logger.info("transcript_api_blocked_trying_yt_dlp", video_id=video_id)
+                last_error = exc
+            except TranscriptUnavailableError:
+                logger.info("transcript_unavailable_trying_yt_dlp", video_id=video_id)
             except Exception as exc:
-                logger.info(
-                    "yt_dlp_subs_failed", video_id=video_id, error=str(exc)[:100]
+                logger.warning(
+                    "transcript_api_error", video_id=video_id, error=str(exc)[:100]
                 )
                 last_error = exc
 
-        # Fallback 3: YouTube API captions
+            # Fallback 2: yt-dlp subtitles (only for public videos)
+            if transcript is None:
+                try:
+                    transcript = self._try_yt_dlp_subs(video_id)
+                except Exception as exc:
+                    logger.info(
+                        "yt_dlp_subs_failed", video_id=video_id, error=str(exc)[:100]
+                    )
+                    last_error = exc
+
+        # Fallback 3: YouTube API captions (works for all videos)
         if transcript is None:
             try:
                 transcript = self._try_youtube_api_captions(video_id)

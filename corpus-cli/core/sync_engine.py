@@ -61,6 +61,7 @@ class SyncEngine:
         limit: int,
         vault_path: str | None = None,
         use_api: bool = False,
+        non_public: bool = False,
     ) -> SyncResult:
         known_id_dates = (
             self.store.get_indexed_id_dates(plugin.name) if mode == "new" else {}
@@ -75,6 +76,8 @@ class SyncEngine:
             sig = inspect.signature(plugin.list_items)
             if "use_api" in sig.parameters:
                 list_kwargs["use_api"] = use_api
+            if "non_public" in sig.parameters:
+                list_kwargs["non_public"] = non_public
 
         items = plugin.list_items(**list_kwargs)
 
@@ -84,6 +87,7 @@ class SyncEngine:
             mode=mode,
             limit=limit,
             use_api=use_api,
+            non_public=non_public,
             known_ids=len(known_id_dates),
             permanent_failures=len(permanent_failures),
             items_available=len(items),
