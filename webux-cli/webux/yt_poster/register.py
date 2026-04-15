@@ -91,8 +91,9 @@ _YT_POSTER_HTML = """<!doctype html>
     </table>
   </div>
 
-  <div id=\"footer\" class=\"footer\">
-    <button id=\"postBtn\">📤 Post selected (0)</button>
+  <div id="footer" class="footer">
+    <button id="postBtn">📤 Post selected (0)</button>
+    <span id="postMode" style="color:var(--text-dim);font-size:12px;margin-left:8px;"></span>
   </div>
   <div id="spinner" class="spinner">Processing... (this may take a while)</div>
   <div id=\"output\" class=\"output\">
@@ -134,6 +135,7 @@ _YT_POSTER_HTML = """<!doctype html>
 
 <script>
 let rows = [];
+let postMode = 'comment';
 
 const fileInput = document.getElementById('fileInput');
 const loadBtn = document.getElementById('loadBtn');
@@ -143,6 +145,7 @@ const tableWrap = document.getElementById('tableWrap');
 const tbody = document.getElementById('tbody');
 const footer = document.getElementById('footer');
 const postBtn = document.getElementById('postBtn');
+const postModeEl = document.getElementById('postMode');
 const selectAllBtn = document.getElementById('selectAll');
 const deselectAllBtn = document.getElementById('deselectAll');
 const dryRunEl = document.getElementById('dryRun');
@@ -174,7 +177,11 @@ let currentSourceFile = '';
 function trunc(v, n=100) { if (!v) return '—'; return v.length > n ? v.slice(0,n) + '…' : v; }
 function esc(v='') { return String(v).replaceAll('&', '&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
 function selectedCount(){ return rows.filter(r => r.selected).length; }
-function updatePostLabel(){ postBtn.textContent = `📤 Post selected (${selectedCount()})`; }
+function updatePostLabel(){
+  const icon = postMode === 'video' ? '🎬' : '💬';
+  postBtn.textContent = `${icon} Post ${selectedCount()} as ${postMode} comment${selectedCount() !== 1 ? 's' : ''}`;
+  postModeEl.textContent = `(→ youtube batch-${postMode}-post)`;
+}
 
 function formatRelativeDate(dateStr) {
   if (!dateStr) return '';
@@ -449,6 +456,7 @@ async function loadFile(){
 
   currentSourceFile = file;
   rows = data.map(item => ({ ...item, selected: true }));
+  postMode = rows.some(r => r.original_comment) ? 'comment' : 'video';
   controls.style.display = 'flex';
   tableWrap.style.display = 'block';
   footer.style.display = 'block';
@@ -480,8 +488,9 @@ async function postSelected(){
   if (effectiveCode !== 0) exitCode.textContent += ' ⚠️';
   errorEl.textContent = hasFailed ? 'Some posts failed - check output below' : (hasErrors ? 'Errors in output' : '');
   const reportPath = body.report ? `\nReport: ${body.report}` : '';
-  const mode = body.dry_run ? '[dry-run] ' : '';
-  logEl.textContent = `${mode}${rawOutput}${reportPath}`;
+  const dryrun = body.dry_run ? '[dry-run] ' : '';
+  const cmdType = body.post_type || postMode;
+  logEl.textContent = `${dryrun}[youtube batch-${cmdType}-post]\n${rawOutput}${reportPath}`;
 }
 
 loadBtn.addEventListener('click', loadFile);

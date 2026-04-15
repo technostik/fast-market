@@ -96,10 +96,14 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
     data = _load_array(source_path)
     selected = [item for idx, item in enumerate(data) if idx in set(payload.indices)]
 
+    has_comments = any(item.get("original_comment") for item in selected)
+    post_type = "comment" if has_comments else "video"
+    cmd_name = f"batch-comment-post" if has_comments else "batch-video-post"
+
     temp_path = Path(tempfile.gettempdir()) / f"webux_post_{uuid4().hex}.json"
     temp_path.write_text(json.dumps(selected, ensure_ascii=False), encoding="utf-8")
 
-    cmd = ["youtube", "batch-post", str(temp_path), "--format", "json"]
+    cmd = ["youtube", cmd_name, str(temp_path), "--format", "json"]
     if payload.dry_run:
         cmd.append("--dry-run")
 
@@ -134,6 +138,7 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
             "output": output,
             "dry_run": payload.dry_run,
             "report": str(report_path),
+            "post_type": post_type,
         }
     finally:
         temp_path.unlink(missing_ok=True)
