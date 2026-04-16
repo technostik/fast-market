@@ -226,26 +226,33 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
     if not prompt_name:
         raise HTTPException(status_code=400, detail="No prompt-name in metadata")
 
-    comment_ids = [
-        item.get("original_comment", {}).get("id")
-        for item in selected
-        if item.get("original_comment", {}).get("id")
-    ]
+    has_comments = any(item.get("original_comment") for item in selected)
 
     temp_input = Path(tempfile.gettempdir()) / f"webux_regen_{uuid4().hex}.json"
     temp_output = Path(tempfile.gettempdir()) / f"webux_regen_out_{uuid4().hex}.json"
     temp_input.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
+    if has_comments:
+        filter_ids = [
+            item.get("original_comment", {}).get("id")
+            for item in selected
+            if item.get("original_comment", {}).get("id")
+        ]
+        cmd_name = "batch-reply"
+    else:
+        filter_ids = [item.get("video_id") for item in selected if item.get("video_id")]
+        cmd_name = "batch-video-reply"
+
     cmd = [
         "youtube",
-        "batch-reply",
+        cmd_name,
         str(temp_input),
         "-s",
         f"prompt apply {prompt_name}",
         "-o",
         str(temp_output),
         "--filter",
-        json.dumps(comment_ids),
+        json.dumps(filter_ids),
         "--rewrite",
     ]
 
@@ -279,7 +286,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
             return {
                 "exit_code": 0,
                 "output": output,
-                "updated_count": len(comment_ids),
+                "updated_count": len(filter_ids),
             }
 
         return {"exit_code": proc.returncode, "output": output}
