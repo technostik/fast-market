@@ -227,6 +227,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Router executing plan: '{plan_path}'", err=True)
         click.echo(f"Provider: {provider_name}, model: {model or 'default'}", err=True)
         click.echo(f"Isolation mode: {isolation_mode}", err=True)
+        if isolation_mode != "none":
+            click.echo(f"Workdir: {workdir}", err=True)
         click.echo(
             f"Shared context: {'enabled' if shared_ctx else 'disabled'}", err=True
         )

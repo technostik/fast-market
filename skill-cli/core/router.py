@@ -1193,6 +1193,12 @@ def run_router(
             # run_root is not a subpath of workdir_path (e.g., run in workdir_root while workdir is a subdir)
             # Fall back to absolute path
             run_dir_value = str(run_root)
+        # Update global workdir config to the isolation directory
+        # This makes subsequent CLI tools use the isolated dir as workdir
+        common_config["workdir"] = str(run_root)
+        from common.core.config import save_common_config
+
+        save_common_config(common_config)
 
     # Inject RUN_DIR into import_params for plan substitution
     if import_params is None:

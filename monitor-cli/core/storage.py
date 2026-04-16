@@ -593,12 +593,14 @@ class MonitorStorage:
     def get_trigger_logs_with_metadata(
         self,
         since: datetime | None = None,
+        until: datetime | None = None,
         rule_id: str | None = None,
         source_id: str | None = None,
         action_id: str | None = None,
         meta_key: str | None = None,
         meta_value: str | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[TriggerLogWithMetadata]:
         with self._get_conn() as conn:
             query = """
@@ -612,6 +614,9 @@ class MonitorStorage:
             if since:
                 query += " AND t.triggered_at >= ?"
                 params.append(since.isoformat())
+            if until:
+                query += " AND t.triggered_at < ?"
+                params.append(until.isoformat())
             if rule_id:
                 query += " AND t.rule_id = ?"
                 params.append(rule_id)
@@ -626,8 +631,9 @@ class MonitorStorage:
                 query += " AND s.metadata LIKE ?"
                 params.append(f'%"' + meta_key + '":"' + meta_value + '"%')
 
-            query += " ORDER BY t.triggered_at DESC LIMIT ?"
+            query += " ORDER BY t.triggered_at DESC LIMIT ? OFFSET ?"
             params.append(limit)
+            params.append(offset)
 
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_trigger_log_with_metadata(row) for row in rows]
@@ -652,9 +658,11 @@ class MonitorStorage:
     def get_rule_mismatch_logs(
         self,
         since: datetime | None = None,
+        until: datetime | None = None,
         rule_id: str | None = None,
         source_id: str | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[RuleMismatchLog]:
         with self._get_conn() as conn:
             query = "SELECT * FROM rule_mismatch_logs WHERE 1=1"
@@ -663,6 +671,9 @@ class MonitorStorage:
             if since:
                 query += " AND evaluated_at >= ?"
                 params.append(since.isoformat())
+            if until:
+                query += " AND evaluated_at < ?"
+                params.append(until.isoformat())
             if rule_id:
                 query += " AND rule_id = ?"
                 params.append(rule_id)
@@ -670,8 +681,9 @@ class MonitorStorage:
                 query += " AND source_id = ?"
                 params.append(source_id)
 
-            query += " ORDER BY evaluated_at DESC LIMIT ?"
+            query += " ORDER BY evaluated_at DESC LIMIT ? OFFSET ?"
             params.append(limit)
+            params.append(offset)
 
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_mismatch_log(row) for row in rows]

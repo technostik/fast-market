@@ -49,26 +49,42 @@ def _parse_since(since: str | None) -> datetime | None:
     return datetime.fromisoformat(since)
 
 
+def _parse_date(date_str: str | None) -> tuple[datetime, datetime] | None:
+    if not date_str:
+        return None
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
+    start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return (start, end)
+
+
 @router.get("/logs")
 def logs(
     since: str | None = Query(None),
+    date: str | None = Query(None),
     rule_id: str | None = Query(None),
     source_id: str | None = Query(None),
     action_id: str | None = Query(None),
     limit: int = Query(100, le=500),
+    offset: int = Query(0, ge=0),
     mismatch: bool = Query(False),
 ) -> list[dict]:
     MonitorStorage = _get_monitor_storage_class()
 
     storage = MonitorStorage(get_tool_data_dir("monitor") / "monitor.db")
     since_dt = _parse_since(since)
+    date_range = _parse_date(date)
+    if date_range:
+        since_dt, until_dt = date_range
 
     if mismatch:
         rows = storage.get_rule_mismatch_logs(
             since=since_dt,
+            until=date_range[1] if date_range else None,
             rule_id=rule_id,
             source_id=source_id,
             limit=limit,
+            offset=offset,
         )
         return [
             {
@@ -84,10 +100,12 @@ def logs(
 
     rows = storage.get_trigger_logs_with_metadata(
         since=since_dt,
+        until=date_range[1] if date_range else None,
         rule_id=rule_id,
         source_id=source_id,
         action_id=action_id,
         limit=limit,
+        offset=offset,
     )
     return [
         {
@@ -172,6 +190,13 @@ h2 { margin:0 0 12px 0; }
 .stat-value { font-size:28px; font-weight:700; margin:8px 0; }
 .stat-label { color:var(--text-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.05em; }
 .filter-section { margin-bottom:12px; }
+
+/* Pagination */
+.pagination { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+.pagination button { padding:6px 12px; }
+.pagination .current-date { font-weight:600; min-width:140px; text-align:center; }
+.pagination .nav-btn:disabled { opacity:0.5; cursor:not-allowed; }
+.pagination-info { color:var(--text-dim); font-size:13px; }
 </style></head>
 <body>
   <h2>👁 Monitor</h2>
@@ -186,6 +211,14 @@ h2 { margin:0 0 12px 0; }
     <button id="loadLogs">📋 Load Logs</button>
     <button id="loadStatus">📊 Status</button>
   </div>
+  <div class="pagination">
+    <button id="prevDay" class="nav-btn">◀ Prev Day</button>
+    <input type="date" id="datePicker" class="current-date">
+    <button id="nextDay" class="nav-btn">Next Day ▶</button>
+    <button id="prevPage" class="nav-btn">◀ Prev</button>
+    <span id="paginationInfo" class="pagination-info"></span>
+    <button id="nextPage" class="nav-btn">Next ▶</button>
+  </div>
   <div id="out"></div>
   <script>
   const out = document.getElementById('out');
@@ -194,6 +227,71 @@ h2 { margin:0 0 12px 0; }
   const sourceFilter = document.getElementById('sourceFilter');
   const actionFilter = document.getElementById('actionFilter');
   const mismatchToggle = document.getElementById('mismatchToggle');
+  const datePicker = document.getElementById('datePicker');
+  const prevDayBtn = document.getElementById('prevDay');
+  const nextDayBtn = document.getElementById('nextDay');
+  const paginationInfo = document.getElementById('paginationInfo');
+  const prevPageBtn = document.getElementById('prevPage');
+  const nextPageBtn = document.getElementById('nextPage');
+
+  let currentOffset = 0;
+  let totalCount = 0;
+  const pageSize = 100;
+
+  const today = new Date().toISOString().split('T')[0];
+  datePicker.value = today;
+  datePicker.max = today;
+
+  function updateNavButtons() {
+    const selectedDate = datePicker.value;
+    nextDayBtn.disabled = selectedDate >= today;
+  }
+
+  prevDayBtn.onclick = () => {
+    const d = new Date(datePicker.value);
+    d.setDate(d.getDate() - 1);
+    datePicker.value = d.toISOString().split('T')[0];
+    currentOffset = 0;
+    updateNavButtons();
+    document.getElementById('loadLogs').click();
+  };
+
+  nextDayBtn.onclick = () => {
+    const d = new Date(datePicker.value);
+    d.setDate(d.getDate() + 1);
+    const newVal = d.toISOString().split('T')[0];
+    if (newVal <= today) {
+      datePicker.value = newVal;
+      currentOffset = 0;
+      updateNavButtons();
+      document.getElementById('loadLogs').click();
+    }
+  };
+
+  datePicker.onchange = () => {
+    currentOffset = 0;
+    updateNavButtons();
+    document.getElementById('loadLogs').click();
+  };
+
+  document.getElementById('prevPage').onclick = () => {
+    if (currentOffset >= pageSize) {
+      currentOffset -= pageSize;
+      document.getElementById('loadLogs').click();
+    }
+  };
+
+  document.getElementById('nextPage').onclick = () => {
+    if (totalCount === pageSize) {
+      currentOffset += pageSize;
+      document.getElementById('loadLogs').click();
+    }
+  };
+
+  function updatePaginationButtons() {
+    prevPageBtn.disabled = currentOffset === 0;
+    nextPageBtn.disabled = totalCount < pageSize;
+  }
 
   function formatRelativeTime(isoString) {
     const now = new Date();
@@ -299,16 +397,24 @@ h2 { margin:0 0 12px 0; }
     const mismatch = mismatchToggle.checked;
     const params = new URLSearchParams();
     if (since) params.set('since', since);
+    if (datePicker.value) params.set('date', datePicker.value);
     if (rule) params.set('rule_id', rule);
     if (source) params.set('source_id', source);
     if (action) params.set('action_id', action);
     if (mismatch) params.set('mismatch', 'true');
+    params.set('limit', String(pageSize));
+    params.set('offset', String(currentOffset));
     const q = params.toString() ? '?' + params.toString() : '';
     const r = await fetch('/api/monitor/logs' + q);
     const data = await r.json();
     const type = mismatch ? 'mismatch' : 'trigger';
     populateFiltersFromLogs(data);
     out.innerHTML = renderCards(data, type);
+    totalCount = data.length;
+    const pageStart = currentOffset + 1;
+    const pageEnd = currentOffset + data.length;
+    paginationInfo.textContent = data.length > 0 ? `Showing ${pageStart}-${pageEnd}` : 'No results';
+    updatePaginationButtons();
   };
 
   document.getElementById('loadStatus').onclick = async () => {
