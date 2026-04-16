@@ -632,7 +632,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 f"Could not extract video ID from: {raw}\n"
                 f"Expected a video ID (e.g. 'BF3Z7J5Jv-U') or a YouTube URL."
             )
-            return vid
+        return vid
 
     def _video_to_output_dict(video) -> dict:
         """Convert a Video object to the standard output dictionary format."""

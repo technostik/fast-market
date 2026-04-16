@@ -161,6 +161,18 @@ class YouTubeClient:
 
     def get_video_details(self, video_id: str) -> Optional[dict[str, Any]]:
         """Get video statistics and details."""
+        if not video_id or not video_id.strip():
+            logger.error(
+                "video_id_empty",
+                hint="Provide a valid YouTube video ID or URL. "
+                "Example: youtube hot fetch-video https://youtube.com/watch?v=VIDEO_ID",
+            )
+            raise ValueError(
+                "video_id cannot be empty. Provide a YouTube video ID (e.g., '7eEy9yFrVO4') "
+                "or full URL (e.g., 'https://youtube.com/watch?v=7eEy9yFrVO4').\n"
+                "If you passed a thematic name, use 'youtube hot list <theme>' instead."
+            )
+
         try:
             request = self.youtube.videos().list(
                 part="statistics,snippet,contentDetails",
@@ -613,7 +625,11 @@ class YouTubeClient:
 
     def get_video_infos(self, video_id: str) -> Optional[Video]:
         """Get complete video information."""
-        details = self.get_video_details(video_id)
+        try:
+            details = self.get_video_details(video_id)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+
         if not details:
             return None
 
