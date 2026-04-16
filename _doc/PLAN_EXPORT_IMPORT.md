@@ -97,7 +97,7 @@ skill run "Create marketing content for my video" --export plan.yaml
 ```
 
 **Export location:**
-- With `--run-isolated` or `--skill-isolated`: Files are placed in the isolated run directory (e.g., `skill_run_abc123/plan.yaml`)
+- With `--run-isolated` or `--skill-isolated`: Files are placed in the isolated run directory (e.g., `{workdir_prefix}abc123/plan.yaml` where prefix is from common config, defaults to `skill_run_`)
 - Without isolation: Files are placed in the workdir
 - With absolute path: Files are placed at the specified absolute location
 - Use `--export -` to export to stdout instead of a file

@@ -191,8 +191,8 @@ skill run "task" --shared-context                 # Enable shared context tool
 **Isolation Modes:**
 
 - **Default**: Skills execute directly in the workdir. Skills can see and modify each other's files, enabling file-based cooperation.
-- **`--run-isolated`**: Creates one isolated directory `{workdir_root}/skill_run_{uuid}/` for the entire run. All skills share this directory. Falls back to `{workdir}` if `workdir_root` is not configured.
-- **`--skill-isolated`**: Creates isolated subdirectory `{workdir_root}/skill_run_{uuid}/` with `{iteration:02d}_{skill_name}/` for each skill. Skills cannot see each other's files. Falls back to `{workdir}` if `workdir_root` is not configured.
+- **`--run-isolated`**: Creates one isolated directory `{workdir_root}/{workdir_prefix}{uuid}/` for the entire run. All skills share this directory. Falls back to `{workdir}` if `workdir_root` is not configured. Uses `workdir_prefix` from common config (defaults to `skill_run_` if not set).
+- **`--skill-isolated`**: Creates isolated subdirectory `{workdir_root}/{workdir_prefix}{uuid}/` with `{iteration:02d}_{skill_name}/` for each skill. Skills cannot see each other's files. Falls back to `{workdir}` if `workdir_root` is not configured.
 
 **Shared Context (`--shared-context`):**
 

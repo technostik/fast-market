@@ -1173,19 +1173,21 @@ def run_router(
 
         common_config = load_common_config()
         workdir_root = common_config.get("workdir_root")
+        workdir_prefix = common_config.get("workdir_prefix")
         if workdir_root:
             isolation_base = Path(workdir_root).expanduser().resolve()
         else:
             isolation_base = workdir_path
     else:
         isolation_base = None
+        workdir_prefix = None
 
     # Create run_root based on isolation mode
     if isolation_mode == "none":
         run_root = None  # Will use workdir_path directly
         run_dir_value = "."  # No isolation, use workdir
     else:
-        run_root = make_run_root(isolation_base)
+        run_root = make_run_root(isolation_base, prefix=workdir_prefix)
         # Calculate RUN_DIR as relative path from workdir to run_root
         try:
             run_dir_value = str(run_root.relative_to(workdir_path))

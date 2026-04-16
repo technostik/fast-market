@@ -17,15 +17,22 @@ from core.skill import Skill, discover_skills
 logger = structlog.get_logger(__name__)
 
 
-def make_run_root(workdir: Path, skill_name: str | None = None) -> Path:
+def make_run_root(
+    workdir: Path,
+    skill_name: str | None = None,
+    prefix: str | None = None,
+) -> Path:
     """Create a unique isolated subdirectory inside workdir.
 
     Returns the created path: {workdir}/{skill_name}_{uuid}/
-    or {workdir}/skill_run_{uuid}/ if skill_name is not provided.
+    or {workdir}/{prefix}{uuid}/ if prefix is provided.
+    or {workdir}/skill_run_{uuid}/ if neither skill_name nor prefix is provided.
     """
     unique_id = uuid4().hex[:8]
     if skill_name:
         run_id = f"{skill_name}_{unique_id}"
+    elif prefix:
+        run_id = f"{prefix}{unique_id}"
     else:
         run_id = f"skill_run_{unique_id}"
     run_root = workdir / run_id

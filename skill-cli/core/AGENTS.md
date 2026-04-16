@@ -64,7 +64,7 @@ The cache dir `~/.cache/fast-market/skill-router/` is no longer used.
 
 ### Workdir isolation
 Each step creates an isolated subdirectory: `{run_root}/{iteration:02d}_{label}/`
-where `run_root = {workdir_root}/skill_run_{uuid}/` (or `{workdir}/skill_run_{uuid}/` if `workdir_root` is not configured).
+where `run_root = {workdir_root}/{workdir_prefix}{uuid}/` (or `{workdir}/skill_run_{uuid}/` if `workdir_root` is not configured, using `workdir_prefix` from common config or defaulting to `skill_run_`).
 
 This ensures:
 - Sequential or concurrent runs using the same workdir do not collide
