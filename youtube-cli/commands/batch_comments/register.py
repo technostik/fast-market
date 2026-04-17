@@ -145,14 +145,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
                 if output_fmt == "json":
                     Path(output).write_text(
-                        json.dumps(all_comments, ensure_ascii=False, default=str)
+                        json.dumps(
+                            all_comments, ensure_ascii=False, indent=2, default=str
+                        )
                     )
                 elif output_fmt == "yaml":
                     Path(output).write_text(dump_yaml(all_comments))
                 else:
                     # text format - write as JSON lines or simple text
                     Path(output).write_text(
-                        json.dumps(all_comments, ensure_ascii=False, default=str)
+                        json.dumps(
+                            all_comments, ensure_ascii=False, indent=2, default=str
+                        )
                     )
                 click.echo(f"Saved {len(all_comments)} comments to {output}", err=True)
             else:

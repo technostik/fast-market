@@ -81,16 +81,20 @@ let activeElement = null;
 const defaultExtensions = ['yaml', 'yml', 'json', 'txt', 'sh', 'md'];
 
 function getActiveExtensions() {
+  const showBak = document.getElementById('showBak').checked;
+  if (showBak) return null;
   const raw = document.getElementById('extFilter').value || '';
   const parts = raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  if (!parts.length) return null;
+  if (!parts.length) return new Set(defaultExtensions);
   return new Set(parts);
 }
 
 function applyFileFilter(node, extensions) {
-  if (!extensions) return node;
+  if (!extensions || extensions.size === 0) return node;
 
   if (node.type === 'file') {
+    const lowerName = node.name.toLowerCase();
+    if (lowerName.includes('.bak')) return null;
     const ext = (node.name.split('.').pop() || '').toLowerCase();
     if (!node.name.includes('.')) return null;
     return extensions.has(ext) ? node : null;
@@ -192,7 +196,7 @@ function initSidebar() {
 
   const filters = document.createElement('div');
   filters.className = 'filters';
-  filters.innerHTML = '<label style="font-size:12px;color:var(--text-dim);">Visible extensions (comma-separated)</label><input id="extFilter" value="' + defaultExtensions.join(', ') + '" /><button id="applyFilter">Apply filter</button>';
+  filters.innerHTML = '<label style="font-size:12px;color:var(--text-dim);">Visible extensions (comma-separated)</label><input id="extFilter" value="' + defaultExtensions.join(', ') + '" /><div style="display:flex;gap:6px;align-items:center;margin-top:6px;"><label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="showBak" /> Show .bak files</label><button id="applyFilter">Apply</button></div>';
   left.appendChild(filters);
 
   sections.forEach(section => {

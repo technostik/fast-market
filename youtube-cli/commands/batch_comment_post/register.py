@@ -185,7 +185,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if output:
                 # Update the original data with post status
                 Path(output).write_text(
-                    json.dumps(results, ensure_ascii=False, default=str)
+                    json.dumps(results, ensure_ascii=False, indent=2, default=str)
                     if fmt == "json"
                     else dump_yaml(results)
                 )

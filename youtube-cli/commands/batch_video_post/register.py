@@ -192,7 +192,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if output:
                 output_path = _resolve_output_path(output)
                 output_path.write_text(
-                    json.dumps(results, ensure_ascii=False, default=str)
+                    json.dumps(results, ensure_ascii=False, indent=2, default=str)
                     if fmt == "json"
                     else dump_yaml(results)
                 )

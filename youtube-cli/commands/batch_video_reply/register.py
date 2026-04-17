@@ -402,20 +402,22 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     merged.append(item)
 
             output_path = Path(output)
-            output_path.write_text(json.dumps(merged, ensure_ascii=False, default=str))
+            output_path.write_text(
+                json.dumps(merged, ensure_ascii=False, indent=2, default=str)
+            )
             click.echo(f"Updated {len(results)} replies in {output}", err=True)
         elif output:
             output_fmt = fmt if fmt else _detect_format_from_filename(output)
 
             if output_fmt == "json":
                 Path(output).write_text(
-                    json.dumps(results, ensure_ascii=False, default=str)
+                    json.dumps(results, ensure_ascii=False, indent=2, default=str)
                 )
             elif output_fmt == "yaml":
                 Path(output).write_text(dump_yaml(results))
             else:
                 Path(output).write_text(
-                    json.dumps(results, ensure_ascii=False, default=str)
+                    json.dumps(results, ensure_ascii=False, indent=2, default=str)
                 )
             click.echo(f"Saved {len(results)} replies to {output}", err=True)
         else:

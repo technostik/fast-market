@@ -84,6 +84,9 @@ _SKILL_RUNNER_HTML = """<!doctype html>
           <button id="loadBtn">Load Plan</button>
           <button id="clearBtn">Clear</button>
         </div>
+        <div style="margin-top:6px;display:flex;gap:6px;align-items:center;">
+          <label style="font-size:11px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="showBak" /> Show .bak files</label>
+        </div>
       </div>
       <div class="file-list" id="fileList">
         <div class="empty-state">Load a plan to see files</div>
@@ -107,9 +110,16 @@ let activeElement = null;
 let planContent = '';
 let planPath = null;
 let detectedPlans = [];
+let lastSkillsData = [];
+let lastPromptsData = [];
 
 function escapeHtml(text) {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+function shouldShowFile(name) {
+  if (document.getElementById('showBak').checked) return true;
+  return !name.includes('.bak');
 }
 
 function setStatus(msg, color = 'var(--success)') {
@@ -162,28 +172,32 @@ function renderFileList(skillsData, promptsData) {
   const container = document.getElementById('fileList');
   container.innerHTML = '';
 
-  const runYAMLEl = document.createElement('div');
-  runYAMLEl.className = 'group';
   const runPath = planPath || 'plan.yaml';
-  runYAMLEl.innerHTML = `
-    <div class="group-header" data-group="run-yaml">
-      <span class="toggle">▶</span>
-      <span>📄 Run YAML</span>
-    </div>
-    <div class="group-files open" id="run-yaml-files">
-      <div class="file-item" data-path="${escapeHtml(runPath)}">${escapeHtml(runPath.split('/').pop())}</div>
-    </div>
-  `;
-  runYAMLEl.querySelector('.group-header').onclick = () => {
-    const files = runYAMLEl.querySelector('.group-files');
-    const toggle = runYAMLEl.querySelector('.toggle');
-    const isOpen = files.classList.toggle('open');
-    toggle.textContent = isOpen ? '▼' : '▶';
-  };
-  runYAMLEl.querySelector('.file-item').onclick = (e) => {
-    openFile(e.target.dataset.path, e.target);
-  };
-  container.appendChild(runYAMLEl);
+  if (!shouldShowFile(runPath)) {
+    // Skip rendering run yaml if filtered out
+  } else {
+    const runYAMLEl = document.createElement('div');
+    runYAMLEl.className = 'group';
+    runYAMLEl.innerHTML = `
+      <div class="group-header" data-group="run-yaml">
+        <span class="toggle">▶</span>
+        <span>📄 Run YAML</span>
+      </div>
+      <div class="group-files open" id="run-yaml-files">
+        <div class="file-item" data-path="${escapeHtml(runPath)}">${escapeHtml(runPath.split('/').pop())}</div>
+      </div>
+    `;
+    runYAMLEl.querySelector('.group-header').onclick = () => {
+      const files = runYAMLEl.querySelector('.group-files');
+      const toggle = runYAMLEl.querySelector('.toggle');
+      const isOpen = files.classList.toggle('open');
+      toggle.textContent = isOpen ? '▼' : '▶';
+    };
+    runYAMLEl.querySelector('.file-item').onclick = (e) => {
+      openFile(e.target.dataset.path, e.target);
+    };
+    container.appendChild(runYAMLEl);
+  }
 
   if (skillsData && skillsData.length > 0) {
     const skillsGroup = document.createElement('div');
@@ -221,6 +235,7 @@ function renderFileList(skillsData, promptsData) {
       };
       const skillFilesContainer = skillDiv.querySelector('.group-files');
       skill.files.forEach(f => {
+        if (!shouldShowFile(f.relative)) return;
         const fileItem = document.createElement('div');
         fileItem.className = 'file-item';
         fileItem.textContent = f.relative;
@@ -250,6 +265,7 @@ function renderFileList(skillsData, promptsData) {
     };
     const filesContainer = promptsGroup.querySelector('#prompts-files');
     promptsData.forEach(p => {
+      if (!shouldShowFile(p.name)) return;
       const fileItem = document.createElement('div');
       fileItem.className = 'file-item';
       fileItem.textContent = p.name;
@@ -257,6 +273,10 @@ function renderFileList(skillsData, promptsData) {
       filesContainer.appendChild(fileItem);
     });
     container.appendChild(promptsGroup);
+  }
+
+  if (container.children.length === 0) {
+    container.innerHTML = '<div class="empty-state">No files to display</div>';
   }
 }
 
@@ -309,6 +329,8 @@ async function loadPlan() {
     }
 
     renderFileList(skillsData, promptsData);
+    lastSkillsData = skillsData;
+    lastPromptsData = promptsData;
     setStatus('Plan loaded');
   } catch (exc) {
     setStatus('Error: ' + exc.message, 'var(--error)');
@@ -393,6 +415,9 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('patternInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') loadDetectedPlans();
+  });
+  document.getElementById('showBak').addEventListener('change', () => {
+    if (planPath) renderFileList(lastSkillsData, lastPromptsData);
   });
   loadDetectedPlans();
 });

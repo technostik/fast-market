@@ -182,7 +182,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             if output_fmt == "json":
                 output_path.write_text(
-                    json.dumps(results, ensure_ascii=False, default=str)
+                    json.dumps(results, ensure_ascii=False, indent=2, default=str)
                 )
             elif output_fmt == "yaml":
                 output_path.write_text(dump_yaml(results))
