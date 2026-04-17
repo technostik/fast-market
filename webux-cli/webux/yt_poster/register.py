@@ -62,8 +62,21 @@ _YT_POSTER_HTML = """<!doctype html>
     .btn-save:hover { opacity:0.85; }
     .btn-cancel { background:var(--accent); color:var(--text); }
   </style>
+  <!-- Regeneration history panel (per-comment, client-side) -->
+  <style>
+    #regenPanel { display:none; margin:8px 0; padding:8px; border:1px solid var(--border); border-radius:6px; background:#111; }
+    #regenPanel h4 { margin:0 0 6px 0; font-size:12px; color:var(--text-dim); }
+    #regenPanel .regenRow { font-family: monospace; font-size:12px; color:#9ecbff; white-space:pre-wrap; word-break:break-all; }
+  </style>
 </head>
 <body>
+  <!-- Regeneration history panel -->
+  <div id="regenPanel" aria-live="polite">
+    <h4>Regeneration (last per-comment)</h4>
+    <div>Raw command: <span id="regenCommandRaw" class="regenRow"></span></div>
+    <div>Result: <span id="regenResult" class="regenRow"></span></div>
+    <div>Time: <span id="regenTime" class="regenRow"></span></div>
+  </div>
   <div class="topbar">
     <input id="fileInput" placeholder="relative path from workdir" />
     <button id="loadBtn">Load</button>
@@ -254,6 +267,7 @@ async function saveReply(){
   }
   closeModal();
   renderTable();
+  renderRegenPanelForCurrentComment();
 }
 modalOverlay.addEventListener('click', (e)=>{ if (e.target === modalOverlay) closeModal(); });
 document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeModal(); });
@@ -321,6 +335,57 @@ function getPromptNameFromRows(){
   return null;
 }
 
+// Helpers: redact secrets, derive per-comment key, render regen panel
+function redactSecrets(cmd) {
+  if (!cmd) return '';
+  try {
+    return cmd.replace(/(token|secret|api_key|password|bearer)\s*[:=]\s*[^\s]+/ig, '$1=<redacted>');
+  } catch (e) { return cmd; }
+}
+
+function deriveCommentKeyFromIndices(indices, data) {
+  for (const idx of indices) {
+    const item = data && data[idx];
+    const cid = (item && item.original_comment && item.original_comment.comment_id) || item?.comment_id;
+    if (cid) return 'comment_' + String(cid);
+  }
+  return 'comment_no_id';
+}
+
+function renderRegenPanelForComment(commentKey, logEntry) {
+  const panel = document.getElementById('regenPanel');
+  const rawEl = document.getElementById('regenCommandRaw');
+  const resEl = document.getElementById('regenResult');
+  const timeEl = document.getElementById('regenTime');
+  if (!panel) return;
+  if (logEntry) {
+    panel.style.display = 'block';
+    if (rawEl) rawEl.textContent = logEntry.rawCommand || '';
+    resEl.textContent = logEntry.success ? 'Success' : ('Error: ' + (logEntry.error || 'Unknown'));
+    timeEl.textContent = logEntry.timestamp || '';
+    try { localStorage.setItem('ytp_regen_last_' + commentKey, JSON.stringify(logEntry)); } catch(e) { /* ignore */ }
+  } else {
+    panel.style.display = 'none';
+    if (rawEl) rawEl.textContent = '';
+    resEl.textContent = '';
+    timeEl.textContent = '';
+  }
+}
+
+function renderRegenPanelForCurrentComment() {
+  const firstRow = rows[0];
+  const key = firstRow ? (firstRow.original_comment?.comment_id ?? firstRow.comment_id ?? 'comment_no_id') : 'comment_no_id';
+  const stored = localStorage.getItem('ytp_regen_last_' + key);
+  if (stored) {
+    try {
+      const logEntry = JSON.parse(stored);
+      renderRegenPanelForComment(key, logEntry);
+      return;
+    } catch { /* ignore */ }
+  }
+  renderRegenPanelForComment(key, null);
+}
+
 async function regenerateRows(indices){
   if (!indices.length) {
     errorEl.textContent = 'No rows selected';
@@ -350,24 +415,46 @@ async function regenerateRows(indices){
     exitCode.style.color = 'var(--error)';
     errorEl.textContent = body.detail || `HTTP ${resp.status}: ${resp.statusText}`;
     logEl.textContent = body.detail || `HTTP ${resp.status}: ${resp.statusText}`;
+    // Surface errors to console for easier debugging
+    try { console.error('YT Poster regen error', { status: resp.status, body }); } catch(e) { /* no-op */ }
     return;
   }
 
   body = await resp.json().catch(() => ({}));
   const code = body.exit_code ?? -1;
+  // Persist per-comment regeneration log (client-side). Derive key from indices and the loaded rows.
+  try {
+    let commentKey = 'comment_no_id';
+    if (indices && indices.length > 0) {
+      const first = rows[indices[0]];
+      const cid = first?.original_comment?.comment_id ?? first?.comment_id;
+      if (cid != null) commentKey = 'comment_' + String(cid);
+    }
+    // Use the shell-ready raw command as the raw_command for debugging
+    const rawCmd = (body && (body.raw_command ?? body.command)) ? (body.raw_command ?? body.command) : shell_cmd_str;
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      rawCommand: rawCmd,
+      success: code === 0,
+      error: body?.error ?? null,
+    };
+    localStorage.setItem('ytp_regen_last_' + commentKey, JSON.stringify(logEntry));
+    renderRegenPanelForComment(commentKey, logEntry);
+    // Also emit a console log for debugging during testing
+    console.log('YT Poster regen', { file: currentSourceFile, indices, code, raw_command: rawCmd, error: body?.error, output: body?.output });
+  } catch (e) { /* ignore logging failure to avoid breaking UX */ }
   exitCode.textContent = `Exit code: ${code}`;
   exitCode.style.color = code === 0 ? 'var(--success)' : 'var(--error)';
 
-  const cmdInfo = body.command ? `\nCommand: ${body.command}` : '';
   const errorInfo = body.error ? `\nError: ${body.error}` : '';
 
   if (body.updated_count) {
     exitCode.textContent += ` (${body.updated_count} replies regenerated)`;
-    logEl.textContent = body.output + cmdInfo;
+    logEl.textContent = (body.output || '') + errorInfo;
     loadFile();
   } else {
     errorEl.textContent = body.error || body.detail || 'Regeneration failed';
-    logEl.textContent = (body.output || '') + cmdInfo + errorInfo;
+    logEl.textContent = (body.output || '') + errorInfo;
   }
 }
 

@@ -228,9 +228,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
 
     has_comments = any(item.get("original_comment") for item in selected)
 
-    temp_input = Path(tempfile.gettempdir()) / f"webux_regen_{uuid4().hex}.json"
     temp_output = Path(tempfile.gettempdir()) / f"webux_regen_out_{uuid4().hex}.json"
-    temp_input.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
     if has_comments:
         filter_ids = [
@@ -246,7 +244,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
     cmd = [
         "youtube",
         cmd_name,
-        str(temp_input),
+        str(source_path),
         "-s",
         f"prompt apply {prompt_name}",
         "-o",
@@ -260,9 +258,21 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
         cmd.extend(["-p", f"URL={promote_url}"])
 
     cmd_str = " ".join(cmd)
+    # Build a shell-friendly command string for display/testing (escape JSON in --filter)
+    try:
+        filter_json = json.dumps(filter_ids)
+        shell_cmd_str = cmd_str.replace(
+            "-s " + f"prompt apply {prompt_name}",
+            '-s "' + f"prompt apply {prompt_name}" + '"',
+        )
+        shell_cmd_str = shell_cmd_str.replace(
+            "--filter " + filter_json, "--filter '" + filter_json + "'"
+        )
+    except Exception:
+        shell_cmd_str = cmd_str
     logger.info(
         "yt_poster_regenerate",
-        cmd=cmd_str,
+        cmd=shell_cmd_str,
         indices=payload.indices,
         prompt_name=prompt_name,
     )
@@ -271,12 +281,23 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         output = (proc.stdout or "") + (proc.stderr or "")
 
-        if proc.returncode != 0:
+        is_known_error = False
+        if output:
+            lo = output.lower()
+            if (
+                ("error" in lo)
+                or ("template formatting failed" in lo)
+                or ("single '}' encountered in format string" in lo)
+            ):
+                is_known_error = True
+
+        if proc.returncode != 0 or is_known_error:
             return {
-                "exit_code": proc.returncode,
-                "command": cmd_str,
+                "exit_code": proc.returncode if proc.returncode != 0 else 1,
+                "command": shell_cmd_str,
+                "raw_command": shell_cmd_str,
                 "output": output,
-                "error": f"batch-reply failed: {output}",
+                "error": output.strip(),
             }
 
         if temp_output.exists():
@@ -287,15 +308,21 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
             )
             return {
                 "exit_code": 0,
-                "command": cmd_str,
+                "command": shell_cmd_str,
+                "raw_command": shell_cmd_str,
                 "output": output,
                 "updated_count": len(filter_ids),
             }
 
-        return {"exit_code": proc.returncode, "command": cmd_str, "output": output}
+        return {
+            "exit_code": proc.returncode,
+            "command": shell_cmd_str,
+            "raw_command": shell_cmd_str,
+            "output": output,
+        }
     finally:
-        temp_input.unlink(missing_ok=True)
-        temp_output.unlink(missing_ok=True)
+        if temp_output.exists():
+            temp_output.unlink(missing_ok=True)
 
 
 @router.post("/workdir-prev")
