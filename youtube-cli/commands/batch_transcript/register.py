@@ -153,18 +153,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
             detail = all_details.get(video_id, {})
             snippet = detail.get("snippet", {})
 
-            result = {
-                "channel_id": item.get("channel_id", ""),
-                "channel_name": item.get("channel_name", ""),
-                "video_id": video_id,
-                "title": item.get("title") or snippet.get("title", ""),
-                "description": item.get("description")
-                or snippet.get("description", ""),
-                "url": item.get("url", f"https://www.youtube.com/watch?v={video_id}"),
-                "published_at": item.get("published_at", ""),
-                "transcript": transcript or "",
-                "transcript_raw": transcript_raw or "",
-            }
+            # Build result entry preserving all original fields
+            result = dict(item)
+            # Use API details as fallback for missing title/description
+            if "title" not in item or not item.get("title"):
+                result["title"] = snippet.get("title", "")
+            if "description" not in item or not item.get("description"):
+                result["description"] = snippet.get("description", "")
+            result["transcript"] = transcript or ""
+            result["transcript_raw"] = transcript_raw or ""
             if error:
                 result["_comment"] = error
 

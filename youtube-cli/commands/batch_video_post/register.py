@@ -113,18 +113,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     click.echo(f"  SKIP: {err_msg}", err=True)
                     continue
 
-                entry = {
-                    "channel_id": item.get("channel_id", ""),
-                    "channel_name": item.get("channel_name", ""),
-                    "video_id": video_id,
-                    "title": video_title,
-                    "url": video_url,
-                    "reply": reply_text,
-                    "post_status": None,
-                    "comment_id": None,
-                    "moderation_status": None,
-                    "error": None,
-                }
+                # Build entry preserving all original fields
+                entry = dict(item)
+                entry["post_status"] = None
+                entry["comment_id"] = None
+                entry["moderation_status"] = None
+                if "error" in entry:
+                    del entry["error"]
+                entry["error"] = None
 
                 if dry_run:
                     entry["post_status"] = "dry_run"

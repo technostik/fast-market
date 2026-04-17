@@ -332,12 +332,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     except Exception as e:
                         error = f"LLM error: {e}"
 
-            # Build result entry with full original data
-            result = {
-                "video_url": video_url,
-                "original_comment": item,
-                "reply": reply_text,
-            }
+            # Build result entry with all original fields plus reply
+            result = dict(item)
+            result["reply"] = reply_text
+            result["original_comment"] = item  # Keep for rewrite mode compatibility
             if metadata_dict:
                 result["metadata"] = metadata_dict
             if error:
@@ -387,7 +385,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             output_path = Path(output)
             output_path.write_text(json.dumps(merged, ensure_ascii=False, default=str))
             click.echo(f"Updated {len(results)} replies in {output}", err=True)
-            click.echo(f"Updated {len(results)} replies in {input_file}", err=True)
+            click.echo(f"Updated {len(results)} replies in {output}", err=True)
         elif output:
             output_fmt = fmt if fmt else _detect_format_from_filename(output)
 

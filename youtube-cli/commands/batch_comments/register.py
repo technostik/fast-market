@@ -126,6 +126,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 for c in comments:
                     c_dict = c.to_dict()
                     c_dict["video_url"] = video_url
+                    # Preserve all fields from input video record
+                    for key, value in item.items():
+                        if key not in c_dict:
+                            c_dict[key] = value
                     all_comments.append(c_dict)
 
             if invalid_count or missing_vid_count:

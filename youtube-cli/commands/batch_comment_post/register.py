@@ -102,15 +102,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     click.echo(f"  SKIP: {err_msg}", err=True)
                     continue
 
-                # Build status entry
-                entry = {
-                    "video_url": video_url,
-                    "original_comment": original_comment,
-                    "reply": reply_text,
-                    "post_status": None,
-                    "reply_id": None,
-                    "error": None,
-                }
+                # Build status entry preserving all original fields
+                entry = dict(item)
+                entry["post_status"] = None
+                entry["reply_id"] = None
+                if "error" in entry:
+                    del entry["error"]
+                entry["error"] = None
 
                 if dry_run:
                     entry["post_status"] = "dry_run"

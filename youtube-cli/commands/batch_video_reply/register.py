@@ -360,17 +360,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     except Exception as e:
                         error = f"LLM error: {e}"
 
-            result = {
-                "channel_id": channel_id,
-                "channel_name": channel_name,
-                "video_id": video_id,
-                "title": video_title,
-                "description": description,
-                "url": video_url,
-                "published_at": published_at,
-                "transcript": transcript,
-                "reply": reply_text,
-            }
+            # Build result entry with all original fields plus reply
+            result = dict(item)
+            result["reply"] = reply_text
             if metadata_dict:
                 result["metadata"] = metadata_dict
             if error:
