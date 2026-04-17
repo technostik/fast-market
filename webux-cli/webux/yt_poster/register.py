@@ -84,7 +84,7 @@ _YT_POSTER_HTML = """<!doctype html>
     <table>
       <thead>
         <tr>
-          <th>#</th><th>☑</th><th>Video</th><th>Channel</th><th>Original Comment</th><th>Generated Reply</th>
+          <th>#</th><th>☑</th><th>Video</th><th>Channel</th><th id="colOrig">Original Comment</th><th>Generated Reply</th>
         </tr>
       </thead>
       <tbody id=\"tbody\"></tbody>
@@ -219,7 +219,7 @@ function showModal(text, editable=false, rowIndex=-1){
     modalBody.innerHTML = '<textarea id=\"modalTextarea\" class=\"modal-edit-area\">' + esc(text || '') + '</textarea>';
     modalFooter.style.display = 'flex';
   } else {
-    modalTitle.textContent = 'Comment';
+    modalTitle.textContent = postMode === 'video' ? 'Transcript' : 'Comment';
     modalBody.innerHTML = '<pre id=\"modalText\"></pre>';
     document.getElementById('modalText').textContent = text || '';
     modalFooter.style.display = 'none';
@@ -391,7 +391,7 @@ function renderTable(){
         <div class="stats">${stats.join('')}</div>
       </td>
       <td><a href="${esc(channelUrl)}" class="channel-link" target="_blank">${esc(channelName)}</a></td>
-      <td><span class="clickable" data-full="orig-${i}">${esc(trunc(oc.text || oc.comment || ''))}</span></td>
+      <td><span class="clickable" data-full="orig-${i}">${esc(trunc(oc.text || oc.comment || row.transcript || ''))}</span></td>
       <td>
         <span class="clickable" data-full="reply-${i}">${esc(trunc(row.reply || row.generated_reply || ''))}</span>
         <button class="edit-reply-btn" data-i="${i}" style="margin-left:6px;padding:2px 6px;font-size:11px;cursor:pointer;">✏️</button>
@@ -414,7 +414,7 @@ function renderTable(){
       const idx = Number(idxRaw);
       const row = rows[idx];
       const oc = row.original_comment || {};
-      if (kind === 'orig') showModal(oc.text || oc.comment || '');
+      if (kind === 'orig') showModal(oc.text || oc.comment || row.transcript || '');
       if (kind === 'reply') showModal(row.reply || row.generated_reply || '');
     });
   });
@@ -457,6 +457,8 @@ async function loadFile(){
   currentSourceFile = file;
   rows = data.map(item => ({ ...item, selected: true }));
   postMode = rows.some(r => r.original_comment) ? 'comment' : 'video';
+  const colOrig = document.getElementById('colOrig');
+  if (colOrig) colOrig.textContent = postMode === 'video' ? 'Transcript' : 'Original Comment';
   controls.style.display = 'flex';
   tableWrap.style.display = 'block';
   footer.style.display = 'block';
