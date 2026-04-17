@@ -282,11 +282,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         total = len(data)
         for idx, item in enumerate(data, 1):
             comment_text = item.get("comment_text", "")
-            author = item.get("author", "")
-            video_url = item.get("video_url", "")
-            video_id = item.get("video_id", "")
-            video_title = item.get("video_title", "")
-            comment_id = item.get("comment_id", "")
 
             if not comment_text:
                 continue
@@ -303,17 +298,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     prompt_args = " ".join(prompt)
                     actual_command = f"{shell} {prompt_args}"
 
-                # Execute shell command with env vars
-                env = {
-                    **os.environ,
-                    "AUTHOR": author,
-                    "COMMENT": comment_text,
-                    "COMMENT_TEXT": comment_text,
-                    "VIDEO_URL": video_url,
-                    "VIDEO_ID": video_id,
-                    "VIDEO_TITLE": video_title,
-                    "COMMENT_ID": comment_id,
-                }
+                # Execute shell command with env vars - pass all fields from item
+                env = {**os.environ}
+                for key, value in item.items():
+                    env_key = key.upper().replace("-", "_")
+                    env[env_key] = str(value) if value is not None else ""
 
                 try:
                     result = subprocess.run(
@@ -336,6 +325,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     error = str(e)
             else:
                 # Use LLM mode
+                author = item.get("author", "")
+                comment_text = item.get("comment_text", "")
+                video_url = item.get("video_url", "")
                 try:
                     processed_prompt = process_prompts(
                         prompts=list(prompt),
@@ -369,6 +361,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 result["error"] = error
             results.append(result)
 
+            author = item.get("author", "unknown")
             if error:
                 click.echo(
                     f"[{idx}/{total}] Error for comment by {author}: {error}", err=True
