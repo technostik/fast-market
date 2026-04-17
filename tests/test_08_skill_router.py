@@ -125,7 +125,21 @@ def _collect_outputs(state) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_skill_run_command_executes_router(workdir):
+@pytest.fixture
+def restore_workdir(isolate_xdg):
+    """Restore workdir to default after test completes."""
+    from common.core.config import load_common_config, save_common_config
+
+    config = load_common_config()
+    original_workdir = config.get("workdir")
+    yield
+    if original_workdir is not None:
+        config["workdir"] = original_workdir
+        save_common_config(config)
+    # If original was None, do nothing - don't remove workdir from config
+
+
+def test_skill_run_command_executes_router(workdir, restore_workdir):
     """Exercise the real `skill run` CLI path end-to-end."""
     runner = CliRunner()
     result = runner.invoke(
@@ -155,13 +169,13 @@ def test_skill_run_command_executes_router(workdir):
 # ---------------------------------------------------------------------------
 
 
-def test_router_picks_correct_skill(workdir):
+def test_router_picks_correct_skill(workdir, restore_workdir):
     state = _run_router("echo the message 'hello-router'", workdir, max_iterations=3)
     _assert_router_success(state)
     assert state.attempts[0].skill_name == "test-echo", _state_debug_dump(state)
 
 
-def test_router_extracts_params(workdir):
+def test_router_extracts_params(workdir, restore_workdir):
     state = _run_router("echo the message 'extracted-param'", workdir, max_iterations=3)
     _assert_router_success(state)
     assert "message" in state.attempts[0].params, _state_debug_dump(state)
@@ -170,7 +184,7 @@ def test_router_extracts_params(workdir):
     )
 
 
-def test_router_retries_on_failure(workdir):
+def test_router_retries_on_failure(workdir, restore_workdir):
     """Router should attempt test-fail (which always exits 1) and record it as failed."""
     state = _run_router(
         "run the test-fail skill with reason='intentional'",
@@ -185,7 +199,7 @@ def test_router_retries_on_failure(workdir):
     )
 
 
-def test_router_chains_two_skills(workdir):
+def test_router_chains_two_skills(workdir, restore_workdir):
     state = _run_router(
         "First run test-chain-a with input='abc', "
         "then run test-chain-b with the output of test-chain-a as chain_input",
@@ -202,7 +216,7 @@ def test_router_chains_two_skills(workdir):
     )
 
 
-def test_router_declares_fail_on_impossible_goal(workdir):
+def test_router_declares_fail_on_impossible_goal(workdir, restore_workdir):
     state = _run_router(
         "send an email to mars@planet.sol using the martian-mail skill",
         workdir,
@@ -217,14 +231,14 @@ def test_router_declares_fail_on_impossible_goal(workdir):
 # ---------------------------------------------------------------------------
 
 
-def test_router_exposes_run_root(workdir):
+def test_router_exposes_run_root(workdir, restore_workdir):
     """run_root is set on the returned state and exists on disk."""
     state = _run_router("echo the message 'run-root-test'", workdir, max_iterations=3)
     assert state.run_root is not None, "run_root should be set"
     assert state.run_root.exists(), f"run_root dir should exist: {state.run_root}"
 
 
-def test_router_sessions_written_to_run_root(workdir):
+def test_router_sessions_written_to_run_root(workdir, restore_workdir):
     """With save_session=True, session files appear inside run_root."""
     state = _run_router(
         "echo the message 'session-test'",
@@ -241,7 +255,7 @@ def test_router_sessions_written_to_run_root(workdir):
     )
 
 
-def test_session_metrics_written(workdir):
+def test_session_metrics_written(workdir, restore_workdir):
     """Session files produced by the router contain metrics."""
     from helpers import get_session_metrics
 
@@ -267,7 +281,7 @@ def test_session_metrics_written(workdir):
 # ---------------------------------------------------------------------------
 
 
-def test_runner_summary_not_raw_session(workdir):
+def test_runner_summary_not_raw_session(workdir, restore_workdir):
     """runner_summary must be concise, not a raw session dump."""
     state = _run_router("echo the message 'distill-test'", workdir, max_iterations=3)
     _assert_router_success(state)
@@ -281,7 +295,7 @@ def test_runner_summary_not_raw_session(workdir):
 # ---------------------------------------------------------------------------
 
 
-def test_successful_skill_has_zero_errors(workdir):
+def test_successful_skill_has_zero_errors(workdir, restore_workdir):
     """A script skill that works first try should have zero errors in session."""
     import subprocess
     from helpers import count_session_errors
@@ -309,7 +323,7 @@ def test_successful_skill_has_zero_errors(workdir):
 # ---------------------------------------------------------------------------
 
 
-def test_plan_import_and_export(workdir):
+def test_plan_import_and_export(workdir, restore_workdir):
     """Test that imported plans are executed and export produces valid YAML."""
     import yaml
     from core.router import run_router, _import_plan_from_yaml
@@ -357,7 +371,7 @@ def test_plan_import_and_export(workdir):
     assert len(execution_data["execution"]) >= 1
 
 
-def test_plan_export_format(workdir):
+def test_plan_export_format(workdir, restore_workdir):
     """Test that exported plan has correct YAML format with all fields."""
     import yaml
     from core.router import run_router
@@ -390,7 +404,7 @@ def test_plan_export_format(workdir):
         assert step["action"] in ["run", "task", "ask"]
 
 
-def test_import_plan_with_inject(workdir):
+def test_import_plan_with_inject(workdir, restore_workdir):
     """Test that inject instructions from imported plan are passed to skills."""
     import yaml
     from core.router import run_router

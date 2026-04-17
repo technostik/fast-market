@@ -53,6 +53,7 @@ def tmp_data_dir(tmp_path: Path) -> Path:
 def mock_snapshot_root(tmp_path: Path, monkeypatch):
     """Mock the snapshot root to use a temp path."""
     import commands.snapshot_service as mod
+
     snapshot_root = tmp_path / "snapshots"
     snapshot_root.mkdir()
     monkeypatch.setattr(mod, "DEFAULT_SNAPSHOT_ROOT", snapshot_root)
@@ -63,7 +64,7 @@ def mock_snapshot_root(tmp_path: Path, monkeypatch):
 def mock_workdir_config(tmp_workdir: Path):
     """Mock the config to return the test workdir."""
     with patch("commands.snapshot_service.load_common_config") as mock_cfg:
-        mock_cfg.return_value = {"workdir": str(tmp_workdir)}
+        mock_cfg.return_value = {"workdir_root": str(tmp_workdir)}
         yield mock_cfg
 
 
@@ -71,6 +72,7 @@ def mock_workdir_config(tmp_workdir: Path):
 def mock_config_source(tmp_config_dir: Path, monkeypatch):
     """Mock the config source directory."""
     import commands.snapshot_service as mod
+
     monkeypatch.setattr(mod, "_get_config_source", lambda: tmp_config_dir)
     return tmp_config_dir
 
@@ -79,6 +81,7 @@ def mock_config_source(tmp_config_dir: Path, monkeypatch):
 def mock_data_source(tmp_data_dir: Path, monkeypatch):
     """Mock the data source directory."""
     import commands.snapshot_service as mod
+
     monkeypatch.setattr(mod, "_get_data_source", lambda: tmp_data_dir)
     return tmp_data_dir
 
@@ -87,6 +90,7 @@ def mock_data_source(tmp_data_dir: Path, monkeypatch):
 def mock_workdir_source(tmp_workdir: Path, monkeypatch):
     """Mock the workdir source directory."""
     import commands.snapshot_service as mod
+
     monkeypatch.setattr(mod, "_get_workdir_source", lambda: tmp_workdir)
     return tmp_workdir
 
@@ -102,7 +106,9 @@ def backup_cmd():
 
 
 class TestBackupSnapshot:
-    def test_snapshot_workdir(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner):
+    def test_snapshot_workdir(
+        self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner
+    ):
         result = runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
         assert result.exit_code == 0
         assert "snapped" in result.output.lower()
@@ -111,7 +117,9 @@ class TestBackupSnapshot:
         snapshot_root = get_snapshot_root()
         assert _is_snapped(snapshot_root, SOURCE_WORKDIR) is True
 
-    def test_snapshot_config(self, backup_cmd, mock_snapshot_root, mock_config_source, runner):
+    def test_snapshot_config(
+        self, backup_cmd, mock_snapshot_root, mock_config_source, runner
+    ):
         result = runner.invoke(backup_cmd, ["snapshot", "--source-type", "config"])
         assert result.exit_code == 0
         assert "snapped" in result.output.lower()
@@ -119,7 +127,9 @@ class TestBackupSnapshot:
         snapshot_root = get_snapshot_root()
         assert _is_snapped(snapshot_root, SOURCE_CONFIG) is True
 
-    def test_snapshot_data(self, backup_cmd, mock_snapshot_root, mock_data_source, runner):
+    def test_snapshot_data(
+        self, backup_cmd, mock_snapshot_root, mock_data_source, runner
+    ):
         result = runner.invoke(backup_cmd, ["snapshot", "--source-type", "data"])
         assert result.exit_code == 0
         assert "snapped" in result.output.lower()
@@ -133,7 +143,9 @@ class TestBackupSnapshot:
 
 
 class TestBackupRestore:
-    def test_restore_workdir(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner, tmp_workdir):
+    def test_restore_workdir(
+        self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner, tmp_workdir
+    ):
         # Snapshot first
         runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
 
@@ -153,13 +165,17 @@ class TestBackupRestore:
 
 
 class TestBackupStatus:
-    def test_status_workdir_snapped(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner):
+    def test_status_workdir_snapped(
+        self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner
+    ):
         runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
         result = runner.invoke(backup_cmd, ["status", "--source-type", "workdir"])
         assert result.exit_code == 0
         assert "SNAPPED" in result.output
 
-    def test_status_config_not_snapped(self, backup_cmd, mock_snapshot_root, mock_config_source, runner):
+    def test_status_config_not_snapped(
+        self, backup_cmd, mock_snapshot_root, mock_config_source, runner
+    ):
         result = runner.invoke(backup_cmd, ["status", "--source-type", "config"])
         assert result.exit_code == 0
         assert "NOT snapped" in result.output or "not snapped" in result.output.lower()
@@ -170,18 +186,24 @@ class TestBackupStatus:
 
 
 class TestBackupList:
-    def test_list_workdir_snapshots(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner):
+    def test_list_workdir_snapshots(
+        self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner
+    ):
         runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
         result = runner.invoke(backup_cmd, ["list", "--source-type", "workdir"])
         assert result.exit_code == 0
         assert "workdir-" in result.output
 
-    def test_list_config_snapshots(self, backup_cmd, mock_snapshot_root, mock_config_source, runner):
+    def test_list_config_snapshots(
+        self, backup_cmd, mock_snapshot_root, mock_config_source, runner
+    ):
         runner.invoke(backup_cmd, ["snapshot", "--source-type", "config"])
         result = runner.invoke(backup_cmd, ["list", "--source-type", "config"])
         assert result.exit_code == 0
 
-    def test_list_empty_when_no_snapshots(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner):
+    def test_list_empty_when_no_snapshots(
+        self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner
+    ):
         result = runner.invoke(backup_cmd, ["list", "--source-type", "workdir"])
         assert result.exit_code == 0
         assert "No snapshots found" in result.output
@@ -192,7 +214,9 @@ class TestBackupList:
 
 
 class TestBackupRollback:
-    def test_rollback_workdir(self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner, tmp_workdir):
+    def test_rollback_workdir(
+        self, backup_cmd, mock_snapshot_root, mock_workdir_config, runner, tmp_workdir
+    ):
         # Snapshot
         runner.invoke(backup_cmd, ["snapshot", "--source-type", "workdir"])
 

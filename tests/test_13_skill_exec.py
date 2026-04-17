@@ -1,4 +1,5 @@
 """Unit tests for skill exec command functionality."""
+
 import pytest
 import yaml
 from pathlib import Path
@@ -7,6 +8,20 @@ import sys
 
 TESTS_DIR = Path(__file__).parent
 sys.path.insert(0, str(TESTS_DIR))
+
+
+@pytest.fixture
+def restore_workdir(isolate_xdg):
+    """Restore workdir to default after test completes."""
+    from common.core.config import load_common_config, save_common_config
+
+    config = load_common_config()
+    original_workdir = config.get("workdir")
+    yield
+    if original_workdir is not None:
+        config["workdir"] = original_workdir
+        save_common_config(config)
+    # If original was None, do nothing - don't remove workdir from config
 
 
 def get_cli():
@@ -20,6 +35,7 @@ def get_cli():
     sys.modules.pop("commands.exec", None)
     sys.modules.pop("commands.exec.register", None)
     from skill_entry import main
+
     return main
 
 
@@ -44,7 +60,9 @@ class TestSkillExecCommand:
         """Test that exec command fails when plan file doesn't exist."""
         runner = CliRunner()
         non_existent = str(tmp_path / "nonexistent.yaml")
-        result = runner.invoke(get_cli(), ["exec", non_existent, "--workdir", str(tmp_path)])
+        result = runner.invoke(
+            get_cli(), ["exec", non_existent, "--workdir", str(tmp_path)]
+        )
         assert result.exit_code != 0
         # The RunPlanFileType.convert will fail before the command runs
         assert "Plan file not found" in result.output or "No such file" in result.output
@@ -55,31 +73,41 @@ class TestSkillExecCommand:
         plan_file.write_text("not: a: valid: yaml:")
 
         runner = CliRunner()
-        result = runner.invoke(get_cli(), [
-            "exec", str(plan_file),
-            "--workdir", str(tmp_path),
-            "--max-iterations", "1",
-        ])
+        result = runner.invoke(
+            get_cli(),
+            [
+                "exec",
+                str(plan_file),
+                "--workdir",
+                str(tmp_path),
+                "--max-iterations",
+                "1",
+            ],
+        )
         # Should fail due to missing LLM config or invalid plan
         assert result.exit_code != 0
 
     def test_exec_command_missing_goal_in_plan(self, tmp_path):
         """Test that exec command fails when plan is missing goal."""
         plan_file = tmp_path / "no-goal.yaml"
-        plan_content = {
-            "plan": [
-                {"step": 1, "action": "task", "description": "Test"}
-            ]
-        }
+        plan_content = {"plan": [{"step": 1, "action": "task", "description": "Test"}]}
         plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
 
         runner = CliRunner()
-        result = runner.invoke(get_cli(), [
-            "exec", str(plan_file),
-            "--workdir", str(tmp_path),
-        ])
+        result = runner.invoke(
+            get_cli(),
+            [
+                "exec",
+                str(plan_file),
+                "--workdir",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code != 0
-        assert "missing 'goal'" in result.output.lower() or "error" in result.output.lower()
+        assert (
+            "missing 'goal'" in result.output.lower()
+            or "error" in result.output.lower()
+        )
 
     def test_exec_command_with_params(self, tmp_path):
         """Test that exec command accepts -p parameters."""
@@ -97,43 +125,55 @@ plan:
         plan_file.write_text(plan_content)
 
         runner = CliRunner()
-        result = runner.invoke(get_cli(), [
-            "exec", str(plan_file),
-            "--workdir", str(tmp_path),
-            "-p", "name=test",
-        ])
+        result = runner.invoke(
+            get_cli(),
+            [
+                "exec",
+                str(plan_file),
+                "--workdir",
+                str(tmp_path),
+                "-p",
+                "name=test",
+            ],
+        )
         # Will fail due to missing LLM, but should accept the params
         assert "Plan file not found" not in result.output
         assert "missing 'goal'" not in result.output.lower()
 
-    def test_exec_command_with_all_flags(self, tmp_path):
+    def test_exec_command_with_all_flags(self, tmp_path, restore_workdir):
         """Test that exec command accepts all inherited flags."""
         plan_file = tmp_path / "plan.yaml"
-        plan_content = {
-            "goal": "Test",
-            "plan": []
-        }
+        plan_content = {"goal": "Test", "plan": []}
         plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
 
         runner = CliRunner()
-        result = runner.invoke(get_cli(), [
-            "exec", str(plan_file),
-            "--workdir", str(tmp_path),
-            "--provider", "test",
-            "--model", "test-model",
-            "--max-iterations", "5",
-            "--verbose",
-            "--retry-limit", "3",
-            "--auto-learn",
-            "--compact",
-            "--no-ask",
-            "--no-eval",
-            "--save-session",
-            "--run-isolated",
-            "--skill-isolated",
-            "--shared-context",
-            "--interactive",
-        ])
+        result = runner.invoke(
+            get_cli(),
+            [
+                "exec",
+                str(plan_file),
+                "--workdir",
+                str(tmp_path),
+                "--provider",
+                "test",
+                "--model",
+                "test-model",
+                "--max-iterations",
+                "5",
+                "--verbose",
+                "--retry-limit",
+                "3",
+                "--auto-learn",
+                "--compact",
+                "--no-ask",
+                "--no-eval",
+                "--save-session",
+                "--run-isolated",
+                "--skill-isolated",
+                "--shared-context",
+                "--interactive",
+            ],
+        )
         # Will fail due to invalid provider/LLM, but flags should be accepted
         # The error should be about provider, not about invalid flags
         assert "no such option" not in result.output.lower()
@@ -157,7 +197,7 @@ class TestSkillExecPlanImport:
                     "action": "run",
                     "skill": "test-skill",
                 }
-            ]
+            ],
         }
         plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
 
@@ -185,7 +225,7 @@ class TestSkillExecPlanImport:
                     "description": "Do something",
                     "instructions": "Instructions here",
                 }
-            ]
+            ],
         }
         plan_file.write_text(yaml.dump(plan_content, default_flow_style=False))
 
@@ -238,7 +278,9 @@ plan:
         assert plan.goal == "Process input.csv"
 
         # With param override, should use provided value
-        plan2 = import_plan_from_yaml(str(plan_file), params={"INPUT_FILE": "custom.csv"})
+        plan2 = import_plan_from_yaml(
+            str(plan_file), params={"INPUT_FILE": "custom.csv"}
+        )
         assert plan2.goal == "Process custom.csv"
 
     def test_exec_import_plan_unresolved_placeholders_fails(self, tmp_path):
@@ -283,7 +325,9 @@ plan:
             import_plan_from_yaml(str(plan_file))
 
         # With URL provided, should succeed
-        plan = import_plan_from_yaml(str(plan_file), params={"URL": "https://example.com"})
+        plan = import_plan_from_yaml(
+            str(plan_file), params={"URL": "https://example.com"}
+        )
         assert plan.goal == "Process https://example.com"
         assert len(plan.steps) == 2
         assert plan.steps[0].skill_name == "test-skill"
@@ -307,24 +351,40 @@ class TestSkillExecVsRun:
     def test_run_does_not_accept_import_flag(self):
         """Test that skill run no longer accepts --import flag."""
         runner = CliRunner()
-        result = runner.invoke(get_cli(), [
-            "run", "test task",
-            "--import", "plan.yaml",
-        ])
+        result = runner.invoke(
+            get_cli(),
+            [
+                "run",
+                "test task",
+                "--import",
+                "plan.yaml",
+            ],
+        )
         # Should fail because --import is not a valid option anymore
         assert result.exit_code != 0
-        assert "no such option" in result.output.lower() or "error" in result.output.lower()
+        assert (
+            "no such option" in result.output.lower()
+            or "error" in result.output.lower()
+        )
 
     def test_run_accepts_param_flag(self):
         """Test that skill run now accepts --param/-p flag (matching skill exec)."""
         runner = CliRunner()
-        result = runner.invoke(get_cli(), [
-            "run", "test task",
-            "-p", "key=value",
-        ])
+        result = runner.invoke(
+            get_cli(),
+            [
+                "run",
+                "test task",
+                "-p",
+                "key=value",
+            ],
+        )
         # Should not fail with "no such option" - param flag is now supported
         # It may fail for other reasons (no LLM, missing skills, etc.) but not due to invalid option
-        assert "no such option" not in result.output.lower() or "-p" not in result.output.lower()
+        assert (
+            "no such option" not in result.output.lower()
+            or "-p" not in result.output.lower()
+        )
 
 
 if __name__ == "__main__":
