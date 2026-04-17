@@ -91,9 +91,25 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             # Extract comments from all videos
             all_comments = []
-            for item in data:
+            invalid_count = 0
+            missing_vid_count = 0
+            total = len(data)
+            for idx, item in enumerate(data):
+                if not item:
+                    click.echo(
+                        f"Warning: Skipping null item at index {idx} (item {idx + 1}/{total})",
+                        err=True,
+                    )
+                    invalid_count += 1
+                    continue
+
                 vid = item.get(field) or item.get("id") or item.get("video_id")
                 if not vid:
+                    click.echo(
+                        f"Warning: Skipping item at index {idx} - no video_id found (item {idx + 1}/{total})",
+                        err=True,
+                    )
+                    missing_vid_count += 1
                     continue
 
                 # Build video URL from video_id
@@ -111,6 +127,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     c_dict = c.to_dict()
                     c_dict["video_url"] = video_url
                     all_comments.append(c_dict)
+
+            if invalid_count or missing_vid_count:
+                click.echo(
+                    f"Warning: Skipped {invalid_count} null items and {missing_vid_count} items without video_id",
+                    err=True,
+                )
 
             # Output results
             if output:
