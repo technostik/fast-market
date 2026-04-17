@@ -234,9 +234,9 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
 
     if has_comments:
         filter_ids = [
-            item.get("original_comment", {}).get("id")
+            item.get("original_comment", {}).get("comment_id")
             for item in selected
-            if item.get("original_comment", {}).get("id")
+            if item.get("original_comment", {}).get("comment_id")
         ]
         cmd_name = "batch-reply"
     else:
@@ -259,9 +259,10 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
     if promote_url:
         cmd.extend(["-p", f"URL={promote_url}"])
 
+    cmd_str = " ".join(cmd)
     logger.info(
         "yt_poster_regenerate",
-        cmd=" ".join(cmd),
+        cmd=cmd_str,
         indices=payload.indices,
         prompt_name=prompt_name,
     )
@@ -273,6 +274,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
         if proc.returncode != 0:
             return {
                 "exit_code": proc.returncode,
+                "command": cmd_str,
                 "output": output,
                 "error": f"batch-reply failed: {output}",
             }
@@ -285,11 +287,12 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
             )
             return {
                 "exit_code": 0,
+                "command": cmd_str,
                 "output": output,
                 "updated_count": len(filter_ids),
             }
 
-        return {"exit_code": proc.returncode, "output": output}
+        return {"exit_code": proc.returncode, "command": cmd_str, "output": output}
     finally:
         temp_input.unlink(missing_ok=True)
         temp_output.unlink(missing_ok=True)

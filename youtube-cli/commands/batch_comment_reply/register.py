@@ -55,12 +55,12 @@ def _item_to_env_vars(item: dict) -> dict:
     all_vars = {}
     fixed_vars = {
         "AUTHOR": item.get("author", ""),
-        "COMMENT": item.get("text", ""),
-        "COMMENT_TEXT": item.get("text", ""),
+        "COMMENT": item.get("comment_text", ""),
+        "COMMENT_TEXT": item.get("comment_text", ""),
         "VIDEO_URL": item.get("video_url", ""),
         "VIDEO_ID": item.get("video_id", ""),
         "VIDEO_TITLE": item.get("video_title", ""),
-        "COMMENT_ID": item.get("id", ""),
+        "COMMENT_ID": item.get("comment_id", ""),
     }
     for k, v in fixed_vars.items():
         if v:
@@ -77,12 +77,12 @@ def _item_to_env_vars(item: dict) -> dict:
 
 def register(plugin_manifests: dict) -> CommandManifest:
     DEFAULT_REQUIRED_FIELDS = [
-        "text",
+        "comment_text",
         "author",
         "video_url",
         "video_id",
         "video_title",
-        "id",
+        "comment_id",
     ]
 
     @click.command("batch-comment-reply")
@@ -110,7 +110,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         type=str,
         default=None,
         help="Shell command to generate replies. Receives comment via env vars: "
-        "AUTHOR, COMMENT, VIDEO_URL, VIDEO_ID, VIDEO_TITLE, COMMENT_ID. "
+        "AUTHOR, COMMENT_TEXT, VIDEO_URL, VIDEO_ID, VIDEO_TITLE, COMMENT_ID. "
         "Output should be plain text reply.",
     )
     @click.option(
@@ -268,9 +268,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             # We need to regenerate only the specified IDs
             existing_results = data
             existing_map = {
-                item.get("original_comment", {}).get("id"): idx
+                item.get("original_comment", {}).get("comment_id"): idx
                 for idx, item in enumerate(existing_results)
-                if item.get("original_comment", {}).get("id")
+                if item.get("original_comment", {}).get("comment_id")
             }
 
             # Process only the filtered IDs
@@ -304,7 +304,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         )
                         return
                     filter_set = set(filter_list)
-                    data = [item for item in data if item.get("id") in filter_set]
+                    data = [
+                        item for item in data if item.get("comment_id") in filter_set
+                    ]
                     click.echo(
                         f"Filtered to {len(data)} comments matching filter IDs",
                         err=True,
@@ -317,12 +319,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         results = []
         total = len(data)
         for idx, item in enumerate(data, 1):
-            comment_text = item.get("text", "")
+            comment_text = item.get("comment_text", "")
             author = item.get("author", "")
             video_url = item.get("video_url", "")
             video_id = item.get("video_id", "")
             video_title = item.get("video_title", "")
-            comment_id = item.get("id", "")
+            comment_id = item.get("comment_id", "")
 
             if not comment_text:
                 continue
@@ -421,13 +423,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             # Build map of regenerated results by comment ID
             regenerated_map = {
-                item.get("original_comment", {}).get("id"): item for item in results
+                item.get("original_comment", {}).get("comment_id"): item
+                for item in results
             }
 
             # Merge: keep original for non-regenerated, use new for regenerated
             merged = []
             for item in original_data:
-                comment_id = item.get("original_comment", {}).get("id")
+                comment_id = item.get("original_comment", {}).get("comment_id")
                 if comment_id in regenerated_map:
                     new_item = regenerated_map[comment_id]
                     # Preserve original metadata

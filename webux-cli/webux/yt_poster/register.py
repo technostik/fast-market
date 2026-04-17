@@ -348,6 +348,7 @@ async function regenerateRows(indices){
     body = await resp.json().catch(() => ({}));
     exitCode.textContent = `Error: ${resp.status}`;
     exitCode.style.color = 'var(--error)';
+    errorEl.textContent = body.detail || `HTTP ${resp.status}: ${resp.statusText}`;
     logEl.textContent = body.detail || `HTTP ${resp.status}: ${resp.statusText}`;
     return;
   }
@@ -357,11 +358,16 @@ async function regenerateRows(indices){
   exitCode.textContent = `Exit code: ${code}`;
   exitCode.style.color = code === 0 ? 'var(--success)' : 'var(--error)';
 
+  const cmdInfo = body.command ? `\nCommand: ${body.command}` : '';
+  const errorInfo = body.error ? `\nError: ${body.error}` : '';
+
   if (body.updated_count) {
     exitCode.textContent += ` (${body.updated_count} replies regenerated)`;
+    logEl.textContent = body.output + cmdInfo;
     loadFile();
   } else {
-    logEl.textContent = body.output || body.error || body.detail || 'Regeneration failed';
+    errorEl.textContent = body.error || body.detail || 'Regeneration failed';
+    logEl.textContent = (body.output || '') + cmdInfo + errorInfo;
   }
 }
 
@@ -393,7 +399,7 @@ function renderTable(){
         <div class="stats">${stats.join('')}</div>
       </td>
       <td><a href="${esc(channelUrl)}" class="channel-link" target="_blank">${esc(channelName)}</a></td>
-      <td><span class="clickable" data-full="orig-${i}">${esc(trunc(oc.text || oc.comment || row.transcript || ''))}</span></td>
+      <td><span class="clickable" data-full="orig-${i}">${esc(trunc(oc.comment_text || oc.text || oc.comment || row.transcript || ''))}</span></td>
       <td>
         <span class="clickable" data-full="reply-${i}">${esc(trunc(row.reply || row.generated_reply || ''))}</span>
         <button class="edit-reply-btn" data-i="${i}" style="margin-left:6px;padding:2px 6px;font-size:11px;cursor:pointer;">✏️</button>
@@ -416,7 +422,7 @@ function renderTable(){
       const idx = Number(idxRaw);
       const row = rows[idx];
       const oc = row.original_comment || {};
-      if (kind === 'orig') showModal(oc.text || oc.comment || row.transcript || '');
+      if (kind === 'orig') showModal(oc.comment_text || oc.text || oc.comment || row.transcript || '');
       if (kind === 'reply') showModal(row.reply || row.generated_reply || '');
     });
   });

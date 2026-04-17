@@ -40,7 +40,7 @@ def _detect_format_from_filename(filename: str) -> str:
 def register(plugin_manifests: dict) -> CommandManifest:
     DEFAULT_REQUIRED_FIELDS = ["video_id"]
 
-    @click.command("batch-comments")
+    @click.command("batch-extract-comments")
     @click.argument("input_file", type=str)
     @click.option(
         "--require-field",
@@ -106,7 +106,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             fields_to_require = (
                 list(required_fields) if required_fields else DEFAULT_REQUIRED_FIELDS
             )
-            validate_required_fields(data, fields_to_require, "batch-comments")
+            validate_required_fields(data, fields_to_require, "batch-extract-comments")
 
             # Extract comments from all videos
             all_comments = []
@@ -128,6 +128,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 for c in comments:
                     c_dict = c.to_dict()
                     c_dict["video_url"] = video_url
+                    if "id" in c_dict:
+                        c_dict["comment_id"] = c_dict.pop("id")
+                    if "text" in c_dict:
+                        c_dict["comment_text"] = c_dict.pop("text")
                     # Preserve all fields from input video record
                     for key, value in item.items():
                         if key not in c_dict:
@@ -164,6 +168,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             raise
 
     return CommandManifest(
-        name="batch-comments",
+        name="batch-extract-comments",
         click_command=batch_comments_cmd,
     )
