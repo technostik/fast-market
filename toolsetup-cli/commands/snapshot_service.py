@@ -52,12 +52,12 @@ def _get_data_source() -> Path:
 
 
 def _get_workdir_source() -> Path | None:
-    """Get the workdir source directory from config."""
+    """Get the workdir root directory from config."""
     try:
         config = load_common_config()
-        workdir = config.get("workdir")
-        if workdir:
-            return Path(workdir)
+        workdir_root = config.get("workdir_root")
+        if workdir_root:
+            return Path(workdir_root)
     except Exception:
         pass
     return None

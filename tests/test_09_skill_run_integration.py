@@ -90,7 +90,22 @@ def llm_provider_module(isolate_xdg):
 
 
 @pytest.fixture(scope="module")
-def router_outcome(workdir_module, llm_provider_module):
+def restore_workdir(isolate_xdg):
+    """Restore workdir to default after module tests complete."""
+    from common.core.config import load_common_config, save_common_config
+
+    config = load_common_config()
+    original_workdir = config.get("workdir")
+    yield
+    if original_workdir is not None:
+        config["workdir"] = original_workdir
+    else:
+        config.pop("workdir", None)
+    save_common_config(config)
+
+
+@pytest.fixture(scope="module")
+def router_outcome(workdir_module, llm_provider_module, restore_workdir):
     """Run the router once. Returns (state, run_root)."""
     from core.router import run_router
 
