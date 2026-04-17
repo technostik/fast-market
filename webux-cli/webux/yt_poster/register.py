@@ -64,11 +64,13 @@ _YT_POSTER_HTML = """<!doctype html>
   </style>
 </head>
 <body>
-  <div class=\"topbar\">
-    <input id=\"fileInput\" placeholder=\"relative path from workdir\" />
-    <button id=\"loadBtn\">Load</button>
+  <div class="topbar">
+    <input id="fileInput" placeholder="relative path from workdir" />
+    <button id="loadBtn">Load</button>
+    <button id="prevWorkdir" title="toolsetup workdir prev">← Prev</button>
+    <button id="lastWorkdir" title="toolsetup workdir last">Last →</button>
   </div>
-  <div id=\"error\" class=\"error\"></div>
+  <div id="error" class="error"></div>
 
   <div id="controls" class="controls">
     <button id="selectAll">Select all</button>
@@ -502,6 +504,26 @@ deselectAllBtn.addEventListener('click', () => { rows.forEach(r => r.selected = 
 regenerateSelectedBtn.addEventListener('click', () => {
   const indices = rows.map((r, i) => r.selected ? i : -1).filter(i => i >= 0);
   regenerateRows(indices);
+});
+document.getElementById('prevWorkdir').addEventListener('click', async () => {
+  const resp = await fetch('/api/yt_poster/workdir-prev', { method: 'POST' });
+  if (resp.ok) {
+    const data = await resp.json();
+    errorEl.textContent = 'Workdir: ' + data.workdir.split('/').pop();
+  } else {
+    const err = await resp.json().catch(() => ({ detail: 'Failed' }));
+    errorEl.textContent = err.detail || 'Failed';
+  }
+});
+document.getElementById('lastWorkdir').addEventListener('click', async () => {
+  const resp = await fetch('/api/yt_poster/workdir-last', { method: 'POST' });
+  if (resp.ok) {
+    const data = await resp.json();
+    errorEl.textContent = 'Workdir: ' + data.workdir.split('/').pop();
+  } else {
+    const err = await resp.json().catch(() => ({ detail: 'Failed' }));
+    errorEl.textContent = err.detail || 'Failed';
+  }
 });
 
 const params = new URLSearchParams(window.location.search);

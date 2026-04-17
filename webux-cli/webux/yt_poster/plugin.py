@@ -293,3 +293,41 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
     finally:
         temp_input.unlink(missing_ok=True)
         temp_output.unlink(missing_ok=True)
+
+
+@router.post("/workdir-prev")
+def workdir_prev() -> dict[str, str]:
+    """Set current workdir to the previous one in the list."""
+    import subprocess
+
+    result = subprocess.run(
+        ["toolsetup", "workdir", "prev"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise HTTPException(status_code=400, detail=result.stderr.strip() or "Failed")
+
+    config = load_common_config()
+    workdir = config.get("workdir", "")
+    return {"workdir": workdir}
+
+
+@router.post("/workdir-last")
+def workdir_last() -> dict[str, str]:
+    """Set current workdir to the most recent one."""
+    import subprocess
+
+    result = subprocess.run(
+        ["toolsetup", "workdir", "last"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise HTTPException(status_code=400, detail=result.stderr.strip() or "Failed")
+
+    config = load_common_config()
+    workdir = config.get("workdir", "")
+    return {"workdir": workdir}
