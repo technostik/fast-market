@@ -186,7 +186,7 @@ def _extract_skills(data: dict) -> list[dict]:
                 f.is_file()
                 and not f.is_symlink()
                 and not f.name.startswith(".")
-                and not f.name.endswith(".bak")
+                and ".bak" not in f.name
             ):
                 files.append(
                     {
