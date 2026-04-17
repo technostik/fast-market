@@ -21,6 +21,7 @@ webux = "webux_entry:main"
 [project.entry-points."fast_market.webux_plugins"]
 fileviewer = "webux.fileviewer.register:register"
 yt_poster = "webux.yt_poster.register:register"
+skill_runner = "webux.skill_runner.register:register"
 
 [tool.setuptools]
 packages = [
@@ -31,6 +32,7 @@ packages = [
     "webux",
     "webux.fileviewer",
     "webux.yt_poster",
+    "webux.skill_runner",
     "commands",
     "commands.serve",
 ]
