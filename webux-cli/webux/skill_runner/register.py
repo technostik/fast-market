@@ -71,6 +71,10 @@ _SKILL_RUNNER_HTML = """<!doctype html>
     <aside class="left">
       <div class="load-bar">
         <div class="section-label">Detected Plans</div>
+        <div class="filter-row" style="display:flex;gap:6px;margin-bottom:6px;">
+          <input type="text" id="patternInput" value="*.run.yaml" style="flex:1;" placeholder="Filter pattern..." />
+          <button id="refreshPlans" style="padding:8px 12px;">⟳</button>
+        </div>
         <div class="plan-list" id="planList">
           <div class="plan-item" style="color:var(--text-dim)">Loading...</div>
         </div>
@@ -356,10 +360,17 @@ async function undoCurrent() {
 
 async function loadDetectedPlans() {
   try {
-    const resp = await fetch('/api/skill_runner/plans');
+    const pattern = document.getElementById('patternInput').value.trim() || '*.run.yaml';
+    const resp = await fetch(`/api/skill_runner/plans?pattern=${encodeURIComponent(pattern)}`);
     if (resp.ok) {
       detectedPlans = await resp.json();
       renderDetectedPlans();
+    }
+
+    const namesResp = await fetch('/api/skill_runner/prompt-names');
+    if (namesResp.ok) {
+      const names = await namesResp.json();
+      console.log('Available prompts:', names);
     }
   } catch (exc) {
     console.error('Failed to load plans:', exc);
@@ -376,8 +387,12 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clearBtn').onclick = clearPlan;
   document.getElementById('save').onclick = saveCurrent;
   document.getElementById('undo').onclick = undoCurrent;
+  document.getElementById('refreshPlans').onclick = loadDetectedPlans;
   document.getElementById('urlInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') loadPlan();
+  });
+  document.getElementById('patternInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadDetectedPlans();
   });
   loadDetectedPlans();
 });
@@ -391,7 +406,7 @@ def register(config: dict) -> WebuxPluginManifest:
     del config
     return WebuxPluginManifest(
         name="skill_runner",
-        tab_label="Skill Runner",
+        tab_label="Plan Editor",
         tab_icon="▶",
         api_router=router,
         frontend_html=_SKILL_RUNNER_HTML,

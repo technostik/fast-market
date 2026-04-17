@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import requests
@@ -77,15 +76,15 @@ def roots() -> dict[str, str | None]:
 
 
 @router.get("/plans")
-def list_plans() -> list[dict]:
-    """List all YAML plan files in workdir_root."""
+def list_plans(pattern: str = Query(default="*.run.yaml")) -> list[dict]:
+    """List YAML plan files in workdir_root matching the glob pattern."""
     roots_map = _roots()
     workdir = roots_map.get("workdir_root")
     if not workdir or not workdir.exists():
         return []
 
     plans = []
-    for f in sorted(workdir.rglob("*.yaml"), key=lambda p: p.name.lower()):
+    for f in sorted(workdir.rglob(pattern), key=lambda p: p.name.lower()):
         if f.is_file() and not f.is_symlink():
             plans.append(
                 {
@@ -94,17 +93,6 @@ def list_plans() -> list[dict]:
                     "relative": str(f.relative_to(workdir)),
                 }
             )
-    for f in sorted(workdir.rglob("*.yml"), key=lambda p: p.name.lower()):
-        if f.is_file() and not f.is_symlink():
-            rel = str(f.relative_to(workdir))
-            if not any(p["relative"] == rel for p in plans):
-                plans.append(
-                    {
-                        "name": f.name,
-                        "path": str(f),
-                        "relative": rel,
-                    }
-                )
 
     return plans
 
@@ -194,7 +182,12 @@ def _extract_skills(data: dict) -> list[dict]:
         for f in sorted(
             skill_path.rglob("*"), key=lambda p: (not p.is_dir(), p.name.lower())
         ):
-            if f.is_file() and not f.is_symlink():
+            if (
+                f.is_file()
+                and not f.is_symlink()
+                and not f.name.startswith(".")
+                and not f.name.endswith(".bak")
+            ):
                 files.append(
                     {
                         "name": f.name,
@@ -250,51 +243,82 @@ class SkillsData(BaseModel):
     skills: list[dict]
 
 
-@router.post("/prompts-for-skills")
-def prompts_for_skills(payload: SkillsData) -> list[dict]:
-    """Filter prompts by grepping skill content for prompt: references."""
-    skills_data = payload.skills
+@router.get("/prompt-names")
+def get_prompt_names() -> list[str]:
+    """Get all prompt names with filenames from the prompts directory (name:filename)."""
+    try:
+        from common.core.paths import get_prompts_dir
 
-    prompt_names = set()
-    skills_dir = get_skills_dir()
+        prompts_dir = get_prompts_dir()
+        if not prompts_dir.exists():
+            return []
+        results = []
+        for f in sorted(prompts_dir.glob("*.md")):
+            results.append(f"{f.stem}:{f.name}")
+        return results
+    except Exception as e:
+        logger.warning("prompt_names_failed", error=str(e))
+        return []
+
+
+def _detect_prompts_in_skills(skills_data: list[dict]) -> list[dict]:
+    """Detect prompts referenced in skill files by matching prompt names and filenames."""
+    try:
+        from common.core.paths import get_prompts_dir
+
+        prompts_dir = get_prompts_dir()
+        if not prompts_dir.exists():
+            return []
+    except Exception:
+        return []
+
+    prompt_files = list(prompts_dir.glob("*.md"))
+    if not prompt_files:
+        return []
+
+    prompt_names = {}
+    for pf in prompt_files:
+        prompt_names[pf.stem] = pf
+        prompt_names[pf.stem.replace("-", "_")] = pf
+
+    if not prompt_names:
+        return []
+
+    found_prompts = []
 
     for skill_group in skills_data:
         skill_path = Path(skill_group.get("path", ""))
         if not skill_path.exists():
             continue
 
-        skill_file = skill_path / "SKILL.md"
-        if skill_file.exists():
-            content = skill_file.read_text(encoding="utf-8")
-            for match in re.findall(r"prompt:\s*([^\s\n]+)", content):
-                prompt_names.add(match.strip())
+        for file_info in skill_group.get("files", []):
+            file_path = Path(file_info["path"])
+            if not file_path.exists():
+                continue
 
-        run_sh = skill_path / "scripts" / "run.sh"
-        if run_sh.exists():
-            content = run_sh.read_text(encoding="utf-8")
-            for match in re.findall(r"prompt:\s*([^\s\n]+)", content):
-                prompt_names.add(match.strip())
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
 
-    prompts_dir = get_prompts_dir()
-    result = []
+            for prompt_key, pf in prompt_names.items():
+                if prompt_key in content:
+                    if not any(p["path"] == str(pf) for p in found_prompts):
+                        found_prompts.append(
+                            {
+                                "name": pf.name,
+                                "path": str(pf),
+                                "relative": pf.name,
+                            }
+                        )
 
-    for prompt_name in sorted(prompt_names):
-        prompt_path = prompts_dir / f"{prompt_name}.md"
-        if not prompt_path.exists():
-            prompt_path = prompts_dir / f"{prompt_name}.yaml"
-        if not prompt_path.exists():
-            prompt_path = prompts_dir / f"{prompt_name}.yml"
+    return found_prompts
 
-        if prompt_path.exists():
-            result.append(
-                {
-                    "name": prompt_path.name,
-                    "path": str(prompt_path),
-                    "relative": prompt_path.name,
-                }
-            )
 
-    return result
+@router.post("/prompts-for-skills")
+def prompts_for_skills(payload: SkillsData) -> list[dict]:
+    """Filter prompts by detecting referenced prompts in skill files."""
+    return _detect_prompts_in_skills(payload.skills)
 
 
 @router.get("/file")
