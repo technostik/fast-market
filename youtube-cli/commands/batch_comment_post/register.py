@@ -12,6 +12,7 @@ from common.cli.helpers import out
 from common.core.yaml_utils import dump_yaml
 from core.config import load_config
 from core.engine import build_youtube_client
+from commands.batch_utils import validate_required_fields, format_field_list
 
 
 def _resolve_path(file_path: str) -> Path:
@@ -30,8 +31,18 @@ def _resolve_path(file_path: str) -> Path:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
+    DEFAULT_REQUIRED_FIELDS = ["reply", "original_comment.id"]
+
     @click.command("batch-comment-post")
     @click.argument("input_file", type=str)
+    @click.option(
+        "--require-field",
+        "-r",
+        "required_fields",
+        multiple=True,
+        help=f"Required JSON fields (default: {format_field_list(DEFAULT_REQUIRED_FIELDS)}). "
+        f"Use multiple times to require multiple fields.",
+    )
     @click.option(
         "--dry-run",
         is_flag=True,
@@ -59,7 +70,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Update input file in-place with reply status added to each comment",
     )
     @click.pass_context
-    def batch_post_cmd(ctx, input_file, dry_run, delay, fmt, output, **kwargs):
+    def batch_post_cmd(
+        ctx, input_file, required_fields, dry_run, delay, fmt, output, **kwargs
+    ):
         try:
             config = load_config()
             client = build_youtube_client(config)
@@ -78,6 +91,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             if not isinstance(data, list):
                 data = [data]
+
+            # Validate required fields
+            fields_to_require = (
+                list(required_fields) if required_fields else DEFAULT_REQUIRED_FIELDS
+            )
+            validate_required_fields(data, fields_to_require, "batch-comment-post")
 
             # Process replies sequentially
             results = []

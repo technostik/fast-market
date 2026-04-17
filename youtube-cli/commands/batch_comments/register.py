@@ -10,6 +10,7 @@ from common.cli.helpers import out
 from common.core.yaml_utils import dump_yaml
 from core.config import load_config
 from core.engine import build_youtube_client
+from commands.batch_utils import validate_required_fields, format_field_list
 
 
 def _resolve_path(file_path: str) -> Path:
@@ -37,8 +38,18 @@ def _detect_format_from_filename(filename: str) -> str:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
+    DEFAULT_REQUIRED_FIELDS = ["video_id"]
+
     @click.command("batch-comments")
     @click.argument("input_file", type=str)
+    @click.option(
+        "--require-field",
+        "-r",
+        "required_fields",
+        multiple=True,
+        help=f"Required JSON fields (default: {format_field_list(DEFAULT_REQUIRED_FIELDS)}). "
+        f"Use multiple times to require multiple fields.",
+    )
     @click.option(
         "--limit",
         "-n",
@@ -67,7 +78,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="JSON field to extract video IDs from input",
     )
     @click.pass_context
-    def batch_comments_cmd(ctx, input_file, limit, order, fmt, output, field, **kwargs):
+    def batch_comments_cmd(
+        ctx, input_file, required_fields, limit, order, fmt, output, field, **kwargs
+    ):
         try:
             config = load_config()
             client = build_youtube_client(config)
@@ -89,28 +102,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if not isinstance(data, list):
                 data = [data]
 
+            # Validate required fields
+            fields_to_require = (
+                list(required_fields) if required_fields else DEFAULT_REQUIRED_FIELDS
+            )
+            validate_required_fields(data, fields_to_require, "batch-comments")
+
             # Extract comments from all videos
             all_comments = []
-            invalid_count = 0
-            missing_vid_count = 0
             total = len(data)
-            for idx, item in enumerate(data):
-                if not item:
-                    click.echo(
-                        f"Warning: Skipping null item at index {idx} (item {idx + 1}/{total})",
-                        err=True,
-                    )
-                    invalid_count += 1
-                    continue
-
+            for idx, item in enumerate(data, 1):
                 vid = item.get(field) or item.get("id") or item.get("video_id")
-                if not vid:
-                    click.echo(
-                        f"Warning: Skipping item at index {idx} - no video_id found (item {idx + 1}/{total})",
-                        err=True,
-                    )
-                    missing_vid_count += 1
-                    continue
 
                 # Build video URL from video_id
                 if vid.startswith("http"):
@@ -131,12 +133,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         if key not in c_dict:
                             c_dict[key] = value
                     all_comments.append(c_dict)
-
-            if invalid_count or missing_vid_count:
-                click.echo(
-                    f"Warning: Skipped {invalid_count} null items and {missing_vid_count} items without video_id",
-                    err=True,
-                )
 
             # Output results
             if output:

@@ -19,6 +19,7 @@ from commands.batch_video_reply.prompt_processor import (
     process_prompts,
     PromptProcessorError,
 )
+from commands.batch_utils import validate_required_fields, format_field_list
 
 
 def _detect_format_from_filename(filename: str) -> str:
@@ -102,8 +103,27 @@ def _resolve_output_path(output: str) -> Path:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
+    DEFAULT_REQUIRED_FIELDS = [
+        "video_id",
+        "url",
+        "title",
+        "description",
+        "channel_name",
+        "channel_id",
+        "transcript",
+        "published_at",
+    ]
+
     @click.command("batch-video-reply")
     @click.argument("input_file", type=str)
+    @click.option(
+        "--require-field",
+        "-r",
+        "required_fields",
+        multiple=True,
+        help=f"Required JSON fields (default: {format_field_list(DEFAULT_REQUIRED_FIELDS)}). "
+        f"Use multiple times to require multiple fields.",
+    )
     @click.option(
         "--prompt",
         "-p",
@@ -156,6 +176,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def batch_video_reply_cmd(
         ctx,
         input_file,
+        required_fields,
         prompt,
         shell,
         metadata,
@@ -239,6 +260,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if not isinstance(data, list):
             data = [data]
+
+        # Validate required fields
+        fields_to_require = (
+            list(required_fields) if required_fields else DEFAULT_REQUIRED_FIELDS
+        )
+        validate_required_fields(data, fields_to_require, "batch-video-reply")
 
         if rewrite:
             existing_results = data

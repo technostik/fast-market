@@ -19,6 +19,7 @@ from commands.batch_comment_reply.prompt_processor import (
     process_prompts,
     PromptProcessorError,
 )
+from commands.batch_utils import validate_required_fields, format_field_list
 
 
 def _detect_format_from_filename(filename: str) -> str:
@@ -75,8 +76,25 @@ def _item_to_env_vars(item: dict) -> dict:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
+    DEFAULT_REQUIRED_FIELDS = [
+        "text",
+        "author",
+        "video_url",
+        "video_id",
+        "video_title",
+        "id",
+    ]
+
     @click.command("batch-comment-reply")
     @click.argument("input_file", type=str)
+    @click.option(
+        "--require-field",
+        "-r",
+        "required_fields",
+        multiple=True,
+        help=f"Required JSON fields (default: {format_field_list(DEFAULT_REQUIRED_FIELDS)}). "
+        f"Use multiple times to require multiple fields.",
+    )
     @click.option(
         "--prompt",
         "-p",
@@ -129,6 +147,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def batch_reply_cmd(
         ctx,
         input_file,
+        required_fields,
         prompt,
         shell,
         metadata,
@@ -236,6 +255,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if not isinstance(data, list):
             data = [data]
+
+        # Validate required fields
+        fields_to_require = (
+            list(required_fields) if required_fields else DEFAULT_REQUIRED_FIELDS
+        )
+        validate_required_fields(data, fields_to_require, "batch-comment-reply")
 
         # Handle rewrite mode
         if rewrite:

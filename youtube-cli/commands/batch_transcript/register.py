@@ -12,6 +12,7 @@ from common.cli.helpers import out
 from common.core.yaml_utils import dump_yaml
 from common.youtube.transport import RSSPlaylistTransport
 from common.youtube.utils import extract_video_id
+from commands.batch_utils import validate_required_fields, format_field_list
 
 log = logging.getLogger(__name__)
 
@@ -55,8 +56,18 @@ def _detect_format_from_filename(filename: str) -> str:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
+    DEFAULT_REQUIRED_FIELDS = ["video_id"]
+
     @click.command("batch-transcript")
     @click.argument("input_file", type=str)
+    @click.option(
+        "--require-field",
+        "-r",
+        "required_fields",
+        multiple=True,
+        help=f"Required JSON fields (default: {format_field_list(DEFAULT_REQUIRED_FIELDS)}). "
+        f"Use multiple times to require multiple fields.",
+    )
     @click.option(
         "--format",
         "-f",
@@ -75,6 +86,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def batch_transcript_cmd(
         ctx,
         input_file: str,
+        required_fields,
         fmt: str | None,
         cookies: str | None,
         output: str | None,
@@ -93,6 +105,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if not isinstance(data, list):
             data = [data]
+
+        # Validate required fields
+        fields_to_require = (
+            list(required_fields) if required_fields else DEFAULT_REQUIRED_FIELDS
+        )
+        validate_required_fields(data, fields_to_require, "batch-transcript")
 
         transport = RSSPlaylistTransport(cookies=cookies)
 
