@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from commands.batch_reply.prompt_processor import (
+from commands.batch_comment_reply.prompt_processor import (
     PromptProcessorError,
     apply_template_variables,
     process_prompts,
@@ -23,28 +23,30 @@ class TestReadFileContent:
         """Test reading from an actual file."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello, World!")
-        
+
         content = read_file_content(str(test_file))
         assert content == "Hello, World!"
 
     def test_read_from_stdin(self):
         """Test reading from stdin."""
         test_input = "piped content from stdin"
-        
-        with patch('sys.stdin', StringIO(test_input)):
-            content = read_file_content('-')
+
+        with patch("sys.stdin", StringIO(test_input)):
+            content = read_file_content("-")
             assert content == test_input
 
     def test_empty_stdin_raises_error(self):
         """Test that empty stdin raises an error."""
-        with patch('sys.stdin', StringIO('')):
-            with pytest.raises(PromptProcessorError, match="No data received from stdin"):
-                read_file_content('-')
+        with patch("sys.stdin", StringIO("")):
+            with pytest.raises(
+                PromptProcessorError, match="No data received from stdin"
+            ):
+                read_file_content("-")
 
     def test_nonexistent_file_raises_error(self):
         """Test that a non-existent file raises an error."""
         with pytest.raises(PromptProcessorError, match="File not found"):
-            read_file_content('/nonexistent/file.txt')
+            read_file_content("/nonexistent/file.txt")
 
     def test_directory_raises_error(self, tmp_path):
         """Test that a directory raises an error."""
@@ -56,7 +58,7 @@ class TestReadFileContent:
         test_file = tmp_path / "subdir" / "file.txt"
         test_file.parent.mkdir()
         test_file.write_text("relative content")
-        
+
         content = read_file_content("subdir/file.txt", working_dir=tmp_path)
         assert content == "relative content"
 
@@ -65,7 +67,7 @@ class TestReadFileContent:
         monkeypatch.chdir(tmp_path)
         test_file = tmp_path / "file.txt"
         test_file.write_text("cwd content")
-        
+
         content = read_file_content("file.txt")
         assert content == "cwd content"
 
@@ -83,7 +85,7 @@ class TestResolveFileReferences:
         """Test resolving a single file reference."""
         test_file = tmp_path / "context.txt"
         test_file.write_text("This is the file content")
-        
+
         prompt = f"Use this context: @{test_file}"
         result = resolve_file_references(prompt, working_dir=tmp_path)
         assert result == "Use this context: This is the file content"
@@ -94,7 +96,7 @@ class TestResolveFileReferences:
         file2 = tmp_path / "file2.txt"
         file1.write_text("content1")
         file2.write_text("content2")
-        
+
         prompt = f"First: @{file1}\nSecond: @{file2}"
         result = resolve_file_references(prompt, working_dir=tmp_path)
         assert result == "First: content1\nSecond: content2"
@@ -102,8 +104,8 @@ class TestResolveFileReferences:
     def test_stdin_reference(self):
         """Test resolving @- reference for stdin."""
         test_input = "stdin content"
-        
-        with patch('sys.stdin', StringIO(test_input)):
+
+        with patch("sys.stdin", StringIO(test_input)):
             prompt = "Data from stdin: @-"
             result = resolve_file_references(prompt)
             assert result == "Data from stdin: stdin content"
@@ -165,7 +167,7 @@ class TestApplyTemplateVariables:
             "text": "Nice video!",
             "video_title": "My Video",
         }
-        
+
         prompt = "{URL} {VIDEO_URL} {VIDEO_ID} {AUTHOR} {COMMENT_AUTHOR} {COMMENT} {COMMENT_TEXT} {VIDEO_TITLE}"
         result = apply_template_variables(prompt, data)
         expected = "https://youtube.com/v1 https://youtube.com/v1 abc123 TestUser TestUser Nice video! Nice video! My Video"
@@ -195,7 +197,7 @@ class TestProcessPrompts:
         """Test file reference processing."""
         test_file = tmp_path / "transcript.txt"
         test_file.write_text("Video transcript content")
-        
+
         prompts = [f"Use this transcript: @{test_file}"]
         data = {}
         result = process_prompts(prompts, data, working_dir=tmp_path)
@@ -215,7 +217,7 @@ class TestProcessPrompts:
         """Test file references and template variables together."""
         test_file = tmp_path / "context.txt"
         test_file.write_text("Context: be friendly")
-        
+
         prompts = [
             f"Context: @{test_file}",
             "Reply to {AUTHOR} about {URL}",
@@ -225,7 +227,7 @@ class TestProcessPrompts:
             "video_url": "https://youtube.com/v1",
         }
         result = process_prompts(prompts, data, working_dir=tmp_path)
-        
+
         assert "Context: Context: be friendly" in result
         assert "Reply to Charlie about https://youtube.com/v1" in result
 
@@ -237,8 +239,8 @@ class TestProcessPrompts:
     def test_stdin_in_prompt(self):
         """Test stdin reference in prompt."""
         test_input = "stdin transcript data"
-        
-        with patch('sys.stdin', StringIO(test_input)):
+
+        with patch("sys.stdin", StringIO(test_input)):
             prompts = ["Data: @-"]
             data = {}
             result = process_prompts(prompts, data)

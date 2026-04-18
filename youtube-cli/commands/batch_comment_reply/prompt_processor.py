@@ -132,6 +132,17 @@ def apply_template_variables(prompt: str, data: dict[str, Any]) -> str:
         Prompt with template variables replaced
     """
     flattened = _flatten_dict(data)
+
+    # Add common aliases for backward compatibility
+    alias_map = {
+        "URL": "video_url",
+        "ID": "video_id",
+        "TITLE": "video_title",
+    }
+    for alias, real_key in alias_map.items():
+        if alias not in flattened and real_key in data:
+            flattened[alias] = str(data[real_key]) if data[real_key] is not None else ""
+
     result = prompt
 
     for template_var in re.findall(r"\{[^}]+\}", result):

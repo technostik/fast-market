@@ -16,6 +16,7 @@ from common.core.yaml_utils import dump_yaml
 from common.llm.base import LLMRequest
 from common.llm.registry import discover_providers, get_default_provider_name
 from commands.batch_comment_reply.prompt_processor import (
+    apply_template_variables,
     process_prompts,
     PromptProcessorError,
 )
@@ -336,9 +337,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 # Build the actual command to execute
                 actual_command = shell
 
-                # If using shell with prompt variables, append them as command-line arguments
+                # If using shell with prompt variables, apply template substitution
                 if use_shell_with_prompt and prompt:
                     prompt_args = " ".join(prompt)
+                    prompt_args = apply_template_variables(prompt_args, item)
                     actual_command = f"{shell} {prompt_args}"
 
                 # Execute shell command with env vars

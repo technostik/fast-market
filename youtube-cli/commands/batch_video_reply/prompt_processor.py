@@ -1,4 +1,4 @@
-from commands.batch_reply.prompt_processor import (
+from commands.batch_comment_reply.prompt_processor import (
     apply_template_variables as _apply_template_variables,
     process_prompts as _process_prompts,
     resolve_file_references,

@@ -16,6 +16,7 @@ from common.core.yaml_utils import dump_yaml
 from common.llm.base import LLMRequest
 from common.llm.registry import discover_providers, get_default_provider_name
 from commands.batch_video_reply.prompt_processor import (
+    apply_template_variables,
     process_prompts,
     PromptProcessorError,
 )
@@ -337,6 +338,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
                 if use_shell_with_prompt and prompt:
                     prompt_args = " ".join(prompt)
+                    prompt_args = apply_template_variables(prompt_args, item)
                     actual_command = f"{shell} {prompt_args}"
 
                 env = {

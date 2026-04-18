@@ -236,7 +236,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
             for item in selected
             if item.get("original_comment", {}).get("comment_id")
         ]
-        cmd_name = "batch-reply"
+        cmd_name = "batch-comment-reply"
     else:
         filter_ids = [item.get("video_id") for item in selected if item.get("video_id")]
         cmd_name = "batch-video-reply"
