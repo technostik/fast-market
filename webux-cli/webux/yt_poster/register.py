@@ -86,6 +86,7 @@ _YT_POSTER_HTML = """<!doctype html>
   <div id="error" class="error"></div>
 
   <div id="controls" class="controls">
+    <span id="modeBadge" style="background:var(--text-dim);color:var(--bg);padding:4px 10px;border-radius:4px;font-size:12px;font-weight:bold;margin-right:8px;"></span>
     <button id="selectAll">Select all</button>
     <button id="deselectAll">Deselect all</button>
     <button id="regenerateSelected" style="background:var(--warning);color:#000;">🔄 Regenerate selected</button>
@@ -227,15 +228,20 @@ function formatNumber(n) {
   return n.toString();
 }
 
-function showModal(text, editable=false, rowIndex=-1){
+function showModal(text, editable=false, rowIndex=-1, isJson=false){
   editingRowIndex = rowIndex;
   if (editable && rowIndex >= 0) {
     modalTitle.textContent = 'Edit Reply';
-    modalBody.innerHTML = '<textarea id=\"modalTextarea\" class=\"modal-edit-area\">' + esc(text || '') + '</textarea>';
+    modalBody.innerHTML = '<textarea id="modalTextarea" class="modal-edit-area">' + esc(text || '') + '</textarea>';
     modalFooter.style.display = 'flex';
+  } else if (isJson) {
+    modalTitle.textContent = 'Raw JSON (Row ' + rowIndex + ')';
+    modalBody.innerHTML = '<pre id="modalText" style="white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;background:var(--bg-dim);padding:12px;border-radius:4px;"></pre>';
+    document.getElementById('modalText').textContent = text || '';
+    modalFooter.style.display = 'none';
   } else {
     modalTitle.textContent = postMode === 'video' ? 'Transcript' : 'Comment';
-    modalBody.innerHTML = '<pre id=\"modalText\"></pre>';
+    modalBody.innerHTML = '<pre id="modalText"></pre>';
     document.getElementById('modalText').textContent = text || '';
     modalFooter.style.display = 'none';
   }
@@ -269,7 +275,7 @@ async function saveReply(){
   renderTable();
   renderRegenPanelForCurrentComment();
 }
-modalOverlay.addEventListener('click', (e)=>{ if (e.target === modalOverlay) closeModal(); });
+
 document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeModal(); });
 modalCloseBtn.addEventListener('click', closeModal);
 modalCancelBtn.addEventListener('click', closeModal);
@@ -490,6 +496,7 @@ function renderTable(){
         <span class="clickable" data-full="reply-${i}">${esc(trunc(row.reply || row.generated_reply || ''))}</span>
         <button class="edit-reply-btn" data-i="${i}" style="margin-left:6px;padding:2px 6px;font-size:11px;cursor:pointer;">✏️</button>
         ${hasPromptName ? `<button class="regen-btn" data-i="${i}" style="margin-left:4px;padding:2px 6px;font-size:11px;cursor:pointer;background:var(--warning);color:#000;">🔄</button>` : ''}
+        <button class="json-btn" data-i="${i}" style="margin-left:4px;padding:2px 6px;font-size:11px;cursor:pointer;" title="View raw JSON">📋</button>
       </td>
     </tr>`;
   }).join('');
@@ -528,6 +535,15 @@ function renderTable(){
     });
   });
 
+  tbody.querySelectorAll('.json-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.i);
+      const row = rows[idx];
+      const jsonStr = JSON.stringify(row, null, 2);
+      showModal(jsonStr, false, -1, true);
+    });
+  });
+
   updatePostLabel();
 }
 
@@ -552,6 +568,12 @@ async function loadFile(){
   postMode = rows.some(r => r.comment_text) ? 'comment' : 'video';
   const colOrig = document.getElementById('colOrig');
   if (colOrig) colOrig.textContent = postMode === 'video' ? 'Transcript' : 'Original Comment';
+  const modeBadge = document.getElementById('modeBadge');
+  if (modeBadge) {
+    modeBadge.textContent = postMode === 'comment' ? '💬 Replying to comment' : '🎬 Replying to video';
+    modeBadge.style.background = postMode === 'comment' ? 'var(--success)' : 'var(--warning)';
+    modeBadge.style.color = '#000';
+  }
   controls.style.display = 'flex';
   tableWrap.style.display = 'block';
   footer.style.display = 'block';

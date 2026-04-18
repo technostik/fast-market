@@ -35,21 +35,17 @@ def sample_data():
     return [
         {
             "video_url": "https://youtube.com/watch?v=abc",
-            "original_comment": {
-                "id": "comment_001",
-                "text": "Great video!",
-                "author": "User1",
-            },
+            "comment_id": "comment_001",
+            "comment_text": "Great video!",
+            "channel_name": "User1",
             "reply": "Original reply",
             "generated_reply": "Original reply",
         },
         {
             "video_url": "https://youtube.com/watch?v=def",
-            "original_comment": {
-                "id": "comment_002",
-                "text": "Thanks!",
-                "author": "User2",
-            },
+            "comment_id": "comment_002",
+            "comment_text": "Thanks!",
+            "channel_name": "User2",
             "reply": "Another reply",
             "generated_reply": "Another reply",
         },
