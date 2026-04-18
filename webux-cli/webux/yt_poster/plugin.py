@@ -96,7 +96,7 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
     data = _load_array(source_path)
     selected = [item for idx, item in enumerate(data) if idx in set(payload.indices)]
 
-    has_comments = any(item.get("original_comment") for item in selected)
+    has_comments = any(item.get("comment_text") for item in selected)
     post_type = "comment" if has_comments else "video"
     cmd_name = f"batch-comment-post" if has_comments else "batch-video-post"
 
@@ -226,15 +226,15 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
     if not prompt_name:
         raise HTTPException(status_code=400, detail="No prompt-name in metadata")
 
-    has_comments = any(item.get("original_comment") for item in selected)
+    has_comments = any(item.get("comment_text") for item in selected)
 
     temp_output = Path(tempfile.gettempdir()) / f"webux_regen_out_{uuid4().hex}.json"
 
     if has_comments:
         filter_ids = [
-            item.get("original_comment", {}).get("comment_id")
+            item.get("comment_id")
             for item in selected
-            if item.get("original_comment", {}).get("comment_id")
+            if item.get("comment_id")
         ]
         cmd_name = "batch-comment-reply"
     else:

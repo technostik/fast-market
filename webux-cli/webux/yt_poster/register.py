@@ -346,7 +346,7 @@ function redactSecrets(cmd) {
 function deriveCommentKeyFromIndices(indices, data) {
   for (const idx of indices) {
     const item = data && data[idx];
-    const cid = (item && item.original_comment && item.original_comment.comment_id) || item?.comment_id;
+    const cid = item?.comment_id;
     if (cid) return 'comment_' + String(cid);
   }
   return 'comment_no_id';
@@ -374,7 +374,7 @@ function renderRegenPanelForComment(commentKey, logEntry) {
 
 function renderRegenPanelForCurrentComment() {
   const firstRow = rows[0];
-  const key = firstRow ? (firstRow.original_comment?.comment_id ?? firstRow.comment_id ?? 'comment_no_id') : 'comment_no_id';
+  const key = firstRow ? (firstRow.comment_id ?? 'comment_no_id') : 'comment_no_id';
   const stored = localStorage.getItem('ytp_regen_last_' + key);
   if (stored) {
     try {
@@ -427,7 +427,7 @@ async function regenerateRows(indices){
     let commentKey = 'comment_no_id';
     if (indices && indices.length > 0) {
       const first = rows[indices[0]];
-      const cid = first?.original_comment?.comment_id ?? first?.comment_id;
+      const cid = first?.comment_id;
       if (cid != null) commentKey = 'comment_' + String(cid);
     }
     // Use the shell-ready raw command as the raw_command for debugging
@@ -463,14 +463,13 @@ function renderTable(){
   editPromptBtn.style.display = hasPrompt ? 'inline-block' : 'none';
 
   tbody.innerHTML = rows.map((row, i) => {
-    const oc = row.original_comment || {};
-    const title = oc.video_title || row.title || trunc(row.url || row.video_url || '', 40);
+    const title = row.video_title || row.title || trunc(row.url || row.video_url || '', 40);
     const videoUrl = row.url || row.video_url || '#';
-    const channelName = oc.channel_name || row.channel_name || '—';
-    const channelUrl = oc.channel_url || (row.channel_id ? `https://www.youtube.com/channel/${row.channel_id}` : '#');
-    const viewCount = oc.view_count != null ? formatNumber(oc.view_count) : '—';
-    const likeCount = oc.like_count != null ? formatNumber(oc.like_count) : '—';
-    const dateAge = oc.published_at ? formatRelativeDate(oc.published_at) : '';
+    const channelName = row.channel_name || '—';
+    const channelUrl = row.channel_url || (row.channel_id ? `https://www.youtube.com/channel/${row.channel_id}` : '#');
+    const viewCount = row.view_count != null ? formatNumber(row.view_count) : '—';
+    const likeCount = row.like_count != null ? formatNumber(row.like_count) : '—';
+    const dateAge = row.published_at ? formatRelativeDate(row.published_at) : '';
     const hasPromptName = row.metadata?.['prompt-name'];
 
     const stats = [];
@@ -486,7 +485,7 @@ function renderTable(){
         <div class="stats">${stats.join('')}</div>
       </td>
       <td><a href="${esc(channelUrl)}" class="channel-link" target="_blank">${esc(channelName)}</a></td>
-      <td><span class="clickable" data-full="orig-${i}">${esc(trunc(oc.comment_text || oc.text || oc.comment || row.transcript || ''))}</span></td>
+      <td><span class="clickable" data-full="orig-${i}">${esc(trunc(row.comment_text || row.transcript || ''))}</span></td>
       <td>
         <span class="clickable" data-full="reply-${i}">${esc(trunc(row.reply || row.generated_reply || ''))}</span>
         <button class="edit-reply-btn" data-i="${i}" style="margin-left:6px;padding:2px 6px;font-size:11px;cursor:pointer;">✏️</button>
@@ -508,8 +507,7 @@ function renderTable(){
       const [kind, idxRaw] = el.dataset.full.split('-');
       const idx = Number(idxRaw);
       const row = rows[idx];
-      const oc = row.original_comment || {};
-      if (kind === 'orig') showModal(oc.comment_text || oc.text || oc.comment || row.transcript || '');
+      if (kind === 'orig') showModal(row.comment_text || row.transcript || '');
       if (kind === 'reply') showModal(row.reply || row.generated_reply || '');
     });
   });
@@ -551,7 +549,7 @@ async function loadFile(){
 
   currentSourceFile = file;
   rows = data.map(item => ({ ...item, selected: true }));
-  postMode = rows.some(r => r.original_comment) ? 'comment' : 'video';
+  postMode = rows.some(r => r.comment_text) ? 'comment' : 'video';
   const colOrig = document.getElementById('colOrig');
   if (colOrig) colOrig.textContent = postMode === 'video' ? 'Transcript' : 'Original Comment';
   controls.style.display = 'flex';
