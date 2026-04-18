@@ -14,16 +14,16 @@ from click.testing import CliRunner
 TESTS_DIR = Path(__file__).parent
 REPO_ROOT = TESTS_DIR.parent
 
-# Ensure toolsetup-cli is in sys.path (must be at very start)
-_toolsetup_path = str(REPO_ROOT / "toolsetup-cli")
-if _toolsetup_path not in sys.path:
-    sys.path.insert(0, _toolsetup_path)
+import importlib.util as _ilu
 
-# Try to import, but handle if it fails (some CI environments may differ)
+# Load toolsetup-cli's workdir module directly by file path to avoid collision
+# with browser-cli's 'commands' package that gets cached in sys.modules first.
+_workdir_file = REPO_ROOT / "toolsetup-cli" / "commands" / "setup" / "workdir.py"
 try:
-    import commands.setup.workdir as workdir_module
-except ModuleNotFoundError:
-    # Fallback: use try-import later in tests
+    _spec = _ilu.spec_from_file_location("_toolsetup_workdir", _workdir_file)
+    workdir_module = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(workdir_module)
+except Exception:
     workdir_module = None
 
 
@@ -61,9 +61,9 @@ def setup_workdir_config(tmp_workdir_root, monkeypatch):
     def mock_is_locked(path):
         return is_workdir_locked(str(path))
 
-    monkeypatch.setattr("commands.setup.workdir.load_common_config", mock_load_config)
-    monkeypatch.setattr("commands.setup.workdir.save_common_config", mock_save_config)
-    monkeypatch.setattr("commands.setup.workdir.is_workdir_locked", mock_is_locked)
+    monkeypatch.setattr(workdir_module, "load_common_config", mock_load_config)
+    monkeypatch.setattr(workdir_module, "save_common_config", mock_save_config)
+    monkeypatch.setattr(workdir_module, "is_workdir_locked", mock_is_locked)
 
     return config_data
 

@@ -81,8 +81,10 @@ def mock_config_source(tmp_config_dir: Path, monkeypatch):
 def mock_data_source(tmp_data_dir: Path, monkeypatch):
     """Mock the data source directory."""
     import commands.snapshot_service as mod
+    import commands.backup.register as reg_mod
 
     monkeypatch.setattr(mod, "_get_data_source", lambda: tmp_data_dir)
+    monkeypatch.setattr(reg_mod, "_get_data_source", lambda: tmp_data_dir)
     return tmp_data_dir
 
 
