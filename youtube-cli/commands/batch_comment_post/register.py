@@ -31,7 +31,7 @@ def _resolve_path(file_path: str) -> Path:
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
-    DEFAULT_REQUIRED_FIELDS = ["reply", "original_comment.id"]
+    DEFAULT_REQUIRED_FIELDS = ["reply", "comment_id"]
 
     @click.command("batch-comment-post")
     @click.argument("input_file", type=str)
@@ -109,11 +109,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 )
 
             for idx, item in enumerate(data, 1):
-                reply_text = item.get("reply", "")
-                original_comment = item.get("original_comment", {})
+                reply_text = item.get("reply", item.get("comment_text", ""))
                 video_url = item.get("video_url", "")
-                comment_id = original_comment.get("id", "")
-                author = original_comment.get("author", "")
+                comment_id = item.get("comment_id", "")
+                author = item.get("author", "")
 
                 if not reply_text or not comment_id:
                     err_msg = f"[{idx}/{total}] Missing reply text or comment ID"
