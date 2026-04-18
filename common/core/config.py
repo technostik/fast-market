@@ -113,6 +113,66 @@ def save_common_config(config: dict) -> None:
     _save_yaml(get_common_config_path(), config)
 
 
+def is_workdir_locked(workdir_path: str | None = None) -> bool:
+    """Check if a workdir is locked via .lock file."""
+    if workdir_path is None:
+        cfg = load_common_config()
+        workdir_path = cfg.get("workdir")
+    if not workdir_path:
+        return False
+    from pathlib import Path
+    return (Path(workdir_path) / ".lock").exists()
+
+
+def add_workdir_lock(workdir_path: str | None = None) -> bool:
+    """Add a .lock file to the workdir. Returns True if lock was added."""
+    if workdir_path is None:
+        cfg = load_common_config()
+        workdir_path = cfg.get("workdir")
+    if not workdir_path:
+        return False
+    from pathlib import Path
+    workdir = Path(workdir_path)
+    if not workdir.exists():
+        return False
+    lock_path = workdir / ".lock"
+    if lock_path.exists():
+        return False
+    lock_path.touch()
+    return True
+
+
+def remove_workdir_lock(workdir_path: str | None = None) -> bool:
+    """Remove the .lock file from the workdir. Returns True if lock was removed."""
+    if workdir_path is None:
+        cfg = load_common_config()
+        workdir_path = cfg.get("workdir")
+    if not workdir_path:
+        return False
+    from pathlib import Path
+    lock_path = Path(workdir_path) / ".lock"
+    if lock_path.exists():
+        lock_path.unlink()
+        return True
+    return False
+
+
+def get_lock_wait_timeout() -> int:
+    """Get the lock wait timeout in seconds. Default is 600 (10 minutes)."""
+    config = load_common_config()
+    return config.get("lock_wait_timeout", 600)
+
+
+# Config keys reference for documentation:
+# common/config.yaml keys:
+#   workdir: null | str - current workdir path
+#   workdir_root: null | str - root directory for workdirs
+#   workdir_prefix: str - prefix for new workdirs (default: "work-")
+#   previous_workdir: null | str - previous workdir for release command
+#   lock_wait_timeout: int - seconds to wait for lock release (default: 600)
+#   snapshot_root: null | str - root for backup snapshots
+
+
 def load_llm_config() -> dict:
     """Load ~/.config/fast-market/common/llm/config.yaml.
 
