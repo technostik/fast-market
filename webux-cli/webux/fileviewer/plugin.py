@@ -127,3 +127,53 @@ def undo_file(path: str = Query(...)) -> dict[str, bool]:
     file_path.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
     logger.info("fileviewer_undo_file", path=str(file_path), backup=str(backup))
     return {"restored": True}
+
+
+def _search_tree(path: Path, query: str, depth: int = 0, max_depth: int = 6) -> dict | None:
+    """Search directory tree for files containing the query string."""
+    if not query:
+        return None
+
+    node_type = "dir" if path.is_dir() else "file"
+    node = {"name": path.name or str(path), "path": str(path), "type": node_type}
+
+    if not path.is_dir() or depth >= max_depth:
+        if path.is_file():
+            try:
+                content = path.read_text(encoding="utf-8")
+                if query in content:
+                    return node
+            except Exception:
+                pass
+        return None
+
+    children = []
+    for child in sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        if child.is_symlink():
+            continue
+        result = _search_tree(child, query, depth=depth + 1, max_depth=max_depth)
+        if result:
+            children.append(result)
+
+    if children:
+        node["children"] = children
+        return node
+    return None
+
+
+@router.get("/search")
+def search(root: str = Query(..., pattern="^(config|data|workdir_root)$"), query: str = Query(...)) -> dict:
+    """Search files containing the query string in their content."""
+    if not query or len(query) < 2:
+        raise HTTPException(status_code=400, detail="Query must be at least 2 characters")
+
+    roots_map = _roots()
+    target = roots_map.get(root)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Root not configured: {root}")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"Root path missing: {target}")
+
+    logger.info("fileviewer_search", root=root, query=query)
+    result = _search_tree(target, query)
+    return result if result else {"name": target.name, "path": str(target), "type": "dir", "children": []}

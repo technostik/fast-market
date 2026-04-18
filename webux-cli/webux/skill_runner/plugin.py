@@ -378,3 +378,45 @@ def undo_file(path: str = Query(...)) -> dict[str, bool]:
     file_path.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
     logger.info("skill_runner_undo_file", path=str(file_path), backup=str(backup))
     return {"restored": True}
+
+
+class SearchRequest(BaseModel):
+    files: list[dict]
+    query: str
+
+
+@router.post("/search")
+def search(payload: SearchRequest) -> list[dict]:
+    """Search files for content containing the query string."""
+    from core.security import _assert_path_safe
+
+    roots_list = [p for p in _roots().values() if p is not None]
+    results = []
+
+    query = payload.query
+    if not query or len(query) < 2:
+        return results
+
+    for file_info in payload.files:
+        file_path = Path(file_info["path"]).expanduser().resolve()
+        try:
+            _assert_path_safe(file_path, roots_list)
+        except HTTPException:
+            continue
+
+        if not file_path.exists() or not file_path.is_file():
+            continue
+
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            if query in content:
+                results.append({
+                    "path": file_info["path"],
+                    "relative": file_info.get("relative", file_info["path"]),
+                    "name": file_info.get("name", file_path.name),
+                    "match": True,
+                })
+        except Exception:
+            continue
+
+    return results

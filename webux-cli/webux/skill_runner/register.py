@@ -16,6 +16,8 @@ _SKILL_RUNNER_HTML = """<!doctype html>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/shell/shell.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
   <style>
     :root {
       --bg: #1a1a2e;
@@ -87,6 +89,13 @@ _SKILL_RUNNER_HTML = """<!doctype html>
         <div style="margin-top:6px;display:flex;gap:6px;align-items:center;">
           <label style="font-size:11px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="showBak" /> Show .bak files</label>
         </div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+          <label style="font-size:11px;color:var(--text-dim);">Search in file contents</label>
+          <div style="display:flex;gap:6px;margin-top:4px;">
+            <input type="text" id="searchQuery" placeholder="Type to search..." style="flex:1;padding:6px;" />
+            <button id="doSearch" style="padding:6px 10px;">Search</button>
+          </div>
+        </div>
       </div>
       <div class="file-list" id="fileList">
         <div class="empty-state">Load a plan to see files</div>
@@ -112,6 +121,7 @@ let planPath = null;
 let detectedPlans = [];
 let lastSkillsData = [];
 let lastPromptsData = [];
+let currentSearchQuery = '';
 
 function escapeHtml(text) {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -140,6 +150,17 @@ async function openFile(path, el) {
   document.getElementById('currentPath').textContent = path;
   editor.setValue(data.content);
   editor.setOption('mode', data.language === 'json' ? 'javascript' : data.language);
+  
+  if (currentSearchQuery) {
+    const cursor = editor.getSearchCursor(currentSearchQuery);
+    const match = cursor.findNext();
+    if (match) {
+      editor.setSelection(cursor.from(), cursor.to());
+      editor.scrollIntoView({ from: cursor.from(), to: cursor.to() });
+      editor.focus();
+    }
+  }
+  
   if (activeElement) activeElement.classList.remove('active');
   if (el) {
     el.classList.add('active');
@@ -419,6 +440,70 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('showBak').addEventListener('change', () => {
     if (planPath) renderFileList(lastSkillsData, lastPromptsData);
   });
+  
+  document.getElementById('doSearch').onclick = async () => {
+    const query = document.getElementById('searchQuery').value.trim();
+    if (query && query.length < 2) {
+      setStatus('Search requires at least 2 characters', 'var(--warning)');
+      return;
+    }
+    if (!query) {
+      currentSearchQuery = '';
+      if (planPath) renderFileList(lastSkillsData, lastPromptsData);
+      setStatus('Search cleared');
+      return;
+    }
+    
+    const allFiles = [];
+    
+    if (planPath && shouldShowFile(planPath)) {
+      allFiles.push({ path: planPath, relative: planPath.split('/').pop(), name: planPath.split('/').pop() });
+    }
+    
+    if (lastSkillsData) {
+      lastSkillsData.forEach(skill => {
+        skill.files.forEach(f => {
+          if (shouldShowFile(f.relative)) {
+            allFiles.push(f);
+          }
+        });
+      });
+    }
+    
+    if (lastPromptsData) {
+      lastPromptsData.forEach(p => {
+        if (shouldShowFile(p.name)) {
+          allFiles.push(p);
+        }
+      });
+    }
+    
+    const resp = await fetch('/api/skill_runner/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: allFiles, query: query }),
+    });
+    
+    if (!resp.ok) {
+      setStatus('Search failed', 'var(--error)');
+      return;
+    }
+    
+    const matches = await resp.json();
+    const matchPaths = new Set(matches.map(m => m.path));
+    currentSearchQuery = query;
+    
+    const filteredSkills = lastSkillsData.map(skill => ({
+      ...skill,
+      files: skill.files.filter(f => matchPaths.has(f.path)),
+    })).filter(s => s.files.length > 0);
+    
+    const filteredPrompts = (lastPromptsData || []).filter(p => matchPaths.has(p.path));
+    
+    renderFileList(filteredSkills, filteredPrompts);
+    setStatus(`Found ${matches.length} file(s) with match`);
+  };
+  
   loadDetectedPlans();
 });
 </script>

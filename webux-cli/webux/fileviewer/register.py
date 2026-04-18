@@ -77,6 +77,7 @@ const sections = [
 let currentFile = null;
 let editor = null;
 let activeElement = null;
+let currentSearchQuery = '';
 
 const defaultExtensions = ['yaml', 'yml', 'json', 'txt', 'sh', 'md'];
 
@@ -167,6 +168,17 @@ async function openFile(path, el) {
   document.getElementById('currentPath').textContent = path;
   editor.setValue(data.content);
   editor.setOption('mode', data.language === 'json' ? 'javascript' : data.language);
+  
+  if (currentSearchQuery) {
+    const cursor = editor.getSearchCursor(currentSearchQuery);
+    const match = cursor.findNext();
+    if (match) {
+      editor.setSelection(cursor.from(), cursor.to());
+      editor.scrollIntoView({ from: cursor.from(), to: cursor.to() });
+      editor.focus();
+    }
+  }
+  
   if (activeElement) activeElement.classList.remove('active');
   el.classList.add('active');
   activeElement = el;
@@ -174,12 +186,24 @@ async function openFile(path, el) {
 
 async function loadSection(rootKey, treeContainer) {
   treeContainer.innerHTML = '<div class="node">Loading...</div>';
-  const resp = await fetch(`/api/fileviewer/tree?root=${rootKey}`);
+  
+  const searchQuery = document.getElementById('searchQuery').value.trim();
+  let url, tree;
+  
+  if (searchQuery && searchQuery.length >= 2) {
+    url = `/api/fileviewer/search?root=${rootKey}&query=${encodeURIComponent(searchQuery)}`;
+    currentSearchQuery = searchQuery;
+  } else {
+    url = `/api/fileviewer/tree?root=${rootKey}`;
+    currentSearchQuery = '';
+  }
+  
+  const resp = await fetch(url);
   if (!resp.ok) {
     treeContainer.innerHTML = '<div class="node">Unavailable</div>';
     return;
   }
-  const tree = await resp.json();
+  tree = await resp.json();
   const extensions = getActiveExtensions();
   const filteredTree = applyFileFilter(tree, extensions) || { ...tree, children: [] };
 
@@ -196,7 +220,7 @@ function initSidebar() {
 
   const filters = document.createElement('div');
   filters.className = 'filters';
-  filters.innerHTML = '<label style="font-size:12px;color:var(--text-dim);">Visible extensions (comma-separated)</label><input id="extFilter" value="' + defaultExtensions.join(', ') + '" /><div style="display:flex;gap:6px;align-items:center;margin-top:6px;"><label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="showBak" /> Show .bak files</label><button id="applyFilter">Apply</button></div>';
+  filters.innerHTML = '<label style="font-size:12px;color:var(--text-dim);">Visible extensions (comma-separated)</label><input id="extFilter" value="' + defaultExtensions.join(', ') + '" /><div style="display:flex;gap:6px;align-items:center;margin-top:6px;"><label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="showBak" /> Show .bak files</label><button id="applyFilter">Apply</button></div><div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);"><label style="font-size:12px;color:var(--text-dim);">Search in file contents</label><div style="display:flex;gap:6px;margin-top:4px;"><input id="searchQuery" placeholder="Type to search..." style="flex:1;" /><button id="doSearch">Search</button></div></div>';
   left.appendChild(filters);
 
   sections.forEach(section => {
@@ -232,6 +256,27 @@ function initSidebar() {
           await loadSection(sectionDef.key, tree);
         }
       }
+    }
+  };
+  
+  document.getElementById('doSearch').onclick = async () => {
+    const query = document.getElementById('searchQuery').value.trim();
+    if (query && query.length < 2) {
+      setStatus('Search requires at least 2 characters', 'var(--warning)');
+      return;
+    }
+    for (const sectionEl of document.querySelectorAll('.section')) {
+      const btn = sectionEl.querySelector('button');
+      const tree = sectionEl.querySelector('.tree');
+      if (tree.style.display === 'block') {
+        const sectionDef = sections.find(s => s.label === btn.textContent);
+        if (sectionDef) {
+          await loadSection(sectionDef.key, tree);
+        }
+      }
+    }
+    if (query) {
+      setStatus('Search applied - files filtered by content');
     }
   };
 }
