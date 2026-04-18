@@ -244,14 +244,14 @@ youtube search "python tutorial" -n 3 --format json -o videos.json
 youtube batch-comments videos.json -n 5 --format json -o comments.json
 ```
 
-### batch-reply
+### batch-comment-reply
 
 Generate replies to comments from a batch-comments output file. Supports two modes:
 - **LLM mode**: Uses an LLM to generate replies (default)
 - **Shell mode**: Uses a custom shell command to generate replies
 
 ```bash
-youtube batch-reply INPUT_FILE [OPTIONS]
+youtube batch-comment-reply INPUT_FILE [OPTIONS]
 ```
 
 | Option | Description | Default |
@@ -268,12 +268,12 @@ youtube batch-reply INPUT_FILE [OPTIONS]
 
 ```bash
 # Simple reply generation
-youtube batch-reply comments.json \
+youtube batch-comment-reply comments.json \
   -p "Write a friendly, helpful reply to this YouTube comment" \
   --format json -o replies.json
 
 # Multiple prompts with file reference
-youtube batch-reply comments.json \
+youtube batch-comment-reply comments.json \
   -p 'Write a response that agrees with the comment and promotes my video {URL}.' \
   -p 'Use this transcript for context: @transcript.txt' \
   -o replies.json
@@ -283,13 +283,13 @@ youtube batch-reply comments.json \
 
 ```bash
 # Using prompt CLI to generate replies
-youtube batch-reply comments.json \
+youtube batch-comment-reply comments.json \
   -s 'prompt get my-prompt --content | claude --no-stream' \
   -m prompt_name=my-prompt \
   -o replies.json
 
 # Using custom script
-youtube batch-reply comments.json \
+youtube batch-comment-reply comments.json \
   -s './generate_reply.sh' \
   -m source=custom \
   -o replies.json
@@ -320,14 +320,14 @@ youtube batch-reply comments.json \
 
 ```bash
 # Regenerate specific replies in existing file
-youtube batch-reply replies.json \
+youtube batch-comment-reply replies.json \
   --filter '["comment_id_1", "comment_id_2"]' \
   --rewrite \
   -o replies.json \
   -p "New prompt for regeneration"
 
 # Regenerate all replies (requires --filter to list all IDs)
-youtube batch-reply replies.json \
+youtube batch-comment-reply replies.json \
   --filter '["all_ids_from_file"]' \
   --rewrite \
   -o replies.json \
@@ -340,12 +340,12 @@ youtube batch-reply replies.json \
 - Writes merged results to `--output` file
 - Preserves non-regenerated entries unchanged
 
-### batch-post
+### batch-comment-post
 
-Post LLM-generated replies to YouTube comments from a batch-reply output file.
+Post LLM-generated replies to YouTube comments from a batch-comment-reply output file.
 
 ```bash
-youtube batch-post INPUT_FILE [OPTIONS]
+youtube batch-comment-post INPUT_FILE [OPTIONS]
 ```
 
 | Option | Description | Default |
@@ -358,15 +358,15 @@ youtube batch-post INPUT_FILE [OPTIONS]
 **Examples:**
 ```bash
 # Preview what would be posted
-youtube batch-post replies.json --dry-run
+youtube batch-comment-post replies.json --dry-run
 
 # Post replies with 2s delay between each
-youtube batch-post replies.json --delay 2 -o posted_results.json
+youtube batch-comment-post replies.json --delay 2 -o posted_results.json
 ```
 
 ### reply
 
-Generate reply text for YouTube comments. Use `batch-post` to actually post replies to YouTube.
+Generate reply text for YouTube comments. Use `batch-comment-post` to actually post replies to YouTube.
 
 ```bash
 youtube reply [COMMENT_ID] [TEXT] [OPTIONS]
@@ -408,7 +408,7 @@ youtube comments VIDEO_ID -n 5 --format json \
   | youtube reply --stdin
 ```
 
-**Output:** Generated reply objects with `comment_id` and `text` (use `batch-post` to post to YouTube)
+**Output:** Generated reply objects with `comment_id` and `text` (use `batch-comment-post` to post to YouTube)
 
 ## Features
 
@@ -425,11 +425,11 @@ All commands support JSON/YAML streaming for pipeline composition:
 # Full batch workflow: search → extract comments → generate replies → post
 youtube search "tutorial" -n 3 --format json -o videos.json
 youtube batch-comments videos.json -n 5 --format json -o comments.json
-youtube batch-reply comments.json \
+youtube batch-comment-reply comments.json \
   -p "Write a friendly, helpful reply" \
   --format json -o replies.json
-youtube batch-post replies.json --dry-run              # Preview first
-youtube batch-post replies.json --delay 2 -o results.json
+youtube batch-comment-post replies.json --dry-run              # Preview first
+youtube batch-comment-post replies.json --delay 2 -o results.json
 
 # Multi-stage pipeline
 youtube search "tutorial" -n 5 --format json \
@@ -468,9 +468,9 @@ youtube-agent/
 │   ├── base.py          # CommandManifest
 │   ├── batch_comments/
 │   │   └── register.py  # Batch comments extraction
-│   ├── batch_reply/
+│   ├── batch_comment_reply/
 │   │   └── register.py  # LLM-powered reply generation
-│   ├── batch_post/
+│   ├── batch_comment_post/
 │   │   └── register.py  # Batch posting to YouTube
 │   ├── search/
 │   │   └── register.py  # Search implementation

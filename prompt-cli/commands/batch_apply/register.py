@@ -135,6 +135,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Working directory for file paths (default: current directory or common config)",
     )
+    @click.option(
+        "--metadata",
+        "-m",
+        "metadata",
+        multiple=True,
+        help="Key-value pairs to include in output (repeatable). Format: key=value",
+    )
     @click.pass_context
     def batch_apply_cmd(
         ctx,
@@ -152,6 +159,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         dry_run,
         limit,
         workdir,
+        metadata,
     ):
         """Apply a prompt to each record in a JSON array.
 
@@ -270,6 +278,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Provider not found: {provider_name}", err=True)
             sys.exit(1)
 
+        metadata_dict = {}
+        for m in metadata:
+            if "=" in m:
+                key, value = m.split("=", 1)
+                metadata_dict[key] = value
+
         if dry_run:
             click.echo(f"Would process {len(records)} records:")
             for idx, rec in enumerate(records[:5]):
@@ -314,6 +328,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 continue
 
             record[output_field] = response.content
+            if metadata_dict:
+                record["metadata"] = metadata_dict
             results.append(record)
 
             if (idx + 1) % 10 == 0:

@@ -55,7 +55,7 @@ Provides a modular CLI interface for YouTube Data API v3 operations with plugin-
 The project includes a batch workflow for managing YouTube comments at scale:
 
 ```
-search → batch-comments → batch-reply → batch-post
+search → batch-comments → batch-comment-reply → batch-comment-post
 ```
 
 ### batch-comments
@@ -64,16 +64,16 @@ Extracts comments from multiple videos listed in a JSON/YAML file.
 - **Output**: Flat array of comments, each augmented with `video_url`
 - **Options**: `--limit` (per video, default 5), `--order`, `--format`, `--output`
 
-### batch-reply
+### batch-comment-reply
 Generates LLM-powered replies for each comment in the input.
 - **Input**: Output from `batch-comments`
 - **Output**: Array with `video_url`, `original_comment` (full object), `reply` (LLM text)
 - **Options**: `--prompt` (required), `--format`, `--output`
 - **Processing**: Sequential LLM calls (one per comment)
 
-### batch-post
+### batch-comment-post
 Posts generated replies to YouTube comments.
-- **Input**: Output from `batch-reply`
+- **Input**: Output from `batch-comment-reply`
 - **Output**: Array augmented with `post_status`, `reply_id`, `moderation_status`, `error`
 - **Options**: `--dry-run`, `--delay` (seconds between posts), `--format`, `--output`
 - **Behavior**: Continues on error, collects error report on stderr
