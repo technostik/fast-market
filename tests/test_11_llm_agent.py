@@ -180,6 +180,7 @@ def test_04_missing_provider_key_leaves_others_intact(llm_config: dict):
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_05_simple_completion(provider_name, selected_providers, provider_fixture):
     _maybe_skip_provider(provider_name, selected_providers)
 
@@ -196,6 +197,7 @@ def test_05_simple_completion(provider_name, selected_providers, provider_fixtur
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_06_tool_call_returned(provider_name, selected_providers, provider_fixture):
     _maybe_skip_provider(provider_name, selected_providers)
 
@@ -218,6 +220,7 @@ def test_06_tool_call_returned(provider_name, selected_providers, provider_fixtu
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_07_tool_result_closes_loop(
     provider_name, selected_providers, provider_fixture
 ):
@@ -276,6 +279,7 @@ def test_07_tool_result_closes_loop(
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_08_no_tool_call_when_not_needed(
     provider_name, selected_providers, provider_fixture
 ):
@@ -504,6 +508,7 @@ def test_22_empty_command_blocked(tmp_path: Path):
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_23_loop_completes_echo_task(
     provider_name, selected_providers, make_task_loop, echo_execute_fn
 ):
@@ -525,6 +530,7 @@ def test_23_loop_completes_echo_task(
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_24_loop_requires_two_tool_calls(
     provider_name, selected_providers, make_task_loop, echo_execute_fn
 ):
@@ -686,6 +692,7 @@ def test_24_record_loop_for_replay(
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_25_loop_tool_result_fed_back(
     provider_name, selected_providers, make_task_loop, echo_execute_fn
 ):
@@ -711,6 +718,7 @@ def test_25_loop_tool_result_fed_back(
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_26_loop_respects_max_iterations(
     provider_name, selected_providers, make_task_loop, echo_execute_fn
 ):
@@ -726,6 +734,7 @@ def test_26_loop_respects_max_iterations(
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_27_loop_failed_command_continues(
     provider_name, selected_providers, make_task_loop, tmp_path: Path
 ):
@@ -757,6 +766,7 @@ def test_27_loop_failed_command_continues(
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_28_loop_termination_signal_detected(
     provider_name, selected_providers, make_task_loop, echo_execute_fn
 ):
@@ -771,6 +781,7 @@ def test_28_loop_termination_signal_detected(
 
 
 @pytest.mark.slow
+@pytest.mark.llm
 def test_29_loop_session_structure_complete(
     provider_name, selected_providers, make_task_loop, echo_execute_fn
 ):

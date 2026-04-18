@@ -1,6 +1,7 @@
 """Unit tests for skill exec command functionality."""
 
 import pytest
+pytestmark = pytest.mark.llm
 import yaml
 from pathlib import Path
 from click.testing import CliRunner
