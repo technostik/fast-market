@@ -59,10 +59,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("batch-apply")
     @click.option(
         "--prompt",
-        "-p",
+        "-t",
         "prompt_content",
         default=None,
-        help="Prompt template string (e.g., 'Translate: {text}')",
+        help="Prompt template string (e.g., 'Translate: {text}'). Use @file to read from file, @- for stdin.",
     )
     @click.option(
         "--prompt-name",
@@ -74,7 +74,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--prompt-param",
-        "-A",
+        "-p",
         "prompt_params",
         multiple=True,
         help="Parameter for saved prompt (key=value, can repeat)",
@@ -82,8 +82,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--input-field",
         "-i",
-        required=True,
-        help="Field name in each record to use as input",
+        default=None,
+        help="Field name in each record to use as input (auto-detected from placeholders if not provided)",
     )
     @click.option(
         "--output-field",
@@ -137,7 +137,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option(
         "--metadata",
-        "-m",
         "metadata",
         multiple=True,
         help="Key-value pairs to include in output (repeatable). Format: key=value",
@@ -169,14 +168,40 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         \b
         Examples:
-          prompt batch-apply -p "Translate: {text}" -i text -o translated -f data.json -O out.json
-          prompt batch-apply -n summarize -A max_length=50 -i description -o summary -f items.yaml
-          cat data.json | prompt batch-apply -p "Summarize: {desc}" -i desc -o summary
+          prompt batch-apply -t "Translate: {text}" -i text -o translated -f data.json -O out.json
+          prompt batch-apply -n summarize -p max_length=50 -i description -o summary -f items.yaml
+          cat data.json | prompt batch-apply -t "Summarize: {desc}" -i desc -o summary
+          echo "Generate reply for {comment}" | prompt batch-apply -t @- -i comment -o reply -f data.json
         """
         from common.core.config import load_common_config, load_tool_config
         from commands.helpers import build_engine, get_default_provider
         from core.substitution import resolve_arguments, extract_placeholders
         from storage.store import PromptStore
+
+        if workdir:
+            workdir_path = Path(workdir)
+        else:
+            common_config = load_common_config()
+            configured_workdir = common_config.get("workdir")
+            if configured_workdir:
+                workdir_path = Path(configured_workdir).expanduser().resolve()
+            else:
+                workdir_path = Path.cwd()
+
+        if prompt_content == "@-":
+            if sys.stdin.isatty():
+                click.echo("Error: --prompt @- requires stdin input", err=True)
+                sys.exit(1)
+            prompt_content = sys.stdin.read()
+        elif prompt_content and prompt_content.startswith("@"):
+            prompt_file = Path(prompt_content[1:])
+            if not prompt_file.is_absolute():
+                prompt_file = workdir_path / prompt_file
+            if prompt_file.exists():
+                prompt_content = prompt_file.read_text(encoding="utf-8")
+            else:
+                click.echo(f"Error: prompt file not found: {prompt_file}", err=True)
+                sys.exit(1)
 
         if not prompt_content and not prompt_name:
             click.echo("Error: either --prompt or --prompt-name is required", err=True)
@@ -185,16 +210,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if prompt_content and prompt_name:
             click.echo("Error: cannot use both --prompt and --prompt-name", err=True)
             sys.exit(1)
-
-        if workdir:
-            workdir_path = Path(workdir)
-        else:
-            common_config = load_common_config()
-            configured_workdir = common_config.get("workdir")
-            if configured_workdir:
-                workdir_path = Path(configured_workdir)
-            else:
-                workdir_path = Path.cwd()
 
         input_path = input_file
 
@@ -241,6 +256,25 @@ def register(plugin_manifests: dict) -> CommandManifest:
         max_tok = max_tokens
         resolved_prompt = None
 
+        def _find_field_in_record(record: dict, placeholder: str) -> str | None:
+            """Try to find a matching field in record for a placeholder (case-insensitive)."""
+            placeholder_lower = placeholder.lower()
+            for key in record:
+                if key.lower() == placeholder_lower:
+                    return key
+                if key.lower().replace("_", "") == placeholder_lower.replace("_", ""):
+                    return key
+            return None
+
+        def _build_auto_param_dict(record: dict, placeholders: list[str]) -> dict[str, str]:
+            """Build param_dict by auto-matching placeholders to JSON fields."""
+            param_dict = {}
+            for ph in placeholders:
+                field = _find_field_in_record(record, ph)
+                if field:
+                    param_dict[ph] = "{" + field + "}"
+            return param_dict
+
         if prompt_name:
             resolved_prompt, is_saved = _resolve_prompt(prompt_name, prompt_store)
             placeholders = extract_placeholders(resolved_prompt)
@@ -253,7 +287,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 k, v = p.split("=", 1)
                 param_dict[k] = v
 
-            if input_field not in placeholders:
+            if input_field:
+                input_field_provided = True
+            else:
+                input_field_provided = False
+
+            if input_field_provided and input_field not in placeholders:
                 if len(placeholders) == 1:
                     param_dict[placeholders[0]] = "{" + input_field + "}"
                 else:
@@ -267,10 +306,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
             provider_name = provider or get_default_provider()
         else:
             provider_name = provider or get_default_provider()
-            placeholder_str = "{" + input_field + "}"
-            if placeholder_str not in prompt_content:
-                click.echo(f"Error: prompt has no {{{input_field}}}", err=True)
-                sys.exit(1)
+            placeholders = extract_placeholders(prompt_content)
+            if input_field:
+                placeholder_str = "{" + input_field + "}"
+                if placeholder_str not in prompt_content:
+                    click.echo(f"Error: prompt has no {{{input_field}}}", err=True)
+                    sys.exit(1)
+                input_field_provided = True
+            else:
+                input_field_provided = False
 
         providers = build_engine(ctx.obj["verbose"])
 
@@ -286,31 +330,57 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if dry_run:
             click.echo(f"Would process {len(records)} records:")
-            for idx, rec in enumerate(records[:5]):
-                val = rec.get(input_field, "<missing>")
-                preview = str(val)[:50] + "..." if len(str(val)) > 50 else str(val)
-                click.echo(f"  [{idx}] {input_field}: {preview}")
-            if len(records) > 5:
-                click.echo(f"  ... and {len(records) - 5} more")
+            if input_field_provided:
+                for idx, rec in enumerate(records[:5]):
+                    val = rec.get(input_field, "<missing>")
+                    preview = str(val)[:50] + "..." if len(str(val)) > 50 else str(val)
+                    click.echo(f"  [{idx}] {input_field}: {preview}")
+                if len(records) > 5:
+                    click.echo(f"  ... and {len(records) - 5} more")
+            else:
+                click.echo(f"  Auto-detected placeholders: {', '.join(placeholders)}")
+                for idx, rec in enumerate(records[:3]):
+                    matched = []
+                    for ph in placeholders:
+                        field = _find_field_in_record(rec, ph)
+                        if field:
+                            matched.append(f"{ph}={field}")
+                    click.echo(f"  [{idx}] {', '.join(matched) if matched else '<no matches>'}")
+                if len(records) > 3:
+                    click.echo(f"  ... and {len(records) - 3} more")
             return
 
         from common.llm.base import LLMRequest
 
         results = []
         for idx, record in enumerate(records):
-            input_value = record.get(input_field)
-            if input_value is None:
-                logger.warning("missing_input_field", index=idx, field=input_field)
-                record[output_field] = None
-                results.append(record)
-                continue
+            if input_field_provided:
+                input_value = record.get(input_field)
+                if input_value is None:
+                    logger.warning("missing_input_field", index=idx, field=input_field)
+                    record[output_field] = None
+                    results.append(record)
+                    continue
 
             if prompt_name:
-                resolved = resolve_arguments(resolved_prompt, param_dict, Path.cwd())
+                if input_field_provided:
+                    resolved = resolve_arguments(resolved_prompt, param_dict, Path.cwd())
+                else:
+                    auto_params = _build_auto_param_dict(record, placeholders)
+                    auto_params.update(param_dict)
+                    resolved = resolve_arguments(resolved_prompt, auto_params, Path.cwd())
             else:
-                resolved = prompt_content.replace(
-                    "{" + input_field + "}", str(input_value)
-                )
+                if input_field_provided:
+                    resolved = prompt_content.replace(
+                        "{" + input_field + "}", str(input_value)
+                    )
+                else:
+                    resolved = prompt_content
+                    for ph in placeholders:
+                        field = _find_field_in_record(record, ph)
+                        if field:
+                            value = record.get(field, "")
+                            resolved = resolved.replace("{" + ph + "}", str(value))
 
             request = LLMRequest(
                 prompt=resolved,
