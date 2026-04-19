@@ -36,6 +36,7 @@ class SyncEngine:
     def __init__(self, store: SQLiteStore, embedder: Embedder) -> None:
         self.store = store
         self.embedder = embedder
+        self._last_error: str | None = None
 
     def _build_chunks(self, document: Document) -> list[Chunk]:
         texts = chunk_by_sections(document)
@@ -131,6 +132,7 @@ class SyncEngine:
 
             except SyncError as exc:
                 error_type = "permanent" if exc.permanent else "transient"
+                self._last_error = str(exc)
                 self.store.record_failure(
                     plugin.name, item.source_id, str(exc), error_type, vault_path
                 )
@@ -143,6 +145,7 @@ class SyncEngine:
                 )
                 failures.append(SyncFailure(source_id=item.source_id, error=str(exc)))
             except Exception as exc:
+                self._last_error = str(exc)
                 self.store.record_failure(
                     plugin.name, item.source_id, str(exc), "transient", vault_path
                 )
@@ -156,8 +159,24 @@ class SyncEngine:
                 failures.append(SyncFailure(source_id=item.source_id, error=str(exc)))
 
         if processed == 0 and len(items) == 0:
-            if "quota" in str(getattr(engine, "_last_error", "")).lower():
-                warning = f"YouTube API quota exceeded. Try again later."
+            last_error = self._last_error
+            if last_error and "quota" in str(last_error).lower():
+                logger.error(
+                    "sync_quota_error",
+                    source=plugin.name,
+                    message=f"YouTube API quota exceeded: {last_error}",
+                )
+                raise RuntimeError(
+                    f"YouTube API quota exceeded. {last_error}. Try again later or use --non-public (RSS mode)."
+                )
+            if last_error:
+                logger.warning(
+                    "sync_no_items_with_error",
+                    source=plugin.name,
+                    warning=f"No items found for {plugin.name}. Error: {last_error}",
+                    last_error=last_error,
+                )
+                warning = f"No items found for {plugin.name}. Check API credentials, RSS feed, or network connection."
             else:
                 warning = f"No items found for {plugin.name}. Check API credentials, RSS feed, or network connection."
             logger.warning("sync_no_items", source=plugin.name, warning=warning)
