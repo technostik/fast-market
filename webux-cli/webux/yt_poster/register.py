@@ -67,6 +67,8 @@ _YT_POSTER_HTML = """<!doctype html>
     #regenPanel { display:none; margin:8px 0; padding:8px; border:1px solid var(--border); border-radius:6px; background:#111; }
     #regenPanel h4 { margin:0 0 6px 0; font-size:12px; color:var(--text-dim); }
     #regenPanel .regenRow { font-family: monospace; font-size:12px; color:#9ecbff; white-space:pre-wrap; word-break:break-all; }
+    #regenPanel .regen-json-toggle { cursor:pointer; font-size:12px; color:var(--text-dim); margin-top:4px; }
+    #regenPanel .regen-json-content { display:none; font-family: monospace; font-size:12px; color:#9ecbff; white-space:pre-wrap; word-break:break-all; margin-top:2px; padding:4px; background:#0f172a; border-radius:4px; }
   </style>
 </head>
 <body>
@@ -74,7 +76,8 @@ _YT_POSTER_HTML = """<!doctype html>
   <div id="regenPanel" aria-live="polite">
     <h4>Regeneration (last per-comment)</h4>
     <div>Raw command: <span id="regenCommandRaw" class="regenRow"></span></div>
-    <div>Input JSON: <span id="regenInputJson" class="regenRow"></span></div>
+    <div class="regen-json-toggle" id="regenJsonToggle">Input JSON ▼</div>
+    <div class="regen-json-content" id="regenJsonContent"><span id="regenInputJson" class="regenRow"></span></div>
     <div>Result: <span id="regenResult" class="regenRow"></span></div>
     <div>Time: <span id="regenTime" class="regenRow"></span></div>
   </div>
@@ -186,6 +189,8 @@ const promptModalCancelBtn = document.getElementById('promptModalCancelBtn');
 const promptModalSaveBtn = document.getElementById('promptModalSaveBtn');
 const editPromptBtn = document.getElementById('editPromptBtn');
 const regenerateSelectedBtn = document.getElementById('regenerateSelected');
+const regenJsonToggle = document.getElementById('regenJsonToggle');
+const regenJsonContent = document.getElementById('regenJsonContent');
 
 let editingRowIndex = -1;
 let editingPromptName = '';
@@ -282,6 +287,12 @@ modalCloseBtn.addEventListener('click', closeModal);
 modalCancelBtn.addEventListener('click', closeModal);
 modalSaveBtn.addEventListener('click', saveReply);
 
+regenJsonToggle.addEventListener('click', () => {
+  const isVisible = regenJsonContent.style.display !== 'none';
+  regenJsonContent.style.display = isVisible ? 'none' : 'block';
+  regenJsonToggle.textContent = isVisible ? 'Input JSON ▼' : 'Input JSON ▲';
+});
+
 function showPromptModal(promptName){
   editingPromptName = promptName;
   promptModalTitle.textContent = 'Edit Prompt: ' + promptName;
@@ -365,6 +376,8 @@ function renderRegenPanelForComment(commentKey, logEntry) {
   const inputEl = document.getElementById('regenInputJson');
   const resEl = document.getElementById('regenResult');
   const timeEl = document.getElementById('regenTime');
+  const toggleEl = document.getElementById('regenJsonToggle');
+  const contentEl = document.getElementById('regenJsonContent');
   if (!panel) return;
   if (logEntry) {
     panel.style.display = 'block';
@@ -372,6 +385,9 @@ function renderRegenPanelForComment(commentKey, logEntry) {
     if (inputEl) inputEl.textContent = logEntry.inputJson || '';
     resEl.textContent = logEntry.success ? 'Success' : ('Error: ' + (logEntry.error || 'Unknown'));
     timeEl.textContent = logEntry.timestamp || '';
+    // Reset toggle to collapsed state
+    if (toggleEl) toggleEl.textContent = 'Input JSON ▼';
+    if (contentEl) contentEl.style.display = 'none';
     try { localStorage.setItem('ytp_regen_last_' + commentKey, JSON.stringify(logEntry)); } catch(e) { /* ignore */ }
   } else {
     panel.style.display = 'none';
