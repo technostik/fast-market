@@ -21,6 +21,7 @@ from commands.completion import (
     PathParamType,
 )
 from commands.setup.workdir import register as workdir_register
+from commands.setup.diagnostic import check_workdir_health
 
 # Import all plugins so they self-register
 from commands.setup.plugins import all_plugins, get_plugin  # noqa: F401
@@ -156,13 +157,22 @@ def register():
         click.echo(f"Default provider set to: {provider}")
 
     @setup_cmd.command("path")
-    @click.option("--youtube", "path_type", flag_value="youtube", help="Show YouTube config path")
     @click.option(
-        "--common", "path_type", flag_value="common", help="Show common config path (alias for --workdir)"
+        "--youtube", "path_type", flag_value="youtube", help="Show YouTube config path"
     )
-    @click.option("--workdir", "path_type", flag_value="workdir", help="Show workdir config path")
+    @click.option(
+        "--common",
+        "path_type",
+        flag_value="common",
+        help="Show common config path (alias for --workdir)",
+    )
+    @click.option(
+        "--workdir", "path_type", flag_value="workdir", help="Show workdir config path"
+    )
     @click.option("--llm", "path_type", flag_value="llm", help="Show LLM config path")
-    @click.option("--agent", "path_type", flag_value="agent", help="Show agent config path")
+    @click.option(
+        "--agent", "path_type", flag_value="agent", help="Show agent config path"
+    )
     @click.pass_context
     def show_path(ctx, path_type):
         """Show config file paths."""
@@ -182,29 +192,25 @@ def register():
             for name, plugin in sorted(all_plugins().items()):
                 click.echo(f"{name:10s}: {plugin.config_path()}")
 
-    @setup_cmd.command("workdir")
-    @click.argument("path", type=PathParamType(), required=False)
-    def set_workdir(path):
-        """Get or set the global default working directory."""
-        plugin = get_plugin("workdir")
-        config = plugin.load()
-        if path is None:
-            current = config.get("workdir")
-            click.echo(current or "(not set)")
-            return
-        config["workdir"] = path
-        plugin.save(config)
-        click.echo(f"Default workdir set to: {path}")
-
     # Register workdir subgroup
     workdir_cmd = workdir_register()
     setup_cmd.add_command(workdir_cmd, name="workdir")
 
     @setup_cmd.command("edit")
-    @click.option("--youtube", "-y", "edit_youtube", is_flag=True, help="Edit YouTube config")
+    @click.option(
+        "--youtube", "-y", "edit_youtube", is_flag=True, help="Edit YouTube config"
+    )
     @click.option("--llm", "-l", "edit_llm", is_flag=True, help="Edit LLM config")
-    @click.option("--workdir", "-w", "edit_workdir", is_flag=True, help="Edit workdir config (common/config.yaml)")
-    @click.option("--common", "-c", "edit_common", is_flag=True, help="Alias for --workdir")
+    @click.option(
+        "--workdir",
+        "-w",
+        "edit_workdir",
+        is_flag=True,
+        help="Edit workdir config (common/config.yaml)",
+    )
+    @click.option(
+        "--common", "-c", "edit_common", is_flag=True, help="Alias for --workdir"
+    )
     @click.option("--agent", "-a", "edit_agent", is_flag=True, help="Edit agent config")
     def edit_config(edit_youtube, edit_llm, edit_workdir, edit_common, edit_agent):
         """Open config file(s) in your editor.
@@ -358,12 +364,18 @@ def register():
 
     @setup_cmd.command("reset")
     @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompt")
-    @click.option("--youtube", "reset_youtube", is_flag=True, help="Reset YouTube config")
+    @click.option(
+        "--youtube", "reset_youtube", is_flag=True, help="Reset YouTube config"
+    )
     @click.option("--agent", "reset_agent", is_flag=True, help="Reset agent config")
-    @click.option("--workdir", "reset_workdir", is_flag=True, help="Reset workdir config")
+    @click.option(
+        "--workdir", "reset_workdir", is_flag=True, help="Reset workdir config"
+    )
     @click.option("--common", "reset_common", is_flag=True, help="Alias for --workdir")
     @click.option("--llm", "reset_llm", is_flag=True, help="Reset LLM config")
-    def reset_config(force, reset_youtube, reset_agent, reset_workdir, reset_common, reset_llm):
+    def reset_config(
+        force, reset_youtube, reset_agent, reset_workdir, reset_common, reset_llm
+    ):
         """Reset config files to defaults (backs up existing).
 
         By default, resets ALL config files.
@@ -372,7 +384,12 @@ def register():
         if reset_common:
             reset_workdir = True
 
-        if not reset_youtube and not reset_agent and not reset_workdir and not reset_llm:
+        if (
+            not reset_youtube
+            and not reset_agent
+            and not reset_workdir
+            and not reset_llm
+        ):
             reset_youtube = True
             reset_agent = True
             reset_workdir = True
@@ -403,12 +420,15 @@ def register():
 
     @setup_cmd.command("reset-all")
     @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompt")
-    @click.option("--provider", "default_provider",
-                  type=click.Choice(["anthropic", "openai", "ollama", "openai-compatible"]),
-                  help="LLM provider to configure")
-    @click.option("--workdir", "workdir_path",
-                  type=str,
-                  help="Default working directory")
+    @click.option(
+        "--provider",
+        "default_provider",
+        type=click.Choice(["anthropic", "openai", "ollama", "openai-compatible"]),
+        help="LLM provider to configure",
+    )
+    @click.option(
+        "--workdir", "workdir_path", type=str, help="Default working directory"
+    )
     def reset_all(force, default_provider, workdir_path):
         """Create a fresh default config for all tools.
 
@@ -429,8 +449,16 @@ def register():
 
         # Create default tool configs
         tools = [
-            "browser", "corpus", "image", "message", "monitor",
-            "prompt", "skill", "tiktok", "webux", "youtube",
+            "browser",
+            "corpus",
+            "image",
+            "message",
+            "monitor",
+            "prompt",
+            "skill",
+            "tiktok",
+            "webux",
+            "youtube",
         ]
         for tool in tools:
             _ensure_default_tool_config(tool, backup_existing=True)
@@ -440,6 +468,31 @@ def register():
         click.echo("Or:")
         click.echo("  <tool> setup --show-config  (to see current)")
         click.echo("  <tool> setup --show-config-path (to see path)")
+
+    @setup_cmd.command("diagnostic")
+    @click.option(
+        "--format",
+        "-F",
+        "fmt",
+        type=click.Choice(["json", "text"]),
+        default="text",
+        help="Output format",
+    )
+    def diagnostic_cmd(fmt):
+        """Run diagnostic tests on workdir, LLM, and YouTube configuration.
+
+        Performs health checks on:
+        - Workdir configuration and existence
+        - LLM provider connectivity
+        - YouTube API setup and credentials
+        """
+        from commands.setup.diagnostic import (
+            run_all_diagnostics,
+            print_diagnostic_results,
+        )
+
+        results = run_all_diagnostics()
+        print_diagnostic_results(results, fmt)
 
     return setup_cmd
 

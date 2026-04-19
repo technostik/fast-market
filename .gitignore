@@ -8,6 +8,7 @@ session
 recordings
 .opencode
 .qwen
+.kilo
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
