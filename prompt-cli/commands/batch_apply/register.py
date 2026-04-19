@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -144,6 +145,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         multiple=True,
         help="Key-value pairs to include in output (repeatable). Format: key=value",
     )
+    @click.option(
+        "--debug",
+        is_flag=True,
+        help="Enable debug mode with additional output",
+    )
     @click.pass_context
     def batch_apply_cmd(
         ctx,
@@ -162,6 +168,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         limit,
         workdir,
         metadata,
+        debug,
     ):
         """Apply a prompt to each record in a JSON array.
 
@@ -178,7 +185,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """
         from common.core.config import load_common_config, load_tool_config
         from commands.helpers import build_engine, get_default_provider
-        from core.substitution import resolve_arguments, extract_placeholders
+        from core.substitution import (
+            resolve_arguments,
+            extract_placeholders,
+            resolve_capitalized_fields,
+        )
         from storage.store import PromptStore
 
         if workdir:
@@ -190,6 +201,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 workdir_path = Path(configured_workdir).expanduser().resolve()
             else:
                 workdir_path = Path.cwd()
+
+        if debug:
+            click.echo(f"Current workdir: {workdir_path}", err=True)
 
         if prompt_content == "@-":
             if sys.stdin.isatty():
@@ -254,6 +268,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if limit:
             records = records[:limit]
+
+        if debug:
+            click.echo(f"Number of rows treated: {len(records)}", err=True)
 
         prompt_store = PromptStore()
         model_name = model
@@ -322,6 +339,28 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 input_field_provided = True
             else:
                 input_field_provided = False
+
+        if debug and records:
+            if input_field_provided:
+                value = records[0].get(input_field, "<missing>")
+                click.echo(
+                    f"For the first one: -i field '{input_field}': {value}", err=True
+                )
+            else:
+                record = records[0]
+                matched = []
+                for ph in placeholders:
+                    field = _find_field_in_record(record, ph)
+                    if field:
+                        value = record.get(field, "<missing>")
+                        matched.append(f"{ph}={field}: {value}")
+                if matched:
+                    click.echo(
+                        f"For the first one: auto-detected fields: {', '.join(matched)}",
+                        err=True,
+                    )
+                else:
+                    click.echo("For the first one: no matching fields found", err=True)
 
         providers = build_engine(ctx.obj["verbose"])
 
@@ -395,6 +434,28 @@ def register(plugin_manifests: dict) -> CommandManifest:
                             value = record.get(field, "")
                             resolved = resolved.replace("{" + ph + "}", str(value))
 
+            if idx == 0 and debug:
+                click.echo(
+                    f"Resolved prompt for first item (before capitalized): {resolved}",
+                    err=True,
+                )
+
+            resolved = resolve_capitalized_fields(resolved, record)
+
+            if idx == 0 and debug:
+                click.echo(
+                    f"Resolved prompt for first item (after capitalized): {resolved}",
+                    err=True,
+                )
+                remaining = re.findall(r"\{.*?\}", resolved)
+                if remaining:
+                    click.echo(
+                        f"Warning: Unresolved placeholders in prompt: {remaining}",
+                        err=True,
+                    )
+                else:
+                    click.echo("All placeholders resolved.", err=True)
+
             request = LLMRequest(
                 prompt=resolved,
                 model=model_name,
@@ -424,5 +485,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         _save_file(output_path, results)
         click.echo(f"Done. Processed {len(results)} records.", err=True)
+        if debug:
+            if results:
+                click.echo(f"Results (first 2): {results[:2]}", err=True)
+            else:
+                click.echo("No results.", err=True)
 
     return CommandManifest(name="batch-apply", click_command=batch_apply_cmd)

@@ -129,3 +129,17 @@ def extract_placeholders(template: str) -> list[str]:
     """Extract placeholder names from template."""
     matches = re.findall(r"\{(\w+)\}|\{['\"](\w+)['\"]\}", template)
     return sorted(set(k1 or k2 for k1, k2 in matches))
+
+
+def resolve_capitalized_fields(template: str, record: dict) -> str:
+    """Replace {Field} with record["field"] if the lowercase key exists in record."""
+
+    def replace_match(match: re.Match) -> str:
+        field = match.group(1).lower()
+        if field in record:
+            return str(record[field])
+        return match.group(0)  # Leave as-is if not found
+
+    # Regex for {AnyWord} (any word chars)
+    pattern = re.compile(r"\{(\w+)\}")
+    return pattern.sub(replace_match, template)
