@@ -74,6 +74,7 @@ _YT_POSTER_HTML = """<!doctype html>
   <div id="regenPanel" aria-live="polite">
     <h4>Regeneration (last per-comment)</h4>
     <div>Raw command: <span id="regenCommandRaw" class="regenRow"></span></div>
+    <div>Input JSON: <span id="regenInputJson" class="regenRow"></span></div>
     <div>Result: <span id="regenResult" class="regenRow"></span></div>
     <div>Time: <span id="regenTime" class="regenRow"></span></div>
   </div>
@@ -361,18 +362,21 @@ function deriveCommentKeyFromIndices(indices, data) {
 function renderRegenPanelForComment(commentKey, logEntry) {
   const panel = document.getElementById('regenPanel');
   const rawEl = document.getElementById('regenCommandRaw');
+  const inputEl = document.getElementById('regenInputJson');
   const resEl = document.getElementById('regenResult');
   const timeEl = document.getElementById('regenTime');
   if (!panel) return;
   if (logEntry) {
     panel.style.display = 'block';
     if (rawEl) rawEl.textContent = logEntry.rawCommand || '';
+    if (inputEl) inputEl.textContent = logEntry.inputJson || '';
     resEl.textContent = logEntry.success ? 'Success' : ('Error: ' + (logEntry.error || 'Unknown'));
     timeEl.textContent = logEntry.timestamp || '';
     try { localStorage.setItem('ytp_regen_last_' + commentKey, JSON.stringify(logEntry)); } catch(e) { /* ignore */ }
   } else {
     panel.style.display = 'none';
     if (rawEl) rawEl.textContent = '';
+    if (inputEl) inputEl.textContent = '';
     resEl.textContent = '';
     timeEl.textContent = '';
   }
@@ -441,6 +445,7 @@ async function regenerateRows(indices){
     const logEntry = {
       timestamp: new Date().toISOString(),
       rawCommand: rawCmd,
+      inputJson: body?.input_json ?? '',
       success: code === 0,
       error: body?.error ?? null,
     };

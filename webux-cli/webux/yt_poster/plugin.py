@@ -226,53 +226,36 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
     if not prompt_name:
         raise HTTPException(status_code=400, detail="No prompt-name in metadata")
 
-    has_comments = any(item.get("comment_text") for item in selected)
-
+    temp_input = Path(tempfile.gettempdir()) / f"webux_regen_in_{uuid4().hex}.json"
     temp_output = Path(tempfile.gettempdir()) / f"webux_regen_out_{uuid4().hex}.json"
 
-    if has_comments:
-        filter_ids = [
-            item.get("comment_id")
-            for item in selected
-            if item.get("comment_id")
-        ]
-        cmd_name = "batch-comment-reply"
-    else:
-        filter_ids = [item.get("video_id") for item in selected if item.get("video_id")]
-        cmd_name = "batch-video-reply"
+    input_json = json.dumps(selected, ensure_ascii=False, indent=2)
+    temp_input.write_text(input_json, encoding="utf-8")
 
     cmd = [
-        "youtube",
-        cmd_name,
-        str(source_path),
-        "-s",
-        f"prompt apply {prompt_name}",
+        "prompt",
+        "batch-apply",
+        "-n",
+        prompt_name,
         "-o",
+        "reply",
+        "-f",
+        str(temp_input),
+        "-O",
         str(temp_output),
-        "--filter",
-        json.dumps(filter_ids),
-        "--rewrite",
+        "--metadata",
+        f"prompt-name={prompt_name}",
     ]
 
     if promote_url:
-        cmd.extend(["-p", f"URL={promote_url}"])
+        cmd.extend(
+            ["-p", f"URL={promote_url}", "--metadata", f"promote-url={promote_url}"]
+        )
 
     cmd_str = " ".join(cmd)
-    # Build a shell-friendly command string for display/testing (escape JSON in --filter)
-    try:
-        filter_json = json.dumps(filter_ids)
-        shell_cmd_str = cmd_str.replace(
-            "-s " + f"prompt apply {prompt_name}",
-            '-s "' + f"prompt apply {prompt_name}" + '"',
-        )
-        shell_cmd_str = shell_cmd_str.replace(
-            "--filter " + filter_json, "--filter '" + filter_json + "'"
-        )
-    except Exception:
-        shell_cmd_str = cmd_str
     logger.info(
         "yt_poster_regenerate",
-        cmd=shell_cmd_str,
+        cmd=cmd_str,
         indices=payload.indices,
         prompt_name=prompt_name,
     )
@@ -294,33 +277,42 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
         if proc.returncode != 0 or is_known_error:
             return {
                 "exit_code": proc.returncode if proc.returncode != 0 else 1,
-                "command": shell_cmd_str,
-                "raw_command": shell_cmd_str,
+                "command": cmd_str,
+                "raw_command": cmd_str,
+                "input_json": input_json,
                 "output": output,
                 "error": output.strip(),
             }
 
         if temp_output.exists():
             updated_data = json.loads(temp_output.read_text(encoding="utf-8"))
+            # Merge updated selected back into original data
+            for idx, updated_item in enumerate(updated_data):
+                original_idx = payload.indices[idx]
+                data[original_idx] = updated_item
             source_path.write_text(
-                json.dumps(updated_data, ensure_ascii=False, indent=2),
+                json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             return {
                 "exit_code": 0,
-                "command": shell_cmd_str,
-                "raw_command": shell_cmd_str,
+                "command": cmd_str,
+                "raw_command": cmd_str,
+                "input_json": input_json,
                 "output": output,
-                "updated_count": len(filter_ids),
+                "updated_count": len(selected),
             }
 
         return {
             "exit_code": proc.returncode,
-            "command": shell_cmd_str,
-            "raw_command": shell_cmd_str,
+            "command": cmd_str,
+            "raw_command": cmd_str,
+            "input_json": input_json,
             "output": output,
         }
     finally:
+        if temp_input.exists():
+            temp_input.unlink(missing_ok=True)
         if temp_output.exists():
             temp_output.unlink(missing_ok=True)
 

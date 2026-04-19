@@ -125,7 +125,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             video_id = item.get("video_id", "")
             error = None
             transcript = None
-            transcript_raw = None
 
             if video_id:
                 method_used = None
@@ -179,7 +178,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if "description" not in item or not item.get("description"):
                 result["description"] = snippet.get("description", "")
             result["transcript"] = transcript or ""
-            result["transcript_raw"] = transcript_raw or ""
             if error:
                 result["_comment"] = error
 

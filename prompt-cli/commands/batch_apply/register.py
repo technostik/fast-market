@@ -23,9 +23,12 @@ def _load_file(path: Path) -> list:
         data = yaml.safe_load(content)
     else:
         data = json.loads(content)
+    if isinstance(data, dict):
+        # If single record, wrap in array
+        data = [data]
     if not isinstance(data, list):
         raise ValueError(
-            f"Input file must contain a JSON array, got {type(data).__name__}"
+            f"Input file must contain a JSON array or object, got {type(data).__name__}"
         )
     return data
 
@@ -235,8 +238,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         records = json.loads(content)
                     else:
                         records = yaml.safe_load(content)
+                    if isinstance(records, dict):
+                        records = [records]
                     if not isinstance(records, list):
-                        raise ValueError(f"Input must be a JSON array")
+                        raise ValueError(f"Input must be a JSON array or object")
                 else:
                     click.echo("Error: no input provided", err=True)
                     sys.exit(1)
@@ -266,7 +271,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     return key
             return None
 
-        def _build_auto_param_dict(record: dict, placeholders: list[str]) -> dict[str, str]:
+        def _build_auto_param_dict(
+            record: dict, placeholders: list[str]
+        ) -> dict[str, str]:
             """Build param_dict by auto-matching placeholders to JSON fields."""
             param_dict = {}
             for ph in placeholders:
@@ -345,7 +352,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         field = _find_field_in_record(rec, ph)
                         if field:
                             matched.append(f"{ph}={field}")
-                    click.echo(f"  [{idx}] {', '.join(matched) if matched else '<no matches>'}")
+                    click.echo(
+                        f"  [{idx}] {', '.join(matched) if matched else '<no matches>'}"
+                    )
                 if len(records) > 3:
                     click.echo(f"  ... and {len(records) - 3} more")
             return
@@ -364,11 +373,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             if prompt_name:
                 if input_field_provided:
-                    resolved = resolve_arguments(resolved_prompt, param_dict, Path.cwd())
+                    resolved = resolve_arguments(
+                        resolved_prompt, param_dict, Path.cwd()
+                    )
                 else:
                     auto_params = _build_auto_param_dict(record, placeholders)
                     auto_params.update(param_dict)
-                    resolved = resolve_arguments(resolved_prompt, auto_params, Path.cwd())
+                    resolved = resolve_arguments(
+                        resolved_prompt, auto_params, Path.cwd()
+                    )
             else:
                 if input_field_provided:
                     resolved = prompt_content.replace(
