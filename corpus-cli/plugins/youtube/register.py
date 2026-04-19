@@ -33,7 +33,9 @@ def register(config: dict) -> PluginManifest:
                 ),
                 click.Option(
                     ["--privacy-status", "--privacy", "privacy_status"],
-                    type=click.Choice(["public", "unlisted", "private", "unknown"]),
+                    type=click.Choice(
+                        ["public", "unlisted", "private", "members", "unknown"]
+                    ),
                     default=None,
                     help="Filter by YouTube privacy status.",
                 ),
@@ -59,7 +61,9 @@ def register(config: dict) -> PluginManifest:
                 ),
                 click.Option(
                     ["--privacy-status", "--privacy", "privacy_status"],
-                    type=click.Choice(["public", "unlisted", "private", "unknown"]),
+                    type=click.Choice(
+                        ["public", "unlisted", "private", "members", "unknown"]
+                    ),
                     default=None,
                     help="Filter by YouTube privacy status.",
                 ),

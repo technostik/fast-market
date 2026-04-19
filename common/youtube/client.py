@@ -529,84 +529,62 @@ class YouTubeClient:
     ) -> list[Video]:
         """Get all videos from a channel."""
         try:
-            channel_response = (
-                self.youtube.channels()
-                .list(
-                    part="contentDetails",
-                    id=channel_id,
-                )
-                .execute()
-            )
-            self._track_quota(1)
-
-            if not channel_response.get("items"):
-                logger.warning("channel_not_found", channel_id=channel_id)
-                return []
-
-            uploads_playlist_id = channel_response["items"][0]["contentDetails"][
-                "relatedPlaylists"
-            ]["uploads"]
-
             videos = []
             next_page_token = None
 
             while len(videos) < max_results:
-                playlist_response = (
-                    self.youtube.playlistItems()
+                search_response = (
+                    self.youtube.search()
                     .list(
-                        part="snippet,status",
-                        playlistId=uploads_playlist_id,
+                        part="snippet",
+                        channelId=channel_id,
+                        type="video",
+                        order="date",
                         maxResults=min(50, max_results - len(videos)),
                         pageToken=next_page_token,
                     )
                     .execute()
                 )
-                self._track_quota(1)
+                self._track_quota(100)  # search costs 100 units
 
                 video_ids = [
-                    item["snippet"]["resourceId"]["videoId"]
-                    for item in playlist_response.get("items", [])
-                    if "resourceId" in item["snippet"]
+                    item["id"]["videoId"]
+                    for item in search_response.get("items", [])
+                    if "videoId" in item.get("id", {})
                 ]
 
                 if video_ids:
+                    # Get full details including status
                     video_details = (
                         self.youtube.videos()
                         .list(
-                            part="contentDetails,snippet",
+                            part="contentDetails,snippet,status",
                             id=",".join(video_ids),
                         )
                         .execute()
                     )
                     self._track_quota(1)
 
-                    duration_map = {
-                        item["id"]: item["contentDetails"]["duration"]
-                        for item in video_details.get("items", [])
-                    }
-
-                    for item in playlist_response.get("items", []):
-                        if "resourceId" not in item["snippet"]:
-                            continue
-                        video_id = item["snippet"]["resourceId"]["videoId"]
-                        duration = duration_map.get(video_id, "")
+                    for item in video_details.get("items", []):
+                        video_id = item["id"]
+                        snippet = item.get("snippet", {})
+                        status = item.get("status", {})
+                        content = item.get("contentDetails", {})
 
                         video = Video(
                             video_id=video_id,
-                            title=item["snippet"].get("title", "N/A"),
-                            description=item["snippet"].get("description", ""),
+                            title=snippet.get("title", "N/A"),
+                            description=snippet.get("description", ""),
                             channel_id=channel_id,
-                            channel_title=item["snippet"].get("channelTitle", ""),
-                            published_at=item["snippet"].get("publishedAt", ""),
+                            channel_title=snippet.get("channelTitle", ""),
+                            published_at=snippet.get("publishedAt", ""),
                             url=f"https://www.youtube.com/watch?v={video_id}",
-                            duration=duration,
-                            privacy_status=item.get("status", {}).get(
-                                "privacyStatus", "public"
-                            ),
+                            duration=content.get("duration", ""),
+                            privacy_status=status.get("privacyStatus", "public"),
                         )
                         videos.append(video)
 
-                next_page_token = playlist_response.get("nextPageToken")
+                next_page_token = search_response.get("nextPageToken")
                 if not next_page_token:
                     break
 

@@ -95,10 +95,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         config = load_config()
         store = SQLiteStore(config.get("db_path"))
         filters = make_filters(source=source, **kwargs)
-        
+
         # If limit is 0, fetch all items (use a large limit)
         effective_limit = limit if limit > 0 else 999999
-        
+
         all_docs = store.list_documents_extended(
             source=source,
             filters=filters,
@@ -207,7 +207,9 @@ def _build_router(source_choices: list[str]) -> APIRouter:
 
     @router.get("/list")
     def list_documents(
-        limit: int = Query(10, ge=0, le=10000, description="Number of items to return (0 for all)"),
+        limit: int = Query(
+            10, ge=0, le=10000, description="Number of items to return (0 for all)"
+        ),
         offset: int = Query(0, ge=0, description="Number of items to skip"),
         source: str | None = Query(None, description="Filter by source plugin"),
         order_by: str = Query(
@@ -222,7 +224,7 @@ def _build_router(source_choices: list[str]) -> APIRouter:
             None, ge=0, description="Max duration in seconds"
         ),
         privacy_status: str | None = Query(
-            None, description="YouTube: public|private|unlisted|unknown"
+            None, description="YouTube: public|private|unlisted|members|unknown"
         ),
         since: str | None = Query(
             None, description="Filter by date: YYYY-MM-DD (inclusive)"
@@ -256,10 +258,10 @@ def _build_router(source_choices: list[str]) -> APIRouter:
             max_size=max_size,
             privacy_status=privacy_status,
         )
-        
+
         # If limit is 0, fetch all items
         effective_limit = limit if limit > 0 else 10000
-        
+
         all_docs = store.list_documents_extended(
             source=source,
             filters=filters,

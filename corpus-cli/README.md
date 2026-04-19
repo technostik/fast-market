@@ -70,7 +70,7 @@ youtube:
   channel_id: UCxxxxxxxxxxxxxxxxxxxxxxxx
   client_secret_path: /path/to/client_secret.json
   # Optional: include non-public videos. Default: only public videos are indexed.
-  # include_privacy: [public, unlisted]   # add "private" to also index private videos
+  # include_privacy: [public, unlisted]   # add "private", "members" to also index private/members videos
 whisper:
   model: base   # tiny | base | small — only used if no transcript available
 ```
@@ -104,7 +104,7 @@ If you still use legacy `config.yaml` in your current directory, it is supported
 
 ### YouTube privacy filtering
 
-The YouTube plugin fetches `privacyStatus` for every video (`public`, `private`, or `unlisted`) and stores it in the index. By default, **only public videos are indexed** — private and unlisted videos are skipped at sync time with a log entry.
+The YouTube plugin fetches `privacyStatus` for every video (`public`, `private`, `unlisted`, or `members`) and stores it in the index. By default, **only public videos are indexed** — private, unlisted, and members videos are skipped at sync time with a log entry.
 
 **To include non-public videos**, set `youtube.include_privacy` in `config.yaml`:
 
@@ -112,8 +112,8 @@ The YouTube plugin fetches `privacyStatus` for every video (`public`, `private`,
 youtube:
   channel_id: UCxxxxxxxxxxxxxxxxxxxxxxxx
   client_secret_path: /path/to/client_secret.json
-  include_privacy: [public, unlisted]    # include unlisted but not private
-  # include_privacy: [public, private, unlisted]  # include everything
+  include_privacy: [public, unlisted]    # include unlisted but not private/members
+  # include_privacy: [public, private, unlisted, members]  # include everything
 ```
 
 The `privacy_status` field is stored on every indexed document and exposed in search results and API responses. You can filter by it at search time:
@@ -121,6 +121,7 @@ The `privacy_status` field is stored on every indexed document and exposed in se
 ```bash
 corpus search "topic" --privacy public      # public only
 corpus search "topic" --privacy unlisted    # unlisted only
+corpus search "topic" --privacy members     # members-only videos
 corpus search "topic" --format json | jq '.[] | select(.privacy_status == "public")'
 ```
 
@@ -276,7 +277,7 @@ Search the index. Returns handles, titles, excerpts, scores, and privacy status.
 | `--until YYYY-MM-DD` | — | Updated before date |
 | `--min-size N` | — | Min content length in chars (useful for Obsidian) |
 | `--max-size N` | — | Max content length in chars |
-| `--privacy public\|private\|unlisted` | — | Filter by YouTube privacy status |
+| `--privacy public\|private\|unlisted\|members` | — | Filter by YouTube privacy status |
 | `--format json\|text`, `-F` | `text` | Output format |
 
 ```bash
@@ -321,7 +322,7 @@ List indexed documents with filtering, sorting, and pagination.
 | `--type short\|long` | Videos ≤60s or >60s |
 | `--min-duration N` | Min duration in seconds |
 | `--max-duration N` | Max duration in seconds |
-| `--privacy public\|private\|unlisted\|unknown` | Privacy status |
+| `--privacy public\|private\|unlisted\|members\|unknown` | Privacy status |
 
 **Obsidian filters:**
 | Option | Description |
