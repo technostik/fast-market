@@ -190,23 +190,29 @@ def register(plugin_manifests: dict) -> CommandManifest:
             common_config = load_common_config()
             workdir = common_config.get("workdir") or "."
 
-        if (run_isolated or skill_isolated):
+        if run_isolated or skill_isolated:
             common_config = load_common_config()
             current_workdir = common_config.get("workdir")
             if current_workdir and is_workdir_locked(current_workdir):
                 timeout = get_lock_wait_timeout()
                 start_time = time.time()
-                click.echo(f"Current workdir is locked. Waiting up to {timeout}s for unlock...", err=True)
+                click.echo(
+                    f"Current workdir is locked. Waiting up to {timeout}s for unlock...",
+                    err=True,
+                )
                 while time.time() - start_time < timeout:
                     time.sleep(1)
                     if not is_workdir_locked(current_workdir):
                         click.echo("Current workdir unlocked.", err=True)
                         break
                 else:
-                    click.echo(f"Error: Timeout waiting for workdir to unlock.", err=True)
+                    click.echo(
+                        f"Error: Timeout waiting for workdir to unlock.", err=True
+                    )
                     sys.exit(1)
 
             import uuid
+
             workdir_root = common_config.get("workdir_root")
             workdir_prefix = common_config.get("workdir_prefix", "work-")
             if workdir_root:
@@ -218,11 +224,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 new_workdir.mkdir(parents=True, exist_ok=True)
 
                 created_isolated_workdir = str(new_workdir)
-                common_config["previous_workdir"] = common_config.get("workdir")
                 common_config["workdir"] = created_isolated_workdir
                 save_common_config(common_config)
                 add_workdir_lock(created_isolated_workdir)
-                click.echo(f"Created and locked isolated workdir: {created_isolated_workdir}", err=True)
+                click.echo(
+                    f"Created and locked isolated workdir: {created_isolated_workdir}",
+                    err=True,
+                )
                 workdir = created_isolated_workdir
 
                 isolation_mode_override = "none"
@@ -363,21 +371,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"✓ Done: {state.final_result}", err=True)
             if created_isolated_workdir:
                 remove_workdir_lock(created_isolated_workdir)
-                common_config = load_common_config()
-                if common_config.get("previous_workdir"):
-                    common_config["workdir"] = common_config.get("previous_workdir")
-                    save_common_config(common_config)
-                click.echo(f"Released isolated workdir: {created_isolated_workdir}", err=True)
+                click.echo(
+                    f"Released isolated workdir: {created_isolated_workdir}", err=True
+                )
             return
         if state.failed:
             click.echo(f"✗ Failed: {state.failure_reason}", err=True)
             if created_isolated_workdir:
                 remove_workdir_lock(created_isolated_workdir)
-                common_config = load_common_config()
-                if common_config.get("previous_workdir"):
-                    common_config["workdir"] = common_config.get("previous_workdir")
-                    save_common_config(common_config)
-                click.echo(f"Released isolated workdir: {created_isolated_workdir}", err=True)
+                click.echo(
+                    f"Released isolated workdir: {created_isolated_workdir}", err=True
+                )
             sys.exit(1)
         click.echo(
             f"✗ Max iterations ({max_iterations}) reached without completion",
@@ -385,11 +389,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         )
         if created_isolated_workdir:
             remove_workdir_lock(created_isolated_workdir)
-            common_config = load_common_config()
-            if common_config.get("previous_workdir"):
-                common_config["workdir"] = common_config.get("previous_workdir")
-                save_common_config(common_config)
-            click.echo(f"Released isolated workdir: {created_isolated_workdir}", err=True)
+            click.echo(
+                f"Released isolated workdir: {created_isolated_workdir}", err=True
+            )
         sys.exit(1)
 
     return CommandManifest(name="run", click_command=run_cmd)

@@ -121,6 +121,7 @@ def is_workdir_locked(workdir_path: str | None = None) -> bool:
     if not workdir_path:
         return False
     from pathlib import Path
+
     return (Path(workdir_path) / ".lock").exists()
 
 
@@ -132,6 +133,7 @@ def add_workdir_lock(workdir_path: str | None = None) -> bool:
     if not workdir_path:
         return False
     from pathlib import Path
+
     workdir = Path(workdir_path)
     if not workdir.exists():
         return False
@@ -150,6 +152,7 @@ def remove_workdir_lock(workdir_path: str | None = None) -> bool:
     if not workdir_path:
         return False
     from pathlib import Path
+
     lock_path = Path(workdir_path) / ".lock"
     if lock_path.exists():
         lock_path.unlink()
@@ -168,7 +171,6 @@ def get_lock_wait_timeout() -> int:
 #   workdir: null | str - current workdir path
 #   workdir_root: null | str - root directory for workdirs
 #   workdir_prefix: str - prefix for new workdirs (default: "work-")
-#   previous_workdir: null | str - previous workdir for release command
 #   lock_wait_timeout: int - seconds to wait for lock release (default: 600)
 #   snapshot_root: null | str - root for backup snapshots
 

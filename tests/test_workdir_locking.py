@@ -143,7 +143,11 @@ class TestAddRemoveWorkdirLock:
 
     def test_remove_workdir_lock_removes_lock_file(self, tmp_path):
         """Test that remove_workdir_lock removes .lock file."""
-        from common.core.config import add_workdir_lock, remove_workdir_lock, is_workdir_locked
+        from common.core.config import (
+            add_workdir_lock,
+            remove_workdir_lock,
+            is_workdir_locked,
+        )
 
         workdir = tmp_path / "work"
         workdir.mkdir()
@@ -168,7 +172,9 @@ class TestAddRemoveWorkdirLock:
 class TestWorkdirLockCommand:
     """Test toolsetup workdir lock/unlock commands."""
 
-    def test_lock_command_creates_lock_file(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_lock_command_creates_lock_file(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that lock command creates .lock file."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
 
@@ -179,7 +185,9 @@ class TestWorkdirLockCommand:
         assert "locked" in result.output.lower()
         assert (tmp_workdir_root / ".lock").exists()
 
-    def test_unlock_command_removes_lock_file(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_unlock_command_removes_lock_file(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that unlock command removes .lock file."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
         (tmp_workdir_root / ".lock").touch()
@@ -191,7 +199,9 @@ class TestWorkdirLockCommand:
         assert "unlocked" in result.output.lower()
         assert not (tmp_workdir_root / ".lock").exists()
 
-    def test_lock_command_fails_when_already_locked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_lock_command_fails_when_already_locked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that lock command fails when already locked."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
         (tmp_workdir_root / ".lock").touch()
@@ -202,7 +212,9 @@ class TestWorkdirLockCommand:
         assert result.exit_code == 0
         assert "already locked" in result.output.lower()
 
-    def test_unlock_command_fails_when_not_locked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_unlock_command_fails_when_not_locked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that unlock command fails when not locked."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
 
@@ -216,7 +228,9 @@ class TestWorkdirLockCommand:
 class TestWorkdirIsLockedCommand:
     """Test toolsetup workdir islocked command."""
 
-    def test_islocked_returns_locked_when_locked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_islocked_returns_locked_when_locked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test islocked returns LOCKED when .lock exists."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
         (tmp_workdir_root / ".lock").touch()
@@ -227,7 +241,9 @@ class TestWorkdirIsLockedCommand:
         assert result.exit_code == 0
         assert "LOCKED" in result.output
 
-    def test_islocked_returns_not_locked_when_unlocked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_islocked_returns_not_locked_when_unlocked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test islocked returns NOT locked when .lock doesn't exist."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
 
@@ -241,7 +257,9 @@ class TestWorkdirIsLockedCommand:
 class TestWorkdirListCommand:
     """Test toolsetup workdir list command shows locks."""
 
-    def test_list_shows_locked_workdirs(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_list_shows_locked_workdirs(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that list shows [LOCKED] for locked workdirs."""
         work1 = tmp_workdir_root / "work-001"
         work1.mkdir()
@@ -258,7 +276,9 @@ class TestWorkdirListCommand:
         assert result.exit_code == 0
         assert "[LOCKED]" in result.output
 
-    def test_list_shows_current_workdir_with_arrows(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_list_shows_current_workdir_with_arrows(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that list shows current workdir with >>> <<<."""
         work1 = tmp_workdir_root / "work-001"
         work1.mkdir()
@@ -279,7 +299,9 @@ class TestWorkdirListCommand:
 class TestWorkdirNewCommand:
     """Test toolsetup workdir new command with locking."""
 
-    def test_new_creates_workdir_with_lock(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_new_creates_workdir_with_lock(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that new creates a workdir with .lock."""
         workdir_cmd = get_workdir_cmd()
         result = runner.invoke(workdir_cmd, ["new"])
@@ -288,7 +310,9 @@ class TestWorkdirNewCommand:
         assert "created" in result.output.lower()
         assert "locked" in result.output.lower()
 
-    def test_new_waits_for_unlock_when_locked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_new_waits_for_unlock_when_locked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that new waits for unlock when current workdir is locked."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
         (tmp_workdir_root / ".lock").touch()
@@ -309,7 +333,9 @@ class TestWorkdirNewCommand:
 
         assert result.exit_code == 0
 
-    def test_new_fails_with_no_wait_when_locked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_new_fails_with_no_wait_when_locked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that new --no-wait fails when current workdir is locked."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
         (tmp_workdir_root / ".lock").touch()
@@ -320,7 +346,9 @@ class TestWorkdirNewCommand:
         assert "locked" in result.output.lower()
         assert "force" in result.output.lower() or "no-wait" in result.output.lower()
 
-    def test_new_force_creates_when_locked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_new_force_creates_when_locked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that new --force creates even when current is locked."""
         setup_workdir_config["workdir"] = str(tmp_workdir_root)
         (tmp_workdir_root / ".lock").touch()
@@ -335,7 +363,9 @@ class TestWorkdirNewCommand:
 class TestWorkdirPrevLastCommands:
     """Test that prev/last commands respect locking."""
 
-    def test_prev_fails_when_locked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_prev_fails_when_locked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that prev fails when current workdir is locked."""
         work1 = tmp_workdir_root / "work-001"
         work1.mkdir()
@@ -350,7 +380,9 @@ class TestWorkdirPrevLastCommands:
 
         assert "locked" in result.output.lower()
 
-    def test_last_fails_when_locked(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_last_fails_when_locked(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that last fails when current workdir is locked."""
         work1 = tmp_workdir_root / "work-001"
         work1.mkdir()
@@ -369,7 +401,9 @@ class TestWorkdirPrevLastCommands:
 class TestWorkdirReleaseCommand:
     """Test toolsetup workdir release command."""
 
-    def test_release_removes_lock_and_switches_to_previous(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_release_removes_lock_and_switches_to_previous(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that release removes lock and switches to previous workdir."""
         prev = tmp_workdir_root / "work-prev"
         prev.mkdir()
@@ -378,7 +412,6 @@ class TestWorkdirReleaseCommand:
         (curr / ".lock").touch()
 
         setup_workdir_config["workdir"] = str(curr)
-        setup_workdir_config["previous_workdir"] = str(prev)
 
         workdir_cmd = get_workdir_cmd()
         result = runner.invoke(workdir_cmd, ["release"])
@@ -387,7 +420,9 @@ class TestWorkdirReleaseCommand:
         assert not (curr / ".lock").exists()
         assert "released" in result.output.lower()
 
-    def test_release_with_bypass_creates_new_workdir(self, runner, tmp_workdir_root, setup_workdir_config):
+    def test_release_with_bypass_creates_new_workdir(
+        self, runner, tmp_workdir_root, setup_workdir_config
+    ):
         """Test that release --bypass creates new workdir."""
         curr = tmp_workdir_root / "work-curr"
         curr.mkdir()
@@ -412,6 +447,7 @@ class TestGetLockWaitTimeout:
         original = load_common_config
         try:
             import common.core.config as config_module
+
             config_module.load_common_config = lambda: {}
             assert config_module.get_lock_wait_timeout() == 600
         finally:
@@ -419,6 +455,7 @@ class TestGetLockWaitTimeout:
 
     def test_custom_timeout_from_config(self, monkeypatch):
         """Test that custom timeout is read from config."""
+
         def mock_load():
             return {"lock_wait_timeout": 300}
 

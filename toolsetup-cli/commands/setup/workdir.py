@@ -171,10 +171,9 @@ def register():
         help="Release current lock and create a new workdir",
     )
     def workdir_release(bypass):
-        """Release the lock and reset to previous workdir, or create new workdir with --bypass."""
+        """Release the lock, or create new workdir with --bypass."""
         config = load_common_config()
         current_workdir = config.get("workdir")
-        previous_workdir = config.get("previous_workdir")
 
         if not current_workdir:
             click.echo("No workdir configured.", err=True)
@@ -204,7 +203,6 @@ def register():
             new_workdir = root_path / dir_name
             new_workdir.mkdir(parents=True, exist_ok=True)
 
-            config["previous_workdir"] = current_workdir
             config["workdir"] = str(new_workdir)
             save_common_config(config)
 
@@ -218,18 +216,8 @@ def register():
             )
             return
 
-        if previous_workdir:
-            prev_path = Path(previous_workdir).expanduser().resolve()
-            if prev_path.exists():
-                remove_workdir_lock(str(workdir_path))
-                config["workdir"] = previous_workdir
-                config["previous_workdir"] = current_workdir
-                save_common_config(config)
-                click.echo(f"Released and switched to previous: {prev_path}")
-                return
-
         remove_workdir_lock(str(workdir_path))
-        click.echo(f"Released lock: {workdir_path} (no previous workdir to switch to)")
+        click.echo(f"Released lock: {workdir_path}")
 
     @workdir_cmd.command("new")
     @click.option(
@@ -303,7 +291,6 @@ def register():
         new_workdir = root_path / dir_name
         new_workdir.mkdir(parents=True, exist_ok=True)
 
-        config["previous_workdir"] = config.get("workdir")
         config["workdir"] = str(new_workdir)
         save_common_config(config)
 
