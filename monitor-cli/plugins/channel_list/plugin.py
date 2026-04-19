@@ -148,9 +148,9 @@ class ChannelListPlugin(SourcePlugin):
         self,
         last_item_id: str | None = None,
         limit: int = 50,
-        last_fetched_at: Any | None = None,
         force: bool = False,
         seen_item_ids: set[str] | None = None,
+        date_filter: str | None = None,
     ) -> list[ItemMetadata]:
         """Fetch new videos from all channels in the list.
 
@@ -185,7 +185,8 @@ class ChannelListPlugin(SourcePlugin):
         for i, channel in enumerate(self.channels):
             channel_id = channel["id"]
             # Use channel-specific last_item_id instead of the source-level one
-            channel_last_id = channel_last_ids.get(channel_id)
+            # But ignore it when force=True to get all recent items
+            channel_last_id = None if force else channel_last_ids.get(channel_id)
 
             # Create a temporary YouTube plugin instance for this channel
             yt_source_config = {
@@ -203,6 +204,7 @@ class ChannelListPlugin(SourcePlugin):
                     limit=per_channel_limit,
                     force=force,
                     seen_item_ids=seen_item_ids,
+                    date_filter=date_filter,
                 )
                 # rss_raw is the total we asked for, not what was actually returned
                 self._rss_raw_count += per_channel_limit

@@ -375,6 +375,21 @@ class MonitorStorage:
             ).fetchall()
             return {row["item_id"] for row in rows}
 
+    def get_all_logged_item_ids(self) -> set[str]:
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT DISTINCT item_id FROM trigger_logs").fetchall()
+            return {row["item_id"] for row in rows}
+
+    def get_trigger_log_for_item(self, item_id: str) -> TriggerLog | None:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM trigger_logs WHERE item_id = ? ORDER BY triggered_at DESC LIMIT 1",
+                (item_id,),
+            ).fetchone()
+            if row:
+                return TriggerLog(**row)
+            return None
+
     def clean_old_triggered_items(self, rule_id: str, older_than: datetime) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(

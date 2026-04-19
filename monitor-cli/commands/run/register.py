@@ -271,10 +271,12 @@ def _evaluate_and_match(items, source, rules, storage, force_mode, cron, debug):
     triggered = []
     mismatches = []
     matched_item_ids = []
+    ignored_items = []
 
     triggered_by_rule = {rule.id: storage.get_triggered_item_ids(rule.id) for rule in rules}
 
     for item in items:
+        item_matched = False
         for rule in rules:
             if not should_run_rule(rule):
                 continue
@@ -287,6 +289,7 @@ def _evaluate_and_match(items, source, rules, storage, force_mode, cron, debug):
             if result.matched:
                 triggered.append({"rule": rule, "item": item, "source": source})
                 matched_item_ids.append(item.id)
+                item_matched = True
             elif debug and source.enabled and rule.enabled:
                 evaluated_at = datetime.now(timezone.utc)
                 mismatches.append(
@@ -311,8 +314,11 @@ def _evaluate_and_match(items, source, rules, storage, force_mode, cron, debug):
                             err=True,
                         )
 
+        if not item_matched:
+            ignored_items.append({"item": item, "source": source})
+
     matched_ids_set = set(matched_item_ids)
-    return triggered, mismatches, matched_ids_set
+    return triggered, mismatches, matched_ids_set, ignored_items
 
 
 def _update_source_tracking(source, storage, items, force_mode, plugin_instance=None):
@@ -785,6 +791,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         triggered = []
         mismatches = []
+        all_ignored = []
         errors = []
         source_stats = {}
         total_actions_executed = 0
@@ -846,11 +853,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             raw_fetched_count = fetch_result.get("raw_fetched_count", len(items))
 
-            triggered_for_source, mismatches_for_source, matched_ids = _evaluate_and_match(
-                items, source, rules, storage, force_mode, cron, debug
+            triggered_for_source, mismatches_for_source, matched_ids, ignored_for_source = (
+                _evaluate_and_match(items, source, rules, storage, force_mode, cron, debug)
             )
             triggered.extend(triggered_for_source)
             mismatches.extend(mismatches_for_source)
+            all_ignored.extend(ignored_for_source)
 
             _update_source_tracking(source, storage, items, force_mode, plugin_instance)
             _mark_seen_items(storage, source, items, force_mode)
@@ -892,6 +900,27 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     )
 
         _log_mismatches(storage, mismatches)
+
+        # Log ignored items
+        for ignored_entry in all_ignored:
+            item = ignored_entry["item"]
+            source = ignored_entry["source"]
+            triggered_at = datetime.now(timezone.utc)
+            storage.log_trigger(
+                TriggerLog(
+                    id=str(uuid.uuid4()),
+                    rule_id="ignored",
+                    source_id=source.id,
+                    action_id="ignored",
+                    item_id=item.id,
+                    item_title=item.title,
+                    item_url=item.url,
+                    item_extra=item.extra,
+                    triggered_at=triggered_at,
+                    exit_code=0,
+                    output="ignored",
+                )
+            )
 
         global_on_error_action_ids = _get_global_on_error_action_ids()
         global_on_execution_action_ids = _get_global_on_execution_action_ids()

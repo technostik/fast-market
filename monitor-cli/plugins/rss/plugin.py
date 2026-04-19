@@ -19,6 +19,7 @@ class RSSPlugin(SourcePlugin):
         limit: int = 50,
         force: bool = False,
         seen_item_ids: set[str] | None = None,
+        date_filter: str | None = None,
     ) -> list[ItemMetadata]:
         if not self._should_fetch(force):
             return []
@@ -51,6 +52,10 @@ class RSSPlugin(SourcePlugin):
                 f"URL: {rss_url}\n"
                 f"Content excerpt: {raw_excerpt}"
             )
+
+        today = None
+        if date_filter == "today":
+            today = datetime.now(timezone.utc).date()
 
         items = []
         for entry in feed.entries[:limit]:
@@ -88,6 +93,9 @@ class RSSPlugin(SourcePlugin):
                     "feed_title": feed.feed.get("title", "") if hasattr(feed, "feed") else "",
                 },
             )
+
+            if today and item.published_at.date() != today:
+                continue
 
             items.append(item)
 

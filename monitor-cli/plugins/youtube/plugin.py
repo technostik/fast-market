@@ -341,6 +341,7 @@ class YouTubePlugin(SourcePlugin):
         limit: int = 50,
         force: bool = False,
         seen_item_ids: set[str] | None = None,
+        date_filter: str | None = None,
     ) -> list[ItemMetadata]:
         """Fetch new videos from YouTube channel with RSS fallback to yt-dlp
 
@@ -356,6 +357,10 @@ class YouTubePlugin(SourcePlugin):
             return []
 
         self._rss_raw_count = 0
+
+        today = None
+        if date_filter == "today":
+            today = datetime.now(timezone.utc).date()
 
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
 
@@ -381,6 +386,9 @@ class YouTubePlugin(SourcePlugin):
                 parsed = self._parse_feed_entry(entry, feed_title)
 
                 if not parsed["id"]:
+                    continue
+
+                if today and parsed["published"].date() != today:
                     continue
 
                 self._rss_raw_count += 1

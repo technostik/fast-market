@@ -116,6 +116,7 @@ class YouTubeSearchPlugin(SourcePlugin):
         limit: int = 50,
         force: bool = False,
         seen_item_ids: set[str] | None = None,
+        date_filter: str | None = None,
     ) -> list[ItemMetadata]:
         if not self._should_fetch(force):
             return []
@@ -135,8 +136,20 @@ class YouTubeSearchPlugin(SourcePlugin):
 
         videos.sort(key=lambda v: v["published"], reverse=True)
 
+        today = None
+        if date_filter == "today":
+            today = datetime.now(timezone.utc).date()
+
         items = []
         for video in videos:
+            if today:
+                try:
+                    upload_date = datetime.strptime(video["upload_date"], "%Y%m%d").date()
+                    if upload_date != today:
+                        continue
+                except (ValueError, KeyError):
+                    continue
+
             if last_item_id and video["id"] == last_item_id:
                 break
 

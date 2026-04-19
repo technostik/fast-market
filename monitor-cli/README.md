@@ -962,6 +962,70 @@ monitor status --format json
 
 ---
 
+### `monitor diagnose`
+
+Diagnose if all videos published today from monitored sources have been processed. Only fetches today's videos to minimize API usage and yt-dlp calls.
+
+```bash
+# Diagnose with default limit (100 items per source)
+monitor diagnose
+
+# Increase fetch limit for more comprehensive check
+monitor diagnose --limit 200
+
+# JSON output for scripting
+monitor diagnose --format json
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--limit` | Max items to fetch per source (default: 100) |
+| `--format` | Output format: `json`, `yaml`, or `text` |
+
+**Output Example:**
+
+```json
+{
+  "total_fetched": 250,
+  "total_today": 15,
+  "total_logged": 12,
+  "total_missing": 3,
+  "today_videos": [
+    {
+      "item_id": "vid123",
+      "title": "Video Title",
+      "url": "https://youtube.com/watch?v=vid123",
+      "published": "2024-01-15T10:00:00+00:00",
+      "source_id": "source-uuid",
+      "source_plugin": "youtube",
+      "status": "triggered",
+      "log": {
+        "rule_id": "tech-videos",
+        "action_id": "notify",
+        "exit_code": 0,
+        "output": "...",
+        "triggered_at": "2024-01-15T10:05:00+00:00"
+      }
+    },
+    {
+      "item_id": "vid124",
+      "title": "Another Video",
+      "url": "https://youtube.com/watch?v=vid124",
+      "published": "2024-01-15T11:00:00+00:00",
+      "source_id": "source-uuid",
+      "source_plugin": "youtube",
+      "status": "unfound",
+      "log": null
+    }
+  ],
+  "missing_videos": [...]
+}
+```
+
+---
+
 ## Testing Your Rules
 
 Use `--force --dry-run` to test rules without affecting tracking:
