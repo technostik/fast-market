@@ -98,18 +98,20 @@ def logs(
             for r in rows
         ]
 
-    rows = storage.get_trigger_logs_with_metadata(
+    fetch_limit = limit + offset
+    trigger_rows = storage.get_trigger_logs_with_metadata(
         since=since_dt,
         until=date_range[1] if date_range else None,
         rule_id=rule_id,
         source_id=source_id,
         action_id=action_id,
-        limit=limit,
-        offset=offset,
+        limit=fetch_limit,
+        offset=0,
     )
-    return [
+    trigger_data = [
         {
             "id": r.id,
+            "log_type": "trigger",
             "rule_id": r.rule_id,
             "source_id": r.source_id,
             "action_id": r.action_id,
@@ -118,8 +120,38 @@ def logs(
             "exit_code": r.exit_code,
             "output": r.output,
         }
-        for r in rows
+        for r in trigger_rows
     ]
+
+    error_rows = storage.get_run_error_logs(
+        since=since_dt,
+        until=date_range[1] if date_range else None,
+        source_id=source_id,
+        action_id=action_id,
+        rule_id=rule_id,
+        limit=fetch_limit,
+        offset=0,
+    )
+    error_data = [
+        {
+            "id": r.id,
+            "log_type": "run_error",
+            "error_type": r.error_type,
+            "message": r.message,
+            "triggered_at": r.logged_at.isoformat(),
+            "source_id": r.source_id,
+            "action_id": r.action_id,
+            "rule_id": r.rule_id,
+            "item_title": r.item_title,
+            "output": r.output,
+            "trigger_log_id": r.trigger_log_id,
+        }
+        for r in error_rows
+    ]
+
+    combined = trigger_data + error_data
+    combined.sort(key=lambda x: x["triggered_at"], reverse=True)
+    return combined[offset : offset + limit]
 
 
 @router.get("/status")
@@ -307,6 +339,15 @@ h2 { margin:0 0 12px 0; }
     return diffDay + 'd ago';
   }
 
+  const RUN_ERROR_TYPE_LABELS = {
+    fetch_error: { cls: 'error', label: 'Fetch Error' },
+    plugin_not_found: { cls: 'error', label: 'Plugin Missing' },
+    action_not_found: { cls: 'error', label: 'Action Missing' },
+    action_exception: { cls: 'error', label: 'Exception' },
+    action_exit_error: { cls: 'error', label: 'Exit Error' },
+    output_contains_error: { cls: 'warning', label: 'Output Error' },
+  };
+
   function getStatusInfo(exitCode) {
     if (exitCode === 0) return { cls: 'success', label: 'Success' };
     if (exitCode === null || exitCode === undefined) return { cls: 'warning', label: 'Pending' };
@@ -318,22 +359,24 @@ h2 { margin:0 0 12px 0; }
     return rows.map(r => {
       const triggeredAt = r.triggered_at || r.evaluated_at;
       const relativeTime = formatRelativeTime(triggeredAt);
-      const status = type === 'mismatch' ? { cls: 'warning', label: 'Mismatch' } : getStatusInfo(r.exit_code);
       const title = r.item_title || '(no title)';
-      let headerHtml = `
-        <span class="status-dot ${status.cls}" title="${status.label}"></span>
-        <span class="card-title" title="${title}">${title}</span>
-        <span class="card-field"><span class="label">Rule:</span><span class="value badge info">${r.rule_id}</span></span>
-        <span class="card-field"><span class="label">Source:</span><span class="value badge info">${r.source_id}</span></span>`;
-      if (r.action_id) headerHtml += ` <span class="card-field"><span class="label">Action:</span><span class="value badge info">${r.action_id}</span></span>`;
-      headerHtml += ` <span class="card-field"><span class="label">Time:</span><span class="value">${relativeTime}</span></span>`;
-      headerHtml += ` <span class="badge ${status.cls}">${status.label}</span>`;
-      headerHtml += ` <span class="card-expand">▼</span>`;
 
-      let bodyHtml = '';
+      let status, bodyHtml;
+
       if (type === 'mismatch') {
+        status = { cls: 'warning', label: 'Mismatch' };
         bodyHtml = `<div class="card-body"><div><span class="label">Failed Conditions:</span><pre>${JSON.stringify(r.failed_conditions, null, 2)}</pre></div></div>`;
+      } else if (r.log_type === 'run_error') {
+        const info = RUN_ERROR_TYPE_LABELS[r.error_type] || { cls: 'warning', label: r.error_type };
+        status = info;
+        const msgTitle = r.message ? r.message.slice(0, 100) : title;
+        bodyHtml = `<div class="card-body">
+          <div style="font-size:13px;margin-bottom:6px;">${r.message || ''}</div>
+          ${r.trigger_log_id ? `<div style="font-size:12px;color:var(--text-dim);">Trigger: ${r.trigger_log_id}</div>` : ''}
+          ${r.output ? `<pre>${r.output}</pre>` : ''}
+        </div>`;
       } else {
+        status = getStatusInfo(r.exit_code);
         bodyHtml = `<div class="card-body">
           <div style="display:grid;grid-template-columns:auto 1fr;gap:6px;font-size:13px;">
             <span class="label">Exit Code:</span><span>${r.exit_code ?? 'N/A'}</span>
@@ -342,6 +385,18 @@ h2 { margin:0 0 12px 0; }
           ${r.output ? `<pre>${r.output}</pre>` : ''}
         </div>`;
       }
+
+      const cardTitle = (r.log_type === 'run_error' && !r.item_title) ? (r.message || '').slice(0, 80) : title;
+      let headerHtml = `
+        <span class="status-dot ${status.cls}" title="${status.label}"></span>
+        <span class="card-title" title="${cardTitle}">${cardTitle}</span>`;
+      if (r.rule_id) headerHtml += ` <span class="card-field"><span class="label">Rule:</span><span class="value badge info">${r.rule_id}</span></span>`;
+      if (r.source_id) headerHtml += ` <span class="card-field"><span class="label">Source:</span><span class="value badge info">${r.source_id}</span></span>`;
+      if (r.action_id) headerHtml += ` <span class="card-field"><span class="label">Action:</span><span class="value badge info">${r.action_id}</span></span>`;
+      headerHtml += ` <span class="card-field"><span class="label">Time:</span><span class="value">${relativeTime}</span></span>`;
+      headerHtml += ` <span class="badge ${status.cls}">${status.label}</span>`;
+      headerHtml += ` <span class="card-expand">▼</span>`;
+
       return `<div class="card" onclick="this.classList.toggle('expanded')"><div class="card-header">${headerHtml}</div><div class="card-content">${bodyHtml}</div></div>`;
     }).join('');
   }

@@ -12,7 +12,7 @@ from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
 from common.core.config import load_tool_config
 from core.executor import execute_action
-from core.models import Action, ItemMetadata, Rule, RuleMismatchLog, Source, TriggerLog
+from core.models import Action, ItemMetadata, Rule, RuleMismatchLog, RunErrorLog, Source, TriggerLog
 from core.rule_engine import evaluate_rule_with_details
 from core.time_scheduler import should_run_rule
 
@@ -211,6 +211,16 @@ def _fetch_items_for_source(source, plugin_cls, config, limit, force, cron, stor
     except Exception as e:
         if not cron:
             click.echo(f"[ERROR] Fetch failed for source='{source.id}': {e}", err=True)
+        storage.log_run_error(
+            RunErrorLog(
+                id=str(uuid.uuid4()),
+                error_type="fetch_error",
+                message=f"Fetch failed for source='{source.id}': {e}",
+                logged_at=datetime.now(timezone.utc),
+                source_id=source.id,
+                output=str(e),
+            )
+        )
         return {"error": str(e), "items": [], "plugin": plugin_instance}
 
     fetch_time = time.time() - fetch_start
@@ -360,6 +370,19 @@ def _execute_actions_for_trigger(
             error_msg = f"Action '{action_id}' not found in storage"
             errors.append(error_msg)
             click.echo(f"[ERROR] {error_msg}", err=True)
+            storage.log_run_error(
+                RunErrorLog(
+                    id=str(uuid.uuid4()),
+                    error_type="action_not_found",
+                    message=error_msg,
+                    logged_at=triggered_at,
+                    source_id=source.id,
+                    action_id=action_id,
+                    rule_id=rule.id,
+                    item_id=item.id,
+                    item_title=item.title,
+                )
+            )
             actions_skipped += 1
             continue
         if not ignore_enabled and not action.enabled:
@@ -375,6 +398,7 @@ def _execute_actions_for_trigger(
             )
             actions_executed += 1
 
+            trigger_log_id = str(uuid.uuid4())
             action_results.append(
                 {
                     "action_id": action_id,
@@ -385,7 +409,7 @@ def _execute_actions_for_trigger(
 
             storage.log_trigger(
                 TriggerLog(
-                    id=str(uuid.uuid4()),
+                    id=trigger_log_id,
                     rule_id=rule.id,
                     source_id=source.id,
                     action_id=action.id,
@@ -414,16 +438,67 @@ def _execute_actions_for_trigger(
                 errors.append(error_msg)
                 click.echo(f"[ERROR] {error_msg}", err=True)
                 actions_failed += 1
-            elif not silent and not cron:
-                click.echo(f"[{action.id}] exit={code}")
-                if output:
-                    click.echo(output)
+                storage.log_run_error(
+                    RunErrorLog(
+                        id=str(uuid.uuid4()),
+                        error_type="action_exit_error",
+                        message=f"Action '{action.id}' failed with exit code {code}",
+                        logged_at=triggered_at,
+                        source_id=source.id,
+                        action_id=action.id,
+                        rule_id=rule.id,
+                        item_id=item.id,
+                        item_title=item.title,
+                        output=output,
+                        trigger_log_id=trigger_log_id,
+                    )
+                )
+            else:
+                if not silent and not cron:
+                    click.echo(f"[{action.id}] exit={code}")
+                    if output:
+                        click.echo(output)
+
+            if output and "error" in output.lower():
+                error_msg = f"Action '{action.id}' output contains 'error' keyword (exit={code})"
+                errors.append(error_msg)
+                if not cron:
+                    click.echo(f"[OUTPUT_ERROR] {error_msg}", err=True)
+                storage.log_run_error(
+                    RunErrorLog(
+                        id=str(uuid.uuid4()),
+                        error_type="output_contains_error",
+                        message=error_msg,
+                        logged_at=triggered_at,
+                        source_id=source.id,
+                        action_id=action.id,
+                        rule_id=rule.id,
+                        item_id=item.id,
+                        item_title=item.title,
+                        output=output,
+                        trigger_log_id=trigger_log_id,
+                    )
+                )
 
         except Exception as e:
             error_msg = f"Action execution error for '{action.id}': {str(e)}"
             errors.append(error_msg)
             click.echo(f"[ERROR] {error_msg}", err=True)
             actions_failed += 1
+            storage.log_run_error(
+                RunErrorLog(
+                    id=str(uuid.uuid4()),
+                    error_type="action_exception",
+                    message=error_msg,
+                    logged_at=triggered_at,
+                    source_id=source.id,
+                    action_id=action.id,
+                    rule_id=rule.id,
+                    item_id=item.id,
+                    item_title=item.title,
+                    output=str(e),
+                )
+            )
             action_results.append(
                 {
                     "action_id": action_id,
@@ -722,6 +797,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 error_msg = f"Plugin '{source.plugin}' not found for source '{source.id}'"
                 errors.append(error_msg)
                 click.echo(f"[ERROR] {error_msg}", err=True)
+                storage.log_run_error(
+                    RunErrorLog(
+                        id=str(uuid.uuid4()),
+                        error_type="plugin_not_found",
+                        message=error_msg,
+                        logged_at=now,
+                        source_id=source.id,
+                    )
+                )
                 continue
 
             _cleanup_old_seen_items(storage, source, now, cron)

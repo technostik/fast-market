@@ -96,3 +96,18 @@ class RuleMismatchLog:
     item_title: str
     failed_conditions: list[dict]
     evaluated_at: datetime
+
+
+@dataclass(slots=True)
+class RunErrorLog:
+    id: str
+    error_type: str  # fetch_error | plugin_not_found | action_not_found | action_exception | action_exit_error | output_contains_error
+    message: str
+    logged_at: datetime
+    source_id: str | None = None
+    action_id: str | None = None
+    rule_id: str | None = None
+    item_id: str | None = None
+    item_title: str | None = None
+    output: str | None = None
+    trigger_log_id: str | None = None

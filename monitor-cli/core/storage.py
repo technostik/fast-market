@@ -12,6 +12,7 @@ from core.models import (
     Action,
     Rule,
     RuleMismatchLog,
+    RunErrorLog,
     Source,
     TriggerLog,
     TriggerLogWithMetadata,
@@ -125,6 +126,26 @@ class MonitorStorage:
 
                 CREATE INDEX IF NOT EXISTS idx_triggered_items_rule_triggered
                 ON triggered_items(rule_id, triggered_at);
+
+                CREATE TABLE IF NOT EXISTS run_error_logs (
+                    id TEXT PRIMARY KEY,
+                    error_type TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    logged_at TEXT NOT NULL,
+                    source_id TEXT,
+                    action_id TEXT,
+                    rule_id TEXT,
+                    item_id TEXT,
+                    item_title TEXT,
+                    output TEXT,
+                    trigger_log_id TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_run_error_logs_logged_at
+                ON run_error_logs(logged_at);
+
+                CREATE INDEX IF NOT EXISTS idx_run_error_logs_source
+                ON run_error_logs(source_id, logged_at);
             """)
             self._migrate_rules_columns(conn)
             self._migrate_sources_columns(conn)
@@ -702,6 +723,81 @@ class MonitorStorage:
                 params.append(before.isoformat())
             cur = conn.execute(query, params)
             return cur.rowcount
+
+    def log_run_error(self, log: RunErrorLog) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO run_error_logs
+                   (id, error_type, message, logged_at, source_id, action_id, rule_id,
+                    item_id, item_title, output, trigger_log_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    log.id,
+                    log.error_type,
+                    log.message,
+                    log.logged_at.isoformat(),
+                    log.source_id,
+                    log.action_id,
+                    log.rule_id,
+                    log.item_id,
+                    log.item_title,
+                    log.output,
+                    log.trigger_log_id,
+                ),
+            )
+
+    def get_run_error_logs(
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        source_id: str | None = None,
+        action_id: str | None = None,
+        rule_id: str | None = None,
+        error_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunErrorLog]:
+        with self._get_conn() as conn:
+            query = "SELECT * FROM run_error_logs WHERE 1=1"
+            params: list = []
+            if since:
+                query += " AND logged_at >= ?"
+                params.append(since.isoformat())
+            if until:
+                query += " AND logged_at < ?"
+                params.append(until.isoformat())
+            if source_id:
+                query += " AND source_id = ?"
+                params.append(source_id)
+            if action_id:
+                query += " AND action_id = ?"
+                params.append(action_id)
+            if rule_id:
+                query += " AND rule_id = ?"
+                params.append(rule_id)
+            if error_type:
+                query += " AND error_type = ?"
+                params.append(error_type)
+            query += " ORDER BY logged_at DESC LIMIT ? OFFSET ?"
+            params.append(limit)
+            params.append(offset)
+            rows = conn.execute(query, params).fetchall()
+            return [self._row_to_run_error_log(row) for row in rows]
+
+    def _row_to_run_error_log(self, row: sqlite3.Row) -> RunErrorLog:
+        return RunErrorLog(
+            id=row["id"],
+            error_type=row["error_type"],
+            message=row["message"],
+            logged_at=datetime.fromisoformat(row["logged_at"]),
+            source_id=row["source_id"],
+            action_id=row["action_id"],
+            rule_id=row["rule_id"],
+            item_id=row["item_id"],
+            item_title=row["item_title"],
+            output=row["output"],
+            trigger_log_id=row["trigger_log_id"],
+        )
 
     def get_stats(self) -> dict:
         with self._get_conn() as conn:
