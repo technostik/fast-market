@@ -118,6 +118,7 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         output = (proc.stdout or "") + (proc.stderr or "")
+        cmd_str = " ".join(cmd)
 
         report = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -125,7 +126,10 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
             "dry_run": payload.dry_run,
             "selected_count": len(selected),
             "exit_code": proc.returncode,
-            "output": output,
+            "command": cmd_str,
+            "stdout": proc.stdout or "",
+            "stderr": proc.stderr or "",
+            "output": output,  # combined for backward compatibility
             "items": selected,
         }
         report_path.write_text(
@@ -136,6 +140,9 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
         return {
             "exit_code": proc.returncode,
             "output": output,
+            "command": cmd_str,
+            "stdout": proc.stdout or "",
+            "stderr": proc.stderr or "",
             "dry_run": payload.dry_run,
             "report": str(report_path),
             "post_type": post_type,

@@ -628,7 +628,10 @@ async function postSelected(){
   const reportPath = body.report ? `\nReport: ${body.report}` : '';
   const dryrun = body.dry_run ? '[dry-run] ' : '';
   const cmdType = body.post_type || postMode;
-  logEl.textContent = `${dryrun}[youtube batch-${cmdType}-post]\n${rawOutput}${reportPath}`;
+  const cmdDisplay = body.command ? `\nCommand: ${body.command}` : '';
+  const stdoutDisplay = body.stdout ? `\nStdout:\n${body.stdout}` : '';
+  const stderrDisplay = body.stderr ? `\nStderr:\n${body.stderr}` : '';
+  logEl.textContent = `${dryrun}[youtube batch-${cmdType}-post]${cmdDisplay}${stdoutDisplay}${stderrDisplay}${reportPath}`;
 }
 
 loadBtn.addEventListener('click', loadFile);
