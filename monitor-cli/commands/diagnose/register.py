@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 import click
+import yaml
 
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
-from common.core.config import load_tool_config
-from core.models import RunErrorLog, Source, TriggerLog
+from core.models import RunErrorLog
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _detect_format_from_filename(filename: str) -> str:
+    if filename.endswith(".yaml") or filename.endswith(".yml"):
+        return "yaml"
+    elif filename.endswith(".json"):
+        return "json"
+    return "json"
 
 
 def _fetch_items_for_diagnose(source, plugin_cls, config, limit, cron, storage):
@@ -78,9 +87,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--limit", type=int, default=100, help="Max items to fetch per source (default: 100)"
     )
-    @click.option("--format", "fmt", type=click.Choice(["json", "text", "yaml"]), default="text")
+    @click.option("--format", "fmt", type=click.Choice(["json", "text", "yaml"]), default="yaml")
+    @click.option(
+        "-f",
+        "--output-file",
+        "output_file",
+        help="Output file path (format autodetected from extension)",
+    )
     @click.pass_context
-    def diagnose_cmd(ctx, cron, limit, fmt):
+    def diagnose_cmd(ctx, cron, limit, fmt, output_file):
         storage = get_storage()
         now = datetime.now(timezone.utc)
         today = now.date()
@@ -190,7 +205,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
         }
 
         if not cron:
-            out_formatted(result, fmt)
+            if output_file:
+                output_fmt = _detect_format_from_filename(output_file)
+                with open(output_file, "w") as f:
+                    if output_fmt == "yaml":
+                        yaml.dump(result, f, default_flow_style=False)
+                    else:
+                        json.dump(result, f, indent=2)
+            else:
+                out_formatted(result, fmt)
 
     return CommandManifest(
         name="diagnose",

@@ -407,11 +407,17 @@ class YouTubePlugin(SourcePlugin):
                 if is_new:
                     details = await self._get_video_details_async(video_id)
                     fetch_method = "rss+yt-dlp"
-                    print(f"  🎬 {video_id}: yt-dlp details (is_new=True)")
+                    published_str = parsed["published"].strftime("%Y-%m-%d %H:%M:%S UTC")
+                    print(
+                        f"  🎬 {video_id}: '{parsed['title']}' ({published_str}) - yt-dlp details (is_new=True)"
+                    )
                 else:
                     details = {}
                     fetch_method = "rss-only"
-                    print(f"  📄 {video_id}: rss-only (is_new=False)")
+                    published_str = parsed["published"].strftime("%Y-%m-%d %H:%M:%S UTC")
+                    print(
+                        f"  📄 {video_id}: '{parsed['title']}' ({published_str}) - rss-only (is_new=False)"
+                    )
 
                 # If we stopped due to last_item_id, we still fetched up to that point
                 # But if we processed ALL entries without hitting last_item_id,
