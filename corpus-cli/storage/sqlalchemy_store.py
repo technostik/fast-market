@@ -466,8 +466,13 @@ class SQLAlchemyStore:
                 query += " AND duration_seconds <= :max_duration"
                 params["max_duration"] = filters.max_duration
             if filters.privacy_status:
-                query += " AND privacy_status = :privacy_status"
-                params["privacy_status"] = filters.privacy_status
+                if filters.privacy_status == "non-public":
+                    query += (
+                        " AND (privacy_status IS NULL OR privacy_status != 'public')"
+                    )
+                else:
+                    query += " AND privacy_status = :privacy_status"
+                    params["privacy_status"] = filters.privacy_status
 
         order_field_map = {
             "date": "updated_at",
@@ -755,11 +760,12 @@ def _apply_filters(
             continue
         if filters.max_duration is not None and duration > filters.max_duration:
             continue
-        if (
-            filters.privacy_status is not None
-            and item.privacy_status != filters.privacy_status
-        ):
-            continue
+        if filters.privacy_status is not None:
+            if filters.privacy_status == "non-public":
+                if item.privacy_status == "public":
+                    continue
+            elif item.privacy_status != filters.privacy_status:
+                continue
         out.append(item)
     return out
 
@@ -788,10 +794,12 @@ def _apply_filters_dicts(
             continue
         if filters.max_size is not None and raw_len > filters.max_size:
             continue
-        if (
-            filters.privacy_status is not None
-            and item.get("privacy_status") != filters.privacy_status
-        ):
-            continue
+        privacy = item.get("privacy_status")
+        if filters.privacy_status is not None:
+            if filters.privacy_status == "non-public":
+                if privacy == "public":
+                    continue
+            elif privacy != filters.privacy_status:
+                continue
         out.append(item)
     return out

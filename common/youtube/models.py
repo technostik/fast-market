@@ -48,6 +48,7 @@ class Video(BaseModel):
         video_id = item.get("id", item.get("video_id", ""))
         snippet = item.get("snippet", {})
         stats = item.get("statistics", {})
+        status = item.get("status", {})
         return cls(
             video_id=video_id,
             title=snippet.get("title", item.get("title", "N/A")),
@@ -62,6 +63,7 @@ class Video(BaseModel):
             subscriber_count=item.get("subscriber_count", 0),
             relevance_score=item.get("relevance_score", 0.0),
             days_old=item.get("days_old", 0),
+            privacy_status=status.get("privacyStatus", item.get("privacy_status", "public")),
         )
 
     def to_dict(self) -> dict:

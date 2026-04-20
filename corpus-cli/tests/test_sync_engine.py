@@ -11,11 +11,13 @@ from plugins.base import ItemMeta, SourcePlugin
 class P(SourcePlugin):
     name = "obsidian"
 
-    def list_items(self, limit: int, known_id_dates=None):
+    def list_items(self, limit: int, known_id_dates=None, debug: bool = False):
         return [ItemMeta("a", datetime.utcnow())]
 
     def fetch(self, item_meta: ItemMeta):
-        return Document(source_plugin="obsidian", source_id="a", title="A", raw_text="# H\ntext")
+        return Document(
+            source_plugin="obsidian", source_id="a", title="A", raw_text="# H\ntext"
+        )
 
 
 class FlakyPlugin(SourcePlugin):
@@ -24,14 +26,16 @@ class FlakyPlugin(SourcePlugin):
     def __init__(self):
         self.calls = 0
 
-    def list_items(self, limit: int, known_id_dates=None):
+    def list_items(self, limit: int, known_id_dates=None, debug: bool = False):
         return [ItemMeta("bad", datetime.utcnow())]
 
     def fetch(self, item_meta: ItemMeta):
         self.calls += 1
         if self.calls == 1:
             raise NetworkError("temporary")
-        return Document(source_plugin="youtube", source_id="bad", title="Recovered", raw_text="ok")
+        return Document(
+            source_plugin="youtube", source_id="bad", title="Recovered", raw_text="ok"
+        )
 
 
 class PermanentFailurePlugin(SourcePlugin):
@@ -40,7 +44,7 @@ class PermanentFailurePlugin(SourcePlugin):
     def __init__(self):
         self.calls = 0
 
-    def list_items(self, limit: int, known_id_dates=None):
+    def list_items(self, limit: int, known_id_dates=None, debug: bool = False):
         return [ItemMeta("perm", datetime.utcnow())]
 
     def fetch(self, item_meta: ItemMeta):

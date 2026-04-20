@@ -23,6 +23,7 @@ class SourcePlugin(ABC):
         self,
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
+        debug: bool = False,
     ) -> list[ItemMeta]:
         """Return up to `limit` items that need indexing (new or modified).
 

@@ -48,15 +48,23 @@ class YouTubePlugin(SourcePlugin):
         self.transport = transport or RSSPlaylistTransport(cookies=self.cookies)
         self._api_client: YouTubeClient | None = None
 
-    def _get_api_client(self) -> YouTubeClient:
+    def _get_api_client(self, debug: bool = False) -> YouTubeClient:
         if self._api_client is None:
             yt_cfg = self._get_config().get("youtube", {})
             client_secret = yt_cfg.get("client_secret_path")
+            if debug:
+                logger.info(
+                    "DEBUG: Getting YouTube API client",
+                    client_secret_path=client_secret is not None,
+                    channel_id=self.channel_id,
+                )
             oauth = YouTubeOAuth(client_secret_path=client_secret)
             api = oauth.get_client()
             self._api_client = YouTubeClient(
                 api, channel_id=self.channel_id, auth=oauth
             )
+            if debug:
+                logger.info("DEBUG: YouTube API client created successfully")
         return self._api_client
 
     def _get_config(self) -> dict:
@@ -70,22 +78,50 @@ class YouTubePlugin(SourcePlugin):
         known_id_dates: dict[str, datetime | None] | None = None,
         use_api: bool = False,
         non_public: bool = False,
+        debug: bool = False,
     ) -> list[ItemMeta]:
+        logger.warning(
+            "DEBUG: YouTubePlugin.list_items called",
+            non_public=non_public,
+            use_api=use_api,
+            debug=debug,
+            limit=limit,
+            known_ids_count=len(known_id_dates or {}),
+        )
+
         if non_public:
+            if debug:
+                logger.info(
+                    "DEBUG: Calling _list_items_via_api with include_non_public=True"
+                )
             return self._list_items_via_api(
-                limit, known_id_dates, include_non_public=True
+                limit, known_id_dates, include_non_public=True, debug=debug
             )
         if use_api:
-            return self._list_items_via_api(limit, known_id_dates)
-        return self._list_items_via_rss(limit, known_id_dates)
+            if debug:
+                logger.info(
+                    "DEBUG: Calling _list_items_via_api with include_non_public=False"
+                )
+            return self._list_items_via_api(limit, known_id_dates, debug=debug)
+        if debug:
+            logger.info("DEBUG: Calling _list_items_via_rss")
+        return self._list_items_via_rss(limit, known_id_dates, debug=debug)
 
     def _list_items_via_api(
         self,
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
         include_non_public: bool = False,
+        debug: bool = False,
     ) -> list[ItemMeta]:
         from googleapiclient.errors import HttpError
+
+        logger.warning(
+            "DEBUG: _list_items_via_api called",
+            limit=limit,
+            include_non_public=include_non_public,
+            debug=debug,
+        )
 
         known = set(known_id_dates or {})
         all_new: list[ItemMeta] = []
@@ -93,14 +129,120 @@ class YouTubePlugin(SourcePlugin):
         skipped_indexed = 0
 
         logger.info("youtube_api_list_videos", channel_id=self.channel_id)
-        client = self._get_api_client()
+        client = self._get_api_client(debug=debug)
+
+        if debug:
+            logger.info("DEBUG: YouTube API client initialized successfully")
 
         max_fetch = limit * 50
         if include_non_public:
-            max_fetch = max(max_fetch, 200)
+            # For non-public videos, we may need to search deeper into the channel history
+            # since many recent videos may already be indexed
+            max_fetch = max(
+                max_fetch, 500
+            )  # Fetch more for non-public to find unindexed videos
 
         try:
-            videos = client.get_channel_videos(self.channel_id, max_results=max_fetch)
+            if include_non_public:
+                # Fetch videos in batches until we find unindexed ones
+                videos = []
+                page_token = None
+                batch_size = 100
+                max_batches = 10  # Limit to avoid excessive API usage
+
+                for batch_num in range(max_batches):
+                    if debug:
+                        logger.warning(
+                            "DEBUG: Fetching batch",
+                            batch=batch_num + 1,
+                            batch_size=batch_size,
+                            total_so_far=len(videos),
+                        )
+
+                    batch_videos, page_token = client.get_all_owned_videos(
+                        self.channel_id, max_results=batch_size, page_token=page_token
+                    )
+
+                    if debug:
+                        logger.warning(
+                            "DEBUG: Batch returned videos", count=len(batch_videos)
+                        )
+
+                    if not batch_videos:
+                        break
+
+                    videos.extend(batch_videos)
+
+                    # Count unindexed non-public videos found so far
+                    unindexed_non_public = [
+                        v for v in videos
+                        if v.video_id not in known
+                        and (v.privacy_status or "unknown") not in _PUBLIC_STATUSES
+                    ]
+                    if debug:
+                        logger.warning(
+                            "DEBUG: Unindexed non-public videos so far",
+                            count=len(unindexed_non_public),
+                            need=limit,
+                        )
+
+                    # Stop once we have enough unindexed non-public videos
+                    if len(unindexed_non_public) >= limit:
+                        if debug:
+                            logger.warning("DEBUG: Found enough non-public unindexed videos, stopping")
+                        break
+
+                    # If no more pages, stop
+                    if not page_token:
+                        if debug:
+                            logger.warning("DEBUG: No more pages available")
+                        break
+
+                if debug:
+                    logger.warning(
+                        "DEBUG: Total videos fetched across batches", count=len(videos)
+                    )
+                    privacy_counts = {}
+                    for v in videos:
+                        privacy = v.privacy_status or "unknown"
+                        privacy_counts[privacy] = privacy_counts.get(privacy, 0) + 1
+                    logger.warning("DEBUG: Privacy status breakdown", **privacy_counts)
+
+                yt_cfg = self._get_config().get("youtube", {})
+                members_ids = yt_cfg.get("members_video_ids", [])
+                if debug:
+                    logger.warning(
+                        "DEBUG: Members video IDs configured",
+                        count=len(members_ids),
+                        ids=members_ids,
+                    )
+
+                if members_ids:
+                    fetched_ids = {v.video_id for v in videos}
+                    extra_ids = [vid for vid in members_ids if vid not in fetched_ids]
+                    if debug:
+                        logger.warning(
+                            "DEBUG: Fetching additional member videos",
+                            count=len(extra_ids),
+                            ids=extra_ids,
+                        )
+                    if extra_ids:
+                        extra = client.get_videos_by_ids(extra_ids)
+                        videos.extend(extra)
+                        if debug:
+                            logger.warning(
+                                "DEBUG: Total videos after adding members",
+                                total=len(videos),
+                            )
+            else:
+                if debug:
+                    logger.info("DEBUG: Fetching public channel videos")
+                    logger.info("DEBUG: Max results", max_results=max_fetch)
+                videos = client.get_channel_videos(
+                    self.channel_id, max_results=max_fetch
+                )
+                if debug:
+                    logger.info("DEBUG: API returned videos", count=len(videos))
         except HttpError as e:
             if e.resp.status == 403 and "quota" in str(e).lower():
                 logger.error("youtube_api_quota_exceeded", channel_id=self.channel_id)
@@ -162,6 +304,22 @@ class YouTubePlugin(SourcePlugin):
                 )
             )
 
+        if debug and all_new:
+            # Calculate date range
+            dates = [item.updated_at for item in all_new if item.updated_at]
+            if dates:
+                min_date = min(dates)
+                max_date = max(dates)
+                logger.info(
+                    "DEBUG: Date range of videos found",
+                    min_date=min_date.isoformat(),
+                    max_date=max_date.isoformat(),
+                )
+            logger.info(
+                "DEBUG: Sample video metadata",
+                video_0=all_new[0].metadata if all_new else None,
+            )
+
         logger.info(
             "api_fetched",
             source=self.name,
@@ -190,13 +348,21 @@ class YouTubePlugin(SourcePlugin):
         self,
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
+        debug: bool = False,
     ) -> list[ItemMeta]:
         known = set(known_id_dates or {})
         all_new: list[ItemMeta] = []
         skipped_privacy = 0
         skipped_indexed = 0
 
+        if debug:
+            logger.info("DEBUG: Using RSS feed for video listing")
+            logger.info("DEBUG: Channel ID", channel_id=self.channel_id)
+
         playlist_id = self.transport.get_uploads_playlist(self.channel_id)
+
+        if debug:
+            logger.info("DEBUG: Uploads playlist ID", playlist_id=playlist_id)
 
         for page in self.transport.iter_playlist_pages(playlist_id):
             video_ids = [item["snippet"]["resourceId"]["videoId"] for item in page]

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, HTTPException
 from commands.base import CommandManifest
 from commands.helpers import build_engine, out
 
-_DEFAULT_LIMITS = {"youtube": 5}
+_DEFAULT_LIMITS = {"youtube": 10}
 _FALLBACK_LIMIT = 10
 
 
@@ -68,6 +68,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text"
     )
+    @click.option(
+        "--debug",
+        is_flag=True,
+        default=False,
+        help="Show detailed debug information during sync",
+    )
     @click.pass_context
     def sync_cmd(
         ctx,
@@ -82,6 +88,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         retry_failure,
         clear_permanent,
         include_blocked,
+        debug,
         **kwargs,
     ):
         import sys
@@ -122,14 +129,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     else _DEFAULT_LIMITS.get(name, _FALLBACK_LIMIT)
                 )
                 vault_path = obsidian_vault_path if name == "obsidian" else None
+                # For YouTube, non-public videos require API access
+                effective_use_api = use_api or (non_public and name == "youtube")
+
                 try:
                     result = engine.sync(
                         plugins[name],
                         mode=mode,
                         limit=effective_limit,
                         vault_path=vault_path,
-                        use_api=use_api if name == "youtube" else False,
+                        use_api=effective_use_api,
                         non_public=non_public if name == "youtube" else False,
+                        debug=debug,
                     )
                 except RuntimeError as e:
                     if "quota" in str(e).lower():
@@ -204,6 +215,7 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         source = req.get("source")
         mode = req.get("mode", "new")
         limit = req.get("limit", 10)
+        debug = req.get("debug", False)
         from common.core.config import load_config
         from core.embedder import Embedder
         from common.core.registry import build_plugins
@@ -229,7 +241,11 @@ def _build_router(source_choices: list[str]) -> APIRouter:
             }
 
         result = engine.sync(
-            plugins[source], mode=mode, limit=int(limit), vault_path=vault_path
+            plugins[source],
+            mode=mode,
+            limit=int(limit),
+            vault_path=vault_path,
+            debug=debug,
         )
         return {
             "source": result.source,

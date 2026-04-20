@@ -63,7 +63,18 @@ class SyncEngine:
         vault_path: str | None = None,
         use_api: bool = False,
         non_public: bool = False,
+        debug: bool = False,
     ) -> SyncResult:
+        if debug:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.info(
+                "DEBUG: Sync called with debug=True",
+                plugin=plugin.name,
+                mode=mode,
+                limit=limit,
+            )
         known_id_dates = (
             self.store.get_indexed_id_dates(plugin.name) if mode == "new" else {}
         )
@@ -79,8 +90,22 @@ class SyncEngine:
                 list_kwargs["use_api"] = use_api
             if "non_public" in sig.parameters:
                 list_kwargs["non_public"] = non_public
+            if "debug" in sig.parameters:
+                list_kwargs["debug"] = debug
 
-        items = plugin.list_items(**list_kwargs)
+        try:
+            items = plugin.list_items(**list_kwargs)
+        except Exception as e:
+            if debug:
+                import structlog
+
+                logger = structlog.get_logger(__name__)
+                logger.info(
+                    "DEBUG: Exception in plugin.list_items",
+                    error=str(e),
+                    plugin=plugin.name,
+                )
+            raise
 
         logger.info(
             "sync_started",

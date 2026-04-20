@@ -64,6 +64,17 @@ def _needs_scope_refresh(e: HttpError) -> bool:
     return _is_insufficient_permissions_error(e)
 
 
+_PRIVACY_STATUS_MAP = {
+    "membersonly": "members",
+    "membersOnly": "members",
+}
+
+
+def _normalize_privacy_status(status: str) -> str:
+    """Normalize YouTube API privacy status values to consistent lowercase strings."""
+    return _PRIVACY_STATUS_MAP.get(status, status)
+
+
 class YouTubeClient:
     """YouTube API client with quota tracking, error handling, and auto-scope refresh."""
 
@@ -598,6 +609,105 @@ class YouTubeClient:
         except Exception as e:
             logger.error(
                 "unexpected_error", operation="get_channel_videos", error=str(e)
+            )
+            raise
+
+    def get_uploads_playlist_id(self, channel_id: str) -> Optional[str]:
+        """Get the uploads playlist ID for a channel (includes private/unlisted for owner)."""
+        try:
+            if channel_id == "mine":
+                response = (
+                    self.youtube.channels()
+                    .list(
+                        part="contentDetails",
+                        mine=True,
+                    )
+                    .execute()
+                )
+            else:
+                response = (
+                    self.youtube.channels()
+                    .list(
+                        part="contentDetails",
+                        id=channel_id,
+                    )
+                    .execute()
+                )
+            self._track_quota(1)
+            if response.get("items"):
+                return response["items"][0]["contentDetails"]["relatedPlaylists"][
+                    "uploads"
+                ]
+            return None
+        except HttpError as e:
+            logger.error("api_error", operation="get_uploads_playlist_id", error=str(e))
+            raise
+
+    def get_all_owned_videos(
+        self,
+        channel_id: str,
+        max_results: int = 500,
+        page_token: str | None = None,
+    ) -> tuple[list[Video], str | None]:
+        """Get all videos via uploads playlist for the authenticated channel owner.
+
+        Returns public, private, and unlisted videos. Members-only videos are NOT
+        returned (YouTube API limitation — use get_videos_by_ids() for known IDs).
+        """
+        try:
+            playlist_id = self.get_uploads_playlist_id(channel_id)
+            if not playlist_id:
+                logger.warning("uploads_playlist_not_found", channel_id=channel_id)
+                return [], None
+
+            videos = []
+            current_page_token = page_token
+
+            while len(videos) < max_results:
+                playlist_response = (
+                    self.youtube.playlistItems()
+                    .list(
+                        part="snippet,contentDetails",
+                        playlistId=playlist_id,
+                        maxResults=min(50, max_results - len(videos)),
+                        pageToken=current_page_token,
+                    )
+                    .execute()
+                )
+                self._track_quota(1)
+
+                video_ids = [
+                    item["contentDetails"]["videoId"]
+                    for item in playlist_response.get("items", [])
+                    if "contentDetails" in item and "videoId" in item["contentDetails"]
+                ]
+
+                if video_ids:
+                    video_details = (
+                        self.youtube.videos()
+                        .list(
+                            part="contentDetails,snippet,status",
+                            id=",".join(video_ids),
+                        )
+                        .execute()
+                    )
+                    self._track_quota(1)
+
+                    for item in video_details.get("items", []):
+                        video = Video.from_video_list(item)
+                        videos.append(video)
+
+                current_page_token = playlist_response.get("nextPageToken")
+                if not current_page_token:
+                    break
+
+            return videos, current_page_token
+        except HttpError as e:
+            logger.error("api_error", operation="get_videos_by_ids", error=str(e))
+            raise
+        except Exception as e:
+            logger.error(
+                "unexpected_error", operation="get_videos_by_ids", error=str(e)
             )
             raise
 

@@ -224,7 +224,8 @@ def _build_router(source_choices: list[str]) -> APIRouter:
             None, ge=0, description="Max duration in seconds"
         ),
         privacy_status: str | None = Query(
-            None, description="YouTube: public|private|unlisted|members|unknown"
+            None,
+            description="YouTube: public|private|unlisted|members|unknown|non-public",
         ),
         since: str | None = Query(
             None, description="Filter by date: YYYY-MM-DD (inclusive)"

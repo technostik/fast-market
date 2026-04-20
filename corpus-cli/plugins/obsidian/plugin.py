@@ -46,6 +46,7 @@ class ObsidianPlugin(SourcePlugin):
         self,
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
+        debug: bool = False,
     ) -> list[ItemMeta]:
         """Walk all vault .md files (recursively) newest-mtime-first.
 
@@ -76,15 +77,19 @@ class ObsidianPlugin(SourcePlugin):
                 indexed_at = known[source_id]
                 # Skip only when mtime has not advanced (content unchanged).
                 # Truncate to second precision to absorb filesystem float rounding.
-                if indexed_at is not None and mtime.replace(microsecond=0) <= indexed_at.replace(microsecond=0):
+                if indexed_at is not None and mtime.replace(
+                    microsecond=0
+                ) <= indexed_at.replace(microsecond=0):
                     continue
                 # mtime advanced → file was modified since last index, re-index it
 
-            out.append(ItemMeta(
-                source_id=source_id,
-                updated_at=mtime,
-                metadata={"size_bytes": file.stat().st_size},
-            ))
+            out.append(
+                ItemMeta(
+                    source_id=source_id,
+                    updated_at=mtime,
+                    metadata={"size_bytes": file.stat().st_size},
+                )
+            )
             if len(out) >= limit:
                 break  # collected `limit` new/modified items — stop
 
@@ -96,7 +101,7 @@ class ObsidianPlugin(SourcePlugin):
             end = raw.find("\n---\n", 4)
             if end > -1:
                 meta = yaml.safe_load(raw[4:end]) or {}
-                return meta, raw[end + 5:]
+                return meta, raw[end + 5 :]
         return {}, raw
 
     def fetch(self, item_meta: ItemMeta) -> Document:
@@ -104,13 +109,23 @@ class ObsidianPlugin(SourcePlugin):
         path = self.vault / item_meta.source_id
         raw = path.read_text(encoding="utf-8")
         metadata, body = self._parse(raw)
-        tags = set(metadata.get("tags", [])) if isinstance(metadata.get("tags"), list) else set()
+        tags = (
+            set(metadata.get("tags", []))
+            if isinstance(metadata.get("tags"), list)
+            else set()
+        )
         tags.update(re.findall(r"(?<!\w)#([\w-]+)", body))
         links = re.findall(r"\[\[([^\]]+)\]\]", body)
         plain = re.sub(r"\[\[([^\]]+)\]\]", r"\1", body)
 
         size_bytes = (item_meta.metadata or {}).get("size_bytes", 0)
-        logger.info("indexed_note", title=path.stem, source_id=item_meta.source_id, size_bytes=size_bytes, tags=len(tags))
+        logger.info(
+            "indexed_note",
+            title=path.stem,
+            source_id=item_meta.source_id,
+            size_bytes=size_bytes,
+            tags=len(tags),
+        )
 
         metadata["vault_path"] = str(self.vault)
         metadata["size_bytes"] = size_bytes
