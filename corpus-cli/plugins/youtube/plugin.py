@@ -47,6 +47,8 @@ class YouTubePlugin(SourcePlugin):
 
         self.transport = transport or RSSPlaylistTransport(cookies=self.cookies)
         self._api_client: YouTubeClient | None = None
+        self._channel_title: str | None = None
+        self._channel_handle: str | None = None
 
     def _get_api_client(self, debug: bool = False) -> YouTubeClient:
         if self._api_client is None:
@@ -66,6 +68,25 @@ class YouTubePlugin(SourcePlugin):
             if debug:
                 logger.info("DEBUG: YouTube API client created successfully")
         return self._api_client
+
+    def _get_channel_title(self) -> str | None:
+        if self._channel_title is None:
+            try:
+                client = self._get_api_client()
+                channel_info = client.get_channel_info(self.channel_id)
+                if channel_info:
+                    self._channel_title = channel_info.title
+                    self._channel_handle = channel_info.custom_url
+            except Exception:
+                # Fallback to channel_id if we can't fetch title
+                self._channel_title = self.channel_id
+                self._channel_handle = None
+        return self._channel_title
+
+    def _get_channel_handle(self) -> str | None:
+        if self._channel_handle is None:
+            self._get_channel_title()  # This will fetch both
+        return self._channel_handle
 
     def _get_config(self) -> dict:
         from common.core.config import load_config
@@ -175,7 +196,8 @@ class YouTubePlugin(SourcePlugin):
 
                     # Count unindexed non-public videos found so far
                     unindexed_non_public = [
-                        v for v in videos
+                        v
+                        for v in videos
                         if v.video_id not in known
                         and (v.privacy_status or "unknown") not in _PUBLIC_STATUSES
                     ]
@@ -189,7 +211,9 @@ class YouTubePlugin(SourcePlugin):
                     # Stop once we have enough unindexed non-public videos
                     if len(unindexed_non_public) >= limit:
                         if debug:
-                            logger.warning("DEBUG: Found enough non-public unindexed videos, stopping")
+                            logger.warning(
+                                "DEBUG: Found enough non-public unindexed videos, stopping"
+                            )
                         break
 
                     # If no more pages, stop
@@ -300,6 +324,9 @@ class YouTubePlugin(SourcePlugin):
                         "url": video.url,
                         "duration_seconds": duration,
                         "privacy_status": privacy,
+                        "channel_id": video.channel_id,
+                        "channel_title": video.channel_title,
+                        "channel_handle": self._get_channel_handle(),
                     },
                 )
             )
@@ -426,6 +453,9 @@ class YouTubePlugin(SourcePlugin):
                             "url": f"https://www.youtube.com/watch?v={video_id}",
                             "duration_seconds": duration,
                             "privacy_status": privacy,
+                            "channel_id": self.channel_id,
+                            "channel_title": self._get_channel_title(),
+                            "channel_handle": self._get_channel_handle(),
                         },
                     )
                 )

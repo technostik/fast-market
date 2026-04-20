@@ -153,6 +153,18 @@ def _print_text(docs: list[dict]) -> None:
         if plugin == "obsidian":
             size = len(doc.get("raw_text", "") or "")
             meta_parts.append(f"size={size}chars")
+        elif plugin == "youtube":
+            channel_handle = doc.get("metadata", {}).get("channel_handle")
+            channel_title = doc.get("metadata", {}).get("channel_title")
+            channel = (
+                channel_handle
+                or channel_title
+                or doc.get("metadata", {}).get("channel_id")
+            )
+            if channel:
+                meta_parts.append(f"channel={channel}")
+        if doc.get("url"):
+            meta_parts.append(f"url={doc['url']}")
 
         meta_str = f"  {' · '.join(meta_parts)}" if meta_parts else ""
         click.echo(f"[{handle}] {title}{meta_str}")
@@ -166,18 +178,29 @@ def _print_table(docs: list[dict], source: str | None) -> None:
 
     if plugin == "youtube":
         click.echo(
-            f"{'HANDLE':<25} {'TITLE':<40} {'DATE':<12} {'DURATION':<10} {'PRIVACY':<10}"
+            f"{'HANDLE':<25} {'TITLE':<30} {'CHANNEL':<12} {'DATE':<12} {'DURATION':<10} {'PRIVACY':<8} {'URL':<40}"
         )
-        click.echo("-" * 100)
+        click.echo("-" * 160)
 
         for doc in docs:
             handle = doc["handle"][:24]
-            title = doc["title"][:39]
+            title = doc["title"][:29]
+            channel_handle = doc.get("metadata", {}).get("channel_handle")
+            channel_title = doc.get("metadata", {}).get("channel_title")
+            channel = (
+                channel_handle
+                or channel_title
+                or doc.get("metadata", {}).get("channel_id")
+                or ""
+            )[:11]
             date = doc.get("updated_at", "")[:10] if doc.get("updated_at") else ""
             dur = fmt_duration(doc.get("duration_seconds", 0)) or ""
-            priv = (doc.get("privacy_status") or "")[:9]
+            priv = (doc.get("privacy_status") or "")[:7]
+            url = (doc.get("url") or "")[:39]
 
-            click.echo(f"{handle:<25} {title:<40} {date:<12} {dur:<10} {priv:<10}")
+            click.echo(
+                f"{handle:<25} {title:<30} {channel:<12} {date:<12} {dur:<10} {priv:<8} {url:<40}"
+            )
     elif plugin == "obsidian":
         click.echo(f"{'HANDLE':<25} {'TITLE':<40} {'DATE':<12} {'SIZE':<10}")
         click.echo("-" * 90)
