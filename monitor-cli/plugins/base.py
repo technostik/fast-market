@@ -23,6 +23,7 @@ class SourcePlugin(ABC):
         self.metadata = source_config.get("metadata", {})
         self.last_check = source_config.get("last_check")
         self.slowdown = source_config.get("slowdown")
+        self.fallback_slowdown = source_config.get("fallback_slowdown")
 
     def _parse_interval(self, interval_str: str | int | None = None) -> int | None:
         """Parse interval string or integer to seconds.
@@ -61,10 +62,23 @@ class SourcePlugin(ABC):
             True if no cooldown is active (never checked, or enough time has passed).
             False if still in cooldown period.
         """
+        return self._should_fetch_with_slowdown(self.slowdown, force)
+
+    def _should_fetch_with_slowdown(self, slowdown: str | int | None, force: bool = False) -> bool:
+        """Check if cooldown has elapsed since last fetch using specified slowdown.
+
+        Args:
+            slowdown: Slowdown to use for this check.
+            force: If True, bypass cooldown check.
+
+        Returns:
+            True if no cooldown is active (never checked, or enough time has passed).
+            False if still in cooldown period.
+        """
         if force:
             return True
 
-        interval_seconds = self._parse_interval()
+        interval_seconds = self._parse_interval(slowdown)
         if interval_seconds is None:
             return True
 

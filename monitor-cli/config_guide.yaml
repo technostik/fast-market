@@ -114,6 +114,7 @@
 #   - is_new:      If true, only trigger on items newer than last check
 #   - metadata:   Custom key-value pairs for your reference
 #   - slowdown: Cooldown between fetches (e.g., "5m", "1h"). Default: no cooldown
+#   - fallback_slowdown: Cooldown for fallback method (e.g., "15m", "1h"). Default: no cooldown
 #
 # -----------------------------------------------------------------------------
 # ACTIONS

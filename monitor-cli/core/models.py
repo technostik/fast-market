@@ -29,6 +29,7 @@ class Source:
     last_fetched_at: datetime | None = None
     last_item_id: str | None = None
     slowdown: int | None = None
+    fallback_slowdown: int | None = None
     is_new: bool = True
     created_at: datetime = field(default_factory=datetime.now)
 

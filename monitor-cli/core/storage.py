@@ -202,6 +202,15 @@ class MonitorStorage:
             except sqlite3.OperationalError:
                 pass
 
+        # Add fallback_slowdown if it doesn't exist
+        try:
+            conn.execute("SELECT fallback_slowdown FROM sources LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            try:
+                conn.execute("ALTER TABLE sources ADD COLUMN fallback_slowdown INTEGER")
+            except sqlite3.OperationalError:
+                pass
+
     def _migrate_triggered_items(self, conn: sqlite3.Connection) -> None:
         try:
             conn.execute("SELECT triggered_at FROM triggered_items LIMIT 1").fetchone()
@@ -227,8 +236,8 @@ class MonitorStorage:
     def add_source(self, source: Source) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO sources (id, plugin, origin, description, metadata, enabled, last_check, last_fetched_at, last_item_id, slowdown, is_new, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO sources (id, plugin, origin, description, metadata, enabled, last_check, last_fetched_at, last_item_id, slowdown, fallback_slowdown, is_new, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     source.id,
                     source.plugin,
@@ -240,6 +249,7 @@ class MonitorStorage:
                     source.last_fetched_at.isoformat() if source.last_fetched_at else None,
                     source.last_item_id,
                     source.slowdown,
+                    source.fallback_slowdown,
                     int(source.is_new),
                     source.created_at.isoformat(),
                 ),
@@ -249,7 +259,7 @@ class MonitorStorage:
         with self._get_conn() as conn:
             conn.execute(
                 """UPDATE sources SET plugin = ?, origin = ?, description = ?, metadata = ?, enabled = ?,
-                   last_check = ?, last_fetched_at = ?, last_item_id = ?, slowdown = ?, is_new = ? WHERE id = ?""",
+                   last_check = ?, last_fetched_at = ?, last_item_id = ?, slowdown = ?, fallback_slowdown = ?, is_new = ? WHERE id = ?""",
                 (
                     source.plugin,
                     source.origin,
@@ -260,6 +270,7 @@ class MonitorStorage:
                     source.last_fetched_at.isoformat() if source.last_fetched_at else None,
                     source.last_item_id,
                     source.slowdown,
+                    source.fallback_slowdown,
                     int(source.is_new),
                     source.id,
                 ),
@@ -841,6 +852,9 @@ class MonitorStorage:
         last_fetched_at_val = row["last_fetched_at"] if "last_fetched_at" in row.keys() else None
         metadata_val = row["metadata"] if "metadata" in row.keys() else "{}"
         slowdown_val = row["slowdown"] if "slowdown" in row.keys() else None
+        fallback_slowdown_val = (
+            row["fallback_slowdown"] if "fallback_slowdown" in row.keys() else None
+        )
         is_new_val = row["is_new"] if "is_new" in row.keys() else 0
         return Source(
             id=row["id"],
@@ -855,6 +869,7 @@ class MonitorStorage:
             else None,
             last_item_id=row["last_item_id"],
             slowdown=slowdown_val,
+            fallback_slowdown=fallback_slowdown_val,
             is_new=bool(is_new_val),
             created_at=datetime.fromisoformat(row["created_at"]),
         )

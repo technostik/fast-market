@@ -687,13 +687,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Cooldown interval (e.g., '15m', '1h', '120s', or '900' for seconds)",
     )
     @click.option(
+        "--fallback-slowdown",
+        type=str,
+        help="Cooldown interval for fallback method (e.g., '15m', '1h', '120s', or '900' for seconds)",
+    )
+    @click.option(
         "--is-new/--no-is-new",
         "is_new",
         default=False,
         help="If true, only trigger on new items (what's new mode)",
     )
     @click.option("--format", "fmt", type=click.Choice(["json", "text"]), default="text")
-    def source_add(custom_id, plugin, origin, description, meta, slowdown, is_new, fmt):
+    def source_add(
+        custom_id, plugin, origin, description, meta, slowdown, fallback_slowdown, is_new, fmt
+    ):
         """Add a new source to monitor with optional metadata."""
         storage = get_storage()
 
@@ -705,6 +712,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             metadata[key.strip()] = value.strip()
 
         parsed_slowdown = _parse_slowdown(slowdown)
+        parsed_fallback_slowdown = _parse_slowdown(fallback_slowdown)
 
         plugin_class = plugin_manifests[plugin].source_plugin_class
         temp_config = plugin_class({"origin": origin}, {"origin": origin})
@@ -721,6 +729,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             description=description,
             metadata=metadata,
             slowdown=parsed_slowdown,
+            fallback_slowdown=parsed_fallback_slowdown,
             is_new=is_new,
             created_at=datetime.now(),
         )
@@ -774,6 +783,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Cooldown interval (e.g., '15m', '1h', '120s', or '900' for seconds)",
     )
     @click.option(
+        "--fallback-slowdown",
+        type=str,
+        help="Cooldown interval for fallback method (e.g., '15m', '1h', '120s', or '900' for seconds)",
+    )
+    @click.option(
         "--is-new/--no-is-new",
         "is_new",
         default=None,
@@ -793,6 +807,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         description,
         meta,
         slowdown,
+        fallback_slowdown,
         is_new,
         enable,
         editor,
@@ -841,6 +856,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if slowdown is not None:
             existing.slowdown = _parse_slowdown(slowdown)
+
+        if fallback_slowdown is not None:
+            existing.fallback_slowdown = _parse_slowdown(fallback_slowdown)
 
         if is_new is not None:
             existing.is_new = is_new

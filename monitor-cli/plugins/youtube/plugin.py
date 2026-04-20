@@ -347,15 +347,12 @@ class YouTubePlugin(SourcePlugin):
 
         Args:
             seen_item_ids: Only call yt-dlp for details on items NOT in this set.
-                       Items in seen_item_ids use basic RSS data (faster, avoids bot detection).
+                        Items in seen_item_ids use basic RSS data (faster, avoids bot detection).
 
         Returns:
             List of ItemMetadata. The number of RSS entries processed is stored in
             self._rss_raw_count for reporting purposes.
         """
-        if not self._should_fetch(force):
-            return []
-
         self._rss_raw_count = 0
 
         today = None
@@ -367,7 +364,14 @@ class YouTubePlugin(SourcePlugin):
         # First check if RSS is available
         rss_available = self._check_rss_availability(rss_url)
 
-        if not rss_available:
+        if rss_available:
+            # Use normal slowdown for RSS
+            if not self._should_fetch_with_slowdown(self.slowdown, force):
+                return []
+        else:
+            # Use fallback slowdown for yt-dlp
+            if not self._should_fetch_with_slowdown(self.fallback_slowdown, force):
+                return []
             print(f"⚠️ RSS feed not available for {self.channel_id}, falling back to yt-dlp")
             return await self._fetch_via_yt_dlp(last_item_id, limit)
 

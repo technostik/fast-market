@@ -56,6 +56,7 @@ class SourceConfig(BaseModel):
     enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
     slowdown: int | None = None
+    fallback_slowdown: int | None = None
     is_new: bool = True
 
 
@@ -103,6 +104,7 @@ KNOWN_SOURCE_FIELDS = {
     "enabled",
     "metadata",
     "slowdown",
+    "fallback_slowdown",
     "is_new",
 }
 KNOWN_ACTION_FIELDS = {"id", "command", "description", "enabled"}
@@ -248,7 +250,7 @@ def validate_config(
             from core.rule_parser import RuleParser, RuleParseError
 
             conditions = rule["conditions"]
-            
+
             # Handle boolean conditions: true = always match, false = never match
             if isinstance(conditions, bool):
                 if conditions is False:
