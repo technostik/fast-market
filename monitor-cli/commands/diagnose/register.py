@@ -112,6 +112,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         config = {}
         all_items = []
         errors = []
+        rss_tests = []
 
         for source in sources:
             if source.plugin not in plugin_manifests:
@@ -132,6 +133,30 @@ def register(plugin_manifests: dict) -> CommandManifest:
             plugin_cls = plugin_manifests[source.plugin].source_plugin_class
             items = _fetch_items_for_diagnose(source, plugin_cls, config, limit, cron, storage)
             all_items.extend([{"item": item, "source": source} for item in items])
+
+            # Test RSS availability for YouTube sources
+            if source.plugin == "youtube":
+                # Create a temporary plugin instance to test RSS
+                temp_plugin = plugin_cls(
+                    config,
+                    {
+                        "id": source.id,
+                        "origin": source.origin,
+                        "metadata": source.metadata or {},
+                        "last_check": source.last_check,
+                        "slowdown": source.slowdown,
+                    },
+                )
+                rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={source.origin}"
+                rss_available = temp_plugin._check_rss_availability(rss_url)
+                rss_tests.append(
+                    {
+                        "source_id": source.id,
+                        "channel_id": source.origin,
+                        "rss_available": rss_available,
+                        "rss_url": rss_url,
+                    }
+                )
 
         # Filter to today's videos
         today_items = [entry for entry in all_items if entry["item"].published_at.date() == today]
@@ -201,6 +226,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             "total_missing": len(missing),
             "today_videos": today_videos,
             "missing_videos": missing,
+            "rss_tests": rss_tests,
             "errors": errors,
         }
 

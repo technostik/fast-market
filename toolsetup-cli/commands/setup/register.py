@@ -21,7 +21,7 @@ from commands.completion import (
     PathParamType,
 )
 from commands.setup.workdir import register as workdir_register
-from commands.setup.diagnostic import check_workdir_health
+
 
 # Import all plugins so they self-register
 from commands.setup.plugins import all_plugins, get_plugin  # noqa: F401
@@ -469,7 +469,7 @@ def register():
         click.echo("  <tool> setup --show-config  (to see current)")
         click.echo("  <tool> setup --show-config-path (to see path)")
 
-    @setup_cmd.command("diagnostic")
+    @setup_cmd.command("diagnose")
     @click.option(
         "--format",
         "-F",
@@ -478,7 +478,7 @@ def register():
         default="text",
         help="Output format",
     )
-    def diagnostic_cmd(fmt):
+    def diagnose_cmd(fmt):
         """Run diagnostic tests on workdir, LLM, and YouTube configuration.
 
         Performs health checks on:
@@ -486,7 +486,7 @@ def register():
         - LLM provider connectivity
         - YouTube API setup and credentials
         """
-        from commands.setup.diagnostic import (
+        from commands.setup.diagnose import (
             run_all_diagnostics,
             print_diagnostic_results,
         )

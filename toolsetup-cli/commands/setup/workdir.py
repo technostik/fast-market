@@ -12,7 +12,7 @@ from common.core.config import (
     remove_workdir_lock,
     get_lock_wait_timeout,
 )
-from commands.setup.diagnostic import check_workdir_health
+from commands.setup.diagnose import check_workdir_health
 
 
 def perform_workdir_health_check():
@@ -254,7 +254,7 @@ def register():
         if current_workdir and is_workdir_locked(current_workdir) and not force:
             if no_wait:
                 click.echo(
-                    f"Error: current workdir is locked. Use --force to create anyway or --no-wait to fail immediately.",
+                    "Error: current workdir is locked. Use --force to create anyway or --no-wait to fail immediately.",
                     err=True,
                 )
                 return
@@ -273,7 +273,7 @@ def register():
                     break
             else:
                 click.echo(
-                    f"Error: Timeout waiting for workdir to unlock. Use --force to create anyway.",
+                    "Error: Timeout waiting for workdir to unlock. Use --force to create anyway.",
                     err=True,
                 )
                 return
@@ -368,7 +368,7 @@ def register():
 
         if current_workdir and is_workdir_locked(current_workdir):
             click.echo(
-                f"Error: workdir is locked. Run 'toolsetup workdir release' to unlock.",
+                "Error: workdir is locked. Run 'toolsetup workdir release' to unlock.",
                 err=True,
             )
             return
@@ -431,7 +431,7 @@ def register():
 
         if current_workdir and is_workdir_locked(current_workdir):
             click.echo(
-                f"Error: workdir is locked. Run 'toolsetup workdir release' to unlock.",
+                "Error: workdir is locked. Run 'toolsetup workdir release' to unlock.",
                 err=True,
             )
             return

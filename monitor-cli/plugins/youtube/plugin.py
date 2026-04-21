@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import time
-import asyncio
-from datetime import datetime, timezone
-from typing import Any
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 import feedparser
 import requests
 import yt_dlp
 from requests.exceptions import RequestException
 
-from plugins.base import SourcePlugin, ItemMetadata
+from plugins.base import ItemMetadata, SourcePlugin
 
 
 class YouTubePlugin(SourcePlugin):
@@ -26,7 +25,7 @@ class YouTubePlugin(SourcePlugin):
         self.ydl_opts = {
             "quiet": True,
             "no_warnings": True,
-            "extract_flat": True,  # Changed to True for playlist extraction
+            "extract_flat": False,  # False to get upload_date for proper sorting
             "force_generic_extractor": False,
             "ignoreerrors": True,
             "no_color": True,
@@ -51,7 +50,7 @@ class YouTubePlugin(SourcePlugin):
             raise NotImplementedError(
                 "YouTube handle resolution requires API key. "
                 "Use channel ID directly or set up YouTube API.\n"
-                f"To find channel ID: https://commentpicker.com/youtube-channel-id.php"
+                "To find channel ID: https://commentpicker.com/youtube-channel-id.php"
             )
 
         # Extract from URL patterns
