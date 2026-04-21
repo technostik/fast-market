@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from common import structlog
-from common.core.config import load_common_config
+from common.core.config import load_common_config, is_workdir_locked
 from core.security import _assert_path_safe
 
 logger = structlog.get_logger(__name__)
@@ -360,3 +360,9 @@ def workdir_last() -> dict[str, str]:
     config = load_common_config()
     workdir = config.get("workdir", "")
     return {"workdir": workdir}
+
+
+@router.get("/workdir-status")
+def workdir_status() -> dict[str, bool]:
+    """Check if the current workdir is locked."""
+    return {"locked": is_workdir_locked()}

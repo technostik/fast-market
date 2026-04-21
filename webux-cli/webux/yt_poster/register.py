@@ -30,6 +30,8 @@ _YT_POSTER_HTML = """<!doctype html>
     input { flex:1; }
     button { cursor:pointer; }
     button:hover { background:var(--accent); }
+    .locked { background:var(--error); color:#fff; }
+    .unlocked { background:var(--success); color:#000; }
     .error { color:var(--error); min-height:20px; margin-bottom:6px; }
     .table-wrap { display:none; border:1px solid var(--border); border-radius:8px; overflow:auto; }
     table { border-collapse:collapse; width:100%; min-width:1100px; }
@@ -642,11 +644,32 @@ regenerateSelectedBtn.addEventListener('click', () => {
   const indices = rows.map((r, i) => r.selected ? i : -1).filter(i => i >= 0);
   regenerateRows(indices);
 });
+async function updateWorkdirStatus() {
+  const resp = await fetch('/api/yt_poster/workdir-status');
+  if (resp.ok) {
+    const data = await resp.json();
+    const prevBtn = document.getElementById('prevWorkdir');
+    const lastBtn = document.getElementById('lastWorkdir');
+    if (data.locked) {
+      prevBtn.classList.add('locked');
+      prevBtn.classList.remove('unlocked');
+      lastBtn.classList.add('locked');
+      lastBtn.classList.remove('unlocked');
+    } else {
+      prevBtn.classList.add('unlocked');
+      prevBtn.classList.remove('locked');
+      lastBtn.classList.add('unlocked');
+      lastBtn.classList.remove('locked');
+    }
+  }
+}
+
 document.getElementById('prevWorkdir').addEventListener('click', async () => {
   const resp = await fetch('/api/yt_poster/workdir-prev', { method: 'POST' });
   if (resp.ok) {
     const data = await resp.json();
     errorEl.textContent = 'Workdir: ' + data.workdir.split('/').pop();
+    updateWorkdirStatus();
   } else {
     const err = await resp.json().catch(() => ({ detail: 'Failed' }));
     errorEl.textContent = err.detail || 'Failed';
@@ -657,6 +680,7 @@ document.getElementById('lastWorkdir').addEventListener('click', async () => {
   if (resp.ok) {
     const data = await resp.json();
     errorEl.textContent = 'Workdir: ' + data.workdir.split('/').pop();
+    updateWorkdirStatus();
   } else {
     const err = await resp.json().catch(() => ({ detail: 'Failed' }));
     errorEl.textContent = err.detail || 'Failed';
@@ -669,6 +693,7 @@ if (preset) {
   fileInput.value = preset;
   loadFile();
 }
+updateWorkdirStatus();
 </script>
 </body>
 </html>
