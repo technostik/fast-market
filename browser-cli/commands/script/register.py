@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import time
 
 import click
@@ -128,13 +127,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
         param_dict: dict[str, str] = {}
         for p in params:
             if "=" not in p:
-                raise click.ClickException(f"Invalid parameter format: '{p}'. Use KEY=VALUE.")
+                raise click.ClickException(
+                    f"Invalid parameter format: '{p}'. Use KEY=VALUE."
+                )
             key, value = p.split("=", 1)
             param_dict[key] = value
 
         # Resolve script content
         if script_file:
             from pathlib import Path
+
             resolved = resolve_script_path(script_file)
             if resolved is None:
                 raise click.ClickException(f"Script file not found: {script_file}")
@@ -142,7 +144,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         elif stdin or script_input == "-":
             script_content = read_stdin()
         elif script_input is None:
-            raise click.ClickException("SCRIPT_INPUT is required (or use --stdin/-s or --file/-f).")
+            raise click.ClickException(
+                "SCRIPT_INPUT is required (or use --stdin/-s or --file/-f)."
+            )
         else:
             # If it contains newlines, treat as inline script content
             if "\n" in script_input:
@@ -189,7 +193,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not browser_was_running:
             # Launch browser automatically
             import subprocess
-            import os
             from pathlib import Path
 
             browser_bin = "google-chrome"
@@ -203,7 +206,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "--disable-features=OptimizationHints",
             ]
 
-            click.echo(f"No browser on CDP port {cdp_port}, launching {browser_bin}...", err=True)
+            click.echo(
+                f"No browser on CDP port {cdp_port}, launching {browser_bin}...",
+                err=True,
+            )
             subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
@@ -231,7 +237,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             resolved = substitute_params(instruction, param_dict)
 
             if fmt == "text":
-                click.echo(f"  [{i+1}/{len(instructions)}] {resolved}", err=True)
+                click.echo(f"  [{i + 1}/{len(instructions)}] {resolved}", err=True)
 
             # Determine if we should retry on timeout
             retry_budget_ms = timeout  # None means no retry (single attempt)
@@ -294,6 +300,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                                         err=True,
                                     )
                                 continue
+                        # Print stdout if successful
+                        if fmt == "text" and entry["success"] and entry["stdout"]:
+                            click.echo(entry["stdout"])
                         break
             else:
                 # No retry: single attempt
@@ -321,6 +330,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "success": result.returncode == 0,
                 }
 
+                # Print stdout if successful
+                if fmt == "text" and entry["success"] and entry["stdout"]:
+                    click.echo(entry["stdout"])
+
             results.append(entry)
 
             if entry["exit_code"] != 0:
@@ -344,10 +357,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
             out(output, fmt)
         else:
             if errors:
-                click.echo(f"\n{len(errors)} error(s) in {len(instructions)} instruction(s).", err=True)
+                click.echo(
+                    f"\n{len(errors)} error(s) in {len(instructions)} instruction(s).",
+                    err=True,
+                )
                 raise SystemExit(1)
             else:
-                click.echo(f"\n{len(instructions)} instruction(s) completed successfully.", err=True)
+                click.echo(
+                    f"\n{len(instructions)} instruction(s) completed successfully.",
+                    err=True,
+                )
 
     return CommandManifest(
         name="script",
