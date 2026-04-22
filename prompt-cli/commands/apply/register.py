@@ -72,11 +72,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
           prompt apply "Review this: @config.yaml"
           echo "What is AI?" | prompt apply -
           cat prompt.txt | prompt apply --stdin
+          echo "Hello world" | prompt apply "Summarize this text:"
         """
         from common.core.config import load_common_config, load_tool_config
         from commands.helpers import build_engine, get_default_provider
         from core.models import PromptExecution
-        from core.substitution import resolve_arguments
+        from core.substitution import resolve_arguments, extract_placeholders
         from common.llm.base import LLMRequest
         from storage.store import PromptStore
 
@@ -157,47 +158,54 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 store = PromptStore()
                 saved_prompt = store.get_prompt(prompt_name_or_content)
 
-                if not saved_prompt:
-                    click.echo(
-                        f"Error: Unknown prompt '{prompt_name_or_content}'.\n"
-                        f"Use 'prompt list' to see available prompts.",
-                        err=True,
-                    )
-                    sys.exit(1)
+                if saved_prompt:
+                    prompt_content = saved_prompt.content
+                    placeholders = extract_placeholders(prompt_content)
 
-                prompt_content = saved_prompt.content
-                from core.substitution import extract_placeholders
-
-                placeholders = extract_placeholders(prompt_content)
-
-                if len(placeholders) == 0:
-                    click.echo(
-                        f"Error: this prompt should not have additional content.",
-                        err=True,
-                    )
-                    sys.exit(1)
-                elif len(placeholders) == 1:
-                    logger = structlog.get_logger(__name__)
-                    logger.warning(
-                        "implicit_stdin_replacing_placeholder",
-                        placeholder=placeholders[0],
-                    )
-                    click.echo(
-                        f"Warning: replacing placeholder '{placeholders[0]}' with stdin content",
-                        err=True,
-                    )
-                    prompt_content = prompt_content.replace(
-                        f"{{{placeholders[0]}}}", stdin_content
-                    )
+                    if len(placeholders) == 0:
+                        click.echo(
+                            f"Error: this prompt should not have additional content.",
+                            err=True,
+                        )
+                        sys.exit(1)
+                    elif len(placeholders) == 1:
+                        logger = structlog.get_logger(__name__)
+                        logger.warning(
+                            "implicit_stdin_replacing_placeholder",
+                            placeholder=placeholders[0],
+                        )
+                        click.echo(
+                            f"Warning: replacing placeholder '{placeholders[0]}' with stdin content",
+                            err=True,
+                        )
+                        prompt_content = prompt_content.replace(
+                            f"{{{placeholders[0]}}}", stdin_content
+                        )
+                    else:
+                        placeholder_list = " ".join(f"{p}=value" for p in placeholders)
+                        click.echo(
+                            f"Error: prompt '{prompt_name_or_content}' has {len(placeholders)} placeholders: {', '.join(placeholders)}\n"
+                            f"Provide values using: prompt apply {prompt_name_or_content} {placeholder_list}\n"
+                            f"Or use stdin for one placeholder: {placeholders[0]}=-",
+                            err=True,
+                        )
+                        sys.exit(1)
                 else:
-                    placeholder_list = " ".join(f"{p}=value" for p in placeholders)
-                    click.echo(
-                        f"Error: prompt '{prompt_name_or_content}' has {len(placeholders)} placeholders: {', '.join(placeholders)}\n"
-                        f"Provide values using: prompt apply {prompt_name_or_content} {placeholder_list}\n"
-                        f"Or use stdin for one placeholder: {placeholders[0]}=-",
-                        err=True,
-                    )
-                    sys.exit(1)
+                    # Treat as direct prompt
+                    is_direct_prompt = True
+                    prompt_content = prompt_name_or_content
+                    placeholders = extract_placeholders(prompt_content)
+                    if not placeholders:
+                        prompt_content += f"\n{stdin_content}"
+                    else:
+                        placeholder_list = " ".join(f"{p}=value" for p in placeholders)
+                        click.echo(
+                            f"Error: direct prompt has {len(placeholders)} placeholders: {', '.join(placeholders)}\n"
+                            f'Provide values using: prompt apply "{prompt_name_or_content}" {placeholder_list}\n'
+                            f'Or use stdin for one placeholder: prompt apply "{prompt_name_or_content}" {placeholders[0]}=-',
+                            err=True,
+                        )
+                        sys.exit(1)
         else:
             # Try to load as saved prompt first
             store = PromptStore()

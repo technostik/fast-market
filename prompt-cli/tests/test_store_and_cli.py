@@ -115,6 +115,32 @@ def test_prompt_cli_apply_literal_and_stdin(
     assert "content=-" in result.output
 
 
+def test_prompt_cli_apply_direct_with_implicit_stdin(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg_data"))
+    monkeypatch.setenv("FASTMARKET_CONFIG_DIR", str(tmp_path / "cfg"))
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    (cfg_dir / "prompt.yaml").write_text(
+        "default_provider: anthropic\nproviders:\n  anthropic:\n    default_model: fake-model\n    api_key_env: ANTHROPIC_API_KEY\n",
+        encoding="utf-8",
+    )
+
+    import commands.helpers as helpers_mod
+
+    monkeypatch.setattr(
+        helpers_mod, "build_engine", lambda verbose: {"anthropic": _FakeProvider()}
+    )
+
+    # Test direct prompt without placeholders, with implicit stdin
+    result = runner.invoke(
+        main, ["apply", "Summarize this:"], input="some text to summarize"
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "RESULT::Summarize this:\nsome text to summarize"
+
+
 def test_prompt_cli_apply_from_file_json(
     runner: CliRunner, tmp_path: Path, monkeypatch
 ):

@@ -16,10 +16,12 @@ prompt apply summarize text=@article.txt
 ### 2. Direct Prompt (inline string)
 ```bash
 prompt apply "Explain {topic}" topic="quantum physics"
+echo "Hello world" | prompt apply "Summarize this text:"
 ```
 - Uses the literal string as prompt content
 - Uses default provider and model settings
 - No database lookup
+- If piped input is detected and no placeholders are present, stdin content is appended after a line break
 
 ### 3. Stdin Mode (piping/chaining)
 ```bash

@@ -18,9 +18,7 @@ class _FakeProvider:
         return _Response()
 
 
-def test_implicit_stdin_one_placeholder(
-    runner: CliRunner, tmp_path: Path, monkeypatch
-):
+def test_implicit_stdin_one_placeholder(runner: CliRunner, tmp_path: Path, monkeypatch):
     """Test that implicit stdin replaces the sole placeholder with a warning."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg_data"))
     monkeypatch.setenv("FASTMARKET_CONFIG_DIR", str(tmp_path / "cfg"))
@@ -39,7 +37,8 @@ def test_implicit_stdin_one_placeholder(
 
     # Create a prompt with ONE placeholder
     result = runner.invoke(
-        main, ["create", "extract_keywords", "--content", "Extract keywords from: {text}"]
+        main,
+        ["create", "extract_keywords", "--content", "Extract keywords from: {text}"],
     )
     assert result.exit_code == 0, result.output
 
@@ -49,7 +48,10 @@ def test_implicit_stdin_one_placeholder(
     )
     assert result.exit_code == 0, result.output
     assert "Warning: replacing placeholder 'text' with stdin content" in result.output
-    assert "RESULT::Extract keywords from: Python is a programming language" in result.output
+    assert (
+        "RESULT::Extract keywords from: Python is a programming language"
+        in result.output
+    )
 
 
 def test_implicit_stdin_no_placeholders_error(
@@ -68,9 +70,7 @@ def test_implicit_stdin_no_placeholders_error(
     assert result.exit_code == 0, result.output
 
     # Apply with implicit stdin (no placeholders -> error)
-    result = runner.invoke(
-        main, ["apply", "greeting"], input="some content"
-    )
+    result = runner.invoke(main, ["apply", "greeting"], input="some content")
     assert result.exit_code == 1, result.output
     assert "this prompt should not have additional content" in result.output
 
@@ -86,14 +86,18 @@ def test_implicit_stdin_multiple_placeholders_error(
 
     # Create a prompt with MULTIPLE placeholders
     result = runner.invoke(
-        main, ["create", "translate", "--content", "Translate {text} from {source_lang} to {target_lang}"]
+        main,
+        [
+            "create",
+            "translate",
+            "--content",
+            "Translate {text} from {source_lang} to {target_lang}",
+        ],
     )
     assert result.exit_code == 0, result.output
 
     # Apply with implicit stdin (multiple placeholders -> error)
-    result = runner.invoke(
-        main, ["apply", "translate"], input="Bonjour le monde"
-    )
+    result = runner.invoke(main, ["apply", "translate"], input="Bonjour le monde")
     assert result.exit_code == 1, result.output
     assert "has 3 placeholders: source_lang, target_lang, text" in result.output
     assert "source_lang=value target_lang=value text=value" in result.output
@@ -133,21 +137,29 @@ def test_implicit_stdin_with_explicit_args_uses_args(
     assert "stdin content" not in result.output
 
 
-def test_implicit_stdin_unknown_prompt_error(
+def test_implicit_stdin_treats_unknown_as_direct(
     runner: CliRunner, tmp_path: Path, monkeypatch
 ):
-    """Test that implicit stdin raises error for unknown prompt name."""
+    """Test implicit stdin treats unknown prompts as direct prompts."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg_data"))
     monkeypatch.setenv("FASTMARKET_CONFIG_DIR", str(tmp_path / "cfg"))
     cfg_dir = tmp_path / "cfg"
     cfg_dir.mkdir()
-
-    # Apply with implicit stdin for non-existent prompt
-    result = runner.invoke(
-        main, ["apply", "nonexistent_prompt"], input="some content"
+    (cfg_dir / "prompt.yaml").write_text(
+        "default_provider: anthropic\nproviders:\n  anthropic:\n    default_model: fake-model\n    api_key_env: ANTHROPIC_API_KEY\n",
+        encoding="utf-8",
     )
-    assert result.exit_code == 1, result.output
-    assert "Unknown prompt 'nonexistent_prompt'" in result.output
+
+    import commands.helpers as helpers_mod
+
+    monkeypatch.setattr(
+        helpers_mod, "build_engine", lambda verbose: {"anthropic": _FakeProvider()}
+    )
+
+    # Apply with implicit stdin for non-existent prompt (treated as direct)
+    result = runner.invoke(main, ["apply", "nonexistent_prompt"], input="some content")
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "RESULT::nonexistent_prompt\nsome content"
 
 
 def test_explicit_stdin_flag_still_works(
@@ -170,14 +182,10 @@ def test_explicit_stdin_flag_still_works(
     )
 
     # Create a prompt with ONE placeholder
-    result = runner.invoke(
-        main, ["create", "process", "--content", "Process: {data}"]
-    )
+    result = runner.invoke(main, ["create", "process", "--content", "Process: {data}"])
     assert result.exit_code == 0, result.output
 
     # --stdin flag should still raise error for named prompts with placeholders
-    result = runner.invoke(
-        main, ["apply", "process", "--stdin"], input="some data"
-    )
+    result = runner.invoke(main, ["apply", "process", "--stdin"], input="some data")
     assert result.exit_code == 1, result.output
     assert "--stdin is not compatible with applying a named prompt" in result.output
