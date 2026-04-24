@@ -139,9 +139,25 @@ class TestBackupSnapshot:
         snapshot_root = get_snapshot_root()
         assert _is_snapped(snapshot_root, SOURCE_DATA) is True
 
-    def test_snapshot_requires_source_type(self, backup_cmd, runner):
+    def test_snapshot_all_sources(
+        self,
+        backup_cmd,
+        mock_snapshot_root,
+        mock_workdir_config,
+        mock_config_source,
+        mock_data_source,
+        runner,
+    ):
         result = runner.invoke(backup_cmd, ["snapshot"])
-        assert result.exit_code != 0
+        assert result.exit_code == 0
+        # Should contain multiple "snapped" messages
+        assert result.output.count("snapped") == 3
+
+        # Verify all sources are snapped
+        snapshot_root = get_snapshot_root()
+        assert _is_snapped(snapshot_root, SOURCE_WORKDIR) is True
+        assert _is_snapped(snapshot_root, SOURCE_CONFIG) is True
+        assert _is_snapped(snapshot_root, SOURCE_DATA) is True
 
 
 class TestBackupRestore:

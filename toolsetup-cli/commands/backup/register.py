@@ -47,11 +47,43 @@ def _is_flat_only(source_type: str) -> bool:
 
 
 SOURCE_TYPE_OPTION = click.option(
-    "--source-type", "-s",
+    "--source-type",
+    "-s",
     type=click.Choice([SOURCE_WORKDIR, SOURCE_CONFIG, SOURCE_DATA]),
-    required=True,
-    help="Which directory to backup: workdir, config, or data",
+    required=False,
+    help="Which directory to backup: workdir, config, or data (default: all)",
 )
+
+
+def _snapshot_all(targets: list[str]):
+    """Snapshot all source types (workdir, config, data)."""
+    all_sources = [SOURCE_WORKDIR, SOURCE_CONFIG, SOURCE_DATA]
+    target_list = list(targets) if targets else ["."]
+
+    for source_type in all_sources:
+        source = _get_source(source_type)
+        if source is None:
+            click.echo(f"Warning: {source_type} not configured, skipping.", err=True)
+            continue
+        if not source.exists():
+            click.echo(
+                f"Warning: {source_type} directory does not exist: {source}, skipping.",
+                err=True,
+            )
+            continue
+
+        flat_only = _is_flat_only(source_type)
+        sentinel_prefix = _get_sentinel_prefix(source_type)
+        try:
+            do_snapshot(
+                source_type,
+                source,
+                target_list,
+                flat_only=flat_only,
+                sentinel_prefix=sentinel_prefix,
+            )
+        except Exception as e:
+            click.echo(f"Error snapshotting {source_type}: {e}", err=True)
 
 
 def register():
@@ -69,26 +101,43 @@ def register():
     @backup_cmd.command("snapshot")
     @SOURCE_TYPE_OPTION
     @click.option(
-        "--target", "-t",
+        "--target",
+        "-t",
         "targets",
         multiple=True,
         help="Specific files/dirs to snapshot (default: entire directory)",
     )
     @click.pass_context
     def backup_snapshot(ctx, source_type, targets):
-        """Create a backup snapshot of the selected directory."""
-        source = _get_source(source_type)
-        if source is None:
-            click.echo(f"Error: {source_type} not configured.", err=True)
-            return
-        if not source.exists():
-            click.echo(f"Error: {source_type} directory does not exist: {source}", err=True)
-            return
+        """Create a backup snapshot of the selected directory.
 
-        target_list = list(targets) if targets else ["."]
-        flat_only = _is_flat_only(source_type)
-        sentinel_prefix = _get_sentinel_prefix(source_type)
-        do_snapshot(source_type, source, target_list, flat_only=flat_only, sentinel_prefix=sentinel_prefix)
+        If --source-type is not specified, snapshots all directories (workdir, config, data).
+        """
+        if source_type is None:
+            # Snapshot all source types
+            _snapshot_all(targets)
+        else:
+            # Snapshot specific source type
+            source = _get_source(source_type)
+            if source is None:
+                click.echo(f"Error: {source_type} not configured.", err=True)
+                return
+            if not source.exists():
+                click.echo(
+                    f"Error: {source_type} directory does not exist: {source}", err=True
+                )
+                return
+
+            target_list = list(targets) if targets else ["."]
+            flat_only = _is_flat_only(source_type)
+            sentinel_prefix = _get_sentinel_prefix(source_type)
+            do_snapshot(
+                source_type,
+                source,
+                target_list,
+                flat_only=flat_only,
+                sentinel_prefix=sentinel_prefix,
+            )
 
     @backup_cmd.command("restore")
     @SOURCE_TYPE_OPTION
@@ -114,7 +163,12 @@ def register():
             return
         flat_only = _is_flat_only(source_type)
         source_exists_check = source_type != SOURCE_WORKDIR or source is not None
-        show_status(source_type, source, flat_only=flat_only, source_exists_check=source_exists_check)
+        show_status(
+            source_type,
+            source,
+            flat_only=flat_only,
+            source_exists_check=source_exists_check,
+        )
 
     @backup_cmd.command("list")
     @SOURCE_TYPE_OPTION
@@ -137,6 +191,8 @@ def register():
         source.mkdir(parents=True, exist_ok=True)
         flat_only = _is_flat_only(source_type)
         re_snap = source_type == SOURCE_WORKDIR
-        do_rollback(source_type, source, snapshot_name, flat_only=flat_only, re_snap=re_snap)
+        do_rollback(
+            source_type, source, snapshot_name, flat_only=flat_only, re_snap=re_snap
+        )
 
     return backup_cmd
