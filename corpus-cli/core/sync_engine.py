@@ -65,10 +65,11 @@ class SyncEngine:
         non_public: bool = False,
         debug: bool = False,
     ) -> SyncResult:
-        if debug:
-            import structlog
+        import structlog
 
-            logger = structlog.get_logger(__name__)
+        logger = structlog.get_logger(__name__)
+
+        if debug:
             logger.info(
                 "DEBUG: Sync called with debug=True",
                 plugin=plugin.name,
@@ -97,9 +98,6 @@ class SyncEngine:
             items = plugin.list_items(**list_kwargs)
         except Exception as e:
             if debug:
-                import structlog
-
-                logger = structlog.get_logger(__name__)
                 logger.info(
                     "DEBUG: Exception in plugin.list_items",
                     error=str(e),
