@@ -47,9 +47,15 @@ def discover_providers(config: dict) -> dict[str, LLMProvider]:
     providers: dict[str, LLMProvider] = {}
 
     for name in configured_providers:
-        module_path = _PROVIDER_MODULES.get(name)
+        provider_config_dict = configured_providers[name]
+        if isinstance(provider_config_dict, dict) and "type" in provider_config_dict:
+            type_name = provider_config_dict["type"]
+        else:
+            type_name = name  # backward compatibility
+
+        module_path = _PROVIDER_MODULES.get(type_name)
         if not module_path:
-            logger.warning("unknown_provider", name=name)
+            logger.warning("unknown_provider", name=name, type=type_name)
             continue
         try:
             import importlib
@@ -60,9 +66,9 @@ def discover_providers(config: dict) -> dict[str, LLMProvider]:
                 "providers": configured_providers,
                 "default_provider": default_provider,
             }
-            instance = manifest.provider_class(provider_config)
+            instance = manifest.provider_class(provider_config, name)
             providers[name] = instance
-            logger.debug("provider_registered", name=name)
+            logger.debug("provider_registered", name=name, type=type_name)
         except Exception as exc:
             logger.warning("provider_registration_failed", name=name, error=str(exc))
 

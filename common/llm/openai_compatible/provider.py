@@ -29,18 +29,27 @@ class OpenAICompatibleProvider(LazyLLMProvider):
                 f"OpenAI-compatible provider not initialized. "
                 f"Check base_url and API key configuration. "
                 f"base_url: {getattr(self, 'base_url', 'not set')}, "
-                f"model: {getattr(self, 'default_model', 'not set')}"
+                f"model: {getattr(self, 'model', 'not set')}"
             )
         return self._provider.complete(request)
 
     def _initialize(self):
+        try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+
+            env_path = Path(__file__).parent.parent.parent.parent / ".env"
+            load_dotenv(env_path)
+        except ImportError:
+            pass
+
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("pip install openai") from exc
 
         provider_config = (self.config.get("providers") or {}).get(
-            "openai-compatible", {}
+            self.provider_name or self.name, {}
         )
         base_url = provider_config.get("base_url", "")
         if not isinstance(base_url, str) or not base_url.strip():
@@ -63,11 +72,11 @@ class OpenAICompatibleProvider(LazyLLMProvider):
                 self._provider = None
                 return
 
-        default_model = provider_config.get("default_model", "")
-        if not isinstance(default_model, str) or not default_model.strip():
+        model = provider_config.get("model", "")
+        if not isinstance(model, str) or not model.strip():
             logger.warning(
                 "openai_compatible_provider_not_initialized",
-                reason="providers.openai-compatible.default_model must be configured",
+                reason=f"providers.{self.provider_name or self.name}.model must be configured",
             )
             self._provider = None
             return
@@ -79,13 +88,13 @@ class OpenAICompatibleProvider(LazyLLMProvider):
         self._provider = _RealOpenAICompatibleProvider(
             client=client,
             base_url=base_url,
-            default_model=default_model,
+            model=model,
             flatten_messages=flatten_messages,
         )
         logger.info(
             "openai_compatible_provider_initialized",
             base_url=base_url,
-            default_model=default_model,
+            model=model,
         )
 
 
@@ -93,11 +102,11 @@ class _RealOpenAICompatibleProvider(LLMProvider):
     name = "openai-compatible"
 
     def __init__(
-        self, client, base_url: str, default_model: str, flatten_messages: bool = False
+        self, client, base_url: str, model: str, flatten_messages: bool = False
     ):
         self.client = client
         self.base_url = base_url
-        self.default_model = default_model
+        self.model = model
         self.flatten_messages = flatten_messages
         self._debug = False
 
@@ -105,7 +114,7 @@ class _RealOpenAICompatibleProvider(LLMProvider):
         self._debug = debug
 
     def _complete_raw(self, request: LLMRequest) -> LLMResponse:
-        model = request.model or self.default_model
+        model = request.model or self.model
 
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)
@@ -210,4 +219,4 @@ class _RealOpenAICompatibleProvider(LLMProvider):
         return result_response
 
     def list_models(self) -> list[str]:
-        return [self.default_model]
+        return [self.model]

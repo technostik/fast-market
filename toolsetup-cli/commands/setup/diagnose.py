@@ -77,7 +77,7 @@ def check_workdir_health() -> DiagnosticResult:
     )
 
 
-def check_llm_health() -> DiagnosticResult:
+def check_llm_health(provider: str | None = None) -> DiagnosticResult:
     """Check LLM connectivity by attempting a simple request."""
     try:
         llm_config = load_llm_config()
@@ -102,7 +102,9 @@ def check_llm_health() -> DiagnosticResult:
             ["Run 'toolsetup llm add <provider>' to configure an LLM provider"],
         )
 
-    if not default_provider:
+    test_provider = provider or default_provider
+
+    if not test_provider:
         return DiagnosticResult(
             "llm",
             "warning",
@@ -111,16 +113,16 @@ def check_llm_health() -> DiagnosticResult:
             ["Run 'toolsetup llm set-default <provider>' to set a default provider"],
         )
 
-    if default_provider not in providers:
+    if test_provider not in providers:
         return DiagnosticResult(
             "llm",
             "error",
-            f"Default provider '{default_provider}' not in configured providers",
+            f"Provider '{test_provider}' not in configured providers",
             {
-                "default_provider": default_provider,
+                "requested_provider": test_provider,
                 "available_providers": list(providers.keys()),
             },
-            ["Run 'toolsetup llm set-default <provider>' with a valid provider"],
+            ["Run 'toolsetup llm add <provider>' to add the provider" if provider else "Run 'toolsetup llm set-default <provider>' with a valid provider"],
         )
 
     # Try to instantiate the provider
@@ -129,34 +131,34 @@ def check_llm_health() -> DiagnosticResult:
         from common.llm.base import LLMRequest
 
         discovered_providers = discover_providers(llm_config)
-        if default_provider not in discovered_providers:
+        if test_provider not in discovered_providers:
             return DiagnosticResult(
                 "llm",
                 "error",
-                f"Failed to initialize provider '{default_provider}'",
+                f"Failed to initialize provider '{test_provider}'",
                 {"error": "Provider initialization failed"},
                 ["Check API key environment variables and provider configuration"],
             )
 
-        provider = discovered_providers[default_provider]
+        test_llm_provider = discovered_providers[test_provider]
 
         # Simple test request
         test_request = LLMRequest(
             prompt="Hello, please respond with 'OK' if you can read this.",
-            model=providers[default_provider].get("model", "default"),
+            model=providers[test_provider].get("model", "default"),
             temperature=0.0,
             max_tokens=10,
         )
 
-        response = provider.complete(test_request)
+        response = test_llm_provider.complete(test_request)
 
         if response and response.content.strip():
             return DiagnosticResult(
                 "llm",
                 "ok",
-                f"LLM connectivity successful ({default_provider})",
+                f"LLM connectivity successful ({test_provider})",
                 {
-                    "provider": default_provider,
+                    "provider": test_provider,
                     "model": response.model,
                     "response_length": len(response.content),
                 },
@@ -165,9 +167,9 @@ def check_llm_health() -> DiagnosticResult:
             return DiagnosticResult(
                 "llm",
                 "warning",
-                f"LLM responded but with empty content ({default_provider})",
+                f"LLM responded but with empty content ({test_provider})",
                 {
-                    "provider": default_provider,
+                    "provider": test_provider,
                     "model": response.model if response else None,
                 },
             )
@@ -190,8 +192,8 @@ def check_llm_health() -> DiagnosticResult:
         return DiagnosticResult(
             "llm",
             "error",
-            f"LLM test failed ({default_provider}): {e}",
-            {"provider": default_provider, "error": str(e)},
+            f"LLM test failed ({test_provider}): {e}",
+            {"provider": test_provider, "error": str(e)},
             recommendations,
         )
 
@@ -249,7 +251,7 @@ def check_youtube_health() -> list[DiagnosticResult]:
         ]
 
 
-def run_all_diagnostics() -> list[DiagnosticResult]:
+def run_all_diagnostics(provider: str | None = None) -> list[DiagnosticResult]:
     """Run all diagnostic checks."""
     results = []
 
@@ -257,7 +259,7 @@ def run_all_diagnostics() -> list[DiagnosticResult]:
     results.append(check_workdir_health())
 
     # LLM check
-    results.append(check_llm_health())
+    results.append(check_llm_health(provider=provider))
 
     # YouTube checks
     results.extend(check_youtube_health())

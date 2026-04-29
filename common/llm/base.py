@@ -220,8 +220,9 @@ class LLMProvider(ABC):
 class LazyLLMProvider(LLMProvider):
     """Base class for providers that need lazy initialization."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, provider_name: str = ""):
         self.config = config
+        self.provider_name = provider_name
         self._initialized = False
         self._provider: LLMProvider | None = None
         self._debug = False

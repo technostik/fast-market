@@ -478,7 +478,13 @@ def register():
         default="text",
         help="Output format",
     )
-    def diagnose_cmd(fmt):
+    @click.option(
+        "--provider",
+        "-P",
+        "provider",
+        help="LLM provider to test (overrides default)",
+    )
+    def diagnose_cmd(fmt, provider):
         """Run diagnostic tests on workdir, LLM, and YouTube configuration.
 
         Performs health checks on:
@@ -491,7 +497,7 @@ def register():
             print_diagnostic_results,
         )
 
-        results = run_all_diagnostics()
+        results = run_all_diagnostics(provider=provider)
         print_diagnostic_results(results, fmt)
 
     return setup_cmd

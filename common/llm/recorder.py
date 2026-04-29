@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
-from common.llm.base import LLMProvider, LLMRequest, LLMResponse, ToolCall
+from common.llm.base import LLMProvider, LLMRequest, LLMResponse
 
 
 class RecordingProvider(LLMProvider):

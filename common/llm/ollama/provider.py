@@ -22,9 +22,9 @@ class OllamaProvider(LazyLLMProvider):
     name = "ollama"
 
     def _initialize(self):
-        provider_config = (self.config.get("providers") or {}).get("ollama", {})
+        provider_config = (self.config.get("providers") or {}).get(self.provider_name or self.name, {})
         base_url = provider_config.get("base_url", "http://127.0.0.1:11434")
-        model = provider_config.get("default_model", "")
+        model = provider_config.get("model", "")
 
         if not isinstance(base_url, str) or not base_url.strip():
             logger.warning(
@@ -37,13 +37,13 @@ class OllamaProvider(LazyLLMProvider):
         if not isinstance(model, str) or not model.strip():
             logger.warning(
                 "ollama_provider_not_initialized",
-                reason="providers.ollama.default_model must be configured",
+                reason=f"providers.{self.provider_name or self.name}.model must be configured",
             )
             self._provider = None
             return
 
         self._provider = _RealOllamaProvider(
-            base_url=base_url.rstrip("/"), default_model=model
+            base_url=base_url.rstrip("/"), model=model
         )
         logger.info(
             "ollama_provider_initialized",
@@ -82,16 +82,16 @@ def _convert_messages_to_ollama(messages: list[dict]) -> list[dict]:
 class _RealOllamaProvider(LLMProvider):
     name = "ollama"
 
-    def __init__(self, base_url: str, default_model: str):
+    def __init__(self, base_url: str, model: str):
         self.base_url = base_url
-        self.default_model = default_model
+        self.model = model
         self._debug = False
 
     def set_debug(self, debug: bool) -> None:
         self._debug = debug
 
     def _complete_raw(self, request: LLMRequest) -> LLMResponse:
-        model = request.model or self.default_model
+        model = request.model or self.model
 
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)
@@ -140,7 +140,7 @@ class _RealOllamaProvider(LLMProvider):
             raise RuntimeError(f"Ollama request failed: {exc.reason}") from exc
         except TimeoutError:
             raise RuntimeError(
-                f"Ollama request timed out after 120s. Model may be loading. Check 'ollama list'."
+                "Ollama request timed out after 120s. Model may be loading. Check 'ollama list'."
             ) from None
 
         try:
@@ -207,4 +207,4 @@ class _RealOllamaProvider(LLMProvider):
         return response
 
     def list_models(self) -> list[str]:
-        return [self.default_model]
+        return [self.model]

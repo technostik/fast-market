@@ -1,18 +1,21 @@
-default_provider: ollama
-default_temperature: 0.3
+default_provider: openai-compatible
+default_temperature: 0.2
 providers:
   ollama:
-    default_model: gemma4:e2b
+    type: ollama
+    model: gemma4:e2b
     base_url: http://localhost:11434
-  anthropic:
-    default_model: claude-sonnet-4-20250514
-    api_key_env: ANTHROPIC_API_KEY
   openai-compatible:
-    default_model: deepseek-chat
+    type: openai-compatible
+    model: deepseek-chat
     base_url: http://localhost:5005/v1
     api_key_env: NONE
-    flatten_messages: yes
   xai:
-    default_model: grok-4-1-fast-non-reasoning
+    type: xai
+    model: grok-4-1-fast-non-reasoning
     api_key_env: XAI_API_KEY
+  groq:
+    type: groq
+    model: llama-3.3-70b-versatile
+    api_key_env: GROQ_API_KEY
 

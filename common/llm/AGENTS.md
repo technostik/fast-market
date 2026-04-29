@@ -109,7 +109,28 @@ Providers use `LazyLLMProvider` base class which:
 
 ## Configuration
 
-Providers are configured in `~/.config/fast-market/config.yaml`:
+Providers are configured in `~/.config/fast-market/config.yaml`. You can have multiple instances of the same provider type with arbitrary names.
+
+```yaml
+default_provider: deepseek
+providers:
+  deepseek:
+    type: openai-compatible
+    model: deepseek-chat
+    base_url: http://localhost:5005/v1
+    api_key_env: NONE
+    flatten_messages: yes
+  local-llama:
+    type: ollama
+    model: llama3.2
+    base_url: http://127.0.0.1:11434
+  anthropic-main:
+    type: anthropic
+    model: claude-sonnet-4-20250514
+    api_key_env: ANTHROPIC_API_KEY
+```
+
+For backward compatibility, the old format without "type" is still supported:
 
 ```yaml
 llm:
@@ -118,16 +139,6 @@ llm:
     anthropic:
       model: claude-sonnet-4-20250514
       api_key_env: ANTHROPIC_API_KEY
-    openai:
-      model: gpt-4
-      api_key_env: OPENAI_API_KEY
-    ollama:
-      model: llama3.2
-      base_url: http://127.0.0.1:11434
-    openai-compatible:
-      model: gpt-4o-mini
-      base_url: https://api.openai.com/v1
-      api_key_env: OPENAI_COMPATIBLE_API_KEY
 ```
 
 ## Do's

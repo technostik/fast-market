@@ -22,11 +22,20 @@ class AnthropicProvider(LazyLLMProvider):
 
     def _initialize(self):
         try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+
+            env_path = Path(__file__).parent.parent.parent.parent / ".env"
+            load_dotenv(env_path)
+        except ImportError:
+            pass
+
+        try:
             from anthropic import Anthropic
         except ImportError as exc:
             raise RuntimeError("pip install anthropic") from exc
 
-        provider_config = (self.config.get("providers") or {}).get("anthropic", {})
+        provider_config = (self.config.get("providers") or {}).get(self.provider_name or self.name, {})
         api_key_env = provider_config.get("api_key_env", "ANTHROPIC_API_KEY")
         api_key = __import__("os").environ.get(api_key_env)
         if not api_key:
@@ -38,12 +47,12 @@ class AnthropicProvider(LazyLLMProvider):
             return
 
         client = Anthropic(api_key=api_key)
-        default_model = provider_config.get("default_model", "claude-sonnet-4-20250514")
+        model = provider_config.get("model", "claude-sonnet-4-20250514")
 
         self._provider = _RealAnthropicProvider(
-            client=client, default_model=default_model
+            client=client, model=model
         )
-        logger.info("anthropic_provider_initialized", default_model=default_model)
+        logger.info("anthropic_provider_initialized", model=model)
 
 
 def _convert_tools_to_anthropic(tools: list[dict]) -> list[dict]:
@@ -120,16 +129,16 @@ def _convert_messages_to_anthropic(messages: list[dict]) -> list[dict]:
 class _RealAnthropicProvider(LLMProvider):
     name = "anthropic"
 
-    def __init__(self, client, default_model: str):
+    def __init__(self, client, model: str):
         self.client = client
-        self.default_model = default_model
+        self.model = model
         self._debug = False
 
     def set_debug(self, debug: bool) -> None:
         self._debug = debug
 
     def _complete_raw(self, request: LLMRequest) -> LLMResponse:
-        model = request.model or self.default_model
+        model = request.model or self.model
 
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)

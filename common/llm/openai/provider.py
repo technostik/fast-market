@@ -23,11 +23,20 @@ class OpenAIProvider(LazyLLMProvider):
 
     def _initialize(self):
         try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+
+            env_path = Path(__file__).parent.parent.parent.parent / ".env"
+            load_dotenv(env_path)
+        except ImportError:
+            pass
+
+        try:
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("pip install openai") from exc
 
-        provider_config = (self.config.get("providers") or {}).get("openai", {})
+        provider_config = (self.config.get("providers") or {}).get(self.provider_name or self.name, {})
         api_key_env = provider_config.get("api_key_env", "OPENAI_API_KEY")
         api_key = os.environ.get(api_key_env)
         if not api_key:
@@ -39,25 +48,25 @@ class OpenAIProvider(LazyLLMProvider):
             return
 
         client = OpenAI(api_key=api_key)
-        default_model = provider_config.get("default_model", "gpt-4")
+        model = provider_config.get("model", "gpt-4")
 
-        self._provider = _RealOpenAIProvider(client=client, default_model=default_model)
-        logger.info("openai_provider_initialized", default_model=default_model)
+        self._provider = _RealOpenAIProvider(client=client, model=model)
+        logger.info("openai_provider_initialized", model=model)
 
 
 class _RealOpenAIProvider(LLMProvider):
     name = "openai"
 
-    def __init__(self, client, default_model: str):
+    def __init__(self, client, model: str):
         self.client = client
-        self.default_model = default_model
+        self.model = model
         self._debug = False
 
     def set_debug(self, debug: bool) -> None:
         self._debug = debug
 
     def _complete_raw(self, request: LLMRequest) -> LLMResponse:
-        model = request.model or self.default_model
+        model = request.model or self.model
 
         if self._debug:
             print("\n" + _format_debug_request(request), file=sys.stderr)
