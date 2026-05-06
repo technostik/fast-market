@@ -252,6 +252,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
         str(temp_output),
         "--metadata",
         f"prompt-name={prompt_name}",
+        "--debug",
     ]
 
     if promote_url:
@@ -287,6 +288,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
                 "command": cmd_str,
                 "raw_command": cmd_str,
                 "input_json": input_json,
+                "debug_output": proc.stderr or "",
                 "output": output,
                 "error": output.strip(),
             }
@@ -306,6 +308,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
                 "command": cmd_str,
                 "raw_command": cmd_str,
                 "input_json": input_json,
+                "debug_output": proc.stderr or "",
                 "output": output,
                 "updated_count": len(selected),
             }
@@ -315,6 +318,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
             "command": cmd_str,
             "raw_command": cmd_str,
             "input_json": input_json,
+            "debug_output": proc.stderr or "",
             "output": output,
         }
     finally:

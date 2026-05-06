@@ -80,6 +80,8 @@ _YT_POSTER_HTML = """<!doctype html>
     <div>Raw command: <span id="regenCommandRaw" class="regenRow"></span></div>
     <div class="regen-json-toggle" id="regenJsonToggle">Input JSON ▼</div>
     <div class="regen-json-content" id="regenJsonContent"><span id="regenInputJson" class="regenRow"></span></div>
+    <div class="regen-json-toggle" id="regenDebugToggle">Debug Output ▼</div>
+    <div class="regen-json-content" id="regenDebugContent"><span id="regenDebugOutput" class="regenRow"></span></div>
     <div>Result: <span id="regenResult" class="regenRow"></span></div>
     <div>Time: <span id="regenTime" class="regenRow"></span></div>
   </div>
@@ -191,8 +193,10 @@ const promptModalCancelBtn = document.getElementById('promptModalCancelBtn');
 const promptModalSaveBtn = document.getElementById('promptModalSaveBtn');
 const editPromptBtn = document.getElementById('editPromptBtn');
 const regenerateSelectedBtn = document.getElementById('regenerateSelected');
-const regenJsonToggle = document.getElementById('regenJsonToggle');
-const regenJsonContent = document.getElementById('regenJsonContent');
+ const regenJsonToggle = document.getElementById('regenJsonToggle');
+ const regenJsonContent = document.getElementById('regenJsonContent');
+ const regenDebugToggle = document.getElementById('regenDebugToggle');
+ const regenDebugContent = document.getElementById('regenDebugContent');
 
 let editingRowIndex = -1;
 let editingPromptName = '';
@@ -295,6 +299,12 @@ regenJsonToggle.addEventListener('click', () => {
   regenJsonToggle.textContent = isVisible ? 'Input JSON ▼' : 'Input JSON ▲';
 });
 
+regenDebugToggle.addEventListener('click', () => {
+  const isVisible = regenDebugContent.style.display !== 'none';
+  regenDebugContent.style.display = isVisible ? 'none' : 'block';
+  regenDebugToggle.textContent = isVisible ? 'Debug Output ▼' : 'Debug Output ▲';
+});
+
 function showPromptModal(promptName){
   editingPromptName = promptName;
   promptModalTitle.textContent = 'Edit Prompt: ' + promptName;
@@ -376,25 +386,32 @@ function renderRegenPanelForComment(commentKey, logEntry) {
   const panel = document.getElementById('regenPanel');
   const rawEl = document.getElementById('regenCommandRaw');
   const inputEl = document.getElementById('regenInputJson');
+  const debugEl = document.getElementById('regenDebugOutput');
   const resEl = document.getElementById('regenResult');
   const timeEl = document.getElementById('regenTime');
   const toggleEl = document.getElementById('regenJsonToggle');
   const contentEl = document.getElementById('regenJsonContent');
+  const debugToggleEl = document.getElementById('regenDebugToggle');
+  const debugContentEl = document.getElementById('regenDebugContent');
   if (!panel) return;
   if (logEntry) {
     panel.style.display = 'block';
     if (rawEl) rawEl.textContent = logEntry.rawCommand || '';
     if (inputEl) inputEl.textContent = logEntry.inputJson || '';
+    if (debugEl) debugEl.textContent = logEntry.debugOutput || '';
     resEl.textContent = logEntry.success ? 'Success' : ('Error: ' + (logEntry.error || 'Unknown'));
     timeEl.textContent = logEntry.timestamp || '';
-    // Reset toggle to collapsed state
+    // Reset toggles to collapsed state
     if (toggleEl) toggleEl.textContent = 'Input JSON ▼';
     if (contentEl) contentEl.style.display = 'none';
+    if (debugToggleEl) debugToggleEl.textContent = 'Debug Output ▼';
+    if (debugContentEl) debugContentEl.style.display = 'none';
     try { localStorage.setItem('ytp_regen_last_' + commentKey, JSON.stringify(logEntry)); } catch(e) { /* ignore */ }
   } else {
     panel.style.display = 'none';
     if (rawEl) rawEl.textContent = '';
     if (inputEl) inputEl.textContent = '';
+    if (debugEl) debugEl.textContent = '';
     resEl.textContent = '';
     timeEl.textContent = '';
   }
@@ -464,13 +481,14 @@ async function regenerateRows(indices){
       timestamp: new Date().toISOString(),
       rawCommand: rawCmd,
       inputJson: body?.input_json ?? '',
+      debugOutput: body?.debug_output ?? '',
       success: code === 0,
       error: body?.error ?? null,
     };
     localStorage.setItem('ytp_regen_last_' + commentKey, JSON.stringify(logEntry));
     renderRegenPanelForComment(commentKey, logEntry);
     // Also emit a console log for debugging during testing
-    console.log('YT Poster regen', { file: currentSourceFile, indices, code, raw_command: rawCmd, error: body?.error, output: body?.output });
+    console.log('YT Poster regen', { file: currentSourceFile, indices, code, raw_command: rawCmd, debug_output: body?.debug_output, error: body?.error, output: body?.output });
   } catch (e) { /* ignore logging failure to avoid breaking UX */ }
   exitCode.textContent = `Exit code: ${code}`;
   exitCode.style.color = code === 0 ? 'var(--success)' : 'var(--error)';
