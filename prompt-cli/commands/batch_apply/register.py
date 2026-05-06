@@ -66,7 +66,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "-t",
         "prompt_content",
         default=None,
-        help="Prompt template string (e.g., 'Translate: {text}'). Use @file to read from file, @- for stdin.",
+        help="Prompt template string (e.g., 'Translate: {text}'). If not provided, auto-generated from JSON fields with all-caps placeholders. Use @file to read from file, @- for stdin.",
     )
     @click.option(
         "--prompt-name",
@@ -176,10 +176,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         to the specified input field of each record, and writes the results
         to an output file (or stdout).
 
+        If no prompt is provided, auto-generates one from the JSON fields using
+        all-caps placeholders (e.g., {NAME} for field "name").
+
         \b
         Examples:
           prompt batch-apply -t "Translate: {text}" -i text -o translated -f data.json -O out.json
           prompt batch-apply -n summarize -p max_length=50 -i description -o summary -f items.yaml
+          prompt batch-apply -f data.json -o result  # auto-generates prompt
           cat data.json | prompt batch-apply -t "Summarize: {desc}" -i desc -o summary
           echo "Generate reply for {comment}" | prompt batch-apply -t @- -i comment -o reply -f data.json
         """
@@ -219,10 +223,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             else:
                 click.echo(f"Error: prompt file not found: {prompt_file}", err=True)
                 sys.exit(1)
-
-        if not prompt_content and not prompt_name:
-            click.echo("Error: either --prompt or --prompt-name is required", err=True)
-            sys.exit(1)
 
         if prompt_content and prompt_name:
             click.echo("Error: cannot use both --prompt and --prompt-name", err=True)
@@ -265,6 +265,22 @@ def register(plugin_manifests: dict) -> CommandManifest:
         except ValueError as exc:
             click.echo(f"Error: {exc}", err=True)
             sys.exit(1)
+
+        if not records:
+            click.echo("Error: no records found in input", err=True)
+            sys.exit(1)
+
+        # Auto-generate prompt from JSON fields if none provided
+        if not prompt_content and not prompt_name:
+            if isinstance(records[0], dict):
+                fields = list(records[0].keys())
+                # Generate prompt like "Field1: {FIELD1}, Field2: {FIELD2}, ..."
+                prompt_parts = [f"{field.title()}: {{{field.upper()}}}" for field in fields]
+                prompt_content = ", ".join(prompt_parts)
+                click.echo(f"Auto-generated prompt: {prompt_content}", err=True)
+            else:
+                click.echo("Error: records must be objects to auto-generate prompt", err=True)
+                sys.exit(1)
 
         if limit:
             records = records[:limit]
