@@ -131,6 +131,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     f"Invalid parameter format: '{p}'. Use KEY=VALUE."
                 )
             key, value = p.split("=", 1)
+            # Strip surrounding quotes from value
+            value = value.strip()
+            if (value.startswith('"') and value.endswith('"')) or \
+               (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
             param_dict[key] = value
 
         # Resolve script content
@@ -249,8 +254,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if fmt == "text":
                 click.echo(f"  [{i + 1}/{len(instructions)}] {resolved}", err=True)
 
+            # upload command behaves differently with --timeout (different internal strategy
+            # that breaks React file handlers on some sites like Instagram)
+            instruction_timeout = None if resolved.startswith("upload ") else timeout
+
             # Determine if we should retry on timeout
-            retry_budget_ms = timeout  # None means no retry (single attempt)
+            retry_budget_ms = instruction_timeout  # None means no retry (single attempt)
             entry = None
             if retry_budget_ms is not None:
                 # Retry loop: keep retrying timed-out instructions until budget expires
@@ -259,7 +268,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 while True:
                     attempt += 1
                     try:
-                        result = run_agent_cmd(resolved, cdp_port, timeout=timeout)
+                        result = run_agent_cmd(resolved, cdp_port, timeout=instruction_timeout)
                     except Exception as exc:
                         if fmt == "text" and attempt == 1:
                             click.echo(f"    Error: {exc}", err=True)
@@ -317,7 +326,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             else:
                 # No retry: single attempt
                 try:
-                    result = run_agent_cmd(resolved, cdp_port, timeout=timeout)
+                    result = run_agent_cmd(resolved, cdp_port, timeout=instruction_timeout)
                 except Exception as exc:
                     entry = {
                         "instruction": resolved,
