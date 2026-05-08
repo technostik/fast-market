@@ -30,6 +30,7 @@ packages = [
     "commands",
     "commands.common",
     "commands.get_channel_id",
+    "commands.get_video",
     "commands.hot",
     "commands.search",
     "commands.comments",

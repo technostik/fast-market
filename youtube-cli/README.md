@@ -21,32 +21,26 @@ pip install -e ".[ytdlp]"
 ## Configuration
 
 The tool follows XDG specifications for configuration:
-- Config: `~/.local/share/fast-market/config/youtube-agent.yaml`
-- Cache: `~/.cache/fast-market/youtube/` (for quota tracking)
-- OAuth token: `~/.local/share/fast-market/config/token.json`
+- Config: `~/.config/fast-market/common/youtube/config.yaml`
+- Cache: `~/.cache/youtube-videos/` (for video caching)
+- OAuth token: `~/.config/fast-market/common/youtube/token.json`
+- Client secrets: `~/.config/fast-market/common/youtube/client_secret.json`
 
 ### First-time Setup
 
 Run the interactive setup wizard:
 ```bash
-youtube setup --create
+youtube setup wizard
 ```
 
-This creates a default configuration at `~/.local/share/fast-market/config/youtube-agent.yaml`:
+This creates a default configuration at `~/.config/fast-market/common/youtube/config.yaml`:
 
 ```yaml
-# YouTube agent configuration
-youtube:
-  # Get your channel ID from YouTube Studio > Settings > Channel
-  # Or use any channel ID you want to interact with
-  channel_id: ""
-
-  # Quota limit (default: 10000 units/day)
-  quota_limit: 10000
-
-  # Optional: explicit path to client_secret.json
-  # If not specified, looks for client_secret.json in config directory
-  # client_secret_path: "~/.config/fast-market/config/client_secret.json"
+# YouTube shared configuration
+channel_id: ""
+quota_limit: 10000
+video_cache_dir: ~/.cache/youtube-videos
+# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json
 ```
 
 ### Getting Google OAuth Credentials
@@ -57,17 +51,20 @@ youtube:
 4. Go to **Credentials** → **Create Credentials** → **OAuth client ID**
    - Application type: Desktop application
    - Name: youtube-agent
-5. Download the JSON file and save as `client_secret.json` in the config directory:
-   ```bash
-   mv ~/Downloads/client_secret.json ~/.local/share/fast-market/config/
-   ```
+ 5. Download the JSON file and save as `client_secret.json` in the config directory:
+    ```bash
+    mv ~/Downloads/client_secret.json ~/.config/fast-market/common/youtube/
+    ```
 
 ### Verify Setup
 
 ```bash
 # Check configuration
-youtube setup --locate
-youtube setup --show
+youtube setup locate
+youtube setup show
+
+# Edit configuration if needed
+youtube setup edit
 
 # Test authentication (will open browser for OAuth)
 youtube search "test"
@@ -121,30 +118,82 @@ youtube get-last --short --debug
 
 **Output:** Two lines - video title and URL.
 
-### setup
+### get-video
 
-Manage configuration and authentication.
+Download YouTube videos using yt-dlp with optional caching and lookup.
 
 ```bash
-youtube setup [OPTIONS]
+youtube get-video URL [OPTIONS]
+youtube get-video --last [OPTIONS]
 ```
 
-| Option | Description |
-|--------|-------------|
-| `-l, --locate` | Show config file locations and status |
-| `-s, --show` | Display current configuration |
-| `-c, --create` | Create default configuration file |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--last` | Get the last video from channel instead of specifying URL | False |
+| `-c, --channel-id` | YouTube channel ID (required for --last, defaults to config) | None |
+| `--short` | Filter to YouTube Shorts only when using --last | False |
+| `--normal` | Filter to normal videos only when using --last | False |
+| `-n, --offset` | Get the Nth from last when using --last | 1 |
+| `--short-threshold` | Duration threshold in seconds for short detection | 180 (3min) |
+| `--debug` | Show debug information | False |
+| `--lookup-dir` | Directory to search for cached videos | ~/.cache/youtube-videos |
+| `-o, --output` | Save video to specific file | Auto-generated from title |
+| `--cookies` | Path to cookies file for authenticated requests | None |
 
 **Examples:**
 ```bash
-# Create initial config
-youtube setup --create
+# Download a specific video
+youtube get-video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# Get and download the last video from your channel
+youtube get-video --last
+
+# Get the last short video
+youtube get-video --last --short
+
+# Get the 2nd last normal video
+youtube get-video --last --normal --offset 2
+
+# Download to specific location
+youtube get-video --last --output "/path/to/video.mp4"
+
+# Use custom cache directory
+youtube get-video --last --lookup-dir "/custom/cache/dir"
+```
+
+### setup
+
+Manage configuration and authentication with various subcommands.
+
+```bash
+youtube setup [COMMAND] [OPTIONS]
+```
+
+**Commands:**
+- `edit` - Open YouTube config in your default editor
+- `show` - Display current configuration
+- `locate` - Show config file locations and status
+- `wizard` - Interactive setup wizard
+- `reset` - Reset config to defaults (backs up existing)
+- `refresh-auth` - Re-authenticate with full API access
+- `channel-list` - Manage channel list file
+
+**Examples:**
+```bash
+# Edit configuration in editor
+youtube setup edit
+
+# Interactive setup
+youtube setup wizard
 
 # Check setup status
-youtube setup --locate
+youtube setup locate
 
 # View current config
-youtube setup --show
+youtube setup show
+
+# Reset to defaults
+youtube setup reset
 ```
 
 ### search

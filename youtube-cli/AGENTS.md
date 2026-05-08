@@ -1,7 +1,7 @@
 # youtube-agent/
 
 ## 🎯 Purpose
-Provides a modular CLI interface for YouTube Data API v3 operations with plugin-style command discovery and OAuth authentication.
+Provides a modular CLI interface for YouTube Data API v3 operations, video downloading, and content management with plugin-style command discovery and OAuth authentication.
 
 ## 🏗️ Essential Components
 - `youtube_entry/__init__.py` — Package entry point exporting main CLI function
@@ -13,6 +13,7 @@ Provides a modular CLI interface for YouTube Data API v3 operations with plugin-
 
 ## 📋 Core Responsibilities
 - Provide unified CLI interface for YouTube API operations
+- Download and cache YouTube videos with yt-dlp integration
 - Handle OAuth 2.0 authentication flow and token management
 - Track API quota usage across sessions
 - Support multiple input formats (JSON, YAML, stdin)
@@ -51,9 +52,15 @@ Provides a modular CLI interface for YouTube Data API v3 operations with plugin-
 - To support additional auth methods:
   - Extend `YouTubeOAuth` in `common.auth.youtube`
 
-## 🔄 Batch Command Pipeline
-The project includes a batch workflow for managing YouTube comments at scale:
+## 🔄 Command Workflows
+The project supports various workflows for YouTube content management:
 
+### Video Download Workflow
+```
+get-last → get-video
+```
+
+### Batch Comment Management Pipeline
 ```
 search → batch-comments → batch-comment-reply → batch-comment-post
 ```
@@ -77,6 +84,13 @@ Posts generated replies to YouTube comments.
 - **Output**: Array augmented with `post_status`, `reply_id`, `moderation_status`, `error`
 - **Options**: `--dry-run`, `--delay` (seconds between posts), `--format`, `--output`
 - **Behavior**: Continues on error, collects error report on stderr
+
+### get-video
+Downloads YouTube videos with caching and lookup capabilities.
+- **Input**: YouTube URL or `--last` flag with channel filtering options
+- **Output**: Downloaded MP4 file to specified or auto-generated path
+- **Options**: `--lookup-dir`, `--output`, `--cookies`, `--last`, `--channel-id`, filtering options
+- **Behavior**: Checks cache first, downloads if not found, supports authenticated requests
 
 ### Output Convention
 - All commands output **data to stdout** (pipeable between commands)

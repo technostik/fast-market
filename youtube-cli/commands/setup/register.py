@@ -32,6 +32,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("Usage: youtube setup <command>")
             click.echo("")
             click.echo("Commands:")
+            click.echo("  edit           Open YouTube config in your default editor")
             click.echo("  show           Display current configuration")
             click.echo("  locate         Show config file locations")
             click.echo("  wizard         Interactive setup wizard")
@@ -43,6 +44,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("  1. youtube setup wizard")
             click.echo("  2. Ensure client_secret.json exists at the configured path")
             click.echo("  3. Run 'youtube search test' to authenticate")
+
+    @setup_group.command("edit")
+    def edit_cmd():
+        """Open the YouTube config in your default editor."""
+        from common.cli.helpers import open_editor
+
+        yt_cfg_path = get_youtube_config_path()
+        yt_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        if not yt_cfg_path.exists():
+            yt_cfg_path.write_text("# Shared YouTube configuration\nchannel_id: \"\"\n# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json\nquota_limit: 10000\nvideo_cache_dir: ~/.cache/youtube-videos\n")
+        click.echo(f"Opening YouTube config: {yt_cfg_path}")
+        open_editor(yt_cfg_path)
 
     @setup_group.command("show")
     def show_cmd():
@@ -186,6 +199,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         click.echo("")
 
+        # video_cache_dir
+        default_video_cache = str(Path.home() / ".cache" / "youtube-videos")
+        current_video_cache = existing.get("video_cache_dir", default_video_cache)
+        click.echo("youtube.video_cache_dir (directory to search for cached videos)")
+        click.echo(f"  current: {current_video_cache or '(not set)'}")
+        video_cache_dir = _ask("  video_cache_dir", default=current_video_cache)
+        if video_cache_dir and video_cache_dir != current_video_cache:
+            click.echo(f"  → {video_cache_dir}")
+        elif not video_cache_dir:
+            click.echo("  → unchanged (using default)")
+        else:
+            click.echo("  → unchanged")
+
+        click.echo("")
+
         # Save
         new_yt_cfg = {}
         if channel_id:
@@ -197,6 +225,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
             new_yt_cfg["channel_list_path"] = channel_list_path
         if default_thematic:
             new_yt_cfg["default_thematic"] = default_thematic
+        if video_cache_dir:
+            new_yt_cfg["video_cache_dir"] = video_cache_dir
 
         save_youtube_config(new_yt_cfg)
         click.echo(f"Saved shared youtube config to {yt_cfg_path}")
@@ -214,7 +244,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             shutil.copy2(str(yt_cfg_path), str(backup_path))
             click.echo(f"Backed up existing shared config to {backup_path}")
         yt_cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        yt_cfg_path.write_text("# YouTube shared configuration\nchannel_id: \"\"\nquota_limit: 10000\n# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json\n")
+        yt_cfg_path.write_text("# YouTube shared configuration\nchannel_id: \"\"\nquota_limit: 10000\n# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json\nvideo_cache_dir: ~/.cache/youtube-videos\n")
         click.echo(f"Reset shared configuration to defaults at {yt_cfg_path}")
 
     @setup_group.command("refresh-auth")
