@@ -163,7 +163,13 @@ def apply_skill_impl(
 
     if isolated:
         skill_name_for_dir = skill_ref.split("/", 1)[0]
-        workdir_path = make_run_root(workdir_path, skill_name_for_dir)
+        # Use workdir_root as base if configured, otherwise use current workdir
+        base_workdir = common_config.get("workdir_root")
+        if base_workdir:
+            base_workdir_path = Path(base_workdir).expanduser().resolve()
+        else:
+            base_workdir_path = workdir_path
+        workdir_path = make_run_root(base_workdir_path, skill_name_for_dir)
         common_config["workdir"] = str(workdir_path)
         save_common_config(common_config)
         add_workdir_lock(str(workdir_path))
