@@ -15,68 +15,30 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Create a new skill."""
         pass
 
-    @create_group.command("name")
-    @click.argument("name")
-    @click.option("--description", "-d", help="Skill description")
-    @click.option("--with-scripts", "-s", is_flag=True, help="Create scripts directory")
-    def create_cmd(name, description, with_scripts):
-        """Create a new skill scaffold."""
-        from common.prompt import get_cached_manager
-
-        manager = get_cached_manager("skill")
-        if manager is None:
-            click.echo("Error: Prompt manager not available", err=True)
-            sys.exit(1)
-
-        template = manager.get("create-skill-template")
-
-        skills_dir = get_skills_dir()
-        skill_path = skills_dir / name
-
-        if skill_path.exists():
-            click.echo(f"Error: Skill '{name}' already exists", err=True)
-            sys.exit(1)
-
-        skill_path.mkdir(parents=True, exist_ok=True)
-
-        skill_template = template.format(
-            skill_name=name,
-            skill_description=description or "No description provided",
-        )
-        (skill_path / "SKILL.md").write_text(skill_template, encoding="utf-8")
-
-        if with_scripts:
-            (skill_path / "scripts").mkdir()
-            (skill_path / "scripts" / "README.md").write_text(
-                "# Scripts Directory\n\nPlace executable scripts here.\n"
-            )
-
-        click.echo(f"Created skill: {name} at {skill_path}")
-
     @create_group.command("auto-from-session")
     @click.argument("session_file", type=click.Path(exists=True))
     @click.option(
-        "--skill-name",
+        "--name",
         "-n",
         default=None,
         help="Skill name (auto-generated if omitted)",
     )
-    def auto_from_session_cmd(session_file, skill_name):
+    def auto_from_session_cmd(session_file, name):
         """Create a skill draft from a session file."""
         from core.session_to_skill import create_skill_from_session
 
         session_path = Path(session_file)
-        create_skill_from_session(session_path, skill_name)
+        create_skill_from_session(session_path, name)
 
     @create_group.command("from-description")
     @click.argument("description", required=False)
     @click.option(
-        "--skill-name",
+        "--name",
         "-n",
         default=None,
         help="Skill name (auto-generated if omitted)",
     )
-    def from_description_cmd(description, skill_name):
+    def from_description_cmd(description, name):
         """Create a skill from a task description."""
         from core.description_to_skill import create_skill_from_description
 
@@ -87,6 +49,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             while not description:
                 description = prompt_free_text("Enter task description: ")
 
-        create_skill_from_description(description, skill_name)
+        create_skill_from_description(description, name)
 
     return CommandManifest(name="create", click_command=create_group)
