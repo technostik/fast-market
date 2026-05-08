@@ -8,7 +8,7 @@ from typing import Any
 
 import click
 from common import structlog
-from common.core.config import load_common_config, load_tool_config, save_tool_config
+from common.core.config import load_common_config, load_tool_config, save_tool_config, save_common_config, add_workdir_lock, remove_workdir_lock
 from common.core.yaml_utils import dump_yaml
 from common.core.paths import get_skills_dir
 from common.llm.registry import get_default_provider_name
@@ -164,6 +164,9 @@ def apply_skill_impl(
     if isolated:
         skill_name_for_dir = skill_ref.split("/", 1)[0]
         workdir_path = make_run_root(workdir_path, skill_name_for_dir)
+        common_config["workdir"] = str(workdir_path)
+        save_common_config(common_config)
+        add_workdir_lock(str(workdir_path))
 
     if fmt != "json":
         click.echo(f"workdir: {workdir_path}")
@@ -342,6 +345,33 @@ def apply_skill_impl(
             inject=inject,
         )
 
+        # Check for false positive successes: if exit_code is 0 but last response indicates failure
+        if result.exit_code == 0 and resolved_save_session and resolved_save_session.exists():
+            try:
+                import yaml
+                session_data = yaml.safe_load(resolved_save_session.read_text())
+                if session_data and 'turns' in session_data:
+                    turns = session_data['turns']
+                    if turns:
+                        last_turn = turns[-1]
+                        if last_turn.get('role') == 'assistant':
+                            content = last_turn.get('content', '').lower()
+                            error_keywords = [
+                                'error', 'issue', 'fail', 'cannot proceed', 'unable to',
+                                'blocked', 'critical issue', 'problem', 'i cannot',
+                                'i see a critical'
+                            ]
+                            if any(keyword in content for keyword in error_keywords):
+                                result.exit_code = 1
+                                result.stderr = last_turn.get('content', '')
+            except Exception:
+                pass  # Ignore errors in false positive detection
+
+        if result.exit_code != 0 and fmt != "json":
+            click.echo(f"Skill execution failed with exit code {result.exit_code}", err=True)
+            if result.stderr:
+                click.echo(f"Error: {result.stderr}", err=True)
+
         if auto_learn:
             from common.core.duration import parse_duration
             from core.runner import _run_auto_learn_from_skill
@@ -411,4 +441,8 @@ def apply_skill_impl(
         click.echo(result.stdout, nl=False)
     if result.stderr:
         click.echo(result.stderr, nl=False, err=True)
+
+    if isolated:
+        remove_workdir_lock(str(workdir_path))
+
     sys.exit(result.exit_code)

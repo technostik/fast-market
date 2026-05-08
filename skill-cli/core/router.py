@@ -735,8 +735,8 @@ def _session_to_text(session) -> str:
             parts.append(f"ASSISTANT: {turn.content[:500]}")
         for tc in turn.tool_calls:
             cmd = tc.arguments.get("command", "") if tc.arguments else ""
-            stdout = (tc.stdout or "")[:300]
-            stderr = (tc.stderr or "")[:200]
+            stdout = (tc.stdout or "")[:1000]
+            stderr = (tc.stderr or "")[:1000]
             exit_code = tc.exit_code if tc.exit_code is not None else "?"
             parts.append(f"CMD [{exit_code}]: {cmd}")
             if stdout:
