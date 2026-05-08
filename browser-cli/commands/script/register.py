@@ -172,14 +172,24 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 # Each ;; separated part could itself be multi-line (ignore comments/blanks)
                 for line in inst.splitlines():
                     line = line.strip()
-                    if not line or line.startswith("#"):
+                    if not line:
+                        continue
+                    # Remove comment
+                    if "#" in line:
+                        line = line.split("#", 1)[0].strip()
+                    if not line:
                         continue
                     instructions.append(line)
         else:
             # Traditional line-by-line parsing
             for line in script_content.splitlines():
                 line = line.strip()
-                if not line or line.startswith("#"):
+                if not line:
+                    continue
+                # Remove comment
+                if "#" in line:
+                    line = line.split("#", 1)[0].strip()
+                if not line:
                     continue
                 instructions.append(line)
 
