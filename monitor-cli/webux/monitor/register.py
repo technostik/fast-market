@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import importlib
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 
 from common.core.paths import get_tool_data_dir
 from common.webux.base import WebuxPluginManifest
@@ -27,7 +27,9 @@ def _get_monitor_storage_class():
     sys.path.insert(0, str(_CLI_ROOT))
     try:
         storage_module = importlib.import_module("core.storage")
-        return storage_module.MonitorStorage
+        models_module = importlib.import_module("core.models")
+        executor_module = importlib.import_module("core.executor")
+        return storage_module.MonitorStorage, models_module, executor_module
     finally:
         sys.path.pop(0)
         for name in list(sys.modules):
@@ -69,7 +71,7 @@ def logs(
     offset: int = Query(0, ge=0),
     mismatch: bool = Query(False),
 ) -> list[dict]:
-    MonitorStorage = _get_monitor_storage_class()
+    MonitorStorage, _, _ = _get_monitor_storage_class()
 
     storage = MonitorStorage(get_tool_data_dir("monitor") / "monitor.db")
     since_dt = _parse_since(since)
@@ -156,7 +158,7 @@ def logs(
 
 @router.get("/status")
 def status() -> dict:
-    MonitorStorage = _get_monitor_storage_class()
+    MonitorStorage, _, _ = _get_monitor_storage_class()
 
     storage = MonitorStorage(get_tool_data_dir("monitor") / "monitor.db")
     return {
@@ -169,13 +171,83 @@ def status() -> dict:
 
 @router.get("/filters")
 def filters() -> dict[str, list[str]]:
-    MonitorStorage = _get_monitor_storage_class()
+    MonitorStorage, _, _ = _get_monitor_storage_class()
 
     storage = MonitorStorage(get_tool_data_dir("monitor") / "monitor.db")
     return {
         "rule_ids": [r.id for r in storage.get_all_rules()],
         "source_ids": [s.id for s in storage.get_all_sources()],
         "action_ids": [a.id for a in storage.get_all_actions()],
+    }
+
+
+@router.post("/rerun/{trigger_log_id}")
+def rerun_action(trigger_log_id: str) -> dict:
+    """Rerun an action based on a previous trigger log."""
+    MonitorStorage, models_module, executor_module = _get_monitor_storage_class()
+
+    ItemMetadata = models_module.ItemMetadata
+    TriggerLog = models_module.TriggerLog
+    execute_action = executor_module.execute_action
+
+    storage = MonitorStorage(get_tool_data_dir("monitor") / "monitor.db")
+
+    # Get the specific trigger log by ID
+    trigger_log = storage.get_trigger_log(trigger_log_id)
+    if not trigger_log:
+        raise HTTPException(status_code=404, detail="Trigger log not found")
+
+    # Get the action
+    action = storage.get_action(trigger_log.action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    # Get the source
+    source = storage.get_source(trigger_log.source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    # Create ItemMetadata from the trigger log
+    item = ItemMetadata(
+        id=trigger_log.item_id,
+        title=trigger_log.item_title,
+        url=trigger_log.item_url,
+        published_at=None,  # We don't have this in the log
+        content_type="",  # We don't have this in the log
+        source_plugin=source.plugin,
+        source_id=source.id,
+        extra=trigger_log.item_extra or {},
+    )
+
+    exit_code, output, script_content = execute_action(
+        action=action,
+        item=item,
+        source=source,
+        rule_id=trigger_log.rule_id,
+    )
+
+    # Log the rerun
+    import uuid
+    rerun_log = TriggerLog(
+            id=str(uuid.uuid4()),
+            rule_id=trigger_log.rule_id,
+            source_id=trigger_log.source_id,
+            action_id=trigger_log.action_id,
+            item_id=trigger_log.item_id,
+            item_title=f"[RERUN] {trigger_log.item_title}",
+            item_url=trigger_log.item_url,
+            triggered_at=datetime.now(timezone.utc),
+            exit_code=exit_code,
+            output=output,
+            item_extra=trigger_log.item_extra,
+        )
+    storage.log_trigger(rerun_log)
+
+    return {
+        "success": True,
+        "exit_code": exit_code,
+        "output": output,
+        "message": f"Action rerun completed with exit code {exit_code}"
     }
 
 
@@ -187,6 +259,8 @@ body { margin:0; padding:16px; background:var(--bg); color:var(--text); font-fam
 input, button, select { padding:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:6px; }
 button { cursor:pointer; }
 button:hover { background:var(--accent); }
+.rerun-btn { background:var(--warning); color:#000; border:1px solid var(--warning); }
+.rerun-btn:hover { background:#fbbf24; }
 .row { display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap; }
 pre { white-space:pre-wrap; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px; }
 h2 { margin:0 0 12px 0; }
@@ -237,9 +311,11 @@ h2 { margin:0 0 12px 0; }
     <select id="ruleFilter" style="width:140px;"><option value="">All Rules</option></select>
     <select id="sourceFilter" style="width:140px;"><option value="">All Sources</option></select>
     <select id="actionFilter" style="width:140px;"><option value="">All Actions</option></select>
-    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;">
+     <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;">
       <input type="checkbox" id="mismatchToggle"> Mismatches only
     </label>
+     <input type="checkbox" id="hideIgnoredActions" checked style="cursor:pointer;">
+     <label for="hideIgnoredActions" style="cursor:pointer;font-size:13px;margin-left:4px;">Hide ignored actions</label>
     <button id="loadLogs">📋 Load Logs</button>
     <button id="loadStatus">📊 Status</button>
   </div>
@@ -259,6 +335,7 @@ h2 { margin:0 0 12px 0; }
   const sourceFilter = document.getElementById('sourceFilter');
   const actionFilter = document.getElementById('actionFilter');
   const mismatchToggle = document.getElementById('mismatchToggle');
+  const hideIgnoredActions = document.getElementById('hideIgnoredActions');
   const datePicker = document.getElementById('datePicker');
   const prevDayBtn = document.getElementById('prevDay');
   const nextDayBtn = document.getElementById('nextDay');
@@ -325,6 +402,30 @@ h2 { margin:0 0 12px 0; }
     nextPageBtn.disabled = totalCount < pageSize;
   }
 
+  async function rerunAction(triggerLogId) {
+    if (!confirm('Are you sure you want to rerun this action?')) return;
+
+    try {
+      const response = await fetch(`/api/monitor/rerun/${triggerLogId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Rerun failed');
+      }
+
+      const result = await response.json();
+      alert(`Action rerun completed!\nExit code: ${result.exit_code}\nOutput: ${result.output.slice(0, 200)}...`);
+
+      // Reload logs to show the new execution
+      document.getElementById('loadLogs').click();
+    } catch (error) {
+      alert(`Rerun failed: ${error.message}`);
+    }
+  }
+
   function formatRelativeTime(isoString) {
     const now = new Date();
     const date = new Date(isoString);
@@ -356,6 +457,16 @@ h2 { margin:0 0 12px 0; }
 
   function renderCards(rows, type) {
     if (!rows || rows.length === 0) return '<div style="text-align:center;padding:40px;color:var(--text-dim);">No entries found.</div>';
+
+    // Filter out ignored actions if checkbox is checked
+    if (hideIgnoredActions.checked) {
+      rows = rows.filter(r => {
+        if (!r.action_id) return true; // Keep non-action logs
+        // Hide actions that are considered ignored
+        return r.action_id !== 'ignored' && !r.action_id.includes('notify');
+      });
+    }
+
     return rows.map(r => {
       const triggeredAt = r.triggered_at || r.evaluated_at;
       const relativeTime = formatRelativeTime(triggeredAt);
@@ -395,6 +506,9 @@ h2 { margin:0 0 12px 0; }
       if (r.action_id) headerHtml += ` <span class="card-field"><span class="label">Action:</span><span class="value badge info">${r.action_id}</span></span>`;
       headerHtml += ` <span class="card-field"><span class="label">Time:</span><span class="value">${relativeTime}</span></span>`;
       headerHtml += ` <span class="badge ${status.cls}">${status.label}</span>`;
+      if (r.action_id && r.log_type !== 'run_error') {
+        headerHtml += ` <button class="rerun-btn" onclick="event.stopPropagation(); rerunAction('${r.id}')" style="padding:4px 8px;font-size:11px;margin-left:8px;">🔄 Rerun</button>`;
+      }
       headerHtml += ` <span class="card-expand">▼</span>`;
 
       return `<div class="card" onclick="this.classList.toggle('expanded')"><div class="card-header">${headerHtml}</div><div class="card-content">${bodyHtml}</div></div>`;
@@ -443,6 +557,10 @@ h2 { margin:0 0 12px 0; }
     sourceIds.forEach(id => { if (![...sourceFilter.options].some(o => o.value === id)) { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; sourceFilter.appendChild(opt); } });
     actionIds.forEach(id => { if (![...actionFilter.options].some(o => o.value === id)) { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; actionFilter.appendChild(opt); } });
   }
+
+  hideIgnoredActions.addEventListener('change', () => {
+    document.getElementById('loadLogs').click();
+  });
 
   document.getElementById('loadLogs').onclick = async () => {
     const since = sinceInput.value.trim();

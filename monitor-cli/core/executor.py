@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -82,7 +80,7 @@ def execute_action(
         "ITEM_TITLE": item.title,
         "ITEM_URL": item.url,
         "ITEM_CONTENT_TYPE": item.content_type,
-        "ITEM_PUBLISHED": item.published_at.isoformat(),
+        "ITEM_PUBLISHED": item.published_at.isoformat() if item.published_at else "",
         "RULE_TIME": rule_time,
         **{f"EXTRA_{k.upper()}": str(v) for k, v in item.extra.items()},
     }
@@ -106,18 +104,13 @@ def execute_action(
         command = command.replace(f"${key}", value)
 
     script_content = f"#!/bin/bash\n{command}"
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
-            f.write("#!/bin/bash\n")
-            f.write(command)
-            f.flush()
-            tmp_path = f.name
 
-        os.chmod(tmp_path, 0o755)
-
-        result = rt_subprocess.run([tmp_path], capture_output=True, text=True, cwd=workdir)
-        return result.returncode, (result.stdout or "") + (result.stderr or ""), script_content
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+    # Execute command directly with bash -c to inherit environment properly
+    result = rt_subprocess.run(
+        ["bash", "-c", command],
+        capture_output=True,
+        text=True,
+        cwd=workdir,
+        env=os.environ.copy()  # Explicitly pass current environment
+    )
+    return result.returncode, (result.stdout or "") + (result.stderr or ""), script_content
