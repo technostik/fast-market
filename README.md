@@ -178,6 +178,7 @@ Watch sources and trigger actions based on rules.
 monitor setup source-add --plugin youtube --identifier UC...
 monitor setup source-add --plugin rss --identifier https://...
 monitor setup source-add --plugin yt-search --identifier "AI tutorial"
+monitor setup source-add --plugin directory --identifier /path/to/watch
 
 # Setup actions
 monitor setup action-add --id notify --command 'echo "$ITEM_TITLE"'

@@ -4,7 +4,7 @@ Rule-based content monitoring agent that watches web sources and triggers action
 
 ## Features
 
-- **Source Monitoring**: Watch YouTube channels, RSS feeds, and search keywords for new content
+- **Source Monitoring**: Watch YouTube channels, RSS feeds, search keywords, and local directories for new content
 - **Rule Engine**: Define conditions with AND/OR logic and operators like `==`, `>`, `contains`, `matches`
 - **DSL Conditions**: Human-readable condition syntax (e.g., `content_type == 'video' and duration > 600`)
 - **Time-Based Scheduling**: Schedule rules with cron expressions or intervals
@@ -106,6 +106,11 @@ monitor setup source-add --plugin yt-search \
   --meta theme=technology \
   --meta min_views=5000 \
   --meta max_results=30
+
+# Directory for new file monitoring
+monitor setup source-add --plugin directory \
+  --identifier /path/to/watch \
+  --slowdown 5m
 
 # Channel list (monitor multiple YouTube channels)
 monitor setup source-add --plugin channel_list \
@@ -1066,7 +1071,7 @@ How to have the correct venv and avoid concurrent calls :
 ```
 monitor-agent/
 ├── core/              # Rule engine, executor, storage
-├── plugins/           # youtube, rss, yt_search source plugins
+├── plugins/           # youtube, rss, yt_search, directory source plugins
 ├── commands/          # CLI commands
 └── monitor_entry/    # Entry point
 ```

@@ -10,9 +10,9 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
-from common.core.config import load_tool_config
+from common.core.config import load_common_config, load_tool_config, save_common_config
 from core.executor import execute_action
-from core.models import Action, ItemMetadata, Rule, RuleMismatchLog, RunErrorLog, Source, TriggerLog
+from core.models import ItemMetadata, RuleMismatchLog, RunErrorLog, TriggerLog
 from core.rule_engine import evaluate_rule_with_details
 from core.time_scheduler import should_run_rule
 
@@ -774,7 +774,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 common_config = load_tool_config("monitor")
                 workdir_path = common_config.get("workdir")
                 if workdir_path:
-                    resolved_workdir = Path(workdir_path).expanduser().resolve()
+                    workdir_path_resolved = Path(workdir_path).expanduser().resolve()
+                    if workdir_path_resolved.exists():
+                        resolved_workdir = workdir_path_resolved
+                    else:
+                        # Workdir doesn't exist, reset to workdir_root
+                        workdir_root = common_config.get("workdir_root")
+                        if workdir_root:
+                            root_path = Path(workdir_root).expanduser().resolve()
+                            if root_path.exists():
+                                # Reset workdir to workdir_root
+                                common_cfg = load_common_config()
+                                common_cfg["workdir"] = str(root_path)
+                                save_common_config(common_cfg)
+                                resolved_workdir = root_path
+                                click.echo(f"Warning: workdir reset to {root_path} (previous workdir did not exist)", err=True)
             except Exception:
                 pass
 

@@ -8,6 +8,7 @@ Provides source plugins that fetch content from external services (YouTube, RSS)
 - `youtube/` — YouTube RSS feed fetcher
 - `rss/` — Generic RSS/Atom feed fetcher
 - `yt_search/` — YouTube search keyword monitor
+- `directory/` — Directory file monitor
 
 ## 📋 Core Responsibilities
 - Fetch items from external sources
@@ -114,6 +115,45 @@ monitor setup source-add --plugin yt-search \
 - Estimate word count from content/summary
 - Support RSS, Atom, and feeds with `feed` in URL
 - Extract author information when available
+
+### Directory Plugin
+Monitor a directory for new files and trigger actions when files are added or modified.
+
+**Identifier**: Absolute directory path (e.g., `/home/user/documents`)
+
+**Source Metadata Options**:
+| Field | Default | Description |
+|-------|---------|-------------|
+| `slowdown` | `"15m"` | Minimum time between directory scans |
+
+**How It Works**:
+- Scans the specified directory for files (non-recursive)
+- Sorts files by modification time (oldest first)
+- Returns `ItemMetadata` for new files since last check
+- Uses file path as unique item ID for tracking
+
+**Content Types**:
+- Detected based on file extension (e.g., `.txt` → `document`, `.jpg` → `image`, default `file`)
+
+**Extra Fields Added to Items**:
+- `file_size` — File size in bytes
+- `extension` — File extension (e.g., `.txt`)
+- `permissions` — File permissions in octal (e.g., `644`)
+- `directory` — Parent directory path
+
+**Example Setup**:
+```bash
+monitor setup source-add --plugin directory \
+  --identifier /path/to/watch \
+  --slowdown 5m \
+  --description "Watch for new files in documents"
+```
+
+**Example Action**:
+```bash
+monitor setup action-add --id notify-file \
+  --command 'echo "New file: $ITEM_TITLE ($EXTRA_FILE_SIZE bytes) in $EXTRA_DIRECTORY"'
+```
 
 ### Channel List Plugin (channel_list)
 Monitor multiple YouTube channels from a single source configuration.

@@ -309,6 +309,9 @@ monitor setup source-edit my-source --no-is-new
 # Add an RSS feed source
 monitor setup source-add --plugin rss --identifier https://example.com/feed.xml
 
+# Add a directory source to monitor for new files
+monitor setup source-add --plugin directory --identifier /path/to/directory
+
 # Add an action with custom ID (use --description for human-readable description)
 monitor setup action-add --id telegram-notify \
   --command 'curl -X POST https://api.telegram.org/...'
@@ -329,6 +332,11 @@ monitor setup rule-add --id "tech-videos" \
 monitor setup rule-add --id "youtube-or-rss" \
   --conditions "source_plugin == 'youtube' or source_plugin == 'rss'" \
   --action-ids <action-id>
+
+# Add rule for directory files
+monitor setup rule-add --id "new-files" \
+  --conditions "source_plugin == 'directory' and content_type == 'document'" \
+  --action-ids notify-file
 
 # Add rule with cron scheduling (hourly)
 monitor setup rule-add --id "hourly-check" \
