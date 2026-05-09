@@ -45,6 +45,7 @@ class MonitorStorage:
                     command TEXT NOT NULL,
                     description TEXT,
                     enabled INTEGER DEFAULT 1,
+                    precondition TEXT,
                     created_at TEXT NOT NULL,
                     last_run TEXT,
                     last_output TEXT,
@@ -150,6 +151,7 @@ class MonitorStorage:
             self._migrate_rules_columns(conn)
             self._migrate_sources_columns(conn)
             self._migrate_triggered_items(conn)
+            self._migrate_actions_columns(conn)
 
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
@@ -208,6 +210,15 @@ class MonitorStorage:
         except sqlite3.OperationalError:
             try:
                 conn.execute("ALTER TABLE sources ADD COLUMN fallback_slowdown INTEGER")
+            except sqlite3.OperationalError:
+                pass
+
+    def _migrate_actions_columns(self, conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute("SELECT precondition FROM actions LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            try:
+                conn.execute("ALTER TABLE actions ADD COLUMN precondition TEXT")
             except sqlite3.OperationalError:
                 pass
 
@@ -461,13 +472,14 @@ class MonitorStorage:
     def add_action(self, action: Action) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO actions (id, command, description, enabled, created_at)
-                   VALUES (?, ?, ?, ?, ?)""",
+                """INSERT INTO actions (id, command, description, enabled, precondition, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (
                     action.id,
                     action.command,
                     action.description,
                     int(action.enabled),
+                    action.precondition,
                     action.created_at.isoformat(),
                 ),
             )
@@ -475,12 +487,13 @@ class MonitorStorage:
     def update_action(self, action: Action) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                """UPDATE actions SET command = ?, description = ?, enabled = ?,
+                """UPDATE actions SET command = ?, description = ?, enabled = ?, precondition = ?,
                    last_run = ?, last_output = ?, last_exit_code = ? WHERE id = ?""",
                 (
                     action.command,
                     action.description,
                     int(action.enabled),
+                    action.precondition,
                     action.last_run.isoformat() if action.last_run else None,
                     action.last_output,
                     action.last_exit_code,
@@ -875,11 +888,13 @@ class MonitorStorage:
         )
 
     def _row_to_action(self, row: sqlite3.Row) -> Action:
+        keys = row.keys()
         return Action(
             id=row["id"],
             command=row["command"],
             description=row["description"],
             enabled=bool(row["enabled"]),
+            precondition=row["precondition"] if "precondition" in keys else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             last_run=datetime.fromisoformat(row["last_run"]) if row["last_run"] else None,
             last_output=row["last_output"],

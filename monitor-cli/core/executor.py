@@ -105,12 +105,24 @@ def execute_action(
 
     script_content = f"#!/bin/bash\n{command}"
 
-    # Execute command directly with bash -c to inherit environment properly
+    if action.precondition:
+        pre = rt_subprocess.run(
+            ["bash", "-l", "-c", action.precondition],
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+            env=os.environ.copy(),
+        )
+        pre_output = (pre.stdout or "") + (pre.stderr or "")
+        if pre.returncode != 0:
+            return pre.returncode, f"[precondition failed]\n{pre_output}", f"#!/bin/bash\n{action.precondition}"
+
+    # Use login shell so ~/.profile is sourced (nvm, pyenv, etc.) regardless of caller env
     result = rt_subprocess.run(
-        ["bash", "-c", command],
+        ["bash", "-l", "-c", command],
         capture_output=True,
         text=True,
         cwd=workdir,
-        env=os.environ.copy()  # Explicitly pass current environment
+        env=os.environ.copy(),
     )
     return result.returncode, (result.stdout or "") + (result.stderr or ""), script_content

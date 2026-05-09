@@ -184,6 +184,7 @@ def _sync_config_logic(
                 command=act["command"],
                 description=act.get("description"),
                 enabled=act.get("enabled", True),
+                precondition=act.get("precondition"),
                 created_at=existing_action.created_at,
                 last_run=existing_action.last_run,
                 last_output=existing_action.last_output,
@@ -197,6 +198,7 @@ def _sync_config_logic(
                 command=act["command"],
                 description=act.get("description"),
                 enabled=act.get("enabled", True),
+                precondition=act.get("precondition"),
                 created_at=datetime.now(),
             )
             changes["added"]["actions"].append(act_id)
