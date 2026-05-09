@@ -67,22 +67,16 @@ class DirectoryPlugin(SourcePlugin):
             print(f"Error accessing directory {directory_path}: {e}")
             return []
 
-        # Sort files by modification time (oldest first)
-        files.sort(key=lambda f: f.stat().st_mtime)
+        # Sort files by modification time (newest first)
+        files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
 
         items = []
-        found_last = last_item_id is None
 
         for file_path in files:
             if len(items) >= limit:
                 break
 
             file_id = str(file_path.resolve())  # Use absolute path as unique ID
-
-            if not found_last:
-                if file_id == last_item_id:
-                    found_last = True
-                continue  # Skip until we find the last_item_id
 
             try:
                 stat = file_path.stat()
