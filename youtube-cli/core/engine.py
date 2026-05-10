@@ -8,6 +8,11 @@ from common.youtube.auth import YouTubeOAuth, get_client_secret_path
 from common.core.config import load_tool_config, load_youtube_config
 from common.youtube import YouTubeClient
 
+try:
+    from google.auth.exceptions import RefreshError
+except ImportError:
+    RefreshError = None
+
 logger = structlog.get_logger(__name__)
 
 
@@ -48,7 +53,17 @@ def build_youtube_client(config: Optional[dict] = None) -> YouTubeClient:
         )
 
     auth = YouTubeOAuth(client_secret)
-    api_client = auth.get_client()
+    try:
+        api_client = auth.get_client()
+    except RefreshError as e:
+        if RefreshError and 'invalid_grant' in str(e):
+            logger.warning("youtube_token_expired", error=str(e))
+            # Automatically refresh authentication
+            auth.refresh_auth()
+            # Retry getting client after refresh
+            api_client = auth.get_client()
+        else:
+            raise
 
     logger.info("youtube_client_built", channel_id=channel_id, quota_limit=quota_limit)
     return YouTubeClient(api_client, channel_id=channel_id, quota_limit=quota_limit, auth=auth)
