@@ -312,7 +312,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             for ph in placeholders:
                 field = _find_field_in_record(record, ph)
                 if field:
-                    param_dict[ph] = "{" + field + "}"
+                    param_dict[ph] = str(record[field]): 
             return param_dict
 
         if prompt_name:
