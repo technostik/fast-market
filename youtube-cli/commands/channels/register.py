@@ -153,9 +153,37 @@ def register(plugin_manifests: dict) -> CommandManifest:
         channel_list.channels.append(channel_entry)
         _save_channel_list(channel_list)
 
+        # Thematic selection
+
+        added_thematics = []
+        thematic_names = channel_list.list_thematic_names()
+        if thematic_names:
+            click.echo(f"\nAvailable thematics ({len(thematic_names)}):")
+            for i, name in enumerate(thematic_names, 1):
+                click.echo(f"  {i}: {name}")
+            
+            while True:
+                try:
+                    choice = input("\nAdd to thematic (number) or 0 to finish: ").strip()
+                    if choice == "0":
+                        break
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(thematic_names):
+                        thematic_name = thematic_names[idx]
+                        channel_list.add_channel_to_thematic(channel_entry.name, thematic_name)
+                        _save_channel_list(channel_list)
+                        added_thematics.append(thematic_name)
+                        click.echo(f"Added '{channel_entry.title}' to thematic '{thematic_name}'")
+                    else:
+                        click.echo("Invalid choice.")
+                except ValueError:
+                    click.echo("Invalid choice.")
+        
         click.echo(f"\nAdded '{title}' ({channel_id}) to channel list.")
         click.echo(f"  Name (slugified): {channel_name}")
         click.echo(f"  Subscribers: {subscribers:,}")
+        if added_thematics:
+            click.echo(f"  Added to thematics: {', '.join(added_thematics)}")
 
     # ─── LIST ───────────────────────────────────────────────────────────
 
