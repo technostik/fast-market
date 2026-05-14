@@ -557,6 +557,7 @@ def _execute_actions_for_trigger(
             continue
 
         try:
+            _action_start = _time.monotonic()
             if timeout_config:
                 code, output, script_content = _run_action_with_budget(
                     action, item, source, rule.id, resolved_workdir, timeout_config
@@ -565,6 +566,7 @@ def _execute_actions_for_trigger(
                 code, output, script_content = execute_action(
                     action, item, source, rule.id, workdir=resolved_workdir
                 )
+            _duration_sec = int(_time.monotonic() - _action_start)
             actions_executed += 1
 
             trigger_log_id = str(uuid.uuid4())
@@ -589,6 +591,7 @@ def _execute_actions_for_trigger(
                     triggered_at=triggered_at,
                     exit_code=code,
                     output=output,
+                    duration_sec=_duration_sec,
                 )
             )
 

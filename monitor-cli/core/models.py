@@ -75,6 +75,7 @@ class TriggerLog:
     exit_code: int | None
     output: str | None
     item_extra: dict[str, Any] | None = None
+    duration_sec: int | None = None
 
 
 @dataclass(slots=True)

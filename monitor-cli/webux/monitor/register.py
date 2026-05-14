@@ -123,6 +123,7 @@ def logs(
             "triggered_at": r.triggered_at.isoformat(),
             "exit_code": r.exit_code,
             "output": r.output,
+            "duration_sec": r.duration_sec,
         }
         for r in trigger_rows
     ]
@@ -221,15 +222,18 @@ def rerun_action(trigger_log_id: str) -> dict:
         extra=trigger_log.item_extra or {},
     )
 
+    import time as _time
+    import uuid
+    _rerun_start = _time.monotonic()
     exit_code, output, script_content = execute_action(
         action=action,
         item=item,
         source=source,
         rule_id=trigger_log.rule_id,
     )
+    _rerun_duration = int(_time.monotonic() - _rerun_start)
 
     # Log the rerun
-    import uuid
     rerun_log = TriggerLog(
             id=str(uuid.uuid4()),
             rule_id=trigger_log.rule_id,
@@ -242,6 +246,7 @@ def rerun_action(trigger_log_id: str) -> dict:
             exit_code=exit_code,
             output=output,
             item_extra=trigger_log.item_extra,
+            duration_sec=_rerun_duration,
         )
     storage.log_trigger(rerun_log)
 
@@ -506,6 +511,17 @@ h2 { margin:0 0 12px 0; }
   }
 
   let runningRefreshTimer = null;
+  let runningCounterTimer = null;
+
+  function startRunningCounter(startedAt) {
+    clearInterval(runningCounterTimer);
+    const startMs = new Date(startedAt).getTime();
+    runningCounterTimer = setInterval(() => {
+      const el = document.getElementById('runningElapsed');
+      if (!el) { clearInterval(runningCounterTimer); return; }
+      el.textContent = formatDuration(Math.floor((Date.now() - startMs) / 1000));
+    }, 1000);
+  }
 
   function formatDuration(sec) {
     sec = Math.max(0, parseInt(sec) || 0);
@@ -530,7 +546,7 @@ h2 { margin:0 0 12px 0; }
         <div style='display:flex;align-items:center;gap:8px;margin-bottom:8px;'>
           <span class='running-dot'></span>
           <strong>Running: ${data.action_id || 'unknown'}</strong>
-          <span style='color:var(--text-dim);font-size:13px;'>${formatDuration(data.elapsed_sec)}</span>
+          <span id='runningElapsed' style='color:var(--text-dim);font-size:13px;'>${formatDuration(data.elapsed_sec)}</span>
         </div>
         <div class='running-grid'>
           <span class='label'>Rule:</span><span>${data.rule_id || 'N/A'}</span>
@@ -628,6 +644,7 @@ h2 { margin:0 0 12px 0; }
       if (r.source_id) headerHtml += ` <span class="card-field"><span class="label">Source:</span><span class="value badge info">${r.source_id}</span></span>`;
       if (r.action_id) headerHtml += ` <span class="card-field"><span class="label">Action:</span><span class="value badge info">${r.action_id}</span></span>`;
       headerHtml += ` <span class="card-field"><span class="label">Time:</span><span class="value">${relativeTime}</span></span>`;
+      if (r.duration_sec != null) headerHtml += ` <span class="card-field"><span class="label">Duration:</span><span class="value">${formatDuration(r.duration_sec)}</span></span>`;
       headerHtml += ` <span class="badge ${status.cls}">${status.label}</span>`;
       if (r.action_id && r.log_type !== 'run_error') {
         headerHtml += ` <button class="rerun-btn" onclick="event.stopPropagation(); rerunAction('${r.id}')" style="padding:4px 8px;font-size:11px;margin-left:8px;">🔄 Rerun</button>`;
@@ -694,6 +711,7 @@ h2 { margin:0 0 12px 0; }
 
   document.getElementById('runDiagnose').onclick = async () => {
     clearInterval(runningRefreshTimer);
+    clearInterval(runningCounterTimer);
     out.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim);">🔍 Running diagnostics…</div>';
     try {
       const r = await fetch('/api/monitor/diagnose', {method:'POST'});
@@ -732,6 +750,8 @@ h2 { margin:0 0 12px 0; }
   });
 
   document.getElementById('loadLogs').onclick = async () => {
+    clearInterval(runningRefreshTimer);
+    clearInterval(runningCounterTimer);
     const since = sinceInput.value.trim();
     const rule = ruleFilter.value;
     const source = sourceFilter.value;
@@ -761,17 +781,24 @@ h2 { margin:0 0 12px 0; }
 
   document.getElementById('loadStatus').onclick = async () => {
     clearInterval(runningRefreshTimer);
+    clearInterval(runningCounterTimer);
     const [statusR, runningR] = await Promise.all([fetch('/api/monitor/status'), fetch('/api/monitor/running')]);
     const statsData = await statusR.json();
     const runningData = await runningR.json();
     out.innerHTML = renderRunning(runningData) + renderStats(statsData);
     if (runningData.status === 'running') {
+      if (runningData.started_at) startRunningCounter(runningData.started_at);
       runningRefreshTimer = setInterval(async () => {
         const r = await fetch('/api/monitor/running');
         const d = await r.json();
         const panel = document.getElementById('runningPanel');
         if (panel) panel.outerHTML = renderRunning(d);
-        if (d.status !== 'running') clearInterval(runningRefreshTimer);
+        if (d.status === 'running') {
+          if (d.started_at) startRunningCounter(d.started_at);
+        } else {
+          clearInterval(runningRefreshTimer);
+          clearInterval(runningCounterTimer);
+        }
       }, 5000);
     }
   };

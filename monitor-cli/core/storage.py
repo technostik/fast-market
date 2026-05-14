@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -152,6 +153,7 @@ class MonitorStorage:
             self._migrate_sources_columns(conn)
             self._migrate_triggered_items(conn)
             self._migrate_actions_columns(conn)
+            self._migrate_trigger_logs_columns(conn)
 
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
@@ -221,6 +223,33 @@ class MonitorStorage:
                 conn.execute("ALTER TABLE actions ADD COLUMN precondition TEXT")
             except sqlite3.OperationalError:
                 pass
+
+    def _migrate_trigger_logs_columns(self, conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute("SELECT duration_sec FROM trigger_logs LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            try:
+                conn.execute("ALTER TABLE trigger_logs ADD COLUMN duration_sec INTEGER")
+            except sqlite3.OperationalError:
+                return
+            # Backfill past logs: parse "Total run time:" from output
+            _pat = re.compile(
+                r'Total run time:\s+(?:(\d+)h\s+)?(?:(\d+)m\s+)?(\d+(?:\.\d+)?)s'
+            )
+            rows = conn.execute(
+                "SELECT id, output FROM trigger_logs WHERE output IS NOT NULL"
+            ).fetchall()
+            for row in rows:
+                m = _pat.search(row["output"])
+                if m:
+                    hours = int(m.group(1) or 0)
+                    mins = int(m.group(2) or 0)
+                    secs = float(m.group(3) or 0)
+                    duration_sec = int(hours * 3600 + mins * 60 + secs)
+                    conn.execute(
+                        "UPDATE trigger_logs SET duration_sec = ? WHERE id = ?",
+                        (duration_sec, row["id"]),
+                    )
 
     def _migrate_triggered_items(self, conn: sqlite3.Connection) -> None:
         try:
@@ -588,8 +617,8 @@ class MonitorStorage:
             conn.execute(
                 """INSERT INTO trigger_logs
                    (id, rule_id, source_id, action_id, item_id, item_title,
-                    item_url, item_extra, triggered_at, exit_code, output)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    item_url, item_extra, triggered_at, exit_code, output, duration_sec)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     log.id,
                     log.rule_id,
@@ -602,6 +631,7 @@ class MonitorStorage:
                     log.triggered_at.isoformat(),
                     log.exit_code,
                     log.output,
+                    log.duration_sec,
                 ),
             )
 
@@ -935,7 +965,9 @@ class MonitorStorage:
         )
 
     def _row_to_trigger_log(self, row: sqlite3.Row) -> TriggerLog:
-        extra_val = row["item_extra"] if "item_extra" in row.keys() else None
+        keys = row.keys()
+        extra_val = row["item_extra"] if "item_extra" in keys else None
+        duration_val = row["duration_sec"] if "duration_sec" in keys else None
         return TriggerLog(
             id=row["id"],
             rule_id=row["rule_id"],
@@ -948,6 +980,7 @@ class MonitorStorage:
             exit_code=row["exit_code"],
             output=row["output"],
             item_extra=json.loads(extra_val) if extra_val else None,
+            duration_sec=duration_val,
         )
 
     def _row_to_trigger_log_with_metadata(self, row: sqlite3.Row) -> TriggerLogWithMetadata:
@@ -967,6 +1000,7 @@ class MonitorStorage:
             output=base.output,
             item_extra=base.item_extra,
             source_metadata=metadata,
+            duration_sec=base.duration_sec,
         )
 
     def _row_to_mismatch_log(self, row: sqlite3.Row) -> RuleMismatchLog:
