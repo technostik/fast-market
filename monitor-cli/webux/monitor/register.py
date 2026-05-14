@@ -640,9 +640,9 @@ h2 { margin:0 0 12px 0; }
 
   function renderStats(data) {
     const stats = data.statistics || {};
-    const total = stats.total_triggers || 0;
-    const success = stats.success_count || 0;
-    const failed = stats.failed_count || 0;
+    const total = stats.triggers_count || 0;
+    const failed = stats.failed_triggers_count || 0;
+    const success = total - failed;
     const successRate = total > 0 ? ((success / total) * 100).toFixed(1) : '0';
     return `
       <div class="stats-grid">
@@ -683,7 +683,7 @@ h2 { margin:0 0 12px 0; }
 
   document.getElementById('runDiagnose').onclick = async () => {
     clearInterval(runningRefreshTimer);
-    out.innerHTML = '<div style=\'padding:40px;text-align:center;color:var(--text-dim);\'>🔍 Running diagnostics…</div>';
+    out.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim);">🔍 Running diagnostics…</div>';
     try {
       const r = await fetch('/api/monitor/diagnose', {method:'POST'});
       const data = await r.json();
