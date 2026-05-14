@@ -112,6 +112,27 @@ def logs(
         limit=fetch_limit,
         offset=0,
     )
+
+    error_rows = storage.get_run_error_logs(
+        since=since_dt,
+        until=date_range[1] if date_range else None,
+        source_id=source_id,
+        action_id=action_id,
+        rule_id=rule_id,
+        limit=fetch_limit,
+        offset=0,
+    )
+
+    # run_error entries with a trigger_log_id are secondary records for an execution
+    # already represented by the trigger_log — skip them to avoid duplicates.
+    # output_contains_error specifically means the action "succeeded" (exit=0) but the
+    # LLM output contains the word "error": flag those trigger_logs as warnings.
+    output_error_trigger_ids = {
+        r.trigger_log_id
+        for r in error_rows
+        if r.error_type == "output_contains_error" and r.trigger_log_id
+    }
+
     trigger_data = [
         {
             "id": r.id,
@@ -124,19 +145,12 @@ def logs(
             "exit_code": r.exit_code,
             "output": r.output,
             "duration_sec": r.duration_sec,
+            "has_output_error": r.id in output_error_trigger_ids,
         }
         for r in trigger_rows
     ]
 
-    error_rows = storage.get_run_error_logs(
-        since=since_dt,
-        until=date_range[1] if date_range else None,
-        source_id=source_id,
-        action_id=action_id,
-        rule_id=rule_id,
-        limit=fetch_limit,
-        offset=0,
-    )
+    # Only keep standalone run_errors (no trigger_log_id) — fetch/plugin/action-not-found errors
     error_data = [
         {
             "id": r.id,
@@ -152,6 +166,7 @@ def logs(
             "trigger_log_id": r.trigger_log_id,
         }
         for r in error_rows
+        if not r.trigger_log_id
     ]
 
     combined = trigger_data + error_data
@@ -588,10 +603,11 @@ h2 { margin:0 0 12px 0; }
     output_contains_error: { cls: 'warning', label: 'Output Error' },
   };
 
-  function getStatusInfo(exitCode) {
-    if (exitCode === 0) return { cls: 'success', label: 'Success' };
+  function getStatusInfo(exitCode, hasOutputError) {
+    if (exitCode !== 0 && exitCode !== null && exitCode !== undefined) return { cls: 'error', label: 'Failed' };
     if (exitCode === null || exitCode === undefined) return { cls: 'warning', label: 'Pending' };
-    return { cls: 'error', label: 'Failed' };
+    if (hasOutputError) return { cls: 'warning', label: 'Output Error' };
+    return { cls: 'success', label: 'Success' };
   }
 
   function renderCards(rows, type) {
@@ -626,11 +642,12 @@ h2 { margin:0 0 12px 0; }
           ${r.output ? `<pre>${r.output}</pre>` : ''}
         </div>`;
       } else {
-        status = getStatusInfo(r.exit_code);
+        status = getStatusInfo(r.exit_code, r.has_output_error);
         bodyHtml = `<div class="card-body">
           <div style="display:grid;grid-template-columns:auto 1fr;gap:6px;font-size:13px;">
             <span class="label">Exit Code:</span><span>${r.exit_code ?? 'N/A'}</span>
             <span class="label">ID:</span><span>${r.id}</span>
+            ${r.has_output_error ? `<span class="label">Note:</span><span style="color:var(--warning);">Output contains 'error' keyword</span>` : ''}
           </div>
           ${r.output ? `<pre>${r.output}</pre>` : ''}
         </div>`;
