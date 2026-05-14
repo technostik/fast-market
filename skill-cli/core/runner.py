@@ -215,7 +215,7 @@ def execute_skill_script(
 
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
-        effective_timeout = 60
+        effective_timeout = 900
     effective_timeout = parse_duration(effective_timeout)
     if effective_timeout == 0:
         effective_timeout = None  # 0 means no timeout
@@ -323,7 +323,7 @@ def execute_skill_run(
 
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
-        effective_timeout = 60
+        effective_timeout = 900
     effective_timeout = parse_duration(effective_timeout)
     if effective_timeout == 0:
         effective_timeout = None
@@ -488,7 +488,7 @@ def execute_skill_prompt(
 
     effective_timeout = timeout if timeout is not None else skill.timeout
     if effective_timeout is None:
-        effective_timeout = 300
+        effective_timeout = 900
     effective_timeout = parse_duration(effective_timeout)
     if effective_timeout == 0:
         effective_timeout = None
@@ -542,7 +542,7 @@ def execute_skill_prompt(
         allowed_commands=allowed_commands,
         max_iterations=effective_max_iterations
         or task_config_dict.get("max_iterations", 20),
-        default_timeout=task_config_dict.get("default_timeout", 60),
+        default_timeout=task_config_dict.get("default_timeout", 900),
         llm_timeout=effective_llm_timeout,
         temperature=config.get("default_temperature", 0.3),
         command_docs=command_docs,

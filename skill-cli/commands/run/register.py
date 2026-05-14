@@ -147,6 +147,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Export only the successfully executed steps to a YAML plan file",
     )
+    @click.option(
+        "--timeout",
+        "skill_timeout_override",
+        default=None,
+        type=int,
+        help="Per-skill execution timeout in seconds, overrides default 900s (0 = no limit)",
+    )
     def run_cmd(
         task,
         provider,
@@ -167,6 +174,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         shared_context,
         interactive,
         export_successful,
+        skill_timeout_override,
     ):
         """Orchestrate multiple skills to accomplish a complex task.
 
@@ -299,13 +307,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
             f"Interactive mode: {'enabled' if interactive else 'disabled'}", err=True
         )
 
+        _effective_skill_timeout = 900 if skill_timeout_override is None else (skill_timeout_override or None)
+
         state = run_router(
             goal=task,
             provider=llm,
             model=model,
             workdir=workdir,
             max_iterations=max_iterations,
-            skill_timeout=300,
+            skill_timeout=_effective_skill_timeout,
             retry_limit=retry_limit,
             verbose=verbose,
             auto_learn=auto_learn,

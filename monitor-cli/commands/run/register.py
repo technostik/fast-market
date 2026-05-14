@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import threading
+import time as _time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,10 +14,14 @@ import click
 from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
 from common.core.config import load_common_config, load_tool_config, save_common_config
+from common.core.duration import parse_duration
 from core.executor import execute_action
 from core.models import ItemMetadata, RuleMismatchLog, RunErrorLog, TriggerLog
 from core.rule_engine import evaluate_rule_with_details
 from core.time_scheduler import should_run_rule
+
+_MONITOR_WAIT_FILE = Path("/tmp/fast-market-monitor.wait")
+_MONITOR_STOP_FILE = Path("/tmp/fast-market-monitor.stop")
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
 
@@ -352,6 +359,70 @@ def _mark_seen_items(storage, source, items, force_mode):
     storage.add_seen_items(source.id, items_to_mark)
 
 
+def _run_action_with_budget(
+    action, item, source, rule_id, workdir, timeout_config
+) -> tuple[int, str, str]:
+    """Run execute_action with alert-before-kill timeout logic.
+
+    Sends an alert at alert_after, kills at max. The user can run
+    'monitor wait' (writes a sentinel file) to extend the deadline by
+    increment, or 'monitor stop' to abort immediately.
+    """
+    max_secs = parse_duration(timeout_config.get("max", "30m")) or 1800
+    alert_after_secs = parse_duration(timeout_config.get("alert_after", "15m")) or 900
+    increment_secs = parse_duration(timeout_config.get("increment", "5m")) or 300
+    alert_cmd_template = timeout_config.get("alert_cmd", "")
+
+    result_holder: dict[str, Any] = {"value": None, "error": None}
+
+    def _run() -> None:
+        try:
+            result_holder["value"] = execute_action(action, item, source, rule_id, workdir=workdir)
+        except Exception as exc:
+            result_holder["error"] = exc
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    start = _time.monotonic()
+    alert_sent = False
+    deadline = float(max_secs)
+
+    _MONITOR_WAIT_FILE.unlink(missing_ok=True)
+    _MONITOR_STOP_FILE.unlink(missing_ok=True)
+
+    while thread.is_alive():
+        elapsed = _time.monotonic() - start
+
+        if _MONITOR_STOP_FILE.exists():
+            _MONITOR_STOP_FILE.unlink(missing_ok=True)
+            click.echo(f"[TIMEOUT] 'monitor stop' received after {int(elapsed)}s — aborting action '{action.id}'", err=True)
+            return -1, f"[aborted by 'monitor stop' after {int(elapsed)}s]", ""
+
+        if _MONITOR_WAIT_FILE.exists():
+            _MONITOR_WAIT_FILE.unlink(missing_ok=True)
+            deadline = elapsed + increment_secs
+            click.echo(f"[TIMEOUT] deadline extended +{increment_secs}s (now {int(deadline)}s total)", err=True)
+            alert_sent = False
+
+        if not alert_sent and elapsed >= alert_after_secs:
+            elapsed_min = int(elapsed // 60)
+            cmd = alert_cmd_template.replace("{elapsed}", str(elapsed_min))
+            if cmd:
+                subprocess.run(["bash", "-c", cmd], capture_output=True)
+            alert_sent = True
+
+        if elapsed >= deadline:
+            click.echo(f"[TIMEOUT] action '{action.id}' exceeded {int(elapsed)}s (max={int(max_secs)}s)", err=True)
+            return -1, f"[timeout after {int(elapsed)}s — max={int(max_secs)}s]", ""
+
+        thread.join(timeout=1.0)
+
+    if result_holder["error"]:
+        raise result_holder["error"]
+    return result_holder["value"]
+
+
 def _execute_actions_for_trigger(
     storage,
     rule,
@@ -366,6 +437,7 @@ def _execute_actions_for_trigger(
     cron,
     errors,
     total_actions,
+    timeout_config=None,
 ):
     action_results = []
     (actions_executed, actions_skipped, actions_failed) = total_actions
@@ -399,9 +471,14 @@ def _execute_actions_for_trigger(
             continue
 
         try:
-            code, output, script_content = execute_action(
-                action, item, source, rule.id, workdir=resolved_workdir
-            )
+            if timeout_config:
+                code, output, script_content = _run_action_with_budget(
+                    action, item, source, rule.id, resolved_workdir, timeout_config
+                )
+            else:
+                code, output, script_content = execute_action(
+                    action, item, source, rule.id, workdir=resolved_workdir
+                )
             actions_executed += 1
 
             trigger_log_id = str(uuid.uuid4())
@@ -765,6 +842,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 )
             return
 
+        monitor_config: dict = {}
+        try:
+            monitor_config = load_tool_config("monitor")
+        except Exception:
+            pass
+        timeout_config: dict | None = monitor_config.get("timeout") if monitor_config else None
+
         config = {}
         resolved_workdir = None
         if workdir:
@@ -962,6 +1046,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         cron,
                         errors,
                         total_actions,
+                        timeout_config=timeout_config,
                     )
                 )
                 total_actions_executed += actions_executed

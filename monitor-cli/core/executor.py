@@ -45,6 +45,7 @@ def execute_action(
     rule_id: str,
     error_context: dict[str, Any] | None = None,
     workdir: Path | None = None,
+    timeout: int | None = None,
 ) -> tuple[int, str, str]:
     """Execute action with placeholders replaced.
 
@@ -124,5 +125,6 @@ def execute_action(
         text=True,
         cwd=workdir,
         env=os.environ.copy(),
+        timeout=timeout,
     )
     return result.returncode, (result.stdout or "") + (result.stderr or ""), script_content

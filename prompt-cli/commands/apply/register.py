@@ -42,6 +42,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Working directory for @filename resolution (default: current directory)",
     )
+    @click.option(
+        "--timeout",
+        "llm_timeout_override",
+        default=None,
+        help="LLM call timeout in seconds, overrides config (0 = no limit)",
+        type=int,
+    )
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
     @click.pass_context
     def apply_cmd(
@@ -54,6 +61,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         fmt,
         stdin,
         workdir,
+        llm_timeout_override,
         args,
     ):
         """Apply a prompt with parameter substitution.
@@ -258,13 +266,27 @@ def register(plugin_manifests: dict) -> CommandManifest:
             )
             sys.exit(1)
 
+        # Load LLM timeout settings from agent config
+        import time as _time
+        try:
+            _agent_cfg = load_tool_config("common/agent")
+        except Exception:
+            _agent_cfg = {}
+        _llm_call_warn = int(_agent_cfg.get("llm_call_warn", 180))
+        if llm_timeout_override is not None:
+            _llm_call_timeout = llm_timeout_override or None
+        else:
+            _llm_call_timeout = int(_agent_cfg.get("llm_call_timeout", 600)) or None
+
         # Execute the prompt
         request = LLMRequest(
             prompt=resolved,
             model=model_name,
             temperature=temp,
             max_tokens=max_tok,
+            timeout=_llm_call_timeout or 0,
         )
+        _t0 = _time.monotonic()
         try:
             response = providers[provider_name].complete(request)
         except RuntimeError as exc:
@@ -273,6 +295,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         except Exception as exc:
             click.echo(f"Error: {provider_name} provider failed: {exc}", err=True)
             sys.exit(1)
+        _elapsed = _time.monotonic() - _t0
+        if _elapsed >= _llm_call_warn:
+            click.echo(f"Warning: LLM call took {_elapsed:.1f}s (warn threshold: {_llm_call_warn}s)", err=True)
 
         # Record execution (only for saved prompts or with a meaningful identifier)
         execution_name = prompt_name_or_content if not is_direct_prompt else "<direct>"

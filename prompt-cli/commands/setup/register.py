@@ -120,7 +120,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "fastmarket_tools": default_fastmarket_tools_dict(),
                 "system_commands": list(DEFAULT_SYSTEM_COMMANDS),
                 "max_iterations": 20,
-                "default_timeout": 60,
+                "default_timeout": 900,
                 "agent_prompt": {
                     "active": "default",
                     "templates": {

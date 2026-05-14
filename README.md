@@ -193,10 +193,26 @@ monitor run                   # Normal mode
 monitor run --force --dry-run # Test mode
 monitor run --cron            # Cron mode
 
+# Timeout control (when monitor run is blocked on a long action)
+monitor wait                  # Extend deadline by +5min (configured by timeout.increment)
+monitor stop                  # Abort the current run immediately
+
 # View logs
 monitor logs --since 1d
 monitor status
 ```
+
+**Monitor run timeout** is configured in `~/.config/fast-market/monitor/config.yaml`:
+
+```yaml
+timeout:
+  alert_after: 15m     # Send alert_cmd when elapsed time exceeds this
+  max: 30m             # Kill action and exit at this hard limit
+  increment: 5m        # How much time 'monitor wait' adds
+  alert_cmd: "message alert 'monitor run: {elapsed}min elapsed — run `monitor wait` or `monitor stop`'"
+```
+
+When `alert_after` is reached, `alert_cmd` fires (typically a Telegram message). The user can run `monitor wait` to extend the deadline or `monitor stop` to abort.
 
 ---
 
@@ -264,10 +280,24 @@ prompt delete my-prompt
 prompt apply my-prompt var1=value1
 prompt apply --direct "Your prompt here" var=value
 echo "input" | prompt apply --stdin
+prompt apply my-prompt --timeout 300    # override LLM call timeout (seconds)
+
+# Batch execution
+prompt batch-apply -n my-prompt -i field -o result -f data.json -O out.json
+prompt batch-apply -n my-prompt -i field -o result -f data.json --timeout 0  # no timeout
 
 # Task execution
 prompt task "Build a website"
 ```
+
+**LLM call timeouts** are configured in `~/.config/fast-market/common/agent/config.yaml`:
+
+```yaml
+llm_call_warn: 180     # Print warning to stderr if call exceeds this (seconds)
+llm_call_timeout: 600  # Hard HTTP timeout per LLM call (seconds, 0 = no limit)
+```
+
+Override per-invocation with `--timeout <seconds>` (0 = no limit).
 
 ---
 
@@ -290,10 +320,16 @@ Manage reusable skills with learning capabilities.
 skill list
 skill create my-skill
 skill show my-skill
-skill run my-skill --input "..."
+skill run "Accomplish task X"          # LLM-orchestrated multi-skill run
+skill run "task" --timeout 1800        # Override per-skill timeout (seconds, 0 = no limit)
+skill apply my-skill KEY=VALUE         # Apply single skill
 skill apply my-skill/script.sh arg1
 skill delete my-skill
 ```
+
+**Skill execution timeouts** default to 15 minutes (900s) per skill step. Override globally in
+`~/.config/fast-market/common/agent/config.yaml` (`default_timeout`), per-skill in `SKILL.md`
+frontmatter (`timeout: <seconds>`), or per-invocation with `--timeout`.
 
 ---
 

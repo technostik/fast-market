@@ -150,6 +150,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         is_flag=True,
         help="Enable debug mode with additional output",
     )
+    @click.option(
+        "--timeout",
+        "llm_timeout_override",
+        default=None,
+        type=int,
+        help="LLM call timeout per record in seconds, overrides config (0 = no limit)",
+    )
     @click.pass_context
     def batch_apply_cmd(
         ctx,
@@ -169,6 +176,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         workdir,
         metadata,
         debug,
+        llm_timeout_override,
     ):
         """Apply a prompt to each record in a JSON array.
 
@@ -415,6 +423,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
             return
 
         from common.llm.base import LLMRequest
+        import time as _time
+
+        try:
+            _agent_cfg = load_tool_config("common/agent")
+        except Exception:
+            _agent_cfg = {}
+        _llm_call_warn = int(_agent_cfg.get("llm_call_warn", 180))
+        if llm_timeout_override is not None:
+            _llm_call_timeout = llm_timeout_override or None
+        else:
+            _llm_call_timeout = int(_agent_cfg.get("llm_call_timeout", 600)) or None
 
         results = []
         for idx, record in enumerate(records):
@@ -477,8 +496,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 model=model_name,
                 temperature=temp,
                 max_tokens=max_tok,
+                timeout=_llm_call_timeout or 0,
             )
 
+            _t0 = _time.monotonic()
             try:
                 response = providers[provider_name].complete(request)
             except Exception as exc:
@@ -486,6 +507,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 record[output_field] = None
                 results.append(record)
                 continue
+            _elapsed = _time.monotonic() - _t0
+            if _elapsed >= _llm_call_warn:
+                click.echo(f"Warning: record {idx} LLM call took {_elapsed:.1f}s (warn threshold: {_llm_call_warn}s)", err=True)
 
             record[output_field] = response.content
             if metadata_dict:

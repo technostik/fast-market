@@ -23,7 +23,11 @@ FIXTURE_DATA = FIXTURES_DIR / "data"
 FIXTURE_BIN = FIXTURES_DIR / "bin"
 
 # Ensure local CLI entry packages are importable in tests.
-for path in (TESTS_DIR, REPO_ROOT / "task-cli", REPO_ROOT / "skill-cli", REPO_ROOT / "browser-cli"):
+# monitor-cli is listed last so it ends up first in sys.path (insert(0) reverses order).
+# This ensures monitor-cli/core takes precedence over corpus-cli/core in the shared
+# 'core' namespace package — otherwise corpus-cli's editable finder wins and
+# 'from core.models import ItemMetadata' fails in monitor plugin imports.
+for path in (TESTS_DIR, REPO_ROOT / "task-cli", REPO_ROOT / "skill-cli", REPO_ROOT / "browser-cli", REPO_ROOT / "monitor-cli"):
     path_str = str(path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)

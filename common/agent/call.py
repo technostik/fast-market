@@ -39,7 +39,7 @@ def agent_call(
     system_commands: list[str] | None = None,
     fastmarket_tools: dict[str, Any] | None = None,
     max_iterations: int = 20,
-    default_timeout: int = 60,
+    default_timeout: int = 900,
     llm_timeout: int = 0,
     temperature: float = 0.3,
     provider: str | None = None,

@@ -24,7 +24,7 @@ class TaskConfig:
     fastmarket_tools: dict
     system_commands: list[str]
     max_iterations: int = 20
-    default_timeout: int = 60
+    default_timeout: int = 900
     llm_timeout: int = 0  # 0 = no limit
     allowed_commands: list[str] = field(default_factory=list)
     temperature: float = 0.3

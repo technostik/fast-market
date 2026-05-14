@@ -121,7 +121,7 @@ def init_task_config(config: dict) -> dict:
     task.setdefault("fastmarket_tools", default_fastmarket_tools_dict())
     task.setdefault("system_commands", list(DEFAULT_SYSTEM_COMMANDS))
     task.setdefault("max_iterations", 20)
-    task.setdefault("default_timeout", 60)
+    task.setdefault("default_timeout", 900)
     task.setdefault("default_workdir", None)
 
     if "agent_prompt" not in task:

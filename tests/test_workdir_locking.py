@@ -18,8 +18,20 @@ import importlib.util as _ilu
 
 # Load toolsetup-cli's workdir module directly by file path to avoid collision
 # with browser-cli's 'commands' package that gets cached in sys.modules first.
-_workdir_file = REPO_ROOT / "toolsetup-cli" / "commands" / "setup" / "workdir.py"
+# Pre-load dependencies that workdir.py imports via namespace (commands.setup.diagnose).
+_toolsetup_root = REPO_ROOT / "toolsetup-cli"
+_workdir_file = _toolsetup_root / "commands" / "setup" / "workdir.py"
 try:
+    # Pre-populate sys.modules with toolsetup-cli's commands.setup.diagnose so
+    # workdir.py's 'from commands.setup.diagnose import ...' resolves correctly
+    # without adding toolsetup-cli to sys.path (which would collide with browser-cli's
+    # 'commands' namespace).
+    _diagnose_file = _toolsetup_root / "commands" / "setup" / "diagnose.py"
+    _d_spec = _ilu.spec_from_file_location("commands.setup.diagnose", _diagnose_file)
+    _d_mod = _ilu.module_from_spec(_d_spec)
+    sys.modules.setdefault("commands.setup.diagnose", _d_mod)
+    _d_spec.loader.exec_module(_d_mod)
+
     _spec = _ilu.spec_from_file_location("_toolsetup_workdir", _workdir_file)
     workdir_module = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(workdir_module)

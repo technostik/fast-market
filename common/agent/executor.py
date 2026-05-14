@@ -171,7 +171,7 @@ def execute_command(
     cmd_str: str,
     workdir: Path,
     allowed: set[str],
-    timeout: int = 60,
+    timeout: int = 900,
     env_params: dict[str, str] | None = None,
 ) -> CommandResult:
     """Execute a whitelisted command in the workdir."""

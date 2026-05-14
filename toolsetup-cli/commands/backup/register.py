@@ -144,9 +144,12 @@ def register():
     @click.pass_context
     def backup_restore(ctx, source_type):
         """Restore from the current backup snapshot."""
+        if source_type is None:
+            raise click.UsageError("--source-type is required for restore")
         source = _get_source(source_type)
         if source is None:
             click.echo(f"Error: {source_type} not configured.", err=True)
+            ctx.exit(1)
             return
         source.mkdir(parents=True, exist_ok=True)
         flat_only = _is_flat_only(source_type)
@@ -157,9 +160,12 @@ def register():
     @click.pass_context
     def backup_status(ctx, source_type):
         """Show backup status of the selected directory."""
+        if source_type is None:
+            raise click.UsageError("--source-type is required for status")
         source = _get_source(source_type)
         if source is None:
-            click.echo(f"{source_type} not configured.")
+            click.echo(f"{source_type} not configured.", err=True)
+            ctx.exit(1)
             return
         flat_only = _is_flat_only(source_type)
         source_exists_check = source_type != SOURCE_WORKDIR or source is not None
@@ -184,9 +190,12 @@ def register():
     @click.pass_context
     def backup_rollback(ctx, source_type, snapshot_name):
         """Rollback to a specific backup snapshot or the current one."""
+        if source_type is None:
+            raise click.UsageError("--source-type is required for rollback")
         source = _get_source(source_type)
         if source is None:
             click.echo(f"Error: {source_type} not configured.", err=True)
+            ctx.exit(1)
             return
         source.mkdir(parents=True, exist_ok=True)
         flat_only = _is_flat_only(source_type)
