@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from common.webux.base import WebuxPluginManifest
 
 router = APIRouter()
 _CLI_ROOT = Path(__file__).resolve().parents[2]
+_MONITOR_STATE_FILE = Path("/tmp/fast-market-monitor.state.json")
 
 
 def _get_monitor_storage_class():
@@ -251,6 +253,58 @@ def rerun_action(trigger_log_id: str) -> dict:
     }
 
 
+@router.get("/running")
+def running_status() -> dict:
+    if not _MONITOR_STATE_FILE.exists():
+        return {"status": "idle"}
+    try:
+        data = json.loads(_MONITOR_STATE_FILE.read_text())
+        if data.get("status") == "running" and data.get("started_at"):
+            started_at = datetime.fromisoformat(data["started_at"])
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            elapsed_sec = int((datetime.now(timezone.utc) - started_at).total_seconds())
+            if elapsed_sec > 7200:
+                return {"status": "idle", "stale": True}
+            data["elapsed_sec"] = elapsed_sec
+        return data
+    except Exception:
+        return {"status": "idle"}
+
+
+@router.post("/wait")
+def monitor_wait() -> dict:
+    Path("/tmp/fast-market-monitor.wait").touch()
+    return {"success": True}
+
+
+@router.post("/stop")
+def monitor_stop() -> dict:
+    Path("/tmp/fast-market-monitor.stop").touch()
+    return {"success": True}
+
+
+@router.post("/diagnose")
+def run_diagnose() -> dict:
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["bash", "-l", "-c", "toolsetup diagnose -F json"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        try:
+            data = json.loads(result.stdout)
+            return {"success": True, "results": data, "stderr": result.stderr.strip()}
+        except Exception:
+            return {"success": False, "error": (result.stderr or result.stdout or "No output").strip()}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Diagnose timed out after 120s"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 _HTML = """<!doctype html>
 <html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Monitor</title>
 <style>
@@ -303,6 +357,16 @@ h2 { margin:0 0 12px 0; }
 .pagination .current-date { font-weight:600; min-width:140px; text-align:center; }
 .pagination .nav-btn:disabled { opacity:0.5; cursor:not-allowed; }
 .pagination-info { color:var(--text-dim); font-size:13px; }
+.running-panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+.running-panel.live { border-color:var(--warning); }
+.running-dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--warning); animation:dot-pulse 1.5s ease-in-out infinite; }
+@keyframes dot-pulse { 0%,100% { box-shadow:0 0 4px var(--warning); } 50% { box-shadow:0 0 10px 3px var(--warning); } }
+.running-grid { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:13px; margin:10px 0; }
+.running-grid .label { color:var(--text-dim); }
+.btn-wait { background:var(--warning); color:#000; }
+.btn-wait:hover { background:#fbbf24; }
+.btn-stop { background:var(--error); color:#fff; }
+.btn-stop:hover { background:#dc2626; }
 </style></head>
 <body>
   <h2>👁 Monitor</h2>
@@ -318,6 +382,7 @@ h2 { margin:0 0 12px 0; }
      <label for="hideIgnoredActions" style="cursor:pointer;font-size:13px;margin-left:4px;">Hide ignored actions</label>
     <button id="loadLogs">📋 Load Logs</button>
     <button id="loadStatus">📊 Status</button>
+    <button id="runDiagnose">🔍 Diagnose</button>
   </div>
   <div class="pagination">
     <button id="prevDay" class="nav-btn">◀ Prev Day</button>
@@ -440,6 +505,64 @@ h2 { margin:0 0 12px 0; }
     return diffDay + 'd ago';
   }
 
+  let runningRefreshTimer = null;
+
+  function formatDuration(sec) {
+    sec = Math.max(0, parseInt(sec) || 0);
+    if (sec < 60) return sec + 's';
+    const m = Math.floor(sec / 60), s = sec % 60;
+    if (m < 60) return m + 'm ' + s + 's';
+    return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+  }
+
+  function renderRunning(data) {
+    if (!data || data.status === 'idle' || data.stale) {
+      let last = '';
+      if (data && data.action_id && (data.status === 'success' || data.status === 'failed')) {
+        const icon = data.exit_code === 0 ? '✅' : '❌';
+        last = ` <span style='font-size:12px;color:var(--text-dim);'>${icon} Last: <strong>${data.action_id}</strong> — ${formatDuration(data.elapsed_sec)}</span>`;
+      }
+      return `<div id='runningPanel' class='running-panel'><span style='color:var(--text-dim);'>● Monitor idle</span>${last}</div>`;
+    }
+    if (data.status === 'running') {
+      const itemRow = data.item_title ? `<span class='label'>Item:</span><span>${data.item_title.slice(0,80)}</span>` : '';
+      return `<div id='runningPanel' class='running-panel live'>
+        <div style='display:flex;align-items:center;gap:8px;margin-bottom:8px;'>
+          <span class='running-dot'></span>
+          <strong>Running: ${data.action_id || 'unknown'}</strong>
+          <span style='color:var(--text-dim);font-size:13px;'>${formatDuration(data.elapsed_sec)}</span>
+        </div>
+        <div class='running-grid'>
+          <span class='label'>Rule:</span><span>${data.rule_id || 'N/A'}</span>
+          <span class='label'>Workdir:</span><span style='font-family:monospace;font-size:11px;word-break:break-all;'>${data.workdir || 'N/A'}</span>
+          ${itemRow}
+          <span class='label'>Started:</span><span>${data.started_at ? formatRelativeTime(data.started_at) : 'N/A'}</span>
+        </div>
+        <div style='display:flex;gap:8px;margin-top:10px;'>
+          <button class='btn-wait' onclick='monitorWait()'>⏳ Wait more (+5min)</button>
+          <button class='btn-stop' onclick='monitorStop()'>⏹ Stop</button>
+        </div>
+      </div>`;
+    }
+    const icon = data.exit_code === 0 ? '✅' : '❌';
+    return `<div id='runningPanel' class='running-panel'><span>${icon} Last: <strong>${data.action_id || 'unknown'}</strong> — ${data.status} — ${formatDuration(data.elapsed_sec)}</span></div>`;
+  }
+
+  async function monitorWait() {
+    try {
+      await fetch('/api/monitor/wait', {method:'POST'});
+      alert('Deadline extended by 5min');
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
+  async function monitorStop() {
+    if (!confirm('Stop the running action?')) return;
+    try {
+      await fetch('/api/monitor/stop', {method:'POST'});
+      alert('Stop signal sent');
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
   const RUN_ERROR_TYPE_LABELS = {
     fetch_error: { cls: 'error', label: 'Fetch Error' },
     plugin_not_found: { cls: 'error', label: 'Plugin Missing' },
@@ -535,6 +658,41 @@ h2 { margin:0 0 12px 0; }
       </div>`;
   }
 
+  function renderDiagnose(data) {
+    if (!data.success) {
+      return `<div style='color:var(--error);padding:16px;background:var(--surface);border-radius:8px;border:1px solid var(--border);'><strong>Diagnose failed:</strong><pre style='margin-top:8px;'>${data.error || 'Unknown error'}</pre></div>`;
+    }
+    const results = data.results || [];
+    const statusConfig = {ok:{cls:'success',icon:'✓'}, warning:{cls:'warning',icon:'⚠'}, error:{cls:'error',icon:'✗'}};
+    const cards = results.map(r => {
+      const sc = statusConfig[r.status] || {cls:'info',icon:'?'};
+      const details = r.details && Object.keys(r.details).length
+        ? `<div style='font-size:12px;color:var(--text-dim);margin-top:6px;'>${Object.entries(r.details).map(([k,v])=>`<span>${k}: <code style='background:var(--bg);padding:1px 4px;border-radius:3px;'>${v}</code></span>`).join(' · ')}</div>` : '';
+      const recs = r.recommendations && r.recommendations.length
+        ? `<div style='margin-top:8px;font-size:12px;'><span style='color:var(--text-dim);'>Recommendations:</span><ul style='margin:4px 0 0 16px;padding:0;'>${r.recommendations.map(rec=>`<li>${rec}</li>`).join('')}</ul></div>` : '';
+      return `<div class='card' style='cursor:default;'><div class='card-header' style='cursor:default;'><span class='status-dot ${sc.cls}'></span><span class='card-title'>${r.test}</span><span class='badge ${sc.cls}'>${sc.icon} ${r.status}</span></div><div style='padding:0 16px 12px;font-size:13px;'><div>${r.message}</div>${details}${recs}</div></div>`;
+    }).join('');
+    const ok = results.filter(r=>r.status==='ok').length;
+    const warn = results.filter(r=>r.status==='warning').length;
+    const err = results.filter(r=>r.status==='error').length;
+    const col = err > 0 ? 'var(--error)' : warn > 0 ? 'var(--warning)' : 'var(--success)';
+    const summary = `<div style='margin-bottom:12px;padding:10px 14px;background:var(--surface);border-radius:8px;border-left:3px solid ${col};font-size:14px;'><strong>Diagnostics</strong> — <span style='color:var(--success);'>${ok} ok</span>, <span style='color:var(--warning);'>${warn} warning</span>, <span style='color:var(--error);'>${err} error</span></div>`;
+    const stderr = data.stderr ? `<div style='font-size:11px;color:var(--text-dim);margin-top:8px;'><pre style='background:var(--bg);'>${data.stderr}</pre></div>` : '';
+    return summary + cards + stderr;
+  }
+
+  document.getElementById('runDiagnose').onclick = async () => {
+    clearInterval(runningRefreshTimer);
+    out.innerHTML = '<div style=\'padding:40px;text-align:center;color:var(--text-dim);\'>🔍 Running diagnostics…</div>';
+    try {
+      const r = await fetch('/api/monitor/diagnose', {method:'POST'});
+      const data = await r.json();
+      out.innerHTML = renderDiagnose(data);
+    } catch(e) {
+      out.innerHTML = `<div style='color:var(--error);padding:16px;'>Failed: ${e.message}</div>`;
+    }
+  };
+
   async function loadFilters() {
     try {
       const r = await fetch('/api/monitor/filters');
@@ -591,9 +749,20 @@ h2 { margin:0 0 12px 0; }
   };
 
   document.getElementById('loadStatus').onclick = async () => {
-    const r = await fetch('/api/monitor/status');
-    const data = await r.json();
-    out.innerHTML = renderStats(data);
+    clearInterval(runningRefreshTimer);
+    const [statusR, runningR] = await Promise.all([fetch('/api/monitor/status'), fetch('/api/monitor/running')]);
+    const statsData = await statusR.json();
+    const runningData = await runningR.json();
+    out.innerHTML = renderRunning(runningData) + renderStats(statsData);
+    if (runningData.status === 'running') {
+      runningRefreshTimer = setInterval(async () => {
+        const r = await fetch('/api/monitor/running');
+        const d = await r.json();
+        const panel = document.getElementById('runningPanel');
+        if (panel) panel.outerHTML = renderRunning(d);
+        if (d.status !== 'running') clearInterval(runningRefreshTimer);
+      }, 5000);
+    }
   };
 
   // Load filters then auto-load logs on startup

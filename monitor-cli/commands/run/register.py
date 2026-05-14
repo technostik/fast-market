@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import threading
 import time as _time
@@ -22,6 +23,41 @@ from core.time_scheduler import should_run_rule
 
 _MONITOR_WAIT_FILE = Path("/tmp/fast-market-monitor.wait")
 _MONITOR_STOP_FILE = Path("/tmp/fast-market-monitor.stop")
+_MONITOR_STATE_FILE = Path("/tmp/fast-market-monitor.state.json")
+
+
+def _write_monitor_state(data: dict) -> None:
+    try:
+        _MONITOR_STATE_FILE.write_text(json.dumps(data))
+    except Exception:
+        pass
+
+
+def _format_budget_template(
+    template: str,
+    elapsed_min: int,
+    action,
+    rule_id: str,
+    workdir,
+    item,
+    webux_url: str = "",
+    exit_code: int = 0,
+) -> str:
+    status_icon = "✅" if exit_code == 0 else "❌"
+    status_word = "succeeded" if exit_code == 0 else f"failed (exit={exit_code})"
+    return (
+        template
+        .replace("{elapsed}", str(elapsed_min))
+        .replace("{action_id}", action.id if action else "")
+        .replace("{rule_id}", rule_id or "")
+        .replace("{workdir}", str(workdir) if workdir else "N/A")
+        .replace("{webux_url}", webux_url)
+        .replace("{item_title}", (item.title or "") if item else "")
+        .replace("{item_url}", (item.url or "") if item else "")
+        .replace("{status_icon}", status_icon)
+        .replace("{status_word}", status_word)
+        .replace("{exit_code}", str(exit_code))
+    )
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
 
@@ -372,6 +408,8 @@ def _run_action_with_budget(
     alert_after_secs = parse_duration(timeout_config.get("alert_after", "15m")) or 900
     increment_secs = parse_duration(timeout_config.get("increment", "5m")) or 300
     alert_cmd_template = timeout_config.get("alert_cmd", "")
+    completion_alert_cmd_template = timeout_config.get("completion_alert_cmd", "")
+    webux_url = timeout_config.get("webux_url", "")
 
     result_holder: dict[str, Any] = {"value": None, "error": None}
 
@@ -391,12 +429,28 @@ def _run_action_with_budget(
     _MONITOR_WAIT_FILE.unlink(missing_ok=True)
     _MONITOR_STOP_FILE.unlink(missing_ok=True)
 
+    state: dict[str, Any] = {
+        "status": "running",
+        "action_id": action.id,
+        "rule_id": rule_id,
+        "workdir": str(workdir) if workdir else None,
+        "item_title": item.title if item else None,
+        "item_url": item.url if item else None,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "elapsed_sec": 0,
+    }
+    _write_monitor_state(state)
+    last_state_write = start
+
     while thread.is_alive():
         elapsed = _time.monotonic() - start
 
         if _MONITOR_STOP_FILE.exists():
             _MONITOR_STOP_FILE.unlink(missing_ok=True)
             click.echo(f"[TIMEOUT] 'monitor stop' received after {int(elapsed)}s — aborting action '{action.id}'", err=True)
+            state.update({"status": "failed", "elapsed_sec": int(elapsed), "exit_code": -1,
+                          "finished_at": datetime.now(timezone.utc).isoformat()})
+            _write_monitor_state(state)
             return -1, f"[aborted by 'monitor stop' after {int(elapsed)}s]", ""
 
         if _MONITOR_WAIT_FILE.exists():
@@ -407,20 +461,52 @@ def _run_action_with_budget(
 
         if not alert_sent and elapsed >= alert_after_secs:
             elapsed_min = int(elapsed // 60)
-            cmd = alert_cmd_template.replace("{elapsed}", str(elapsed_min))
+            cmd = _format_budget_template(alert_cmd_template, elapsed_min, action, rule_id, workdir, item, webux_url)
             if cmd:
                 subprocess.run(["bash", "-c", cmd], capture_output=True)
             alert_sent = True
 
         if elapsed >= deadline:
             click.echo(f"[TIMEOUT] action '{action.id}' exceeded {int(elapsed)}s (max={int(max_secs)}s)", err=True)
+            state.update({"status": "failed", "elapsed_sec": int(elapsed), "exit_code": -1,
+                          "finished_at": datetime.now(timezone.utc).isoformat()})
+            _write_monitor_state(state)
             return -1, f"[timeout after {int(elapsed)}s — max={int(max_secs)}s]", ""
+
+        now_mono = _time.monotonic()
+        if now_mono - last_state_write >= 10:
+            state["elapsed_sec"] = int(elapsed)
+            _write_monitor_state(state)
+            last_state_write = now_mono
 
         thread.join(timeout=1.0)
 
     if result_holder["error"]:
+        elapsed = _time.monotonic() - start
+        state.update({"status": "failed", "elapsed_sec": int(elapsed), "exit_code": -1,
+                      "finished_at": datetime.now(timezone.utc).isoformat()})
+        _write_monitor_state(state)
         raise result_holder["error"]
-    return result_holder["value"]
+
+    exit_code, output, script_content = result_holder["value"]
+    elapsed = _time.monotonic() - start
+    elapsed_min = int(elapsed // 60)
+    final_status = "success" if exit_code == 0 else "failed"
+    state.update({
+        "status": final_status,
+        "exit_code": exit_code,
+        "elapsed_sec": int(elapsed),
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _write_monitor_state(state)
+
+    if completion_alert_cmd_template:
+        cmd = _format_budget_template(
+            completion_alert_cmd_template, elapsed_min, action, rule_id, workdir, item, webux_url, exit_code
+        )
+        subprocess.run(["bash", "-c", cmd], capture_output=True)
+
+    return exit_code, output, script_content
 
 
 def _execute_actions_for_trigger(
