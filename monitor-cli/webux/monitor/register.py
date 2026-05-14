@@ -644,12 +644,23 @@ h2 { margin:0 0 12px 0; }
     const failed = stats.failed_triggers_count || 0;
     const success = total - failed;
     const successRate = total > 0 ? ((success / total) * 100).toFixed(1) : '0';
+    const todayTotal = stats.triggers_today || 0;
+    const todayFailed = stats.failed_today || 0;
+    const todaySuccess = todayTotal - todayFailed;
+    const todayRate = todayTotal > 0 ? ((todaySuccess / todayTotal) * 100).toFixed(1) : '0';
+    const rateColor = (r) => r >= 80 ? 'var(--success)' : r >= 50 ? 'var(--warning)' : 'var(--error)';
     return `
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Total Triggers</div><div class="stat-value">${total}</div></div>
-        <div class="stat-card"><div class="stat-label">Success</div><div class="stat-value" style="color:var(--success)">${success}</div></div>
-        <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:var(--error)">${failed}</div></div>
-        <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value" style="color:${successRate >= 80 ? 'var(--success)' : successRate >= 50 ? 'var(--warning)' : 'var(--error)'}">${successRate}%</div></div>
+      <div class="stats-grid" style="margin-bottom:4px;">
+        <div class="stat-card"><div class="stat-label">All time — Triggers</div><div class="stat-value">${total}</div></div>
+        <div class="stat-card"><div class="stat-label">All time — Success</div><div class="stat-value" style="color:var(--success)">${success}</div></div>
+        <div class="stat-card"><div class="stat-label">All time — Failed</div><div class="stat-value" style="color:var(--error)">${failed}</div></div>
+        <div class="stat-card"><div class="stat-label">All time — Rate</div><div class="stat-value" style="color:${rateColor(successRate)}">${successRate}%</div></div>
+      </div>
+      <div class="stats-grid" style="margin-bottom:16px;">
+        <div class="stat-card"><div class="stat-label">Today — Triggers</div><div class="stat-value">${todayTotal}</div></div>
+        <div class="stat-card"><div class="stat-label">Today — Success</div><div class="stat-value" style="color:var(--success)">${todaySuccess}</div></div>
+        <div class="stat-card"><div class="stat-label">Today — Failed</div><div class="stat-value" style="color:var(--error)">${todayFailed}</div></div>
+        <div class="stat-card"><div class="stat-label">Today — Rate</div><div class="stat-value" style="color:${rateColor(todayRate)}">${todayRate}%</div></div>
       </div>
       <div class="filter-section">
         <div class="card-field"><span class="label">Sources:</span> ${(data.sources || []).map(s => `<span class="badge info">${s}</span>`).join(' ')}</div>

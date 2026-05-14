@@ -847,6 +847,12 @@ class MonitorStorage:
             failed_triggers = conn.execute(
                 "SELECT COUNT(*) FROM trigger_logs WHERE exit_code != 0"
             ).fetchone()[0]
+            triggers_today = conn.execute(
+                "SELECT COUNT(*) FROM trigger_logs WHERE DATE(triggered_at) = DATE('now')"
+            ).fetchone()[0]
+            failed_today = conn.execute(
+                "SELECT COUNT(*) FROM trigger_logs WHERE exit_code != 0 AND DATE(triggered_at) = DATE('now')"
+            ).fetchone()[0]
 
             last_trigger = conn.execute(
                 "SELECT triggered_at FROM trigger_logs ORDER BY triggered_at DESC LIMIT 1"
@@ -858,6 +864,8 @@ class MonitorStorage:
                 "rules_count": rules,
                 "triggers_count": triggers,
                 "failed_triggers_count": failed_triggers,
+                "triggers_today": triggers_today,
+                "failed_today": failed_today,
                 "last_trigger_at": last_trigger[0] if last_trigger else None,
             }
 
