@@ -10,7 +10,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "monitor-cli"))
 from plugins.youtube.plugin import YouTubePlugin
 
 
-@pytest.mark.asyncio
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
 async def test_rss_vs_yt_dlp_video_comparison():
     """Test that RSS and yt-dlp fetch return comparable video lists and dates."""
 

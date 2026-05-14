@@ -94,7 +94,7 @@ class YouTubePlugin(SourcePlugin):
         videos_url = f"https://www.youtube.com/channel/{self.channel_id}/videos"
         shorts_url = f"https://www.youtube.com/channel/{self.channel_id}/shorts"
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _extract_videos(url, is_short_playlist=False):
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
@@ -235,7 +235,7 @@ class YouTubePlugin(SourcePlugin):
         """Get detailed video info using yt-dlp (async wrapper)"""
         url = f"https://youtube.com/watch?v={video_id}"
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             info = await loop.run_in_executor(self.executor, self._extract_video_info, url)
             return info
@@ -491,7 +491,7 @@ class YouTubePlugin(SourcePlugin):
             "max_comments": max_comments,
         }
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _extract_comments():
             with yt_dlp.YoutubeDL(comment_opts) as ydl:
