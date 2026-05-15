@@ -23,6 +23,9 @@ ytdlp = ["yt-dlp"]
 [project.scripts]
 youtube = "youtube_entry:main"
 
+[project.entry-points."fast_market.webux_plugins"]
+publish = "webux.publish.register:register"
+
 [tool.setuptools]
 packages = [
     "cli",
@@ -35,7 +38,13 @@ packages = [
     "commands.search",
     "commands.comments",
     "commands.reply",
+    "commands.remove_silence",
+    "commands.extract_transcript",
+    "commands.burn_subtitles",
+    "commands.upload",
     "youtube_entry",
+    "webux",
+    "webux.publish",
 ]
 
 [tool.setuptools.package-data]
