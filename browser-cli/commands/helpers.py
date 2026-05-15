@@ -62,8 +62,6 @@ def build_agent_cmd(
         str(cdp_port),
         *args,
     ]
-    if timeout is not None:
-        cmd.extend(["--timeout", str(timeout)])
     return cmd
 
 
@@ -75,10 +73,12 @@ def run_agent_cmd(
 ) -> subprocess.CompletedProcess:
     """Run an agent-browser instruction and return the result."""
     cmd = build_agent_cmd(instruction, cdp_port, timeout)
+    timeout_seconds = timeout / 1000 if timeout else None
     return subprocess.run(
         cmd,
         capture_output=True,
         text=True,
+        timeout=timeout_seconds,
     )
 
 
