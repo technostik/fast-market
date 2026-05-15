@@ -1,101 +1,144 @@
 from __future__ import annotations
 
 import os
-import re
-import subprocess
-import tempfile
 from pathlib import Path
+from typing import List, Tuple
 
 import click
+import numpy as np
 
 from commands.base import CommandManifest
 
 
-def remove_silence(
-    input_path: str,
-    output_path: str,
-    threshold_db: float = -35,
-    min_duration: float = 0.5,
-) -> None:
-    """Remove silence segments from a video using ffmpeg silencedetect + concat."""
-    result = subprocess.run(
-        [
-            "ffmpeg", "-i", input_path,
-            "-af", f"silencedetect=noise={threshold_db}dB:duration={min_duration}",
-            "-f", "null", "-",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    stderr = result.stderr
+# ── Exact port of detect_silence_segments_simple from YouTools/plugins/trimsilences.py ──
 
-    starts = [float(m) for m in re.findall(r"silence_start: ([\d.e+-]+)", stderr)]
-    ends = [float(m) for m in re.findall(r"silence_end: ([\d.e+-]+)", stderr)]
+def detect_silence_segments_simple(
+    audio_array: np.ndarray,
+    sample_rate: int,
+    threshold_db: float,
+) -> List[Tuple[float, float]]:
+    threshold_amp = 10 ** (threshold_db / 20)
+    window_size = int(sample_rate / 30)  # Granularité au niveau des frames (env. 33ms)
+    if window_size == 0:
+        return []
+    num_windows = len(audio_array) // window_size
+    if num_windows == 0:
+        return []
+    audio_array = audio_array[:num_windows * window_size]
+    rms = np.array([np.sqrt(np.mean(window**2))
+                   for window in np.array_split(audio_array, num_windows)])
+    is_non_silent = rms >= threshold_amp
+    time_per_window = window_size / sample_rate
+    segments = []
+    start_idx = None
+    for i in range(len(is_non_silent)):
+        if is_non_silent[i] and start_idx is None:
+            start_idx = i
+        elif not is_non_silent[i] and start_idx is not None:
+            segments.append((start_idx * time_per_window, i * time_per_window))
+            start_idx = None
+    if start_idx is not None:
+        segments.append((start_idx * time_per_window, len(is_non_silent) * time_per_window))
+    return segments
 
-    dur_match = re.search(r"Duration: (\d+):(\d+):([\d.]+)", stderr)
-    if not dur_match:
-        raise RuntimeError("Could not determine video duration from ffmpeg output")
-    h, m, s = dur_match.groups()
-    total_duration = int(h) * 3600 + int(m) * 60 + float(s)
 
-    segments: list[tuple[float, float]] = []
-    current = 0.0
-    for start, end in zip(starts, ends):
-        if start > current + 0.01:
-            segments.append((current, start))
-        current = end
-    if current < total_duration - 0.01:
-        segments.append((current, total_duration))
+# ── Exact port of remove_silence_simple from YouTools/plugins/trimsilences.py ──
+
+def remove_silence_simple(
+    input_file: str,
+    output_file: str,
+    threshold: float,
+) -> tuple[str, float, float]:
+    """
+    Remove silence from a video — direct port of TrimsilencesPlugin.remove_silence_simple.
+    Returns (output_file, original_duration, final_duration).
+    Raises RuntimeError on failure.
+    """
+    from moviepy import VideoFileClip, concatenate_videoclips
+
+    video = VideoFileClip(input_file)
+    original_duration = video.duration
+    audio_array = video.audio.to_soundarray(fps=video.audio.fps)
+    if len(audio_array.shape) > 1:
+        audio_array = np.mean(audio_array, axis=1).astype(np.float32)
+
+    segments = detect_silence_segments_simple(audio_array, video.audio.fps, threshold)
 
     if not segments:
+        video.close()
         raise RuntimeError("No non-silent segments detected — check threshold")
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False, encoding="utf-8"
-    ) as f:
-        concat_file = f.name
-        abs_input = os.path.abspath(input_path)
-        for seg_start, seg_end in segments:
-            f.write(f"file '{abs_input}'\n")
-            f.write(f"inpoint {seg_start:.6f}\n")
-            f.write(f"outpoint {seg_end:.6f}\n")
+    clips = []
+    for i, (start, end) in enumerate(segments):
+        clip = video.subclipped(start, end)
+        clips.append(clip)
 
-    try:
-        subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-f", "concat", "-safe", "0", "-i", concat_file,
-                "-c:v", "libx264", "-preset", "medium",
-                "-c:a", "aac", "-b:a", "192k",
-                output_path,
-            ],
-            check=True,
+    final_video = concatenate_videoclips(clips)
+
+    # temp_audiofile placed next to output to avoid CWD issues
+    temp_audio = os.path.join(os.path.dirname(os.path.abspath(output_file)), "temp-audio.m4a")
+    final_video.write_videofile(
+        output_file,
+        codec='libx264',
+        audio_codec='aac',
+        temp_audiofile=temp_audio,
+        remove_temp=True,
+        audio_bitrate="192k",
+        preset='medium',
+    )
+
+    final_duration = final_video.duration
+
+    if final_duration >= original_duration:
+        video.close()
+        final_video.close()
+        for clip in clips:
+            clip.close()
+        if os.path.exists(output_file):
+            os.remove(output_file)
+        raise RuntimeError(
+            f"Output video ({final_duration:.1f}s) is not shorter than input ({original_duration:.1f}s) — "
+            "no silence was removed; try lowering the threshold"
         )
-    finally:
-        os.unlink(concat_file)
 
+    reduction_percentage = ((original_duration - final_duration) / original_duration * 100)
+
+    video.close()
+    final_video.close()
+    for clip in clips:
+        clip.close()
+
+    return output_file, original_duration, final_duration
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("remove-silence")
     @click.argument("input_file", type=click.Path(exists=True))
     @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
-    @click.option("--threshold", "-t", default=-35.0, show_default=True, help="Silence threshold in dB")
-    @click.option("--min-duration", "-d", default=0.5, show_default=True, help="Min silence duration to remove (seconds)")
-    def remove_silence_cmd(
-        input_file: str,
-        output: str | None,
-        threshold: float,
-        min_duration: float,
-    ):
-        """Remove silence from a video file using ffmpeg."""
+    @click.option(
+        "--threshold", "-t",
+        default=-65.0, show_default=True,
+        help="Silence threshold in dB",
+    )
+    def remove_silence_cmd(input_file: str, output: str | None, threshold: float):
+        """Remove silence from a video (RMS-based, exact YouTools algorithm)."""
         input_path = Path(input_file).resolve()
-        if output:
-            output_path = Path(output).resolve()
-        else:
-            output_path = input_path.parent / f"{input_path.stem}_nosilence{input_path.suffix}"
+        output_path = (
+            Path(output).resolve() if output
+            else input_path.parent / f"{input_path.stem}_nosilence{input_path.suffix}"
+        )
 
         click.echo(f"Removing silence from {input_path.name}...", err=True)
-        remove_silence(str(input_path), str(output_path), threshold, min_duration)
+        _, orig_dur, final_dur = remove_silence_simple(
+            str(input_path), str(output_path), threshold
+        )
+        reduction = (orig_dur - final_dur) / orig_dur * 100
+        click.echo(
+            f"Duration: {orig_dur:.1f}s → {final_dur:.1f}s ({reduction:.1f}% removed)",
+            err=True,
+        )
         click.echo(str(output_path))
 
     return CommandManifest(name="remove-silence", click_command=remove_silence_cmd)
