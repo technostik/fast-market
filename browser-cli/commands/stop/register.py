@@ -29,7 +29,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         try:
             # Use lsof to find the process
             result = subprocess.run(
-                ["lsof", "-ti", f"TCP:*:{cdp_port}"],
+                ["lsof", "-ti", f":{cdp_port}"],
                 capture_output=True,
                 text=True,
             )
@@ -45,7 +45,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             else:
                 # Fallback: find chrome processes with the cdp port in args
                 result = subprocess.run(
-                    ["pgrep", "-f", f"--remote-debugging-port={cdp_port}"],
+                    ["pgrep", "-f", "--", f"--remote-debugging-port={cdp_port}"],
                     capture_output=True,
                     text=True,
                 )
