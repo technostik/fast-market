@@ -9,28 +9,25 @@ import click
 from commands.base import CommandManifest
 
 
-def burn_subtitles(
+def burn_ass_subtitles(
     video_path: str,
-    srt_path: str,
+    ass_path: str,
     output_path: str,
-    font_size: int = 24,
+    subtitle_size: int = 96,
 ) -> None:
-    """Burn SRT subtitles into a video using ffmpeg."""
-    abs_srt = os.path.abspath(srt_path)
-    # Escape colons and backslashes for the ffmpeg filter string
-    escaped = abs_srt.replace("\\", "/").replace(":", "\\:")
-
+    """Burn ASS karaoke subtitles into a video using ffmpeg subtitles filter."""
+    abs_ass = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
     force_style = (
-        f"FontSize={font_size},Bold=1,Outline=2,Shadow=1,"
-        "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,MarginV=50"
+        f"Alignment=10,Fontsize={subtitle_size},"
+        "MarginL=0,MarginR=0,MarginV=0,"
+        "Outline=8,Shadow=14,BackColour=&H80000000&"
     )
-
     subprocess.run(
         [
             "ffmpeg", "-y", "-i", video_path,
-            "-vf", f"subtitles='{escaped}':force_style='{force_style}'",
-            "-c:v", "libx264", "-preset", "medium",
-            "-c:a", "copy",
+            "-vf", f"subtitles='{abs_ass}':force_style='{force_style}'",
+            "-vcodec", "h264",
+            "-acodec", "aac",
             output_path,
         ],
         check=True,
@@ -40,24 +37,23 @@ def burn_subtitles(
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("burn-subtitles")
     @click.argument("video_file", type=click.Path(exists=True))
-    @click.argument("srt_file", type=click.Path(exists=True))
+    @click.argument("ass_file", type=click.Path(exists=True))
     @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
-    @click.option("--font-size", default=24, show_default=True, help="Subtitle font size")
+    @click.option("--font-size", default=96, show_default=True, help="Subtitle font size")
     def burn_subtitles_cmd(
         video_file: str,
-        srt_file: str,
+        ass_file: str,
         output: str | None,
         font_size: int,
     ):
-        """Burn SRT subtitles into a video file."""
+        """Burn ASS karaoke subtitles (green/white, middle-centered) into a video."""
         video_path = Path(video_file).resolve()
-        if output:
-            output_path = Path(output).resolve()
-        else:
-            output_path = video_path.parent / f"{video_path.stem}_subtitled{video_path.suffix}"
-
+        output_path = (
+            Path(output).resolve() if output
+            else video_path.parent / f"{video_path.stem}_subtitled{video_path.suffix}"
+        )
         click.echo(f"Burning subtitles into {video_path.name}...", err=True)
-        burn_subtitles(str(video_path), srt_file, str(output_path), font_size)
+        burn_ass_subtitles(str(video_path), ass_file, str(output_path), font_size)
         click.echo(str(output_path))
 
     return CommandManifest(name="burn-subtitles", click_command=burn_subtitles_cmd)

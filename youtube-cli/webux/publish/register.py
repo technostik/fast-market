@@ -122,6 +122,23 @@ def _extract_video_id(url: str) -> str:
     return m.group(1) if m else ""
 
 
+def _ass_to_plain_text(ass_path: str) -> str:
+    """Strip ASS tags and headers; return dialogue lines as plain text."""
+    lines = []
+    with open(ass_path, encoding="utf-8") as f:
+        for line in f:
+            if not line.startswith("Dialogue:"):
+                continue
+            parts = line.split(",", 9)
+            if len(parts) < 10:
+                continue
+            text = parts[9].strip()
+            text = re.sub(r"\{[^}]*\}", "", text)
+            if text:
+                lines.append(text)
+    return "\n".join(lines)
+
+
 def _get_video_duration(path: str) -> float:
     """Return video duration in seconds via ffprobe."""
     import subprocess
@@ -184,20 +201,26 @@ async def _run_pipeline(job: Job) -> None:
     else:
         s0.status = "skipped"
 
-    # Step 1 — Extract transcript (faster-whisper)
+    # Step 1 — Extract transcript (faster-whisper → ASS karaoke)
     s1 = job.steps[1]
     s1.status = "running"
-    srt_path = str(d / f"{stem}.srt")
+    ass_path = str(d / f"{stem}.ass")
+    txt_path = str(d / f"{stem}_transcript.txt")
     rc, _ = await _run(
         s1, _yt(), "extract-transcript", current_video,
-        "-o", srt_path, "-l", job.language, "-m", job.model,
+        "-o", ass_path, "-l", job.language, "-m", job.model,
     )
     if rc != 0:
         s1.status = "error"
         job.status = "error"
         return
     s1.status = "done"
-    job.files["transcript"] = srt_path
+    job.files["transcript"] = ass_path
+    # Write plain-text version for LLM (ASS tags stripped)
+    plain = _ass_to_plain_text(ass_path)
+    with open(txt_path, "w", encoding="utf-8") as _f:
+        _f.write(plain)
+    job.files["transcript_txt"] = txt_path
 
     # Step 2 — Burn subtitles
     s2 = job.steps[2]
@@ -205,7 +228,7 @@ async def _run_pipeline(job: Job) -> None:
         s2.status = "running"
         out_path = str(d / f"{stem}_subtitled.mp4")
         rc, _ = await _run(
-            s2, _yt(), "burn-subtitles", current_video, srt_path, "-o", out_path
+            s2, _yt(), "burn-subtitles", current_video, ass_path, "-o", out_path
         )
         if rc != 0:
             s2.status = "error"
@@ -218,23 +241,23 @@ async def _run_pipeline(job: Job) -> None:
         s2.status = "skipped"
 
     job.files["final_video"] = current_video
-    await _run_from_llm(job, srt_path, current_video)
+    await _run_from_llm(job, txt_path, current_video)
 
 
-async def _run_from_llm(job: Job, srt_path: str, final_video: str) -> None:
+async def _run_from_llm(job: Job, transcript_path: str, final_video: str) -> None:
     """Resumable entry point: run LLM step then upload."""
     # Step 3 — Prompt apply
     s3 = job.steps[3]
     s3.status = "running"
 
-    rc, title_out = await _run(s3, _pr(), "apply", job.prompt_title, f"transcript=@{srt_path}")
+    rc, title_out = await _run(s3, _pr(), "apply", job.prompt_title, f"transcript=@{transcript_path}")
     if rc != 0:
         s3.status = "error"
         job.status = "error"
         return
 
     proc = await asyncio.create_subprocess_exec(
-        _pr(), "apply", job.prompt_summary, f"transcript=@{srt_path}",
+        _pr(), "apply", job.prompt_summary, f"transcript=@{transcript_path}",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -432,12 +455,19 @@ async def status(job_id: str):
 @router.post("/resume")
 async def resume(req: ResumeRequest):
     source = str(Path(req.source).expanduser().resolve())
-    srt_path = str(_dir(source) / f"{_stem(source)}.srt")
-    if not Path(srt_path).exists():
-        raise HTTPException(status_code=400, detail=f"Transcript not found: {srt_path}")
-
     d = _dir(source)
     stem = _stem(source)
+    ass_path = str(d / f"{stem}.ass")
+    if not Path(ass_path).exists():
+        raise HTTPException(status_code=400, detail=f"Transcript not found: {ass_path}")
+
+    # Derive/regenerate plain-text for LLM
+    txt_path = str(d / f"{stem}_transcript.txt")
+    if not Path(txt_path).exists():
+        plain = _ass_to_plain_text(ass_path)
+        with open(txt_path, "w", encoding="utf-8") as _f:
+            _f.write(plain)
+
     final_video = source
     for candidate in [
         str(d / f"{stem}_subtitled.mp4"),
@@ -461,20 +491,20 @@ async def resume(req: ResumeRequest):
         privacy=req.privacy,
         description_prefix=req.description_prefix,
         steps=[Step(name=n) for n in STEP_NAMES],
-        files={"transcript": srt_path, "final_video": final_video},
+        files={"transcript": ass_path, "transcript_txt": txt_path, "final_video": final_video},
     )
     for i in range(3):
         job.steps[i].status = "skipped"
     _jobs[job_id] = job
-    asyncio.create_task(_run_from_llm(job, srt_path, final_video))
+    asyncio.create_task(_run_from_llm(job, txt_path, final_video))
     return {"job_id": job_id}
 
 
 @router.post("/check-resume")
 async def check_resume(body: dict):
     source = str(Path(body.get("source", "")).expanduser().resolve())
-    srt = _dir(source) / f"{_stem(source)}.srt"
-    return {"can_resume": srt.exists(), "transcript": str(srt)}
+    ass = _dir(source) / f"{_stem(source)}.ass"
+    return {"can_resume": ass.exists(), "transcript": str(ass)}
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
