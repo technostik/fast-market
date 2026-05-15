@@ -19,7 +19,7 @@ def transcribe_to_srt(
     input_path: str,
     output_path: str,
     language: str = "fr",
-    model_size: str = "large-v3",
+    model_size: str = "medium",
 ) -> None:
     """Transcribe a video file to SRT using faster_whisper (fallback: openai-whisper)."""
     try:
@@ -32,7 +32,7 @@ def transcribe_to_srt(
     except ImportError:
         import whisper  # type: ignore[import]
 
-        model = whisper.load_model(model_size)
+        model = whisper.load_model(model_size, device="cpu")
         lang = language if language != "auto" else None
         result = model.transcribe(input_path, language=lang)
         segments = [
@@ -52,7 +52,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.argument("input_file", type=click.Path(exists=True))
     @click.option("--output", "-o", type=click.Path(), default=None, help="Output SRT file path")
     @click.option("--language", "-l", default="fr", show_default=True, help="Language code or 'auto'")
-    @click.option("--model", "-m", default="large-v3", show_default=True, help="Whisper model size")
+    @click.option("--model", "-m", default="medium", show_default=True, help="Whisper model size")
     def extract_transcript_cmd(
         input_file: str,
         output: str | None,

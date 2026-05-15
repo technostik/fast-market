@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from common.webux.base import WebuxPluginManifest
+from common.core.config import load_tool_config, save_tool_config
 
 router = APIRouter()
 
@@ -23,6 +27,9 @@ STEP_NAMES = [
     "Generate title & description",
     "Upload to YouTube",
 ]
+
+DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
+DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv"
 
 
 @dataclass
@@ -43,18 +50,21 @@ class Job:
     language: str
     model: str
     privacy: str
+    description_prefix: str = ""
     steps: list[Step] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)
     title: str = ""
     description: str = ""
     status: str = "running"
     video_url: str = ""
+    studio_url: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
             "status": self.status,
             "video_url": self.video_url,
+            "studio_url": self.studio_url,
             "title": self.title,
             "description": self.description,
             "files": self.files,
@@ -66,6 +76,26 @@ class Job:
 
 
 _jobs: dict[str, Job] = {}
+
+
+# ── Config helpers ────────────────────────────────────────────────────────────
+
+def _load_publish_cfg() -> dict:
+    try:
+        cfg = load_tool_config("youtube")
+        return cfg.get("youtube", {}).get("publish", {})
+    except Exception:
+        return {}
+
+
+def _save_publish_cfg(pub: dict) -> None:
+    try:
+        cfg = load_tool_config("youtube")
+        yt = cfg.setdefault("youtube", {})
+        yt["publish"] = pub
+        save_tool_config("youtube", cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save config: {exc}")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -84,6 +114,30 @@ def _stem(p: str) -> str:
 
 def _dir(p: str) -> Path:
     return Path(p).resolve().parent
+
+
+def _extract_video_id(url: str) -> str:
+    """Extract YouTube video ID from a watch URL."""
+    m = re.search(r"[?&]v=([a-zA-Z0-9_-]+)", url)
+    return m.group(1) if m else ""
+
+
+def _get_video_duration(path: str) -> float:
+    """Return video duration in seconds via ffprobe."""
+    import subprocess
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "quiet",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            path,
+        ],
+        capture_output=True, text=True,
+    )
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return 0.0
 
 
 async def _run(step: Step, *cmd: str) -> tuple[int, str]:
@@ -117,13 +171,20 @@ async def _run_pipeline(job: Job) -> None:
             s0.status = "error"
             job.status = "error"
             return
+        duration = _get_video_duration(out_path)
+        if duration > 180:
+            s0.status = "error"
+            s0.output += f"\n⏱ Video is {duration:.0f}s — exceeds 180s limit for YouTube Shorts."
+            job.status = "error"
+            return
         s0.status = "done"
+        s0.output += f"\n⏱ Duration: {duration:.0f}s"
         current_video = out_path
         job.files["no_silence"] = out_path
     else:
         s0.status = "skipped"
 
-    # Step 1 — Extract transcript
+    # Step 1 — Extract transcript (faster-whisper)
     s1 = job.steps[1]
     s1.status = "running"
     srt_path = str(d / f"{stem}.srt")
@@ -184,8 +245,21 @@ async def _run_from_llm(job: Job, srt_path: str, final_video: str) -> None:
         job.status = "error"
         return
 
+    raw_description = desc_out.decode(errors="replace").strip()
+
+    # Apply description prefix (top) and signature (bottom)
+    pub_cfg = _load_publish_cfg()
+    signature = pub_cfg.get("signature", "").strip()
+
+    parts = []
+    if job.description_prefix.strip():
+        parts.append(job.description_prefix.strip())
+    parts.append(raw_description)
+    if signature:
+        parts.append(signature)
+
     job.title = title_out.strip()
-    job.description = desc_out.decode(errors="replace").strip()
+    job.description = "\n\n".join(parts)
     s3.output = f"Title: {job.title[:80]}"
     s3.status = "done"
 
@@ -204,11 +278,103 @@ async def _run_from_llm(job: Job, srt_path: str, final_video: str) -> None:
         return
 
     s4.status = "done"
-    job.video_url = url_out.strip()
+    watch_url = url_out.strip()
+    video_id = _extract_video_id(watch_url)
+    if video_id:
+        job.video_url = f"https://www.youtube.com/shorts/{video_id}"
+        job.studio_url = f"https://studio.youtube.com/video/{video_id}/edit"
+    else:
+        job.video_url = watch_url
+        job.studio_url = ""
     job.status = "done"
 
 
-# ── API ───────────────────────────────────────────────────────────────────────
+# ── Config API ────────────────────────────────────────────────────────────────
+
+@router.get("/config")
+async def get_config():
+    pub = _load_publish_cfg()
+    return {
+        "video_source_path": pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH),
+        "video_extensions": pub.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
+        "signature": pub.get("signature", ""),
+    }
+
+
+class ConfigSaveRequest(BaseModel):
+    video_source_path: str = DEFAULT_VIDEO_SOURCE_PATH
+    video_extensions: str = DEFAULT_VIDEO_EXTENSIONS
+    signature: str = ""
+
+
+@router.post("/config")
+async def save_config(req: ConfigSaveRequest):
+    pub = _load_publish_cfg()
+    pub["video_source_path"] = req.video_source_path
+    pub["video_extensions"] = req.video_extensions
+    pub["signature"] = req.signature
+    _save_publish_cfg(pub)
+    return {"ok": True}
+
+
+# ── Video list API ────────────────────────────────────────────────────────────
+
+@router.get("/list-videos")
+async def list_videos(
+    path: str = Query(default=DEFAULT_VIDEO_SOURCE_PATH),
+    extensions: str = Query(default=DEFAULT_VIDEO_EXTENSIONS),
+):
+    d = Path(path).expanduser()
+    if not d.exists() or not d.is_dir():
+        return {"videos": [], "error": f"Directory not found: {path}"}
+    exts = {("." + e.strip().lstrip(".")).lower() for e in extensions.split(",") if e.strip()}
+    files = sorted(
+        [f for f in d.iterdir() if f.suffix.lower() in exts],
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    return {
+        "videos": [
+            {"name": f.name, "path": str(f), "mtime": f.stat().st_mtime}
+            for f in files
+        ]
+    }
+
+
+# ── Prompt list API ───────────────────────────────────────────────────────────
+
+@router.get("/list-prompts")
+async def list_prompts():
+    pr = _pr()
+    proc = await asyncio.create_subprocess_exec(
+        pr, "list", "--names-only",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    names = [n.strip() for n in stdout.decode(errors="replace").splitlines() if n.strip()]
+    return {"prompts": names}
+
+
+# ── Video preview API ─────────────────────────────────────────────────────────
+
+_MIME = {
+    ".mp4": "video/mp4",
+    ".mkv": "video/x-matroska",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+
+@router.get("/video-preview")
+async def video_preview(file: str = Query(...)):
+    p = Path(file).expanduser().resolve()
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+    mime = _MIME.get(p.suffix.lower(), "video/mp4")
+    return FileResponse(str(p), media_type=mime)
+
+
+# ── Job API ───────────────────────────────────────────────────────────────────
 
 class StartRequest(BaseModel):
     source: str
@@ -217,8 +383,9 @@ class StartRequest(BaseModel):
     do_remove_silence: bool = True
     do_burn_subtitles: bool = True
     language: str = "fr"
-    model: str = "large-v3"
+    model: str = "medium"
     privacy: str = "unlisted"
+    description_prefix: str = ""
 
 
 class ResumeRequest(BaseModel):
@@ -226,6 +393,7 @@ class ResumeRequest(BaseModel):
     prompt_title: str
     prompt_summary: str
     privacy: str = "unlisted"
+    description_prefix: str = ""
 
 
 @router.post("/start")
@@ -245,6 +413,7 @@ async def start(req: StartRequest):
         language=req.language,
         model=req.model,
         privacy=req.privacy,
+        description_prefix=req.description_prefix,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -288,8 +457,9 @@ async def resume(req: ResumeRequest):
         do_remove_silence=False,
         do_burn_subtitles=False,
         language="fr",
-        model="large-v3",
+        model="medium",
         privacy=req.privacy,
+        description_prefix=req.description_prefix,
         steps=[Step(name=n) for n in STEP_NAMES],
         files={"transcript": srt_path, "final_video": final_video},
     )
@@ -318,116 +488,321 @@ _HTML = """<!doctype html>
     :root {
       --bg:#1a1a2e; --bg2:#16213e; --text:#eee; --dim:#888;
       --accent:#0f3460; --ok:#4ade80; --err:#f87171; --warn:#fbbf24; --border:#333;
+      --link:#7dd3fc;
     }
     body { margin:0; padding:16px; background:var(--bg); color:var(--text);
            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
-    h2 { margin:0 0 16px; font-size:18px; }
+    .wrap { max-width:860px; margin:0 auto; }
+    h2 { margin:0 0 12px; font-size:18px; }
     label { display:block; font-size:12px; color:var(--dim); margin-bottom:3px; }
-    input[type=text], select {
-      width:100%; padding:8px 10px; border:1px solid var(--border);
+    input[type=text], select, textarea {
+      width:100%; padding:7px 10px; border:1px solid var(--border);
       background:var(--bg2); color:var(--text); border-radius:6px;
       box-sizing:border-box; font-size:13px;
     }
-    .row { margin-bottom:12px; }
-    .cols { display:flex; gap:12px; }
-    .cols .row { flex:1; }
-    .checkrow { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px; }
-    button { padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
+    textarea { resize:vertical; }
+    .row { margin-bottom:10px; }
+    .cols2 { display:flex; gap:12px; }
+    .cols2 .row { flex:1; }
+    .checkrow { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px; }
+    button { padding:7px 14px; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
     .btn-go     { background:var(--ok); color:#000; }
     .btn-go:hover { opacity:.88; }
     .btn-go:disabled { opacity:.4; cursor:default; }
     .btn-resume { background:var(--warn); color:#000; display:none; }
     .btn-resume:hover { opacity:.88; }
-    .steps { margin:18px 0 10px; }
-    .step { display:flex; align-items:flex-start; gap:10px; padding:7px 0;
+    .btn-sec    { background:var(--accent); color:var(--text); }
+    .btn-sec:hover { opacity:.88; }
+    /* two-column main layout */
+    .main-layout { display:flex; gap:16px; align-items:flex-start; }
+    .main-left { flex:1; min-width:0; }
+    .main-right { flex:0 0 260px; }
+    .video-wrap { border:1px solid var(--border); border-radius:8px; overflow:hidden;
+                  background:#000; display:none; }
+    .video-wrap video { width:100%; height:220px; object-fit:contain; display:block; }
+    .video-name { font-size:11px; color:var(--dim); padding:4px 8px;
+                  background:var(--bg2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    /* pipeline */
+    .steps { margin:14px 0 10px; }
+    .step { display:flex; align-items:flex-start; gap:10px; padding:6px 0;
             border-bottom:1px solid var(--border); font-size:13px; }
     .step:last-child { border-bottom:none; }
     .step-icon { width:20px; flex-shrink:0; font-size:14px; margin-top:1px; }
     .step-name { flex:1; }
     .step-out { font-size:11px; color:var(--dim); margin-top:2px; word-break:break-all; }
+    .step-out.collapsed { display:none; }
+    .step-toggle { cursor:pointer; font-size:10px; color:var(--dim); margin-left:6px;
+                   user-select:none; opacity:.7; }
+    .step-toggle:hover { opacity:1; }
     .log-box { background:#0f172a; border:1px solid var(--border); border-radius:8px;
                padding:10px; font-size:12px; font-family:monospace; white-space:pre-wrap;
-               max-height:220px; overflow-y:auto; margin-top:12px; display:none; }
-    .result { margin-top:14px; padding:12px; border-radius:8px;
+               max-height:160px; overflow-y:auto; margin-top:10px; display:none; }
+    .result { margin-top:12px; padding:12px; border-radius:8px;
               background:var(--bg2); border:1px solid var(--ok); display:none; }
-    .result a { color:var(--ok); }
+    .result-title { font-size:15px; font-weight:700; margin-bottom:6px; }
+    .result-desc { font-size:12px; color:var(--dim); white-space:pre-wrap; max-height:110px;
+                   overflow-y:auto; border:1px solid var(--border); border-radius:4px;
+                   padding:8px; background:#0f172a; margin-bottom:8px; }
+    .result-links { display:flex; flex-direction:column; gap:5px; }
+    .result-links a { color:var(--link); font-size:13px; word-break:break-all; }
     .hint { font-size:11px; color:var(--dim); margin-left:8px; }
-    hr { border:none; border-top:1px solid var(--border); margin:18px 0; }
+    hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
+    /* config */
+    .config-toggle { cursor:pointer; color:var(--dim); font-size:12px; margin-bottom:8px; user-select:none; }
+    .config-panel { display:none; padding:10px; border:1px solid var(--border);
+                    border-radius:6px; background:var(--bg2); margin-bottom:12px; }
+    .file-row { display:flex; gap:8px; align-items:flex-end; }
+    .file-row input { flex:1; }
   </style>
 </head>
 <body>
+<div class="wrap">
   <h2>🚀 Publish</h2>
 
-  <div class="row">
-    <label>Source MP4 (absolute path)</label>
-    <input type="text" id="source" placeholder="/path/to/recording.mp4" />
-  </div>
-  <div class="cols">
-    <div class="row">
-      <label>Prompt — title</label>
-      <input type="text" id="promptTitle" placeholder="youtube-title" />
+  <!-- Config panel -->
+  <div class="config-toggle" id="configToggle">⚙️ YouTube Publish Settings ▼</div>
+  <div class="config-panel" id="configPanel">
+    <div class="cols2">
+      <div class="row">
+        <label>Video source directory</label>
+        <div class="file-row">
+          <input type="text" id="sourceDir" placeholder="/home/joriel/Vidéos" />
+          <button class="btn-sec" onclick="scanDir()">Scan</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>File extensions (comma-separated)</label>
+        <input type="text" id="videoExtensions" value="mp4,mkv" placeholder="mp4,mkv" />
+      </div>
     </div>
     <div class="row">
-      <label>Prompt — description</label>
-      <input type="text" id="promptSummary" placeholder="youtube-summary" />
+      <label>Signature (appended to every description)</label>
+      <textarea id="signature" rows="3" placeholder="Your signature / links..."></textarea>
     </div>
+    <button class="btn-sec" onclick="saveConfig()">💾 Save settings</button>
+    <span id="configStatus" style="font-size:12px;margin-left:8px;color:var(--ok);display:none">Saved!</span>
   </div>
-  <div class="cols" style="align-items:flex-end">
-    <div class="row" style="flex:0 0 auto">
-      <label>Language</label>
-      <input type="text" id="language" value="fr" style="width:60px" />
-    </div>
-    <div class="row" style="flex:0 0 auto">
-      <label>Whisper model</label>
-      <input type="text" id="model" value="large-v3" style="width:110px" />
-    </div>
-    <div class="row" style="flex:0 0 auto">
-      <label>Privacy</label>
-      <select id="privacy" style="width:110px">
-        <option value="unlisted" selected>unlisted</option>
-        <option value="private">private</option>
-        <option value="public">public</option>
-      </select>
-    </div>
-  </div>
-  <div class="checkrow"><input type="checkbox" id="doSilence" checked /><span>Remove silence</span></div>
-  <div class="checkrow"><input type="checkbox" id="doBurn" checked /><span>Burn subtitles</span></div>
 
-  <div style="display:flex;gap:10px;align-items:center;margin-top:10px">
-    <button class="btn-go" id="startBtn">▶ Publish</button>
-    <button class="btn-resume" id="resumeBtn">↩ Reprendre la publication</button>
-    <span class="hint" id="resumeHint"></span>
+  <div class="main-layout">
+    <!-- Left: form -->
+    <div class="main-left">
+      <!-- Source video -->
+      <div class="row">
+        <label>Source video</label>
+        <select id="fileSelect" onchange="onFileSelected()">
+          <option value="">— select a video —</option>
+        </select>
+      </div>
+
+      <!-- Prompts -->
+      <div class="cols2">
+        <div class="row">
+          <label>Prompt — title</label>
+          <input type="text" id="promptTitle" list="promptsList" placeholder="youtube-title" />
+        </div>
+        <div class="row">
+          <label>Prompt — description</label>
+          <input type="text" id="promptSummary" list="promptsList" placeholder="youtube-summary" />
+        </div>
+      </div>
+      <datalist id="promptsList"></datalist>
+
+      <!-- Description prefix -->
+      <div class="row">
+        <label>Description prefix (added at the top)</label>
+        <textarea id="descPrefix" rows="2" placeholder="Optional text to prepend..."></textarea>
+      </div>
+
+      <!-- Options row -->
+      <div class="cols2" style="align-items:flex-end">
+        <div class="row" style="flex:0 0 auto">
+          <label>Language</label>
+          <input type="text" id="language" value="fr" style="width:55px" />
+        </div>
+        <div class="row" style="flex:0 0 auto">
+          <label>Whisper model</label>
+          <input type="text" id="model" value="medium" style="width:100px" />
+        </div>
+        <div class="row" style="flex:0 0 auto">
+          <label>Privacy</label>
+          <select id="privacy" style="width:100px">
+            <option value="unlisted" selected>unlisted</option>
+            <option value="private">private</option>
+            <option value="public">public</option>
+          </select>
+        </div>
+      </div>
+      <div class="checkrow"><input type="checkbox" id="doSilence" checked /><span>Remove silence</span></div>
+      <div class="checkrow"><input type="checkbox" id="doBurn" checked /><span>Burn subtitles</span></div>
+
+      <div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+        <button class="btn-go" id="startBtn">▶ Publish</button>
+        <button class="btn-resume" id="resumeBtn">↩ Resume</button>
+        <span class="hint" id="resumeHint"></span>
+      </div>
+    </div>
+
+    <!-- Right: video preview -->
+    <div class="main-right">
+      <div class="video-wrap" id="videoWrap">
+        <video id="videoPreview" controls preload="metadata"></video>
+        <div class="video-name" id="videoName"></div>
+      </div>
+    </div>
   </div>
 
   <hr />
 
   <div class="steps" id="stepsEl">
-    <div class="step" id="step-0"><span class="step-icon">⬜</span><div><div class="step-name">Remove silence</div><div class="step-out" id="out-0"></div></div></div>
-    <div class="step" id="step-1"><span class="step-icon">⬜</span><div><div class="step-name">Extract transcript</div><div class="step-out" id="out-1"></div></div></div>
-    <div class="step" id="step-2"><span class="step-icon">⬜</span><div><div class="step-name">Burn subtitles</div><div class="step-out" id="out-2"></div></div></div>
+    <div class="step" id="step-0"><span class="step-icon">⬜</span><div style="flex:1"><div class="step-name">Remove silence<span class="step-toggle" id="toggle-0" onclick="toggleOut(0)">▶ logs</span></div><div class="step-out collapsed" id="out-0"></div></div></div>
+    <div class="step" id="step-1"><span class="step-icon">⬜</span><div><div class="step-name">Extract transcript (faster-whisper)</div><div class="step-out" id="out-1"></div></div></div>
+    <div class="step" id="step-2"><span class="step-icon">⬜</span><div style="flex:1"><div class="step-name">Burn subtitles<span class="step-toggle" id="toggle-2" onclick="toggleOut(2)">▶ logs</span></div><div class="step-out collapsed" id="out-2"></div></div></div>
     <div class="step" id="step-3"><span class="step-icon">⬜</span><div><div class="step-name">Generate title &amp; description</div><div class="step-out" id="out-3"></div></div></div>
     <div class="step" id="step-4"><span class="step-icon">⬜</span><div><div class="step-name">Upload to YouTube</div><div class="step-out" id="out-4"></div></div></div>
   </div>
 
+  <!-- Result -->
   <div class="result" id="result">
-    <strong>✅ Published!</strong><br/>
-    <a id="resultUrl" href="#" target="_blank"></a>
-    <div id="resultTitle" style="font-size:12px;color:var(--dim);margin-top:4px"></div>
+    <div class="result-title" id="resultTitle"></div>
+    <div class="result-desc" id="resultDesc"></div>
+    <div class="result-links">
+      <a id="resultShortUrl" href="#" target="_blank"></a>
+      <a id="resultStudioUrl" href="#" target="_blank"></a>
+    </div>
   </div>
   <div class="log-box" id="logBox"></div>
+</div>
 
 <script>
 const ICONS = { pending:'⬜', running:'🔄', done:'✅', error:'❌', skipped:'⏭️' };
 let pollTimer = null;
 let jobId = null;
+let selectedFilePath = '';
+
+// ── Config ────────────────────────────────────────────────────────────────────
+
+document.getElementById('configToggle').addEventListener('click', () => {
+  const panel = document.getElementById('configPanel');
+  const toggle = document.getElementById('configToggle');
+  const open = panel.style.display === 'block';
+  panel.style.display = open ? 'none' : 'block';
+  toggle.textContent = (open ? '▼' : '▲').replace(/[▼▲]/, open ? '▼' : '▲');
+  toggle.textContent = '⚙️ YouTube Publish Settings ' + (open ? '▼' : '▲');
+});
+
+async function loadConfig() {
+  const r = await fetch('/api/publish/config').catch(() => null);
+  if (!r || !r.ok) return;
+  const data = await r.json();
+  document.getElementById('sourceDir').value = data.video_source_path || '/home/joriel/Vidéos';
+  document.getElementById('videoExtensions').value = data.video_extensions || 'mp4,mkv';
+  document.getElementById('signature').value = data.signature || '';
+  await scanDir();
+}
+
+async function saveConfig() {
+  const r = await fetch('/api/publish/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      video_source_path: document.getElementById('sourceDir').value.trim(),
+      video_extensions: document.getElementById('videoExtensions').value.trim() || 'mp4,mkv',
+      signature: document.getElementById('signature').value,
+    }),
+  }).catch(() => null);
+  const st = document.getElementById('configStatus');
+  st.style.display = 'inline';
+  if (r && r.ok) {
+    st.textContent = 'Saved!';
+    st.style.color = 'var(--ok)';
+  } else {
+    st.textContent = 'Error saving';
+    st.style.color = 'var(--err)';
+  }
+  setTimeout(() => { st.style.display = 'none'; }, 2000);
+}
+
+// ── Video list ─────────────────────────────────────────────────────────────────
+
+async function scanDir() {
+  const dir = document.getElementById('sourceDir').value.trim() || '/home/joriel/Vidéos';
+  const ext = document.getElementById('videoExtensions').value.trim() || 'mp4,mkv';
+  const r = await fetch(
+    '/api/publish/list-videos?path=' + encodeURIComponent(dir) + '&extensions=' + encodeURIComponent(ext)
+  ).catch(() => null);
+  const sel = document.getElementById('fileSelect');
+  sel.innerHTML = '<option value="">— select a video —</option>';
+  if (!r || !r.ok) return;
+  const data = await r.json();
+  if (data.videos && data.videos.length) {
+    data.videos.forEach((v, i) => {
+      const opt = document.createElement('option');
+      opt.value = v.path;
+      opt.textContent = v.name;
+      sel.appendChild(opt);
+    });
+    // Select most recent (first) by default
+    sel.value = data.videos[0].path;
+    onFileSelected();
+  }
+}
+
+function onFileSelected() {
+  const path = document.getElementById('fileSelect').value;
+  selectedFilePath = path;
+  const wrap = document.getElementById('videoWrap');
+  const video = document.getElementById('videoPreview');
+  const nameEl = document.getElementById('videoName');
+  if (path) {
+    video.src = '/api/publish/video-preview?file=' + encodeURIComponent(path);
+    nameEl.textContent = path.split('/').pop();
+    wrap.style.display = 'block';
+    checkResume();
+  } else {
+    wrap.style.display = 'none';
+    video.src = '';
+    nameEl.textContent = '';
+  }
+}
+
+// ── Prompts ────────────────────────────────────────────────────────────────────
+
+async function loadPrompts() {
+  const r = await fetch('/api/publish/list-prompts').catch(() => null);
+  if (!r || !r.ok) return;
+  const data = await r.json();
+  const prompts = data.prompts || [];
+  const dl = document.getElementById('promptsList');
+  dl.innerHTML = '';
+  prompts.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    dl.appendChild(opt);
+  });
+  const ptEl = document.getElementById('promptTitle');
+  const psEl = document.getElementById('promptSummary');
+  if (!ptEl.value && prompts.includes('youtube-title'))   ptEl.value = 'youtube-title';
+  if (!psEl.value && prompts.includes('youtube-summary')) psEl.value = 'youtube-summary';
+}
+
+// ── Pipeline UI ────────────────────────────────────────────────────────────────
 
 function renderSteps(steps) {
   steps.forEach((s, i) => {
-    const icon = document.querySelector(`#step-${i} .step-icon`);
-    const out  = document.getElementById(`out-${i}`);
+    const icon = document.querySelector('#step-' + i + ' .step-icon');
+    const out  = document.getElementById('out-' + i);
     if (icon) icon.textContent = ICONS[s.status] || '⬜';
     if (out)  out.textContent  = s.output || '';
   });
+}
+
+function toggleOut(i) {
+  const out = document.getElementById('out-' + i);
+  const tog = document.getElementById('toggle-' + i);
+  if (!out || !tog) return;
+  const willCollapse = !out.classList.contains('collapsed');
+  out.classList.toggle('collapsed');
+  tog.textContent = willCollapse ? '▶ logs' : '▼ logs';
 }
 
 function log(msg) {
@@ -441,30 +816,46 @@ function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = nul
 
 function resetUI() {
   stopPoll(); jobId = null;
-  document.getElementById('result').style.display = 'none';
-  document.getElementById('logBox').style.display  = 'none';
-  document.getElementById('logBox').textContent    = '';
+  document.getElementById('result').style.display   = 'none';
+  document.getElementById('logBox').style.display   = 'none';
+  document.getElementById('logBox').textContent     = '';
   document.getElementById('resumeBtn').style.display = 'none';
   document.getElementById('resumeHint').textContent  = '';
   for (let i = 0; i < 5; i++) {
-    document.querySelector(`#step-${i} .step-icon`).textContent = '⬜';
-    document.getElementById(`out-${i}`).textContent = '';
+    document.querySelector('#step-' + i + ' .step-icon').textContent = '⬜';
+    const out = document.getElementById('out-' + i);
+    out.textContent = '';
+    if (i === 0 || i === 2) {
+      out.classList.add('collapsed');
+      const tog = document.getElementById('toggle-' + i);
+      if (tog) tog.textContent = '▶ logs';
+    }
   }
 }
 
 async function poll() {
   if (!jobId) return;
-  const r = await fetch(`/api/publish/status/${jobId}`).catch(() => null);
+  const r = await fetch('/api/publish/status/' + jobId).catch(() => null);
   if (!r || !r.ok) return;
   const data = await r.json();
   renderSteps(data.steps);
   if (data.status === 'done') {
     stopPoll();
     document.getElementById('startBtn').disabled = false;
+    // Show result
     const res = document.getElementById('result');
-    document.getElementById('resultUrl').href        = data.video_url;
-    document.getElementById('resultUrl').textContent = data.video_url;
-    document.getElementById('resultTitle').textContent = data.title;
+    document.getElementById('resultTitle').textContent = '✅ ' + (data.title || 'Published!');
+    document.getElementById('resultDesc').textContent  = data.description || '';
+    const shortEl = document.getElementById('resultShortUrl');
+    const studioEl = document.getElementById('resultStudioUrl');
+    if (data.video_url) {
+      shortEl.href = data.video_url;
+      shortEl.textContent = '📱 ' + data.video_url;
+    }
+    if (data.studio_url) {
+      studioEl.href = data.studio_url;
+      studioEl.textContent = '📊 ' + data.studio_url;
+    }
     res.style.display = 'block';
   } else if (data.status === 'error') {
     stopPoll();
@@ -474,7 +865,7 @@ async function poll() {
 }
 
 async function checkResume() {
-  const src = document.getElementById('source').value.trim();
+  const src = selectedFilePath || document.getElementById('fileSelect').value;
   if (!src) return;
   const r = await fetch('/api/publish/check-resume', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -489,24 +880,27 @@ async function checkResume() {
 }
 
 async function launch(isResume) {
-  const src   = document.getElementById('source').value.trim();
-  const pt    = document.getElementById('promptTitle').value.trim();
-  const ps    = document.getElementById('promptSummary').value.trim();
-  const priv  = document.getElementById('privacy').value;
-  if (!src || !pt || !ps) { alert('Fill in source file and both prompt names.'); return; }
+  const src  = selectedFilePath || document.getElementById('fileSelect').value;
+  const pt   = document.getElementById('promptTitle').value.trim();
+  const ps   = document.getElementById('promptSummary').value.trim();
+  const priv = document.getElementById('privacy').value;
+  const desc_prefix = document.getElementById('descPrefix').value;
+  if (!src)       { alert('Select a source video.'); return; }
+  if (!pt || !ps) { alert('Fill in both prompt names.'); return; }
 
   resetUI();
   document.getElementById('startBtn').disabled = true;
 
   const url  = isResume ? '/api/publish/resume' : '/api/publish/start';
   const body = isResume
-    ? { source:src, prompt_title:pt, prompt_summary:ps, privacy:priv }
+    ? { source:src, prompt_title:pt, prompt_summary:ps, privacy:priv, description_prefix:desc_prefix }
     : {
         source:src, prompt_title:pt, prompt_summary:ps, privacy:priv,
+        description_prefix: desc_prefix,
         do_remove_silence: document.getElementById('doSilence').checked,
         do_burn_subtitles: document.getElementById('doBurn').checked,
         language: document.getElementById('language').value.trim() || 'fr',
-        model:    document.getElementById('model').value.trim() || 'large-v3',
+        model:    document.getElementById('model').value.trim() || 'medium',
       };
 
   const r = await fetch(url, {
@@ -528,10 +922,15 @@ async function launch(isResume) {
 
 document.getElementById('startBtn').addEventListener('click', () => launch(false));
 document.getElementById('resumeBtn').addEventListener('click', () => launch(true));
-document.getElementById('source').addEventListener('blur', checkResume);
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+
+loadConfig();
+loadPrompts();
 </script>
 </body>
-</html>"""
+</html>
+"""
 
 
 def register(config: dict) -> WebuxPluginManifest:

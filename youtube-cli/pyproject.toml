@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ytdlp = ["yt-dlp"]
+transcribe = ["faster-whisper>=1.0"]
 
 [project.scripts]
 youtube = "youtube_entry:main"
