@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import shutil
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
