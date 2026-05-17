@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -397,6 +397,20 @@ async def video_preview(file: str = Query(...)):
     return FileResponse(str(p), media_type=mime)
 
 
+@router.post("/upload-external")
+async def upload_external(file: UploadFile = File(...)):
+    """Accept external file upload and save to temp dir. Return path for use as source."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+    ext = Path(file.filename).suffix.lower()
+    if ext not in {".mp4", ".mkv", ".mov", ".webm"}:
+        raise HTTPException(status_code=400, detail="Unsupported video format")
+    dest = Path(tempfile.gettempdir()) / f"webux_upload_{uuid.uuid4().hex}{ext}"
+    with open(dest, "wb") as f:
+        f.write(await file.read())
+    return {"path": str(dest), "name": file.filename}
+
+
 # ── Job API ───────────────────────────────────────────────────────────────────
 
 class StartRequest(BaseModel):
@@ -622,6 +636,9 @@ _HTML = """<!doctype html>
         <select id="fileSelect" onchange="onFileSelected()">
           <option value="">— select a video —</option>
         </select>
+        <div id="dropZone" style="margin-top:6px;border:2px dashed var(--border);border-radius:6px;padding:12px;text-align:center;font-size:13px;color:var(--dim);cursor:pointer;">
+          or drag &amp; drop external file here
+        </div>
       </div>
 
       <!-- Prompts -->
@@ -957,6 +974,39 @@ document.getElementById('resumeBtn').addEventListener('click', () => launch(true
 
 loadConfig();
 loadPrompts();
+
+// ── Drag & drop external upload ──────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('click', () => {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'video/*';
+  inp.onchange = () => { if (inp.files[0]) uploadExternal(inp.files[0]); };
+  inp.click();
+});
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; });
+dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--border)'; });
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.style.borderColor = 'var(--border)';
+  if (e.dataTransfer.files.length) uploadExternal(e.dataTransfer.files[0]);
+});
+
+async function uploadExternal(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch('/api/publish/upload-external', { method: 'POST', body: fd }).catch(() => null);
+  if (!r || !r.ok) { alert('Upload failed'); return; }
+  const data = await r.json();
+  // Add to select and pick it
+  const sel = document.getElementById('fileSelect');
+  const opt = document.createElement('option');
+  opt.value = data.path;
+  opt.textContent = data.name + ' (uploaded)';
+  sel.appendChild(opt);
+  sel.value = data.path;
+  onFileSelected();
+}
 </script>
 </body>
 </html>
