@@ -18,7 +18,7 @@ from core.server import build_app
 logger = structlog.get_logger(__name__)
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("serve")
-    @click.option("--host", default="localhost")
+    @click.option("--host", default="0.0.0.0")
     @click.option("--port", "-p", default=8007, type=int)
     @click.option("--open", "open_browser", is_flag=True, default=False)
     @click.pass_context
