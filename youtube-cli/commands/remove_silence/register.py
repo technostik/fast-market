@@ -48,11 +48,13 @@ def remove_silence_simple(
     input_file: str,
     output_file: str,
     threshold: float,
+    progress_cb=None,
 ) -> tuple[str, float, float]:
     """
     Remove silence from a video — direct port of TrimsilencesPlugin.remove_silence_simple.
     Returns (output_file, original_duration, final_duration).
     Raises RuntimeError on failure.
+    If progress_cb is provided it will be called with (current_pct, total_pct).
     """
     import numpy as np
     from moviepy import VideoFileClip, concatenate_videoclips
@@ -78,6 +80,38 @@ def remove_silence_simple(
 
     # temp_audiofile placed next to output to avoid CWD issues
     temp_audio = os.path.join(os.path.dirname(os.path.abspath(output_file)), "temp-audio.m4a")
+
+    def _make_logger():
+        if progress_cb is None:
+            return None
+        last_pct = [0.0]
+        def logger(msg):
+            # moviepy logs "t: 00:00:03 / 00:00:10" style lines
+            if "t:" in msg and "/" in msg:
+                try:
+                    parts = msg.split("/")
+                    cur = parts[0].split(":")[-1].strip()
+                    tot = parts[1].strip()
+                    # crude parse of MM:SS or HH:MM:SS
+                    def to_sec(s):
+                        s = s.strip()
+                        if s.count(":") == 1:
+                            m, sec = s.split(":")
+                            return int(m)*60 + float(sec)
+                        elif s.count(":") == 2:
+                            h, m, sec = s.split(":")
+                            return int(h)*3600 + int(m)*60 + float(sec)
+                        return float(s)
+                    cur_sec = to_sec(cur)
+                    tot_sec = to_sec(tot)
+                    pct = (cur_sec / tot_sec * 100) if tot_sec > 0 else 0
+                    if abs(pct - last_pct[0]) >= 1:
+                        last_pct[0] = pct
+                        progress_cb(pct, 100)
+                except Exception:
+                    pass
+        return logger
+
     final_video.write_videofile(
         output_file,
         codec='libx264',
@@ -86,6 +120,8 @@ def remove_silence_simple(
         remove_temp=True,
         audio_bitrate="192k",
         preset='medium',
+        logger=_make_logger(),
+        progress_bar=False,
     )
 
     final_duration = final_video.duration
@@ -133,7 +169,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         click.echo(f"Removing silence from {input_path.name}...", err=True)
         _, orig_dur, final_dur = remove_silence_simple(
-            str(input_path), str(output_path), threshold
+            str(input_path), str(output_path), threshold, progress_cb=None
         )
         reduction = (orig_dur - final_dur) / orig_dur * 100
         click.echo(

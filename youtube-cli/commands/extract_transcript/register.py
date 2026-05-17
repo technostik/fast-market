@@ -26,12 +26,24 @@ def generate_karaoke_ass(
     model_size: str = "medium",
     subtitle_size: int = 96,
     max_line_chars: int = 35,
+    progress_cb=None,
 ) -> None:
     """
     Transcribe video to ASS karaoke subtitles with word-level green/white highlighting.
     Green = primary (being read), White = secondary (pre-read), middle-centered.
+    If progress_cb is given it receives (current_pct, 100).
     """
     from faster_whisper import WhisperModel
+    import subprocess, json
+
+    # best-effort total duration for percentage
+    total_dur = None
+    try:
+        dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
+        dur_out = subprocess.check_output(dur_cmd, text=True)
+        total_dur = float(json.loads(dur_out)["format"]["duration"])
+    except Exception:
+        pass
 
     lang = language if language != "auto" else None
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
@@ -110,6 +122,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return " ".join(parts)
 
     for segment in result_segments:
+        if progress_cb and total_dur:
+            try:
+                pct = min(100.0, (segment["end"] / total_dur) * 100)
+                progress_cb(round(pct, 1), 100)
+            except Exception:
+                pass
+
         start_ms = int(segment["start"] * 1000)
         end_ms = int(segment["end"] * 1000)
         words = segment.get("words", [])
@@ -156,14 +175,31 @@ def transcribe_to_srt(
     output_path: str,
     language: str = "fr",
     model_size: str = "medium",
+    progress_cb=None,
 ) -> None:
     """Segment-level SRT transcription via faster_whisper (fallback: openai-whisper on CPU)."""
+    import subprocess, json
+    total_dur = None
+    try:
+        dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
+        dur_out = subprocess.check_output(dur_cmd, text=True)
+        total_dur = float(json.loads(dur_out)["format"]["duration"])
+    except Exception:
+        pass
     try:
         from faster_whisper import WhisperModel
         lang = language if language != "auto" else None
         model = WhisperModel(model_size, device="cpu", compute_type="int8")
         segments_gen, _ = model.transcribe(input_path, language=lang)
-        segments = [(seg.start, seg.end, seg.text.strip()) for seg in segments_gen]
+        segments = []
+        for seg in segments_gen:
+            segments.append((seg.start, seg.end, seg.text.strip()))
+            if progress_cb and total_dur:
+                try:
+                    pct = min(100.0, (seg.end / total_dur) * 100)
+                    progress_cb(round(pct, 1), 100)
+                except Exception:
+                    pass
     except ImportError:
         import whisper  # type: ignore[import]
         lang = language if language != "auto" else None
@@ -188,14 +224,32 @@ def transcribe_to_txt(
     output_path: str,
     language: str = "fr",
     model_size: str = "medium",
+    progress_cb=None,
 ) -> None:
     """Plain-text transcription (no timestamps) via faster_whisper."""
+    import subprocess, json
+    total_dur = None
+    try:
+        dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
+        dur_out = subprocess.check_output(dur_cmd, text=True)
+        total_dur = float(json.loads(dur_out)["format"]["duration"])
+    except Exception:
+        pass
     try:
         from faster_whisper import WhisperModel
         lang = language if language != "auto" else None
         model = WhisperModel(model_size, device="cpu", compute_type="int8")
         segments_gen, _ = model.transcribe(input_path, language=lang)
-        lines = [seg.text.strip() for seg in segments_gen if seg.text.strip()]
+        lines = []
+        for seg in segments_gen:
+            if seg.text.strip():
+                lines.append(seg.text.strip())
+            if progress_cb and total_dur:
+                try:
+                    pct = min(100.0, (seg.end / total_dur) * 100)
+                    progress_cb(round(pct, 1), 100)
+                except Exception:
+                    pass
     except ImportError:
         import whisper  # type: ignore[import]
         lang = language if language != "auto" else None
@@ -254,11 +308,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Transcribing {input_path.name} ({model}, {language}, {fmt})...", err=True)
 
         if fmt == "ass":
-            generate_karaoke_ass(str(input_path), str(output_path), language, model, font_size)
+            generate_karaoke_ass(str(input_path), str(output_path), language, model, font_size, progress_cb=None)
         elif fmt == "srt":
-            transcribe_to_srt(str(input_path), str(output_path), language, model)
+            transcribe_to_srt(str(input_path), str(output_path), language, model, progress_cb=None)
         else:
-            transcribe_to_txt(str(input_path), str(output_path), language, model)
+            transcribe_to_txt(str(input_path), str(output_path), language, model, progress_cb=None)
 
         click.echo(str(output_path))
 

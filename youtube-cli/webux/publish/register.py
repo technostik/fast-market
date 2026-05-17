@@ -38,6 +38,7 @@ class Step:
     name: str
     status: str = "pending"   # pending | running | done | error | skipped
     output: str = ""
+    progress: float | None = None  # 0-100 when available
 
 
 @dataclass
@@ -70,7 +71,12 @@ class Job:
             "description": self.description,
             "files": self.files,
             "steps": [
-                {"name": s.name, "status": s.status, "output": s.output}
+                {
+                    "name": s.name,
+                    "status": s.status,
+                    "output": s.output,
+                    "progress": s.progress,
+                }
                 for s in self.steps
             ],
         }
@@ -171,6 +177,27 @@ async def _run(step: Step, *cmd: str) -> tuple[int, str]:
     return proc.returncode or 0, out
 
 
+# Direct function imports for progress-capable execution
+try:
+    from commands.remove_silence.register import remove_silence_simple
+except Exception:
+    remove_silence_simple = None
+
+try:
+    from commands.burn_subtitles.register import burn_ass_subtitles
+except Exception:
+    burn_ass_subtitles = None
+
+try:
+    from commands.extract_transcript.register import (
+        generate_karaoke_ass,
+        transcribe_to_srt,
+        transcribe_to_txt,
+    )
+except Exception:
+    generate_karaoke_ass = transcribe_to_srt = transcribe_to_txt = None
+
+
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
 async def _run_pipeline(job: Job) -> None:
@@ -184,7 +211,18 @@ async def _run_pipeline(job: Job) -> None:
     if job.do_remove_silence:
         s0.status = "running"
         out_path = str(d / f"{stem}_nosilence.mp4")
-        rc, _ = await _run(s0, _yt(), "remove-silence", job.source, "-o", out_path)
+        if remove_silence_simple is not None:
+            # direct call with progress callback
+            def _progress(pct, _):
+                s0.progress = round(pct, 1)
+            try:
+                remove_silence_simple(job.source, out_path, -65.0, progress_cb=_progress)
+                rc = 0
+            except Exception as exc:
+                s0.output = str(exc)
+                rc = 1
+        else:
+            rc, _ = await _run(s0, _yt(), "remove-silence", job.source, "-o", out_path)
         if rc != 0:
             s0.status = "error"
             job.status = "error"
@@ -196,6 +234,7 @@ async def _run_pipeline(job: Job) -> None:
             job.status = "error"
             return
         s0.status = "done"
+        s0.progress = 100
         s0.output += f"\n⏱ Duration: {duration:.0f}s"
         current_video = out_path
         job.files["no_silence"] = out_path
@@ -207,15 +246,26 @@ async def _run_pipeline(job: Job) -> None:
     s1.status = "running"
     ass_path = str(d / f"{stem}.ass")
     txt_path = str(d / f"{stem}_transcript.txt")
-    rc, _ = await _run(
-        s1, _yt(), "extract-transcript", current_video,
-        "-o", ass_path, "-l", job.language, "-m", job.model,
-    )
+    if generate_karaoke_ass is not None:
+        def _progress(pct, _):
+            s1.progress = pct
+        try:
+            generate_karaoke_ass(current_video, ass_path, job.language, job.model, 96, 35, progress_cb=_progress)
+            rc = 0
+        except Exception as exc:
+            s1.output = str(exc)
+            rc = 1
+    else:
+        rc, _ = await _run(
+            s1, _yt(), "extract-transcript", current_video,
+            "-o", ass_path, "-l", job.language, "-m", job.model,
+        )
     if rc != 0:
         s1.status = "error"
         job.status = "error"
         return
     s1.status = "done"
+    s1.progress = 100
     job.files["transcript"] = ass_path
     # Write plain-text version for LLM (ASS tags stripped)
     plain = _ass_to_plain_text(ass_path)
@@ -228,14 +278,25 @@ async def _run_pipeline(job: Job) -> None:
     if job.do_burn_subtitles:
         s2.status = "running"
         out_path = str(d / f"{stem}_subtitled.mp4")
-        rc, _ = await _run(
-            s2, _yt(), "burn-subtitles", current_video, ass_path, "-o", out_path
-        )
+        if burn_ass_subtitles is not None:
+            def _progress(pct, _):
+                s2.progress = pct
+            try:
+                burn_ass_subtitles(current_video, ass_path, out_path, 96, progress_cb=_progress)
+                rc = 0
+            except Exception as exc:
+                s2.output = str(exc)
+                rc = 1
+        else:
+            rc, _ = await _run(
+                s2, _yt(), "burn-subtitles", current_video, ass_path, "-o", out_path
+            )
         if rc != 0:
             s2.status = "error"
             job.status = "error"
             return
         s2.status = "done"
+        s2.progress = 100
         current_video = out_path
         job.files["subtitled"] = out_path
     else:
@@ -574,6 +635,7 @@ _HTML = """<!doctype html>
     .step:last-child { border-bottom:none; }
     .step-icon { width:20px; flex-shrink:0; font-size:14px; margin-top:1px; }
     .step-name { flex:1; }
+    .step-progress { width:120px; height:6px; margin-left:8px; vertical-align:middle; }
     .step-out { font-size:11px; color:var(--dim); margin-top:2px; word-break:break-all; }
     .step-out.collapsed { display:none; }
     .step-toggle { cursor:pointer; font-size:10px; color:var(--dim); margin-left:6px;
@@ -839,8 +901,23 @@ function renderSteps(steps) {
   steps.forEach((s, i) => {
     const icon = document.querySelector('#step-' + i + ' .step-icon');
     const out  = document.getElementById('out-' + i);
+    const nameEl = document.querySelector('#step-' + i + ' .step-name');
     if (icon) icon.textContent = ICONS[s.status] || '⬜';
     if (out)  out.textContent  = s.output || '';
+    if (nameEl) {
+      let bar = nameEl.querySelector('.step-progress');
+      if (s.progress != null) {
+        if (!bar) {
+          bar = document.createElement('progress');
+          bar.className = 'step-progress';
+          bar.max = 100;
+          nameEl.appendChild(bar);
+        }
+        bar.value = s.progress;
+      } else if (bar) {
+        bar.remove();
+      }
+    }
   });
 }
 
