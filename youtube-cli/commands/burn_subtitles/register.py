@@ -38,23 +38,27 @@ def burn_ass_subtitles(
         subprocess.run(cmd, check=True)
         return
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    import json
     total_duration = None
+    try:
+        dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", video_path]
+        dur_out = subprocess.check_output(dur_cmd, text=True)
+        total_duration = float(json.loads(dur_out)["format"]["duration"])
+    except Exception:
+        pass
+
+    last_pct = [0.0]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     for line in proc.stdout:
         line = line.strip()
-        if line.startswith("out_time_ms="):
+        if line.startswith("out_time_ms=") and total_duration:
             try:
-                ms = int(line.split("=", 1)[1])
-                cur_sec = ms / 1_000_000
-                if total_duration is None:
-                    # try to get duration via ffprobe once
-                    import json
-                    dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", video_path]
-                    dur_out = subprocess.check_output(dur_cmd, text=True)
-                    total_duration = float(json.loads(dur_out)["format"]["duration"])
-                if total_duration and total_duration > 0:
-                    pct = min(100.0, cur_sec / total_duration * 100)
-                    progress_cb(round(pct, 1), 100)
+                us = int(line.split("=", 1)[1])
+                cur_sec = us / 1_000_000
+                pct = min(100.0, cur_sec / total_duration * 100)
+                if abs(pct - last_pct[0]) >= 1:
+                    last_pct[0] = pct
+                    progress_cb(pct, 100)
             except Exception:
                 pass
     rc = proc.wait()

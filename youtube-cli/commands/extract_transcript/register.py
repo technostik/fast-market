@@ -61,6 +61,12 @@ def generate_karaoke_ass(
             "text": seg.text.strip(),
             "words": word_list,
         })
+        if progress_cb and total_dur:
+            try:
+                pct = min(100.0, (seg.end / total_dur) * 100)
+                progress_cb(round(pct, 1), 100)
+            except Exception:
+                pass
 
     primary_color = "&H0000FF00"   # green — word being read
     secondary_color = "&H00FFFFFF" # white — words not yet read
@@ -122,13 +128,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return " ".join(parts)
 
     for segment in result_segments:
-        if progress_cb and total_dur:
-            try:
-                pct = min(100.0, (segment["end"] / total_dur) * 100)
-                progress_cb(round(pct, 1), 100)
-            except Exception:
-                pass
-
         start_ms = int(segment["start"] * 1000)
         end_ms = int(segment["end"] * 1000)
         words = segment.get("words", [])

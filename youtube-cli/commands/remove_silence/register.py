@@ -56,8 +56,9 @@ def remove_silence_simple(
     Raises RuntimeError on failure.
     If progress_cb is provided it will be called with (current_pct, total_pct).
     """
+    import subprocess
     import numpy as np
-    from moviepy import VideoFileClip, concatenate_videoclips
+    from moviepy import VideoFileClip
 
     video = VideoFileClip(input_file)
     original_duration = video.duration
@@ -66,70 +67,63 @@ def remove_silence_simple(
         audio_array = np.mean(audio_array, axis=1).astype(np.float32)
 
     segments = detect_silence_segments_simple(audio_array, video.audio.fps, threshold)
+    video.close()
 
     if not segments:
-        video.close()
         raise RuntimeError("No non-silent segments detected — check threshold")
 
-    clips = []
-    for i, (start, end) in enumerate(segments):
-        clip = video.subclipped(start, end)
-        clips.append(clip)
-
-    final_video = concatenate_videoclips(clips)
-
-    # temp_audiofile placed next to output to avoid CWD issues
-    temp_audio = os.path.join(os.path.dirname(os.path.abspath(output_file)), "temp-audio.m4a")
-
-    def _make_logger():
-        if progress_cb is None:
-            return None
-        import proglog
-        last_pct = [0.0]
-        class _Logger(proglog.ProgressBarLogger):
-            def callback(self, **changes):
-                for bar in self.bars.values():
-                    index = bar.get('index') or 0
-                    total = bar.get('total') or 0
-                    if total > 0:
-                        pct = min(100.0, 100.0 * index / total)
-                        if abs(pct - last_pct[0]) >= 1:
-                            last_pct[0] = pct
-                            progress_cb(pct, 100)
-                        break
-        return _Logger()
-
-    final_video.write_videofile(
-        output_file,
-        codec='libx264',
-        audio_codec='aac',
-        temp_audiofile=temp_audio,
-        remove_temp=True,
-        audio_bitrate="192k",
-        preset='medium',
-        logger=_make_logger(),
-    )
-
-    final_duration = final_video.duration
+    final_duration = sum(end - start for start, end in segments)
 
     if final_duration >= original_duration:
-        video.close()
-        final_video.close()
-        for clip in clips:
-            clip.close()
-        if os.path.exists(output_file):
-            os.remove(output_file)
         raise RuntimeError(
             f"Output video ({final_duration:.1f}s) is not shorter than input ({original_duration:.1f}s) — "
             "no silence was removed; try lowering the threshold"
         )
 
-    reduction_percentage = ((original_duration - final_duration) / original_duration * 100)
+    # Write ffmpeg concat list and encode with progress tracking
+    abs_input = os.path.abspath(input_file).replace("'", "\\'")
+    concat_path = os.path.join(os.path.dirname(os.path.abspath(output_file)), "_concat_list.txt")
+    with open(concat_path, "w") as f:
+        for start, end in segments:
+            f.write(f"file '{abs_input}'\n")
+            f.write(f"inpoint {start}\n")
+            f.write(f"outpoint {end}\n")
 
-    video.close()
-    final_video.close()
-    for clip in clips:
-        clip.close()
+    try:
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0", "-i", concat_path,
+            "-c:v", "libx264", "-preset", "medium",
+            "-c:a", "aac", "-b:a", "192k",
+            "-progress", "pipe:1", "-nostats",
+            output_file,
+        ]
+
+        if progress_cb is None:
+            result = subprocess.run(cmd, capture_output=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"ffmpeg failed: {result.stderr.decode(errors='replace')}")
+        else:
+            last_pct = [0.0]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for line in proc.stdout:
+                line = line.strip()
+                if line.startswith("out_time_ms="):
+                    try:
+                        us = int(line.split("=", 1)[1])
+                        cur_sec = us / 1_000_000
+                        pct = min(100.0, cur_sec / final_duration * 100)
+                        if abs(pct - last_pct[0]) >= 1:
+                            last_pct[0] = pct
+                            progress_cb(pct, 100)
+                    except Exception:
+                        pass
+            rc = proc.wait()
+            if rc != 0:
+                raise RuntimeError(f"ffmpeg failed with code {rc}")
+    finally:
+        if os.path.exists(concat_path):
+            os.unlink(concat_path)
 
     return output_file, original_duration, final_duration
 
