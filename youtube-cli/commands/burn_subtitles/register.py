@@ -48,7 +48,7 @@ def burn_ass_subtitles(
         pass
 
     last_pct = [0.0]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     for line in proc.stdout:
         line = line.strip()
         if line.startswith("out_time_ms=") and total_duration:
