@@ -121,7 +121,6 @@ def remove_silence_simple(
         audio_bitrate="192k",
         preset='medium',
         logger=_make_logger(),
-        progress_bar=False,
     )
 
     final_duration = final_video.duration
