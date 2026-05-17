@@ -792,13 +792,22 @@ async def check_resume(body: dict):
     completed = set(meta.get("completed_steps", []))
     skipped = set(meta.get("skipped_steps", []))
     passed = completed | skipped
-    # Available entry points: the step after each passed step (if within range)
     available = sorted({c + 1 for c in passed if c + 1 < len(STEP_NAMES)})
+    files = meta.get("files", {})
+    step_files = [
+        [
+            {"path": files[k], "name": Path(files[k]).name}
+            for k in keys
+            if k in files and files[k] and Path(files[k]).exists()
+        ]
+        for keys in _STEP_FILE_KEYS
+    ]
     return {
         "can_resume": bool(available),
         "available_from_steps": available,
         "completed_steps": sorted(completed),
         "skipped_steps": sorted(skipped),
+        "step_files": step_files,
     }
 
 
@@ -1192,6 +1201,15 @@ async function loadPrompts() {
 async function checkResume() {
   const src = selectedFilePath || document.getElementById('fileSelect').value;
   const area = document.getElementById('resumeArea');
+
+  // Always clear previous resume state first
+  for (let i = 0; i < 5; i++) {
+    const icon = document.querySelector('#step-' + i + ' .step-icon');
+    if (icon) icon.textContent = '⬜';
+    const dlEl = document.getElementById('dl-' + i);
+    if (dlEl) dlEl.innerHTML = '';
+  }
+
   if (!src) { area.style.display = 'none'; return; }
 
   const r = await fetch('/api/publish/check-resume', {
@@ -1203,6 +1221,24 @@ async function checkResume() {
   if (!r || !r.ok) { area.style.display = 'none'; return; }
   const data = await r.json();
 
+  // Show step icons and download links for previously completed/skipped steps
+  (data.completed_steps || []).forEach(i => {
+    const icon = document.querySelector('#step-' + i + ' .step-icon');
+    if (icon) icon.textContent = '✅';
+  });
+  (data.skipped_steps || []).forEach(i => {
+    const icon = document.querySelector('#step-' + i + ' .step-icon');
+    if (icon) icon.textContent = '⏭️';
+  });
+  (data.step_files || []).forEach((files, i) => {
+    const dlEl = document.getElementById('dl-' + i);
+    if (dlEl && files.length) {
+      dlEl.innerHTML = files.map(f =>
+        `<a href="/api/publish/download?file=${encodeURIComponent(f.path)}" download="${f.name}">⬇ ${f.name}</a>`
+      ).join('');
+    }
+  });
+
   if (!data.can_resume || !data.available_from_steps.length) {
     area.style.display = 'none';
     return;
@@ -1210,10 +1246,8 @@ async function checkResume() {
 
   const sel = document.getElementById('resumeFromStep');
   sel.innerHTML = '';
-  // Show options from most-skipped (fastest resume) to least (most re-done)
   const steps = [...data.available_from_steps].reverse();
   steps.forEach(step => {
-    const skips = step; // number of steps we reuse
     const opt = document.createElement('option');
     opt.value = step;
     const doneLabel = step < STEP_NAMES.length ? STEP_NAMES[step] : '?';
@@ -1221,7 +1255,7 @@ async function checkResume() {
     opt.textContent = `Step ${step + 1}: ${doneLabel}` + (step > 0 ? ` (reuse: ${skipList})` : '');
     sel.appendChild(opt);
   });
-  sel.value = steps[0]; // default: most steps reused = fastest
+  sel.value = steps[0];
 
   area.style.display = 'block';
 }
