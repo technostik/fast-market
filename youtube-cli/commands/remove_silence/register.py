@@ -84,33 +84,20 @@ def remove_silence_simple(
     def _make_logger():
         if progress_cb is None:
             return None
+        import proglog
         last_pct = [0.0]
-        def logger(msg):
-            # moviepy logs "t: 00:00:03 / 00:00:10" style lines
-            if "t:" in msg and "/" in msg:
-                try:
-                    parts = msg.split("/")
-                    cur = parts[0].split(":")[-1].strip()
-                    tot = parts[1].strip()
-                    # crude parse of MM:SS or HH:MM:SS
-                    def to_sec(s):
-                        s = s.strip()
-                        if s.count(":") == 1:
-                            m, sec = s.split(":")
-                            return int(m)*60 + float(sec)
-                        elif s.count(":") == 2:
-                            h, m, sec = s.split(":")
-                            return int(h)*3600 + int(m)*60 + float(sec)
-                        return float(s)
-                    cur_sec = to_sec(cur)
-                    tot_sec = to_sec(tot)
-                    pct = (cur_sec / tot_sec * 100) if tot_sec > 0 else 0
-                    if abs(pct - last_pct[0]) >= 1:
-                        last_pct[0] = pct
-                        progress_cb(pct, 100)
-                except Exception:
-                    pass
-        return logger
+        class _Logger(proglog.ProgressBarLogger):
+            def callback(self, **changes):
+                for bar in self.bars.values():
+                    index = bar.get('index') or 0
+                    total = bar.get('total') or 0
+                    if total > 0:
+                        pct = min(100.0, 100.0 * index / total)
+                        if abs(pct - last_pct[0]) >= 1:
+                            last_pct[0] = pct
+                            progress_cb(pct, 100)
+                        break
+        return _Logger()
 
     final_video.write_videofile(
         output_file,

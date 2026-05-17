@@ -212,11 +212,10 @@ async def _run_pipeline(job: Job) -> None:
         s0.status = "running"
         out_path = str(d / f"{stem}_nosilence.mp4")
         if remove_silence_simple is not None:
-            # direct call with progress callback
             def _progress(pct, _):
                 s0.progress = round(pct, 1)
             try:
-                remove_silence_simple(job.source, out_path, -65.0, progress_cb=_progress)
+                await asyncio.to_thread(remove_silence_simple, job.source, out_path, -65.0, _progress)
                 rc = 0
             except Exception as exc:
                 s0.output = str(exc)
@@ -250,7 +249,7 @@ async def _run_pipeline(job: Job) -> None:
         def _progress(pct, _):
             s1.progress = pct
         try:
-            generate_karaoke_ass(current_video, ass_path, job.language, job.model, 96, 35, progress_cb=_progress)
+            await asyncio.to_thread(generate_karaoke_ass, current_video, ass_path, job.language, job.model, 96, 35, _progress)
             rc = 0
         except Exception as exc:
             s1.output = str(exc)
@@ -282,7 +281,7 @@ async def _run_pipeline(job: Job) -> None:
             def _progress(pct, _):
                 s2.progress = pct
             try:
-                burn_ass_subtitles(current_video, ass_path, out_path, 96, progress_cb=_progress)
+                await asyncio.to_thread(burn_ass_subtitles, current_video, ass_path, out_path, 96, _progress)
                 rc = 0
             except Exception as exc:
                 s2.output = str(exc)
