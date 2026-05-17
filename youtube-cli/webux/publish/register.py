@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -53,6 +54,7 @@ class Job:
     model: str
     privacy: str
     description_prefix: str = ""
+    source_urls: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)
     title: str = ""
@@ -164,6 +166,24 @@ def _get_video_duration(path: str) -> float:
         return 0.0
 
 
+def _sanitize_filename(title: str) -> str:
+    """Convert a title to a safe filename stem."""
+    safe = re.sub(r'[<>:"/\\|?*\n\r\t]', '', title)
+    safe = re.sub(r'\s+', '_', safe.strip())
+    safe = safe.strip('._')
+    return safe[:100] if safe else "video"
+
+
+def _validate_urls(urls: list[str]) -> list[str]:
+    """Return only valid http(s) URLs from the list."""
+    result = []
+    for u in urls:
+        u = u.strip()
+        if u and (u.startswith("http://") or u.startswith("https://")):
+            result.append(u)
+    return result
+
+
 async def _run(step: Step, *cmd: str) -> tuple[int, str]:
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -202,7 +222,8 @@ except Exception:
 
 async def _run_pipeline(job: Job) -> None:
     stem = _stem(job.source)
-    d = _dir(job.source)
+    pub_cfg = _load_publish_cfg()
+    d = Path(pub_cfg.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH)).expanduser().resolve()
 
     current_video = job.source
 
@@ -307,6 +328,8 @@ async def _run_pipeline(job: Job) -> None:
 
 async def _run_from_llm(job: Job, transcript_path: str, final_video: str) -> None:
     """Resumable entry point: run LLM step then upload."""
+    pub_cfg = _load_publish_cfg()
+
     # Step 3 — Prompt apply
     s3 = job.steps[3]
     s3.status = "running"
@@ -332,7 +355,6 @@ async def _run_from_llm(job: Job, transcript_path: str, final_video: str) -> Non
     raw_description = desc_out.decode(errors="replace").strip()
 
     # Apply description prefix (top) and signature (bottom)
-    pub_cfg = _load_publish_cfg()
     signature = pub_cfg.get("signature", "").strip()
 
     parts = []
@@ -344,6 +366,30 @@ async def _run_from_llm(job: Job, transcript_path: str, final_video: str) -> Non
 
     job.title = title_out.strip()
     job.description = "\n\n".join(parts)
+
+    # Rename final video using sanitized title
+    safe_name = _sanitize_filename(job.title)
+    ext = Path(final_video).suffix or ".mp4"
+    renamed_path = str(Path(final_video).parent / f"{safe_name}{ext}")
+    if Path(final_video).resolve() != Path(renamed_path).resolve():
+        if not Path(renamed_path).exists():
+            os.rename(final_video, renamed_path)
+        final_video = renamed_path
+        job.files["final_video"] = final_video
+
+    # Write meta.json alongside the final video
+    meta: dict = {
+        "title": job.title,
+        "description": job.description,
+        "description_prefix": job.description_prefix,
+    }
+    if job.source_urls:
+        meta["source"] = job.source_urls
+    meta_path = str(Path(final_video).with_suffix(".json"))
+    with open(meta_path, "w", encoding="utf-8") as _mf:
+        json.dump(meta, _mf, ensure_ascii=False, indent=2)
+    job.files["meta"] = meta_path
+
     s3.output = f"Title: {job.title[:80]}"
     s3.status = "done"
 
@@ -372,6 +418,15 @@ async def _run_from_llm(job: Job, transcript_path: str, final_video: str) -> Non
         job.studio_url = ""
     job.status = "done"
 
+    # Post-publish script (fire and forget)
+    post_script = pub_cfg.get("post_publish_script", "").strip()
+    if post_script and Path(post_script).is_file():
+        await asyncio.create_subprocess_exec(
+            "bash", post_script, final_video,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+
 
 # ── Config API ────────────────────────────────────────────────────────────────
 
@@ -382,6 +437,7 @@ async def get_config():
         "video_source_path": pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH),
         "video_extensions": pub.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
         "signature": pub.get("signature", ""),
+        "post_publish_script": pub.get("post_publish_script", ""),
     }
 
 
@@ -389,6 +445,7 @@ class ConfigSaveRequest(BaseModel):
     video_source_path: str = DEFAULT_VIDEO_SOURCE_PATH
     video_extensions: str = DEFAULT_VIDEO_EXTENSIONS
     signature: str = ""
+    post_publish_script: str = ""
 
 
 @router.post("/config")
@@ -397,6 +454,7 @@ async def save_config(req: ConfigSaveRequest):
     pub["video_source_path"] = req.video_source_path
     pub["video_extensions"] = req.video_extensions
     pub["signature"] = req.signature
+    pub["post_publish_script"] = req.post_publish_script
     _save_publish_cfg(pub)
     return {"ok": True}
 
@@ -460,13 +518,19 @@ async def video_preview(file: str = Query(...)):
 
 @router.post("/upload-external")
 async def upload_external(file: UploadFile = File(...)):
-    """Accept external file upload and save to temp dir. Return path for use as source."""
+    """Accept external file upload and save to video source dir. Return path for use as source."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
     ext = Path(file.filename).suffix.lower()
     if ext not in {".mp4", ".mkv", ".mov", ".webm"}:
         raise HTTPException(status_code=400, detail="Unsupported video format")
-    dest = Path(tempfile.gettempdir()) / f"webux_upload_{uuid.uuid4().hex}{ext}"
+    pub_cfg = _load_publish_cfg()
+    source_dir = Path(pub_cfg.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH)).expanduser()
+    source_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(file.filename).stem
+    dest = source_dir / f"{stem}{ext}"
+    if dest.exists():
+        dest = source_dir / f"{stem}_{uuid.uuid4().hex[:8]}{ext}"
     with open(dest, "wb") as f:
         f.write(await file.read())
     return {"path": str(dest), "name": file.filename}
@@ -484,6 +548,7 @@ class StartRequest(BaseModel):
     model: str = "medium"
     privacy: str = "unlisted"
     description_prefix: str = ""
+    source_urls: list[str] = []
 
 
 class ResumeRequest(BaseModel):
@@ -492,6 +557,7 @@ class ResumeRequest(BaseModel):
     prompt_summary: str
     privacy: str = "unlisted"
     description_prefix: str = ""
+    source_urls: list[str] = []
 
 
 @router.post("/start")
@@ -512,6 +578,7 @@ async def start(req: StartRequest):
         model=req.model,
         privacy=req.privacy,
         description_prefix=req.description_prefix,
+        source_urls=_validate_urls(req.source_urls),
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -565,6 +632,7 @@ async def resume(req: ResumeRequest):
         model="medium",
         privacy=req.privacy,
         description_prefix=req.description_prefix,
+        source_urls=_validate_urls(req.source_urls),
         steps=[Step(name=n) for n in STEP_NAMES],
         files={"transcript": ass_path, "transcript_txt": txt_path, "final_video": final_video},
     )
@@ -685,6 +753,10 @@ _HTML = """<!doctype html>
       <label>Signature (appended to every description)</label>
       <textarea id="signature" rows="3" placeholder="Your signature / links..."></textarea>
     </div>
+    <div class="row">
+      <label>Post-publish script (bash script, called with final video path as argument)</label>
+      <input type="text" id="postPublishScript" placeholder="/path/to/script.sh" />
+    </div>
     <button class="btn-sec" onclick="saveConfig()">💾 Save settings</button>
     <span id="configStatus" style="font-size:12px;margin-left:8px;color:var(--ok);display:none">Saved!</span>
   </div>
@@ -720,6 +792,12 @@ _HTML = """<!doctype html>
       <div class="row">
         <label>Description prefix (added at the top)</label>
         <textarea id="descPrefix" rows="2" placeholder="Optional text to prepend..."></textarea>
+      </div>
+
+      <!-- Source URLs -->
+      <div class="row">
+        <label>Source URLs (one per line — saved in meta.json)</label>
+        <textarea id="sourceUrls" rows="2" placeholder="https://example.com/article&#10;https://youtube.com/watch?v=..."></textarea>
       </div>
 
       <!-- Options row -->
@@ -806,6 +884,7 @@ async function loadConfig() {
   document.getElementById('sourceDir').value = data.video_source_path || '/home/joriel/Vidéos';
   document.getElementById('videoExtensions').value = data.video_extensions || 'mp4,mkv';
   document.getElementById('signature').value = data.signature || '';
+  document.getElementById('postPublishScript').value = data.post_publish_script || '';
   await scanDir();
 }
 
@@ -817,6 +896,7 @@ async function saveConfig() {
       video_source_path: document.getElementById('sourceDir').value.trim(),
       video_extensions: document.getElementById('videoExtensions').value.trim() || 'mp4,mkv',
       signature: document.getElementById('signature').value,
+      post_publish_script: document.getElementById('postPublishScript').value.trim(),
     }),
   }).catch(() => null);
   const st = document.getElementById('configStatus');
@@ -1016,11 +1096,14 @@ async function launch(isResume) {
   document.getElementById('startBtn').disabled = true;
 
   const url  = isResume ? '/api/publish/resume' : '/api/publish/start';
+  const source_urls = document.getElementById('sourceUrls').value
+    .split('\\n').map(u => u.trim()).filter(u => u.startsWith('http'));
   const body = isResume
-    ? { source:src, prompt_title:pt, prompt_summary:ps, privacy:priv, description_prefix:desc_prefix }
+    ? { source:src, prompt_title:pt, prompt_summary:ps, privacy:priv, description_prefix:desc_prefix, source_urls }
     : {
         source:src, prompt_title:pt, prompt_summary:ps, privacy:priv,
         description_prefix: desc_prefix,
+        source_urls,
         do_remove_silence: document.getElementById('doSilence').checked,
         do_burn_subtitles: document.getElementById('doBurn').checked,
         language: document.getElementById('language').value.trim() || 'fr',
