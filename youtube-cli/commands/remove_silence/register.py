@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import List, Tuple
 
 import click
-import numpy as np
 
 from commands.base import CommandManifest
 
@@ -13,10 +12,11 @@ from commands.base import CommandManifest
 # ── Exact port of detect_silence_segments_simple from YouTools/plugins/trimsilences.py ──
 
 def detect_silence_segments_simple(
-    audio_array: np.ndarray,
+    audio_array,
     sample_rate: int,
     threshold_db: float,
 ) -> List[Tuple[float, float]]:
+    import numpy as np
     threshold_amp = 10 ** (threshold_db / 20)
     window_size = int(sample_rate / 30)  # Granularité au niveau des frames (env. 33ms)
     if window_size == 0:
@@ -54,6 +54,7 @@ def remove_silence_simple(
     Returns (output_file, original_duration, final_duration).
     Raises RuntimeError on failure.
     """
+    import numpy as np
     from moviepy import VideoFileClip, concatenate_videoclips
 
     video = VideoFileClip(input_file)
