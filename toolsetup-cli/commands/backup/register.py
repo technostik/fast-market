@@ -181,6 +181,8 @@ def register():
     @click.pass_context
     def backup_list(ctx, source_type):
         """List all backup snapshots of the selected directory."""
+        if source_type is None:
+            raise click.UsageError("--source-type is required for list")
         sentinel_prefix = _get_sentinel_prefix(source_type)
         list_snapshots(source_type, sentinel_prefix=sentinel_prefix)
 
