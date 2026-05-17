@@ -83,7 +83,7 @@ class OpenAICompatibleProvider(LazyLLMProvider):
 
         flatten_messages = provider_config.get("flatten_messages", False)
 
-        client = OpenAI(api_key=api_key or "", base_url=base_url)
+        client = OpenAI(api_key=api_key or "none", base_url=base_url)
 
         self._provider = _RealOpenAICompatibleProvider(
             client=client,
