@@ -274,8 +274,9 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
 
     post_script = pub_cfg.get("post_publish_script", "").strip()
     if post_script and Path(post_script).is_file():
+        final_for_script = job.files.get("final_video", final_video)
         await asyncio.create_subprocess_exec(
-            "bash", post_script, final_video,
+            "bash", post_script, final_for_script,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from pathlib import Path
 
@@ -28,10 +29,23 @@ from .utils import (
     _ass_to_plain_text,
     _validate_urls,
 )
+from .pool import (
+    add_to_pool,
+    remove_from_pool,
+    get_pool_state,
+    start_pool,
+    stop_pool,
+    skip_current,
+    redo_current,
+    _load_pool_from_disk,
+    clear_finished,
+)
 
 router = APIRouter()
 
 _jobs: dict[str, Job] = {}
+
+_load_pool_from_disk()
 
 
 def _is_intermediate(path: Path) -> bool:
@@ -39,6 +53,38 @@ def _is_intermediate(path: Path) -> bool:
 
 
 from .pipeline import _run_pipeline_from  # noqa: E402
+
+
+def _create_publish_job(source: str, description_prefix: str = "", skip_upload: bool = False) -> Job:
+    """Create (but do not start) a publish Job. Used by pool worker.
+    Respects publish config for default prompts etc.
+    """
+    pub = _load_publish_cfg()
+    job_id = str(uuid.uuid4())
+    job = Job(
+        job_id=job_id,
+        source=source,
+        prompt_title=pub.get("default_title_prompt", "youtube-title"),
+        prompt_summary=pub.get("default_description_prompt", "youtube-summary"),
+        do_remove_silence=True,
+        do_burn_subtitles=True,
+        simple_transcript=True,
+        language=pub.get("language", "fr"),
+        model=pub.get("model", "medium"),
+        privacy=pub.get("privacy", "unlisted"),
+        description_prefix=description_prefix,
+        source_urls=[],
+        skip_upload=skip_upload,
+        steps=[Step(name=n) for n in STEP_NAMES],
+    )
+    _jobs[job_id] = job
+    return job
+
+
+async def _run_single_publish_job(source: str, description_prefix: str = "", skip_upload: bool = False):
+    """Legacy direct run (kept for compatibility)."""
+    job = _create_publish_job(source, description_prefix, skip_upload)
+    await _run_pipeline_from(job, 0)
 
 
 # ── Config API ────────────────────────────────────────────────────────────────
@@ -94,10 +140,24 @@ async def list_videos(
         key=lambda f: f.stat().st_mtime,
         reverse=True,
     )
+
+    # Hide videos that have finished meta
+    visible = []
+    for f in files:
+        meta_path = f.with_name(f.stem + "-meta.json")
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                if meta.get("status") == "finished":
+                    continue
+            except Exception:
+                pass
+        visible.append(f)
+
     return {
         "videos": [
             {"name": f.name, "path": str(f), "mtime": f.stat().st_mtime}
-            for f in files
+            for f in visible
         ]
     }
 
@@ -323,6 +383,62 @@ async def check_resume(body: dict):
         "source_urls": meta.get("source_urls", []),
         "description_prefix": meta.get("description_prefix", ""),
     }
+
+
+# ── Pool API ──────────────────────────────────────────────────────────────────
+
+@router.get("/pool")
+async def pool_status():
+    return get_pool_state()
+
+
+class PoolAddRequest(BaseModel):
+    source: str
+    description_prefix: str = ""
+    skip_upload: bool = False
+
+
+@router.post("/pool/add")
+async def pool_add(req: PoolAddRequest):
+    ok = add_to_pool(req.source, req.description_prefix, req.skip_upload)
+    return {"ok": ok}
+
+
+@router.post("/pool/remove")
+async def pool_remove(body: dict):
+    src = body.get("source", "")
+    ok = remove_from_pool(src)
+    return {"ok": ok}
+
+
+@router.post("/pool/start")
+async def pool_start():
+    start_pool()
+    return {"ok": True}
+
+
+@router.post("/pool/stop")
+async def pool_stop():
+    stop_pool()
+    return {"ok": True}
+
+
+@router.post("/pool/skip")
+async def pool_skip():
+    skip_current()
+    return {"ok": True}
+
+
+@router.post("/pool/redo")
+async def pool_redo():
+    redo_current()
+    return {"ok": True}
+
+
+@router.post("/pool/clear-finished")
+async def pool_clear_finished():
+    clear_finished()
+    return {"ok": True}
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────

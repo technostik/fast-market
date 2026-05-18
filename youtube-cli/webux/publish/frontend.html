@@ -37,6 +37,12 @@
     .main-layout { display:flex; gap:16px; align-items:flex-start; }
     .main-left { flex:1; min-width:0; }
     .main-right { flex:0 0 260px; }
+    /* pool */
+    .pool { border:1px solid var(--border); border-radius:8px; padding:10px; margin:12px 0; background:var(--bg2); }
+    .pool h3 { margin:0 0 8px; font-size:14px; }
+    .pool-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:13px; border-bottom:1px solid var(--border); }
+    .pool-row:last-child { border-bottom:none; }
+    .pool-actions button { padding:2px 6px; font-size:11px; }
     .video-wrap { border:1px solid var(--border); border-radius:8px; overflow:hidden;
                   background:#000; display:none; }
     .video-wrap video { width:100%; height:220px; object-fit:contain; display:block; }
@@ -136,6 +142,18 @@
     <button class="btn-sec" onclick="saveConfig()">Save config</button>
   </div>
 
+  <div class="pool">
+    <h3>📋 Publish Pool <span id="poolStatus" style="font-size:11px;color:var(--dim);"></span></h3>
+    <div style="margin-bottom:8px;">
+      <button id="poolStart" class="btn-go">▶ Start</button>
+      <button id="poolStop" class="btn-sec">⏹ Stop</button>
+      <button id="poolSkip" class="btn-sec">⏭ Skip</button>
+      <button id="poolRedo" class="btn-sec">🔄 Redo</button>
+      <button id="poolClear" class="btn-sec" style="margin-left:8px;">🧹 Clear finished</button>
+    </div>
+    <div id="poolList"></div>
+  </div>
+
   <div class="main-layout">
     <div class="main-left">
       <div class="row">
@@ -221,7 +239,8 @@
       </div>
 
       <div style="display:flex; gap:8px; margin-top:8px;">
-        <button class="btn-go" onclick="startJob()" id="goBtn">Start</button>
+        <button class="btn-go" onclick="startJob()" id="goBtn">Publish (immediate)</button>
+        <button class="btn-sec" onclick="addToPool()" id="addPoolBtn">Add to pool</button>
         <button class="btn-resume" onclick="resumeJob()" id="resumeBtn" style="display:none;">Resume from step…</button>
         <button class="btn-sec" onclick="showConfig()">Config</button>
       </div>
@@ -390,6 +409,12 @@ async function startJob() {
     description_prefix: document.getElementById('descPrefix').value,
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n')
   };
+  // Immediate publish (only if pool not running)
+  const poolState = await fetch('/api/publish/pool').then(r => r.json()).catch(() => ({}));
+  if (poolState.running) {
+    alert('Pool is running. Use "Add to pool" instead or stop the pool first.');
+    return;
+  }
   const r = await fetch('/api/publish/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (!r.ok) { alert('Failed to start'); return; }
   const data = await r.json();
@@ -571,9 +596,22 @@ async function saveConfig() {
   if (r.ok) alert('Saved'); else alert('Save failed');
 }
 
-function toggleConfig() {
+async function toggleConfig() {
   const p = document.getElementById('configPanel');
-  p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+  const willShow = p.style.display !== 'block';
+  p.style.display = willShow ? 'block' : 'none';
+  if (willShow) {
+    const r = await fetch('/api/publish/config').catch(() => null);
+    if (r && r.ok) {
+      const c = await r.json();
+      document.getElementById('cfgPath').value = c.video_source_path || '';
+      document.getElementById('cfgExts').value = c.video_extensions || '';
+      document.getElementById('cfgTitlePrompt').value = c.default_title_prompt || 'youtube-title';
+      document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
+      document.getElementById('cfgSignature').value = c.signature || '';
+      document.getElementById('cfgPostScript').value = c.post_publish_script || '';
+    }
+  }
 }
 
 function initDropZone() {
@@ -603,12 +641,105 @@ async function uploadFile(file) {
   sel.appendChild(opt);
   sel.value = data.path;
   onFileSelected();
+
+  // Auto-add uploaded file to pool
+  await fetch('/api/publish/pool/add', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ source: data.path })
+  });
+  refreshPool();
+}
+
+/* ── Pool UI ───────────────────────────────────────────── */
+async function refreshPool() {
+  const r = await fetch('/api/publish/pool').catch(() => null);
+  if (!r || !r.ok) return;
+  const data = await r.json();
+  const statusEl = document.getElementById('poolStatus');
+  statusEl.textContent = data.running ? '● Running' : '○ Stopped';
+  statusEl.style.color = data.running ? 'var(--ok)' : 'var(--dim)';
+
+  const list = document.getElementById('poolList');
+  list.innerHTML = '';
+  data.items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'pool-row';
+    const name = item.source.split('/').pop();
+    const st = item.status;
+    let html = `<span>${name} <small style="color:var(--dim)">(${st})</small></span>`;
+
+    // Show steps if we have job progress
+    if (item.job && item.job.steps) {
+      html += '<div style="font-size:11px;color:var(--dim);margin-top:2px;">';
+      item.job.steps.forEach(s => {
+        const icon = s.status === 'done' ? '✅' : (s.status === 'running' ? '⏳' : (s.status === 'error' ? '❌' : '○'));
+        html += `${icon} ${s.name} `;
+      });
+      html += '</div>';
+    }
+
+    // Show YouTube links when finished
+    if (item.status === 'finished') {
+      if (item.video_url) {
+        html += `<div><a href="${item.video_url}" target="_blank" style="color:var(--link);font-size:12px;">▶ Watch</a></div>`;
+      }
+      if (item.studio_url) {
+        html += `<div><a href="${item.studio_url}" target="_blank" style="color:var(--link);font-size:12px;">✏️ Edit in Studio</a></div>`;
+      }
+    }
+
+    html += `<span class="pool-actions"><button onclick="poolRemove('${item.source}')">✕</button></span>`;
+    row.innerHTML = html;
+    list.appendChild(row);
+  });
+}
+
+async function poolRemove(source) {
+  await fetch('/api/publish/pool/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source })
+  });
+  refreshPool();
+}
+
+async function poolAction(action) {
+  await fetch(`/api/publish/pool/${action}`, { method: 'POST' });
+  refreshPool();
+}
+
+async function addToPool() {
+  const sel = document.getElementById('fileSelect');
+  if (!sel || !sel.value) {
+    alert('Select a video first');
+    return;
+  }
+  const prefix = document.getElementById('descPrefix').value || '';
+  const skipUpload = document.getElementById('skipUpload').checked;
+  await fetch('/api/publish/pool/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: sel.value, description_prefix: prefix, skip_upload: skipUpload })
+  });
+  refreshPool();
+}
+
+function initPool() {
+  document.getElementById('poolStart').onclick = () => poolAction('start');
+  document.getElementById('poolStop').onclick = () => poolAction('stop');
+  document.getElementById('poolSkip').onclick = () => poolAction('skip');
+  document.getElementById('poolRedo').onclick = () => poolAction('redo');
+  document.getElementById('poolClear').onclick = () => poolAction('clear-finished');
+  setInterval(refreshPool, 2000);
+  refreshPool();
 }
 
 function init() {
   loadVideos();
   loadPrompts();
   initDropZone();
+  initPool();
   document.getElementById('goBtn').disabled = false;
 }
 init();
