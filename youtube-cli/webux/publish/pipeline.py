@@ -220,6 +220,9 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         parts = []
         if job.description_prefix.strip():
             parts.append(job.description_prefix.strip())
+        if job.source_urls:
+            sources_block = "Sources:\n" + "\n".join(f"- {u}" for u in job.source_urls)
+            parts.append(sources_block)
         parts.append(raw_description)
         if signature:
             parts.append(signature)

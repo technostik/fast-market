@@ -664,6 +664,12 @@ async function refreshPool() {
   statusEl.style.color = data.running ? 'var(--ok)' : 'var(--dim)';
 
   const list = document.getElementById('poolList');
+
+  // Remember which logs are currently expanded
+  document.querySelectorAll('#poolList .step-out:not(.collapsed)').forEach(el => {
+    if (el.id) openPoolLogs.add(el.id);
+  });
+
   list.innerHTML = '';
   data.items.forEach(item => {
     const row = document.createElement('div');
@@ -709,8 +715,8 @@ async function refreshPool() {
         html += `
           <div style="margin-top:2px;">
             <span onclick="document.getElementById('${logId}').classList.toggle('collapsed'); this.textContent = this.textContent.includes('Show') ? '▴ Hide logs' : '▼ Show logs';" 
-                  style="cursor:pointer; font-size:11px; color:var(--link);">▼ Show logs</span>
-            <div id="${logId}" class="step-out collapsed" style="font-size:10px; white-space:pre-wrap; margin-top:4px; max-height:180px; overflow:auto; border:1px solid var(--border); padding:4px; background:#111;">
+                  style="cursor:pointer; font-size:11px; color:var(--link);">▴ Hide logs</span>
+            <div id="${logId}" class="step-out" style="font-size:10px; white-space:pre-wrap; margin-top:4px; max-height:180px; overflow:auto; border:1px solid var(--border); padding:4px; background:#111;">
         `;
         if (item.job && item.job.steps) {
           item.job.steps.forEach(s => {
@@ -726,6 +732,15 @@ async function refreshPool() {
     html += `<span class="pool-actions"><button onclick="poolRemove('${item.source}')">✕</button></span>`;
     row.innerHTML = html;
     list.appendChild(row);
+
+    // Restore previously expanded logs
+    if (item.status === 'finished' || item.status === 'error') {
+      const logId = `poollog-${item.source.replace(/[^a-z0-9]/gi,'_')}`;
+      if (openPoolLogs.has(logId)) {
+        const logEl = document.getElementById(logId);
+        if (logEl) logEl.classList.remove('collapsed');
+      }
+    }
   });
 }
 
@@ -758,6 +773,8 @@ async function addToPool() {
   });
   refreshPool();
 }
+
+let openPoolLogs = new Set();
 
 function initPool() {
   document.getElementById('poolStart').onclick = () => poolAction('start');
