@@ -125,8 +125,8 @@ def _get_video_duration(path: str) -> float:
 def _sanitize_filename(title: str) -> str:
     import re
     safe = re.sub(r'[<>:"/\\|?*\n\r\t]', '', title)
-    safe = re.sub(r'\s+', '_', safe.strip())
-    safe = safe.strip('._')
+    safe = safe.strip()
+    safe = safe.strip('.-')
     return safe[:100] if safe else "video"
 
 

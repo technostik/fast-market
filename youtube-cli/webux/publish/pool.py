@@ -183,15 +183,22 @@ async def _pool_worker():
             from .pipeline import _run_pipeline_from
             await _run_pipeline_from(job, 0)
 
-            next_item.status = "finished"
-            next_item.finished_at = time.time()
-            next_item.video_url = job.video_url or ""
-            next_item.studio_url = job.studio_url or ""
-            if job.end_time and job.start_time:
-                next_item.elapsed_seconds = round(job.end_time - job.start_time, 1)
-            elif job.start_time:
-                next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
-            _update_meta_status(next_item.source, "finished")
+            if job.status == "error":
+                next_item.status = "error"
+                next_item.finished_at = time.time()
+                if job.start_time:
+                    next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
+                _update_meta_status(next_item.source, "error")
+            else:
+                next_item.status = "finished"
+                next_item.finished_at = time.time()
+                next_item.video_url = job.video_url or ""
+                next_item.studio_url = job.studio_url or ""
+                if job.end_time and job.start_time:
+                    next_item.elapsed_seconds = round(job.end_time - job.start_time, 1)
+                elif job.start_time:
+                    next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
+                _update_meta_status(next_item.source, "finished")
         except Exception:
             next_item.status = "error"
             next_item.finished_at = time.time()
