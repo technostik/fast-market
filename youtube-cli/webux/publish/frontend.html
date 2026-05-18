@@ -774,12 +774,15 @@ async function addToPool() {
     alert('Select a video first');
     return;
   }
-  const prefix = document.getElementById('descPrefix').value || '';
-  const skipUpload = document.getElementById('skipUpload').checked;
   await fetch('/api/publish/pool/add', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source: sel.value, description_prefix: prefix, skip_upload: skipUpload })
+    body: JSON.stringify({
+      source: sel.value,
+      description_prefix: document.getElementById('descPrefix').value,
+      source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
+      skip_upload: document.getElementById('skipUpload').checked
+    })
   });
   refreshPool();
 }
