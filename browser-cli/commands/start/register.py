@@ -116,7 +116,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Extra arguments to pass to the browser (can repeat).",
     )
-    def start_cmd(browser: str, cdp_port: int, user_data_dir: str | None, extra_args: tuple[str, ...] | None) -> None:
+    @click.option(
+        "--silent",
+        "-s",
+        is_flag=True,
+        default=False,
+        help="Start browser silently (suppress logs, infobars, first-run, etc.) without using headless mode.",
+    )
+    def start_cmd(browser: str, cdp_port: int, user_data_dir: str | None, extra_args: tuple[str, ...] | None, silent: bool) -> None:
         """Launch a Chromium browser with CDP enabled in the background."""
         ensure_agent_browser_installed()
 
@@ -145,6 +152,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if display and not os.environ.get("DISPLAY"):
             click.echo(f"No $DISPLAY set — using detected display {display}.", err=True)
             os.environ["DISPLAY"] = display
+
         if headless:
             click.echo(
                 "Warning: no display found — falling back to headless mode.\n"
@@ -158,6 +166,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "--disable-gpu",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+            ]
+        elif silent:
+            # Silent but visible mode
+            click.echo("Starting in silent (non-headless) mode.", err=True)
+            cmd += [
+                "--disable-infobars",
+                "--disable-notifications",
+                "--disable-extensions",
+                "--disable-default-apps",
+                "--no-first-run",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--mute-audio",
+                "--autoplay-policy=no-user-gesture-required",
             ]
 
         if extra_args:
