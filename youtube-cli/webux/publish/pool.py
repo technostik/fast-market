@@ -22,6 +22,7 @@ class PoolItem:
     job_id: Optional[str] = None  # set when processing starts
     video_url: str = ""
     studio_url: str = ""
+    elapsed_seconds: Optional[float] = None
 
 
 _pool: list[PoolItem] = []
@@ -137,6 +138,7 @@ def get_pool_state() -> dict:
             "job_id": it.job_id,
             "video_url": it.video_url,
             "studio_url": it.studio_url,
+            "elapsed_seconds": it.elapsed_seconds,
         }
         # If processing and we have a job_id, attach live job status
         if it.job_id and it.status == "processing":
@@ -185,9 +187,16 @@ async def _pool_worker():
             next_item.finished_at = time.time()
             next_item.video_url = job.video_url or ""
             next_item.studio_url = job.studio_url or ""
+            if job.end_time and job.start_time:
+                next_item.elapsed_seconds = round(job.end_time - job.start_time, 1)
+            elif job.start_time:
+                next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
             _update_meta_status(next_item.source, "finished")
         except Exception:
             next_item.status = "error"
+            next_item.finished_at = time.time()
+            if 'job' in locals() and job and job.start_time:
+                next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
             _update_meta_status(next_item.source, "error")
 
         _save_pool_to_disk()

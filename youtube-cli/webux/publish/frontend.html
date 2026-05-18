@@ -687,16 +687,39 @@ async function refreshPool() {
       html += '</div>';
     }
 
-    // Show YouTube links when finished
-    if (item.status === 'finished') {
+    // Finished / error item: time + logs (use existing name line above)
+    if (item.status === 'finished' || item.status === 'error') {
       if (item.video_url) {
         html += `<div><a href="${item.video_url}" target="_blank" style="color:var(--link);font-size:12px;">▶ Watch</a></div>`;
       }
       if (item.studio_url) {
         html += `<div><a href="${item.studio_url}" target="_blank" style="color:var(--link);font-size:12px;">✏️ Edit in Studio</a></div>`;
       }
-      if (item.job && item.job.elapsed_seconds != null) {
-        html += `<div style="font-size:11px;color:var(--dim);">⏱ ${item.job.elapsed_seconds}s</div>`;
+
+      const timeVal = (item.elapsed_seconds != null) ? item.elapsed_seconds : (item.job && item.job.elapsed_seconds != null ? item.job.elapsed_seconds : null);
+      if (timeVal != null) {
+        html += `<div style="font-size:11px;color:var(--dim);">⏱ ${timeVal}s</div>`;
+      }
+
+      // Logs expander
+      const hasLogs = (item.job && item.job.steps && item.job.steps.some(s => s.output && s.output.trim())) ||
+                      (item.elapsed_seconds != null); // if we want to show something
+      if (hasLogs) {
+        const logId = `poollog-${item.source.replace(/[^a-z0-9]/gi,'_')}`;
+        html += `
+          <div style="margin-top:2px;">
+            <span onclick="document.getElementById('${logId}').classList.toggle('collapsed'); this.textContent = this.textContent.includes('Show') ? '▴ Hide logs' : '▼ Show logs';" 
+                  style="cursor:pointer; font-size:11px; color:var(--link);">▼ Show logs</span>
+            <div id="${logId}" class="step-out collapsed" style="font-size:10px; white-space:pre-wrap; margin-top:4px; max-height:180px; overflow:auto; border:1px solid var(--border); padding:4px; background:#111;">
+        `;
+        if (item.job && item.job.steps) {
+          item.job.steps.forEach(s => {
+            if (s.output && s.output.trim()) {
+              html += `<div style="margin-bottom:6px;"><b>${s.name}</b> [${s.status}]:<br>${s.output}</div>`;
+            }
+          });
+        }
+        html += `</div></div>`;
       }
     }
 
