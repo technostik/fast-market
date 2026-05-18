@@ -1,0 +1,12 @@
+{
+  "source": {
+    "duration": 6.17
+  },
+  "silence_removal": {
+    "reported_duration": 4.033333333333333,
+    "probed_duration": 4.8
+  },
+  "subtitle_burn": {
+    "probed_duration": 6.066667
+  }
+}

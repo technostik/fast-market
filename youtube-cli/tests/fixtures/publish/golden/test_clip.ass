@@ -1,0 +1,13 @@
+[Script Info]
+Title: Auto Karaoke Subtitles
+PlayResX: 1080
+PlayResY: 1920
+ScriptType: v4.00+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,96,&H0000FF00,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,14,14,10,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00:00,0:00:03:94,Default,,0,0,0,,{\k122}ceci {\k19}est {\k16}un {\k41}test {\k31}de {\k48}vidéo {\k90}ceci {\k23}est
+Dialogue: 0,0:00:03:94,0:00:05:38,Default,,0,0,0,,{\k23}un {\k58}test {\k37}de {\k24}vidéo
