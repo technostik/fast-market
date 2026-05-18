@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import shutil
+from pathlib import Path
+
+from fastapi import HTTPException
+
+from common.core.config import load_tool_config, save_tool_config
+
+
+def _load_publish_cfg() -> dict:
+    try:
+        cfg = load_tool_config("youtube")
+        return cfg.get("youtube", {}).get("publish", {})
+    except Exception:
+        return {}
+
+
+def _save_publish_cfg(pub: dict) -> None:
+    try:
+        cfg = load_tool_config("youtube")
+        yt = cfg.setdefault("youtube", {})
+        yt["publish"] = pub
+        save_tool_config("youtube", cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save config: {exc}")
+
+
+def _meta_path(source: str) -> Path:
+    p = Path(source)
+    return p.parent / f"{p.stem}-meta.json"
+
+
+def _save_meta(job) -> None:
+    meta: dict = {
+        "source": job.source,
+        "completed_steps": [i for i, s in enumerate(job.steps) if s.status == "done"],
+        "skipped_steps": [i for i, s in enumerate(job.steps) if s.status == "skipped"],
+        "files": job.files,
+    }
+    if job.title:
+        meta["title"] = job.title
+    if job.description:
+        meta["description"] = job.description
+    if job.source_urls:
+        meta["source_urls"] = job.source_urls
+    if job.description_prefix:
+        meta["description_prefix"] = job.description_prefix
+    try:
+        with open(_meta_path(job.source), "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _load_meta(source: str) -> dict:
+    try:
+        p = _meta_path(source)
+        if p.exists():
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _yt() -> str:
+    return shutil.which("youtube") or "youtube"
+
+
+def _pr() -> str:
+    return shutil.which("prompt") or "prompt"
+
+
+def _stem(p: str) -> str:
+    return Path(p).stem
+
+
+def _dir(p: str) -> Path:
+    return Path(p).resolve().parent
+
+
+def _extract_video_id(url: str) -> str:
+    m = re.search(r"[?&]v=([a-zA-Z0-9_-]+)", url)
+    return m.group(1) if m else ""
+
+
+def _ass_to_plain_text(ass_path: str) -> str:
+    import re
+    lines = []
+    with open(ass_path, encoding="utf-8") as f:
+        for line in f:
+            if not line.startswith("Dialogue:"):
+                continue
+            parts = line.split(",", 9)
+            if len(parts) < 10:
+                continue
+            text = parts[9].strip()
+            text = re.sub(r"\{[^}]*\}", "", text)
+            if text:
+                lines.append(text)
+    return "\n".join(lines)
+
+
+def _get_video_duration(path: str) -> float:
+    import subprocess
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "quiet",
+            "-show_entries", "format/duration",
+            "-of", "default=noprint_wrappers:1:nokey=1",
+            path,
+        ],
+        capture_output=True, text=True,
+    )
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+def _sanitize_filename(title: str) -> str:
+    import re
+    safe = re.sub(r'[<>:"/\\|?*\n\r\t]', '', title)
+    safe = re.sub(r'\s+', '_', safe.strip())
+    safe = safe.strip('._')
+    return safe[:100] if safe else "video"
+
+
+def _validate_urls(urls: list[str]) -> list[str]:
+    result = []
+    for u in urls:
+        u = u.strip()
+        if u and (u.startswith("http://") or u.startswith("https://")):
+            result.append(u)
+    return result
+
+
+async def _run(step, *cmd: str):
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    out = stdout.decode(errors="replace").strip()
+    err = stderr.decode(errors="replace").strip()
+    if step:
+        raw = (out + "\n" + err).replace("\r", "\n")
+        step.output = "\n".join(line for line in raw.splitlines() if line.strip())
+    return proc.returncode or 0, out
