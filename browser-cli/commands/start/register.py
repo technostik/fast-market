@@ -123,7 +123,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=False,
         help="Start browser silently (suppress logs, infobars, first-run, etc.) without using headless mode.",
     )
-    def start_cmd(browser: str, cdp_port: int, user_data_dir: str | None, extra_args: tuple[str, ...] | None, silent: bool) -> None:
+    @click.option(
+        "--hidden",
+        is_flag=True,
+        default=False,
+        help="Start browser hidden (window positioned off-screen, not visible on desktop).",
+    )
+    def start_cmd(browser: str, cdp_port: int, user_data_dir: str | None, extra_args: tuple[str, ...] | None, silent: bool, hidden: bool) -> None:
         """Launch a Chromium browser with CDP enabled in the background."""
         ensure_agent_browser_installed()
 
@@ -144,6 +150,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             f"--user-data-dir={user_data_dir}",
             "--no-first-run",
             "--disable-features=OptimizationHints",
+            "--remote-allow-origins=*",
         ]
 
         # Auto-detect display; fall back to headless only if none found
@@ -180,6 +187,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "--disable-sync",
                 "--mute-audio",
                 "--autoplay-policy=no-user-gesture-required",
+            ]
+
+        if hidden and not headless:
+            click.echo("Starting browser in hidden mode (off-screen).", err=True)
+            cmd += [
+                "--window-position=-32000,-32000",
+                "--window-size=1,1",
             ]
 
         if extra_args:

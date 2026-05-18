@@ -15,6 +15,7 @@ from .utils import _load_publish_cfg
 class PoolItem:
     source: str
     description_prefix: str = ""
+    source_urls: list[str] = field(default_factory=list)
     skip_upload: bool = False
     status: str = "queued"  # queued | processing | finished | skipped | error
     added_at: float = field(default_factory=time.time)
@@ -47,6 +48,8 @@ def _load_pool_from_disk():
             PoolItem(
                 source=item["source"],
                 description_prefix=item.get("description_prefix", ""),
+                source_urls=item.get("source_urls", []),
+                skip_upload=item.get("skip_upload", False),
                 status=item.get("status", "queued"),
                 added_at=item.get("added_at", time.time()),
                 finished_at=item.get("finished_at"),
@@ -64,6 +67,8 @@ def _save_pool_to_disk():
             {
                 "source": it.source,
                 "description_prefix": it.description_prefix,
+                "source_urls": it.source_urls,
+                "skip_upload": it.skip_upload,
                 "status": it.status,
                 "added_at": it.added_at,
                 "finished_at": it.finished_at,
@@ -77,11 +82,12 @@ def _save_pool_to_disk():
         pass
 
 
-def _create_meta(source: str, description_prefix: str):
+def _create_meta(source: str, description_prefix: str = "", source_urls: list[str] | None = None):
     meta_path = Path(source).with_name(Path(source).stem + "-meta.json")
     meta = {
         "source": source,
         "description_prefix": description_prefix,
+        "source_urls": source_urls or [],
         "status": "queued",
         "added_at": time.time(),
     }
@@ -105,13 +111,14 @@ def _update_meta_status(source: str, status: str):
         pass
 
 
-def add_to_pool(source: str, description_prefix: str = "", skip_upload: bool = False) -> bool:
+def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False) -> bool:
     src = str(Path(source).expanduser().resolve())
     if any(item.source == src for item in _pool):
         return False
-    item = PoolItem(source=src, description_prefix=description_prefix, skip_upload=skip_upload)
+    source_urls = source_urls or []
+    item = PoolItem(source=src, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload)
     _pool.append(item)
-    _create_meta(src, description_prefix)
+    _create_meta(src, description_prefix, source_urls)
     _save_pool_to_disk()
     return True
 
@@ -175,6 +182,7 @@ async def _pool_worker():
             job = _create_publish_job(
                 source=next_item.source,
                 description_prefix=next_item.description_prefix,
+                source_urls=next_item.source_urls,
                 skip_upload=next_item.skip_upload,
             )
             next_item.job_id = job.job_id

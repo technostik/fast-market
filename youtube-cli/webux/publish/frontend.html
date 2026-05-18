@@ -150,6 +150,8 @@
       <button id="poolSkip" class="btn-sec">⏭ Skip</button>
       <button id="poolRedo" class="btn-sec">🔄 Redo</button>
       <button id="poolClear" class="btn-sec" style="margin-left:8px;">🧹 Clear finished</button>
+      <button id="browserHide" class="btn-sec" style="margin-left:12px;" onclick="browserHide()">🙈 Hide browser</button>
+      <button id="browserShow" class="btn-sec" onclick="browserShow()">👁️ Show browser</button>
     </div>
     <div id="poolList"></div>
   </div>
@@ -751,6 +753,14 @@ async function poolRemove(source) {
     body: JSON.stringify({ source })
   });
   refreshPool();
+}
+
+async function browserHide() {
+  await fetch('/api/publish/browser/hide', { method: 'POST' });
+}
+
+async function browserShow() {
+  await fetch('/api/publish/browser/show', { method: 'POST' });
 }
 
 async function poolAction(action) {

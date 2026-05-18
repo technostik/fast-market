@@ -55,7 +55,7 @@ def _is_intermediate(path: Path) -> bool:
 from .pipeline import _run_pipeline_from  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", skip_upload: bool = False) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
@@ -73,7 +73,7 @@ def _create_publish_job(source: str, description_prefix: str = "", skip_upload: 
         model=pub.get("model", "medium"),
         privacy=pub.get("privacy", "unlisted"),
         description_prefix=description_prefix,
-        source_urls=[],
+        source_urls=source_urls or [],
         skip_upload=skip_upload,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
@@ -81,9 +81,9 @@ def _create_publish_job(source: str, description_prefix: str = "", skip_upload: 
     return job
 
 
-async def _run_single_publish_job(source: str, description_prefix: str = "", skip_upload: bool = False):
+async def _run_single_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False):
     """Legacy direct run (kept for compatibility)."""
-    job = _create_publish_job(source, description_prefix, skip_upload)
+    job = _create_publish_job(source, description_prefix, source_urls, skip_upload)
     await _run_pipeline_from(job, 0)
 
 
@@ -395,12 +395,13 @@ async def pool_status():
 class PoolAddRequest(BaseModel):
     source: str
     description_prefix: str = ""
+    source_urls: list[str] = []
     skip_upload: bool = False
 
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.skip_upload)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload)
     return {"ok": ok}
 
 
@@ -439,6 +440,28 @@ async def pool_redo():
 async def pool_clear_finished():
     clear_finished()
     return {"ok": True}
+
+
+# ── Browser visibility control ────────────────────────────────────────────────
+
+@router.post("/browser/hide")
+async def browser_hide():
+    import subprocess
+    try:
+        subprocess.run(["browser", "hide"], check=True, capture_output=True)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/browser/show")
+async def browser_show():
+    import subprocess
+    try:
+        subprocess.run(["browser", "show"], check=True, capture_output=True)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
