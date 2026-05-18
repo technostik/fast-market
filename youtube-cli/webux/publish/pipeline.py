@@ -272,11 +272,34 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         job.status = "done"
         _save_meta(job)
 
+    # Step 5: Post-publish script (always runs if configured, even if upload was skipped)
+    s5 = job.steps[5]
+    s5.start_time = time.time()
+    s5.status = "running"
+
     post_script = pub_cfg.get("post_publish_script", "").strip()
-    if post_script and Path(post_script).is_file():
-        final_for_script = job.files.get("final_video", final_video)
-        await asyncio.create_subprocess_exec(
-            "bash", post_script, final_for_script,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+    if post_script:
+        script_path = Path(post_script)
+        if script_path.is_file():
+            try:
+                final_for_script = job.files.get("final_video", final_video)
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", str(script_path), final_for_script,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=os.environ.copy(),
+                )
+                stdout, stderr = await proc.communicate()
+                s5.output = (stdout or b"").decode(errors="replace") + "\n" + (stderr or b"").decode(errors="replace")
+                s5.status = "done" if proc.returncode == 0 else "error"
+            except Exception as exc:
+                s5.output = str(exc)
+                s5.status = "error"
+        else:
+            s5.output = f"Script not found: {post_script}"
+            s5.status = "error"
+    else:
+        s5.status = "skipped"
+
+    s5.end_time = time.time()
+    _save_meta(job)

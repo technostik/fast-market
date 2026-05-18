@@ -133,7 +133,7 @@
     </div>
     <div class="row">
       <label>Signature (appended to descriptions)</label>
-      <input type="text" id="cfgSignature">
+      <textarea id="cfgSignature" rows="4" style="width:100%; min-height:80px; font-family:inherit; font-size:13px;"></textarea>
     </div>
     <div class="row">
       <label>Post-publish script (absolute path)</label>
@@ -479,6 +479,9 @@ function showResult(job) {
   links.innerHTML = '';
   if (job.video_url) links.innerHTML += `<a href="${job.video_url}" target="_blank">Watch on YouTube</a>`;
   if (job.studio_url) links.innerHTML += `<a href="${job.studio_url}" target="_blank">Studio edit</a>`;
+  if (job.elapsed_seconds != null) {
+    links.innerHTML += `<span style="margin-left:12px;color:var(--dim);">⏱ ${job.elapsed_seconds}s total</span>`;
+  }
 }
 
 async function checkResumeAvailable(source) {
@@ -669,12 +672,17 @@ async function refreshPool() {
     const st = item.status;
     let html = `<span>${name} <small style="color:var(--dim)">(${st})</small></span>`;
 
-    // Show steps if we have job progress
+    // Show steps if we have job progress (with expandable output)
     if (item.job && item.job.steps) {
       html += '<div style="font-size:11px;color:var(--dim);margin-top:2px;">';
-      item.job.steps.forEach(s => {
+      item.job.steps.forEach((s, idx) => {
         const icon = s.status === 'done' ? '✅' : (s.status === 'running' ? '⏳' : (s.status === 'error' ? '❌' : '○'));
-        html += `${icon} ${s.name} `;
+        const hasOutput = s.output && s.output.trim();
+        const stepId = `poolstep-${item.source.replace(/[^a-z0-9]/gi,'_')}-${idx}`;
+        html += `<span style="cursor:${hasOutput ? 'pointer' : 'default'}" onclick="${hasOutput ? `document.getElementById('${stepId}').classList.toggle('collapsed')` : ''}">${icon} ${s.name}</span> `;
+        if (hasOutput) {
+          html += `<div id="${stepId}" class="step-out collapsed" style="font-size:10px;white-space:pre-wrap;margin-left:16px;">${s.output}</div>`;
+        }
       });
       html += '</div>';
     }
@@ -686,6 +694,9 @@ async function refreshPool() {
       }
       if (item.studio_url) {
         html += `<div><a href="${item.studio_url}" target="_blank" style="color:var(--link);font-size:12px;">✏️ Edit in Studio</a></div>`;
+      }
+      if (item.job && item.job.elapsed_seconds != null) {
+        html += `<div style="font-size:11px;color:var(--dim);">⏱ ${item.job.elapsed_seconds}s</div>`;
       }
     }
 

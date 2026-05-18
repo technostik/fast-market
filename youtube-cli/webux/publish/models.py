@@ -12,6 +12,7 @@ STEP_NAMES = [
     "Burn subtitles",
     "Generate title & description",
     "Upload to YouTube",
+    "Post-publish script",
 ]
 
 DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
@@ -24,6 +25,7 @@ _STEP_FILE_KEYS: list[list[str]] = [
     ["transcript", "transcript_txt"],
     ["subtitled"],
     ["final_video"],
+    [],
     [],
 ]
 
