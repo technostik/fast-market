@@ -170,6 +170,7 @@
              <select id="fileSelect" style="flex:1;">
                <option value="">— or select from list —</option>
              </select>
+             <button type="button" class="btn-sec" onclick="loadVideos()" style="padding:4px 8px; flex-shrink:0;">🔄</button>
              <button type="button" class="btn-sec" onclick="previewSource()" style="padding:4px 8px; flex-shrink:0;">👁</button>
            </div>
         </div>
@@ -274,6 +275,14 @@
     <div class="result-title" id="resultTitle"></div>
     <div class="result-desc" id="resultDesc"></div>
     <div class="result-links" id="resultLinks"></div>
+  </div>
+
+  <div id="globalConsole" style="margin-top:16px;height:140px;max-width:860px;background:#0f172a;border:1px solid var(--border);border-radius:6px;padding:8px;font-family:monospace;font-size:11px;overflow-y:auto;white-space:pre-wrap;color:#aaa;display:none;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+      <span style="color:var(--dim);">📜 Live Console (all subcommands)</span>
+      <button onclick="clearConsole()" style="font-size:10px;padding:1px 6px;">Clear</button>
+    </div>
+    <div id="consoleContent"></div>
   </div>
 
 </div>
@@ -459,7 +468,8 @@ function renderSteps(job) {
     if (s.elapsed_seconds != null) html += ` <span class="step-time">${s.elapsed_seconds}s</span>`;
     html += `</div>`;
     if (s.output) {
-      html += `<div class="step-out collapsed">${s.output}</div><span class="step-toggle" onclick="this.previousElementSibling.classList.toggle('collapsed');this.textContent=this.textContent==='…'?'▴':'…'">…</span>`;
+      const collapsed = s.status === 'running' ? '' : 'collapsed';
+      html += `<div class="step-out ${collapsed}">${s.output}</div><span class="step-toggle" onclick="this.previousElementSibling.classList.toggle('collapsed');this.textContent=this.textContent==='…'?'▴':'…'">…</span>`;
     }
     if (s.output_files && s.output_files.length) {
       html += '<div class="step-dl">' + s.output_files.map(f => {
@@ -692,7 +702,8 @@ async function refreshPool() {
         const stepId = `poolstep-${item.source.replace(/[^a-z0-9]/gi,'_')}-${idx}`;
         html += `<span style="cursor:${hasOutput ? 'pointer' : 'default'}" onclick="${hasOutput ? `document.getElementById('${stepId}').classList.toggle('collapsed')` : ''}">${icon} ${s.name}</span> `;
         if (hasOutput) {
-          html += `<div id="${stepId}" class="step-out collapsed" style="font-size:10px;white-space:pre-wrap;margin-left:16px;">${s.output}</div>`;
+          const col = s.status === 'running' ? '' : 'collapsed';
+          html += `<div id="${stepId}" class="step-out ${col}" style="font-size:10px;white-space:pre-wrap;margin-left:16px;">${s.output}</div>`;
         }
       });
       html += '</div>';
@@ -795,6 +806,35 @@ async function addToPool() {
 }
 
 let openPoolLogs = new Set();
+let lastConsoleContent = '';
+let consoleEl = null;
+
+function appendToConsole(text) {
+  if (!text || !text.trim()) return;
+  if (!consoleEl) consoleEl = document.getElementById('consoleContent');
+  const box = document.getElementById('globalConsole');
+  box.style.display = 'block';
+  consoleEl.textContent += (consoleEl.textContent ? '\n' : '') + text;
+  // auto-scroll only if content actually grew
+  const newContent = consoleEl.textContent;
+  if (newContent !== lastConsoleContent) {
+    box.scrollTop = box.scrollHeight;
+    lastConsoleContent = newContent;
+  }
+}
+
+function clearConsole() {
+  if (consoleEl) consoleEl.textContent = '';
+  lastConsoleContent = '';
+  document.getElementById('globalConsole').style.display = 'none';
+}
+
+// Hook into existing render to feed console
+const origRender = renderSteps;
+renderSteps = function(job) {
+  origRender(job);
+  if (job.steps) job.steps.forEach(s => { if (s.output) appendToConsole(s.name + ': ' + s.output); });
+};
 
 function initPool() {
   document.getElementById('poolStart').onclick = () => poolAction('start');

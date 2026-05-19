@@ -210,12 +210,25 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        desc_out, desc_err = await proc.communicate()
+
+        async def _stream(stream, prefix):
+            while True:
+                line = await stream.readline()
+                if not line: break
+                text = line.decode(errors="replace").rstrip()
+                if text:
+                    if s3.output: s3.output += "\n"
+                    s3.output += f"{prefix}{text}"
+
+        await asyncio.gather(
+            _stream(proc.stdout, ""),
+            _stream(proc.stderr, "[err] "),
+            proc.wait(),
+        )
         if proc.returncode:
-            s3.output += "\n" + desc_err.decode(errors="replace")
             s3.end_time = time.time(); s3.status = "error"; job.status = "error"; _save_meta(job); return
 
-        raw_description = desc_out.decode(errors="replace").strip()
+        raw_description = (s3.output or "").strip()
         signature = pub_cfg.get("signature", "").strip()
         parts = []
         if job.description_prefix.strip():
@@ -292,8 +305,21 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
                     stderr=asyncio.subprocess.PIPE,
                     env=os.environ.copy(),
                 )
-                stdout, stderr = await proc.communicate()
-                s5.output = (stdout or b"").decode(errors="replace") + "\n" + (stderr or b"").decode(errors="replace")
+
+                async def _stream(stream, prefix):
+                    while True:
+                        line = await stream.readline()
+                        if not line: break
+                        text = line.decode(errors="replace").rstrip()
+                        if text:
+                            if s5.output: s5.output += "\n"
+                            s5.output += f"{prefix}{text}"
+
+                await asyncio.gather(
+                    _stream(proc.stdout, ""),
+                    _stream(proc.stderr, "[err] "),
+                    proc.wait(),
+                )
                 s5.status = "done" if proc.returncode == 0 else "error"
             except Exception as exc:
                 s5.output = str(exc)

@@ -145,10 +145,26 @@ async def _run(step, *cmd: str):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await proc.communicate()
-    out = stdout.decode(errors="replace").strip()
-    err = stderr.decode(errors="replace").strip()
-    if step:
-        raw = (out + "\n" + err).replace("\r", "\n")
-        step.output = "\n".join(line for line in raw.splitlines() if line.strip())
-    return proc.returncode or 0, out
+
+    async def _stream(stream, prefix):
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode(errors="replace").rstrip()
+            if text and step:
+                if step.output:
+                    step.output += "\n"
+                step.output += f"{prefix}{text}"
+
+    await asyncio.gather(
+        _stream(proc.stdout, ""),
+        _stream(proc.stderr, "[err] "),
+        proc.wait(),
+    )
+    rc = proc.returncode or 0
+    # final out for caller compatibility (last non-empty line)
+    out = ""
+    if step and step.output:
+        out = step.output.splitlines()[-1]
+    return rc, out
