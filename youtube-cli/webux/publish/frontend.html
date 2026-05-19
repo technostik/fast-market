@@ -249,6 +249,7 @@
         <button class="btn-sec" onclick="addToPool()" id="addPoolBtn">Add to pool</button>
         <button class="btn-resume" onclick="resumeJob()" id="resumeBtn" style="display:none;">Resume from step…</button>
         <button class="btn-sec" onclick="showConfig()">Config</button>
+        <button class="btn-sec" onclick="clearConsole()">Clear console</button>
       </div>
 
       <div id="resumeArea" class="resume-area">
@@ -304,6 +305,11 @@ async function loadVideos() {
     sel.appendChild(opt);
   }
   sel.onchange = onFileSelected;
+  // Auto-select the most recent file (backend returns newest first)
+  if (data.videos && data.videos.length > 0) {
+    sel.value = data.videos[0].path;
+    onFileSelected();
+  }
 }
 
 function previewFile(path) {
