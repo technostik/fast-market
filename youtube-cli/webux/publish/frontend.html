@@ -278,9 +278,9 @@
   </div>
 
   <div id="globalConsole" style="margin-top:16px;height:140px;max-width:860px;background:#0f172a;border:1px solid var(--border);border-radius:6px;padding:8px;font-family:monospace;font-size:11px;overflow-y:auto;white-space:pre-wrap;color:#aaa;display:none;">
-    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:4px;align-items:center;">
       <span style="color:var(--dim);">📜 Live Console (all subcommands)</span>
-      <button onclick="clearConsole()" style="font-size:10px;padding:1px 6px;">Clear</button>
+      <button onclick="clearConsole()" style="font-size:10px;padding:2px 8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);border-radius:4px;cursor:pointer;">Clear</button>
     </div>
     <div id="consoleContent"></div>
   </div>
@@ -674,16 +674,21 @@ async function refreshPool() {
   const r = await fetch('/api/publish/pool').catch(() => null);
   if (!r || !r.ok) return;
   const data = await r.json();
+  // Feed all subcommand outputs from pool items into global console
+  data.items.forEach(item => {
+    if (item.job && item.job.steps) {
+      item.job.steps.forEach(s => {
+        if (s.output && s.output.trim()) {
+          appendToConsole(`${s.name}: ${s.output.trim()}`);
+        }
+      });
+    }
+  });
   const statusEl = document.getElementById('poolStatus');
   statusEl.textContent = data.running ? '● Running' : '○ Stopped';
   statusEl.style.color = data.running ? 'var(--ok)' : 'var(--dim)';
 
   const list = document.getElementById('poolList');
-
-  // Remember which logs are currently expanded
-  document.querySelectorAll('#poolList .step-out:not(.collapsed)').forEach(el => {
-    if (el.id) openPoolLogs.add(el.id);
-  });
 
   list.innerHTML = '';
   data.items.forEach(item => {
@@ -693,18 +698,12 @@ async function refreshPool() {
     const st = item.status;
     let html = `<span>${name} <small style="color:var(--dim)">(${st})</small></span>`;
 
-    // Show steps if we have job progress (with expandable output)
+    // Show steps if we have job progress (no outputs here — see global console)
     if (item.job && item.job.steps) {
       html += '<div style="font-size:11px;color:var(--dim);margin-top:2px;">';
-      item.job.steps.forEach((s, idx) => {
+      item.job.steps.forEach(s => {
         const icon = s.status === 'done' ? '✅' : (s.status === 'running' ? '⏳' : (s.status === 'error' ? '❌' : '○'));
-        const hasOutput = s.output && s.output.trim();
-        const stepId = `poolstep-${item.source.replace(/[^a-z0-9]/gi,'_')}-${idx}`;
-        html += `<span style="cursor:${hasOutput ? 'pointer' : 'default'}" onclick="${hasOutput ? `document.getElementById('${stepId}').classList.toggle('collapsed')` : ''}">${icon} ${s.name}</span> `;
-        if (hasOutput) {
-          const col = s.status === 'running' ? '' : 'collapsed';
-          html += `<div id="${stepId}" class="step-out ${col}" style="font-size:10px;white-space:pre-wrap;margin-left:16px;">${s.output}</div>`;
-        }
+        html += `${icon} ${s.name} `;
       });
       html += '</div>';
     }
@@ -722,41 +721,11 @@ async function refreshPool() {
       if (timeVal != null) {
         html += `<div style="font-size:11px;color:var(--dim);">⏱ ${timeVal}s</div>`;
       }
-
-      // Logs expander
-      const hasLogs = (item.job && item.job.steps && item.job.steps.some(s => s.output && s.output.trim())) ||
-                      (item.elapsed_seconds != null); // if we want to show something
-      if (hasLogs) {
-        const logId = `poollog-${item.source.replace(/[^a-z0-9]/gi,'_')}`;
-        html += `
-          <div style="margin-top:2px;">
-            <span onclick="document.getElementById('${logId}').classList.toggle('collapsed'); this.textContent = this.textContent.includes('Show') ? '▴ Hide logs' : '▼ Show logs';" 
-                  style="cursor:pointer; font-size:11px; color:var(--link);">▴ Hide logs</span>
-            <div id="${logId}" class="step-out" style="font-size:10px; white-space:pre-wrap; margin-top:4px; max-height:180px; overflow:auto; border:1px solid var(--border); padding:4px; background:#111;">
-        `;
-        if (item.job && item.job.steps) {
-          item.job.steps.forEach(s => {
-            if (s.output && s.output.trim()) {
-              html += `<div style="margin-bottom:6px;"><b>${s.name}</b> [${s.status}]:<br>${s.output}</div>`;
-            }
-          });
-        }
-        html += `</div></div>`;
-      }
     }
 
     html += `<span class="pool-actions"><button onclick="poolRemove('${item.source}')">✕</button></span>`;
     row.innerHTML = html;
     list.appendChild(row);
-
-    // Restore previously expanded logs
-    if (item.status === 'finished' || item.status === 'error') {
-      const logId = `poollog-${item.source.replace(/[^a-z0-9]/gi,'_')}`;
-      if (openPoolLogs.has(logId)) {
-        const logEl = document.getElementById(logId);
-        if (logEl) logEl.classList.remove('collapsed');
-      }
-    }
   });
 }
 
@@ -805,7 +774,6 @@ async function addToPool() {
   refreshPool();
 }
 
-let openPoolLogs = new Set();
 let lastConsoleContent = '';
 let consoleEl = null;
 
@@ -815,12 +783,9 @@ function appendToConsole(text) {
   const box = document.getElementById('globalConsole');
   box.style.display = 'block';
   consoleEl.textContent += (consoleEl.textContent ? '\n' : '') + text;
-  // auto-scroll only if content actually grew
-  const newContent = consoleEl.textContent;
-  if (newContent !== lastConsoleContent) {
-    box.scrollTop = box.scrollHeight;
-    lastConsoleContent = newContent;
-  }
+  // always auto-scroll to latest line
+  box.scrollTop = box.scrollHeight;
+  lastConsoleContent = consoleEl.textContent;
 }
 
 function clearConsole() {
