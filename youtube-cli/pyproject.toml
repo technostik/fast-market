@@ -22,6 +22,7 @@ dependencies = [
     "numpy>=1.24",
     "moviepy>=2.0",
     "faster-whisper>=1.0",
+    "modal>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +54,8 @@ packages = [
     "youtube_entry",
     "webux",
     "webux.publish",
+    "modal_client",
+    "commands.modal_diagnose",
 ]
 
 [tool.setuptools.package-data]
