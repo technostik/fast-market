@@ -203,6 +203,10 @@
         <input type="checkbox" id="skipUpload">
         <label for="skipUpload" style="display:inline; margin:0;">Skip YouTube upload (test)</label>
       </div>
+      <div class="checkrow">
+        <input type="checkbox" id="useModal" checked>
+        <label for="useModal" style="display:inline; margin:0;">Use Modal (remote processing)</label>
+      </div>
 
       <div class="cols2">
         <div class="row">
@@ -423,6 +427,7 @@ async function startJob() {
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
     simple_transcript: document.getElementById('simpleTranscript').checked,
     skip_upload: document.getElementById('skipUpload').checked,
+    use_modal: document.getElementById('useModal').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -549,6 +554,7 @@ async function doResume() {
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
     simple_transcript: document.getElementById('simpleTranscript').checked,
     skip_upload: document.getElementById('skipUpload').checked,
+    use_modal: document.getElementById('useModal').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,

@@ -54,6 +54,7 @@ class Job:
     privacy: str
     description_prefix: str = ""
     skip_upload: bool = False
+    use_modal: bool = True
     source_urls: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)

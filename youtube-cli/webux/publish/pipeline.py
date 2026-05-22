@@ -39,6 +39,117 @@ except Exception:
     generate_karaoke_ass = transcribe_to_srt = transcribe_to_txt = None
 
 
+async def _run_modal_steps(
+    job: Job,
+    from_step: int,
+    current_video: str,
+    d: Path,
+    stem: str,
+) -> tuple[str, str, str]:
+    """Run steps 0-2 remotely on Modal. Returns (current_video, ass_path, txt_path)."""
+    from modal_client.app import app
+    from modal_client.remote_steps import run_media_pipeline
+
+    do_remove_silence = job.do_remove_silence and from_step <= 0
+    do_transcribe = from_step <= 1
+    do_burn_subtitles = job.do_burn_subtitles
+
+    # Pre-existing ASS for resume-from-step-2
+    ass_bytes: bytes | None = None
+    if from_step == 2:
+        existing_ass = job.files.get("transcript", "")
+        if existing_ass and Path(existing_ass).exists():
+            ass_bytes = Path(existing_ass).read_bytes()
+        do_transcribe = False
+
+    # Mark steps as running
+    for i in range(from_step, 3):
+        s = job.steps[i]
+        s.start_time = time.time()
+        s.status = "running"
+        s.progress = 0.0
+
+    video_bytes = Path(current_video).read_bytes()
+    video_name = Path(current_video).name
+
+    try:
+        with app.run():
+            result = await asyncio.to_thread(
+                run_media_pipeline.remote,
+                video_bytes,
+                video_name,
+                do_remove_silence,
+                -65.0,
+                do_transcribe,
+                ass_bytes,
+                do_burn_subtitles,
+                job.language,
+                job.model,
+                96,
+            )
+    except Exception as exc:
+        for i in range(from_step, 3):
+            job.steps[i].status = "error"
+            job.steps[i].output = str(exc)
+            job.steps[i].end_time = time.time()
+        job.status = "error"
+        _save_meta(job)
+        return current_video, "", ""
+
+    now = time.time()
+
+    # ── Write outputs to disk ──────────────────────────────────────────────
+    out_video_name = result["video_name"]
+    out_video_path = str(d / out_video_name)
+    Path(out_video_path).write_bytes(result["video_bytes"])
+
+    ass_path = str(d / f"{stem}.ass")
+    if result["ass_bytes"]:
+        Path(ass_path).write_bytes(result["ass_bytes"])
+
+    txt_path = str(d / f"{stem}_transcript.txt")
+    if result["ass_txt"]:
+        Path(txt_path).write_text(result["ass_txt"], encoding="utf-8")
+
+    # ── Update step statuses ───────────────────────────────────────────────
+    if from_step <= 0:
+        s0 = job.steps[0]
+        s0.end_time = now
+        if do_remove_silence:
+            orig = result["original_duration"]
+            final = result["final_duration"]
+            s0.status = "done"
+            s0.progress = 100
+            s0.output = f"⏱ Duration: {final:.0f}s" if final else ""
+            job.files["no_silence"] = out_video_path
+        else:
+            s0.status = "skipped"
+
+    if from_step <= 1:
+        s1 = job.steps[1]
+        s1.end_time = now
+        elapsed = round(now - s1.start_time, 1)
+        s1.status = "done"
+        s1.progress = 100
+        s1.output = f"Done in {elapsed}s [modal]"
+        job.files["transcript"] = ass_path
+        job.files["transcript_txt"] = txt_path
+
+    if from_step <= 2:
+        s2 = job.steps[2]
+        s2.end_time = now
+        if do_burn_subtitles:
+            s2.status = "done"
+            s2.progress = 100
+            job.files["subtitled"] = out_video_path
+        else:
+            s2.status = "skipped"
+
+    from .utils import _save_meta
+    _save_meta(job)
+    return out_video_path, ass_path, txt_path
+
+
 async def _run_pipeline_from(job: Job, from_step: int) -> None:
     stem = _stem(job.source)
     pub_cfg = _load_publish_cfg()
@@ -50,6 +161,25 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
 
     current_video = job.source
 
+    # ── Modal path for steps 0-2 ──────────────────────────────────────────────
+    if job.use_modal and from_step <= 2:
+        # Resolve current_video from previous steps if resuming
+        if from_step >= 1:
+            nv = job.files.get("no_silence", "")
+            if nv and Path(nv).exists():
+                current_video = nv
+
+        current_video, ass_path, txt_path = await _run_modal_steps(
+            job, from_step, current_video, d, stem
+        )
+        if job.status == "error":
+            return
+
+        job.files["final_video"] = current_video
+        await _run_llm_and_upload(job, txt_path, current_video, max(from_step, 3))
+        return
+
+    # ── Local path for steps 0-2 ──────────────────────────────────────────────
     if from_step <= 0:
         s0 = job.steps[0]
         if job.do_remove_silence:

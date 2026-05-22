@@ -237,6 +237,7 @@ class StartRequest(BaseModel):
     description_prefix: str = ""
     source_urls: list[str] = []
     skip_upload: bool = False
+    use_modal: bool = True
 
 
 class ResumeRequest(BaseModel):
@@ -247,6 +248,7 @@ class ResumeRequest(BaseModel):
     do_burn_subtitles: bool = True
     simple_transcript: bool = True
     skip_upload: bool = False
+    use_modal: bool = True
     language: str = "fr"
     model: str = "medium"
     privacy: str = "unlisted"
@@ -275,6 +277,7 @@ async def start(req: StartRequest):
         description_prefix=req.description_prefix,
         source_urls=_validate_urls(req.source_urls),
         skip_upload=req.skip_upload,
+        use_modal=req.use_modal,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -338,6 +341,7 @@ async def resume(req: ResumeRequest):
         description_prefix=req.description_prefix,
         source_urls=_validate_urls(req.source_urls),
         skip_upload=req.skip_upload,
+        use_modal=req.use_modal,
         steps=[Step(name=n) for n in STEP_NAMES],
         files=files,
         title=meta.get("title", ""),
