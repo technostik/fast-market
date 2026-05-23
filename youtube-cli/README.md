@@ -1,47 +1,35 @@
 # youtube-agent
 
-YouTube CLI tool for searching videos, fetching comments, and posting replies via the YouTube Data API v3.
+YouTube CLI tool for searching videos, fetching comments, posting replies, and publishing YouTube Shorts via the YouTube Data API v3. Includes a media processing pipeline (silence removal, transcription, subtitle burning) that can run locally or remotely on Modal.
 
 ## Installation
 
 ```bash
-# Clone and install
-cd youtube-agent
+cd youtube-cli
 pip install -e .
-
-# Install with yt-dlp support for advanced searching
-pip install -e ".[ytdlp]"
 ```
 
 ### Prerequisites
 - Python 3.11+
 - Google Cloud Project with YouTube Data API v3 enabled
-- OAuth 2.0 credentials (client_secret.json)
+- OAuth 2.0 credentials (`client_secret.json`)
+- `ffmpeg` installed locally (for media processing commands)
 
 ## Configuration
 
 The tool follows XDG specifications for configuration:
 - Config: `~/.config/fast-market/common/youtube/config.yaml`
-- Cache: `~/.cache/youtube-videos/` (for video caching)
+- Cache: `~/.cache/youtube-videos/`
 - OAuth token: `~/.config/fast-market/common/youtube/token.json`
 - Client secrets: `~/.config/fast-market/common/youtube/client_secret.json`
 
 ### First-time Setup
 
-Run the interactive setup wizard:
 ```bash
 youtube setup wizard
 ```
 
-This creates a default configuration at `~/.config/fast-market/common/youtube/config.yaml`:
-
-```yaml
-# YouTube shared configuration
-channel_id: ""
-quota_limit: 10000
-video_cache_dir: ~/.cache/youtube-videos
-# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json
-```
+This creates a default configuration at `~/.config/fast-market/common/youtube/config.yaml`.
 
 ### Getting Google OAuth Credentials
 
@@ -50,155 +38,34 @@ video_cache_dir: ~/.cache/youtube-videos
 3. Enable **YouTube Data API v3**
 4. Go to **Credentials** → **Create Credentials** → **OAuth client ID**
    - Application type: Desktop application
-   - Name: youtube-agent
- 5. Download the JSON file and save as `client_secret.json` in the config directory:
-    ```bash
-    mv ~/Downloads/client_secret.json ~/.config/fast-market/common/youtube/
-    ```
+5. Download the JSON file and save as `client_secret.json`:
+   ```bash
+   mv ~/Downloads/client_secret.json ~/.config/fast-market/common/youtube/
+   ```
 
 ### Verify Setup
 
 ```bash
-# Check configuration
 youtube setup locate
 youtube setup show
-
-# Edit configuration if needed
-youtube setup edit
-
-# Test authentication (will open browser for OAuth)
-youtube search "test"
+youtube search "test"   # triggers OAuth on first run
 ```
+
+---
 
 ## CLI Reference
 
-### get-last
-
-Get the last video from your channel with optional filtering by type.
-
-```bash
-youtube get-last [OPTIONS]
-```
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--short` | Filter to YouTube Shorts only (duration <= 3min) | False |
-| `--normal` | Filter to normal videos only (duration > 3min) | False |
-| `-n, --offset` | Get the Nth from last (1=last, 2=2nd from last, etc.) | 1 |
-| `-c, --channel-id` | Override channel ID (defaults to authenticated user's channel) | mine |
-| `--short-threshold` | Duration threshold in seconds for short detection | 180 (3min) |
-| `--debug` | Show debug information | False |
-
-**Examples:**
-```bash
-# Get the last video (most recent)
-youtube get-last
-
-# Get the last Short (≤3min)
-youtube get-last --short
-
-# Get the last normal video (>3min)
-youtube get-last --normal
-
-# Get the 2nd last short
-youtube get-last --short -n 2
-
-# Get the 3rd last video overall
-youtube get-last -n 3
-
-# Use custom threshold (1 minute for older shorts)
-youtube get-last --short --short-threshold 60
-
-# Specify a different channel
-youtube get-last --channel-id UCxxxxxxx
-
-# Debug output to see what's happening
-youtube get-last --short --debug
-```
-
-**Output:** Two lines - video title and URL.
-
-### get-video
-
-Download YouTube videos using yt-dlp with optional caching and lookup.
-
-```bash
-youtube get-video URL [OPTIONS]
-youtube get-video --last [OPTIONS]
-```
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--last` | Get the last video from channel instead of specifying URL | False |
-| `-c, --channel-id` | YouTube channel ID (required for --last, defaults to config) | None |
-| `--short` | Filter to YouTube Shorts only when using --last | False |
-| `--normal` | Filter to normal videos only when using --last | False |
-| `-n, --offset` | Get the Nth from last when using --last | 1 |
-| `--short-threshold` | Duration threshold in seconds for short detection | 180 (3min) |
-| `--debug` | Show debug information | False |
-| `--lookup-dir` | Directory to search for cached videos | ~/.cache/youtube-videos |
-| `-o, --output` | Save video to specific file | Auto-generated from title |
-| `--cookies` | Path to cookies file for authenticated requests | None |
-
-**Examples:**
-```bash
-# Download a specific video
-youtube get-video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Get and download the last video from your channel
-youtube get-video --last
-
-# Get the last short video
-youtube get-video --last --short
-
-# Get the 2nd last normal video
-youtube get-video --last --normal --offset 2
-
-# Download to specific location
-youtube get-video --last --output "/path/to/video.mp4"
-
-# Use custom cache directory
-youtube get-video --last --lookup-dir "/custom/cache/dir"
-```
-
 ### setup
 
-Manage configuration and authentication with various subcommands.
-
 ```bash
-youtube setup [COMMAND] [OPTIONS]
+youtube setup [COMMAND]
 ```
 
-**Commands:**
-- `edit` - Open YouTube config in your default editor
-- `show` - Display current configuration
-- `locate` - Show config file locations and status
-- `wizard` - Interactive setup wizard
-- `reset` - Reset config to defaults (backs up existing)
-- `refresh-auth` - Re-authenticate with full API access
-- `channel-list` - Manage channel list file
+**Commands:** `edit`, `show`, `locate`, `wizard`, `reset`, `refresh-auth`, `channel-list`
 
-**Examples:**
-```bash
-# Edit configuration in editor
-youtube setup edit
-
-# Interactive setup
-youtube setup wizard
-
-# Check setup status
-youtube setup locate
-
-# View current config
-youtube setup show
-
-# Reset to defaults
-youtube setup reset
-```
+---
 
 ### search
-
-Search for YouTube videos by keywords.
 
 ```bash
 youtube search KEYWORDS... [OPTIONS]
@@ -207,191 +74,86 @@ youtube search KEYWORDS... [OPTIONS]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-n, --max-results` | Number of results | 10 |
-| `--order` | Sort order: date, relevance, rating, title, viewCount | relevance |
-| `--language` | Language code (e.g., en, fr, es) | en |
-| `--combine` | Use OR instead of AND for keywords | False |
-| `-f, --format` | Output: json, yaml, text | text |
-| `-o, --output` | Save results to file | None |
-| `--stdin` | Read video IDs from stdin for filtering | False |
-| `--use-yt-dlp` | Use yt-dlp instead of YouTube API (requires yt-dlp) | False |
+| `--order` | date / relevance / rating / title / viewCount | relevance |
+| `--language` | Language code | en |
+| `--combine` | OR instead of AND for keywords | False |
+| `-f, --format` | json / yaml / text | text |
+| `-o, --output` | Save to file | None |
+| `--use-yt-dlp` | Use yt-dlp instead of YouTube API | False |
 
-**Examples:**
+---
+
+### get-last
+
+Get the last video from your channel.
+
 ```bash
-# Basic search
-youtube search "python tutorial" -n 5
-
-# Sort by date, French language
-youtube search "tutoriel python" --order date --language fr -n 3
-
-# OR search
-youtube search "python java" --combine
-
-# Output as JSON to file
-youtube search "machine learning" --format json -o results.json
-
-# Use yt-dlp for more flexible searching
-youtube search "site:youtube.com tutorial" --use-yt-dlp
-
-# Filter search results by video IDs from stdin
-echo '{"video_id": "dQw4w9WgXcQ"}' | youtube search --stdin
+youtube get-last [OPTIONS]
 ```
 
-### comments
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--short` | Shorts only (≤3min) | False |
+| `--normal` | Normal videos only (>3min) | False |
+| `-n, --offset` | Nth from last | 1 |
+| `-c, --channel-id` | Override channel ID | mine |
+| `--short-threshold` | Duration threshold in seconds | 180 |
 
-Fetch comments for YouTube videos.
+**Output:** Two lines — title and URL.
+
+---
+
+### get-video
+
+Download a YouTube video.
+
+```bash
+youtube get-video URL [OPTIONS]
+youtube get-video --last [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--last` | Get last video from channel | False |
+| `--short` / `--normal` | Filter type when using --last | — |
+| `-n, --offset` | Nth from last | 1 |
+| `-o, --output` | Output file path | auto |
+| `--lookup-dir` | Cache directory | ~/.cache/youtube-videos |
+| `--cookies` | Cookies file for authenticated requests | None |
+
+---
+
+### comments / batch-comments
 
 ```bash
 youtube comments [VIDEO_ID] [OPTIONS]
-```
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-n, --max-results` | Maximum comments per video | 20 |
-| `--order` | Sort order: relevance, time | relevance |
-| `-f, --format` | Output: json, yaml, text | text |
-| `-o, --output` | Save results to file | None |
-| `--stdin` | Read video IDs from stdin | False |
-| `--field` | JSON field to extract IDs from stdin | video_id |
-
-**Examples:**
-```bash
-# Get comments for a video
-youtube comments dQw4w9WgXcQ -n 10
-
-# Sort by newest first
-youtube comments dQw4w9WgXcQ --order time
-
-# Chain with search using jq
-youtube search "tutorial" -n 3 --format json \
-  | jq '.[].id' -r \
-  | xargs -I {} youtube comments {} -n 5
-
-# Using stdin with custom field
-echo '[{"video": "dQw4w9WgXcQ"}]' | youtube comments --stdin --field video
-```
-
-### batch-comments
-
-Extract comments from multiple videos listed in a JSON/YAML file.
-
-```bash
 youtube batch-comments INPUT_FILE [OPTIONS]
 ```
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-n, --limit` | Maximum comments per video | 5 |
-| `--order` | Sort order: relevance, time | relevance |
-| `-f, --format` | Output: json, yaml, text | text |
-| `-o, --output` | Save results to file | None |
-| `--field` | JSON field to extract video IDs | video_id |
+Fetch comments for one or many videos. `batch-comments` reads a JSON/YAML file of video IDs.
 
-**Examples:**
-```bash
-# Extract comments from search results
-youtube search "python tutorial" -n 3 --format json -o videos.json
-youtube batch-comments videos.json -n 5 --format json -o comments.json
-```
+---
 
 ### batch-comment-reply
 
-Generate replies to comments from a batch-comments output file. Supports two modes:
-- **LLM mode**: Uses an LLM to generate replies (default)
-- **Shell mode**: Uses a custom shell command to generate replies
+Generate LLM-powered replies for a list of comments.
 
 ```bash
 youtube batch-comment-reply INPUT_FILE [OPTIONS]
 ```
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-p, --prompt` | Prompt template for LLM mode. Can be used multiple times. Supports `@filename`, `@-` for stdin, and template variables `{URL}`, `{AUTHOR}`, `{COMMENT}` | - |
-| `-s, --shell` | Shell command to generate replies. Receives comment via env vars: AUTHOR, COMMENT, VIDEO_URL, VIDEO_ID, VIDEO_TITLE, COMMENT_ID | - |
-| `-m, --metadata` | Key-value pairs to include in output (repeatable). Format: `key=value` | - |
-| `--filter` | JSON list of comment IDs to process (in rewrite mode: IDs to regenerate) | - |
-| `--rewrite` | Rewrite output file: regenerate filtered IDs, keep others. Requires --filter and --output | - |
-| `-f, --format` | Output: json, yaml, text | json |
-| `-o, --output` | Save results to file | stdout |
+| Option | Description |
+|--------|-------------|
+| `-p, --prompt` | Prompt template (repeatable). Supports `@filename`, `{URL}`, `{AUTHOR}`, `{COMMENT}` |
+| `-s, --shell` | Shell command to generate replies instead of LLM |
+| `--rewrite` | Regenerate only `--filter` IDs, keep others |
+| `-o, --output` | Output file |
 
-**LLM Mode (default):**
-
-```bash
-# Simple reply generation
-youtube batch-comment-reply comments.json \
-  -p "Write a friendly, helpful reply to this YouTube comment" \
-  --format json -o replies.json
-
-# Multiple prompts with file reference
-youtube batch-comment-reply comments.json \
-  -p 'Write a response that agrees with the comment and promotes my video {URL}.' \
-  -p 'Use this transcript for context: @transcript.txt' \
-  -o replies.json
-```
-
-**Shell Mode:**
-
-```bash
-# Using prompt CLI to generate replies
-youtube batch-comment-reply comments.json \
-  -s 'prompt get my-prompt --content | claude --no-stream' \
-  -m prompt_name=my-prompt \
-  -o replies.json
-
-# Using custom script
-youtube batch-comment-reply comments.json \
-  -s './generate_reply.sh' \
-  -m source=custom \
-  -o replies.json
-```
-
-**Environment variables in shell mode:**
-- `AUTHOR` - Comment author name
-- `COMMENT` or `COMMENT_TEXT` - The comment text
-- `VIDEO_URL` - URL of the video
-- `VIDEO_ID` - YouTube video ID
-- `VIDEO_TITLE` - Video title
-- `COMMENT_ID` - YouTube comment ID
-
-**Output format:**
-```json
-[
-  {
-    "video_url": "https://www.youtube.com/watch?v=...",
-    "original_comment": { ... },
-    "reply": "Generated reply text...",
-    "metadata": { "prompt_name": "my-prompt" },
-    "error": null  // present if shell command failed
-  }
-]
-```
-
-**Rewrite Mode (regenerate specific replies):**
-
-```bash
-# Regenerate specific replies in existing file
-youtube batch-comment-reply replies.json \
-  --filter '["comment_id_1", "comment_id_2"]' \
-  --rewrite \
-  -o replies.json \
-  -p "New prompt for regeneration"
-
-# Regenerate all replies (requires --filter to list all IDs)
-youtube batch-comment-reply replies.json \
-  --filter '["all_ids_from_file"]' \
-  --rewrite \
-  -o replies.json \
-  -p "New prompt"
-```
-
-**Rewrite mode:**
-- Reads existing output file (specified as INPUT_FILE)
-- Regenerates only the replies matching `--filter` IDs
-- Writes merged results to `--output` file
-- Preserves non-regenerated entries unchanged
+---
 
 ### batch-comment-post
 
-Post LLM-generated replies to YouTube comments from a batch-comment-reply output file.
+Post generated replies to YouTube.
 
 ```bash
 youtube batch-comment-post INPUT_FILE [OPTIONS]
@@ -399,185 +161,224 @@ youtube batch-comment-post INPUT_FILE [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dry-run` | Preview replies without posting | False |
-| `-d, --delay` | Seconds to wait between each post | 0 |
-| `-f, --format` | Output: json, yaml, text | json |
-| `-o, --output` | Update input file with reply status | None |
+| `--dry-run` | Preview without posting | False |
+| `-d, --delay` | Seconds between posts | 0 |
 
-**Examples:**
-```bash
-# Preview what would be posted
-youtube batch-comment-post replies.json --dry-run
-
-# Post replies with 2s delay between each
-youtube batch-comment-post replies.json --delay 2 -o posted_results.json
-```
+---
 
 ### reply
 
-Generate reply text for YouTube comments. Use `batch-comment-post` to actually post replies to YouTube.
+Post a single reply to a YouTube comment.
 
 ```bash
-youtube reply [COMMENT_ID] [TEXT] [OPTIONS]
+youtube reply COMMENT_ID TEXT
 ```
 
-**Parameters:**
+---
 
-| Parameter | Description |
-|-----------|-------------|
-| `COMMENT_ID` | YouTube comment ID to reply to (required unless using --from-file or --stdin) |
-| `TEXT` | Reply text to post (required unless using --from-file or --stdin) |
+### remove-silence
 
-**Options:**
+Remove silent segments from a video using RMS-based detection (moviepy).
+
+```bash
+youtube remove-silence INPUT_FILE [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-o, --output` | Output file | `{stem}_nosilence{ext}` |
+| `-t, --threshold` | Silence threshold in dB | -65.0 |
+
+**Output:** Path to the processed video on stdout.
+
+---
+
+### extract-transcript
+
+Transcribe a video to ASS karaoke subtitles, SRT, or plain text using faster-whisper.
+
+```bash
+youtube extract-transcript INPUT_FILE [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-o, --output` | Output file (extension infers format) | `{stem}.srt` |
+| `-f, --format` | ass / srt / txt | inferred from extension |
+| `-l, --language` | Language code or `auto` | fr |
+| `-m, --model` | Whisper model size | medium |
+| `--font-size` | ASS font size (ASS only) | 96 |
+
+**ASS format** produces word-level karaoke highlighting (green = current word, white = upcoming).
+
+---
+
+### burn-subtitles
+
+Burn an ASS subtitle file into a video using ffmpeg.
+
+```bash
+youtube burn-subtitles VIDEO_FILE ASS_FILE [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-o, --output` | Output file | `{stem}_subtitled{ext}` |
+| `--font-size` | Subtitle font size | 96 |
+
+---
+
+### modal-diagnose
+
+Test Modal API connectivity and the remote processing environment.
+
+```bash
+youtube modal-diagnose [OPTIONS]
+```
 
 | Option | Description |
 |--------|-------------|
-| `--from-file` | JSON/YAML file containing array of `{comment_id, text}` objects |
-| `-f, --format` | Output format: `json`, `yaml`, or `text` (default: `text`) |
-| `-o, --output` | Save results to file instead of stdout |
-| `--stdin` | Read input from stdin (JSON array of `{comment_id, text}` objects) |
+| `--full` | Run file roundtrip + full media pipeline on a test clip |
+| `--clip PATH` | Clip to use for `--full` (default: built-in 6s fixture) |
 
-**Examples:**
-```bash
-# Generate a single reply
-youtube reply COMMENT_ID "Thanks for watching!"
+**Requires:** Modal authentication (`modal token new`).
 
-# Batch generate replies from file
-youtube reply --from-file replies.json
+`--full` runs three steps:
+1. Environment check: Python version, ffmpeg, faster-whisper, moviepy
+2. File roundtrip: upload clip → ffmpeg remux MKV→MP4 → download
+3. Full pipeline: silence removal + whisper transcription (tiny model) + subtitle burning
 
-# replies.json format:
-# [
-#   {"comment_id": "abc123", "text": "Great point!"},
-#   {"comment_id": "def456", "text": "Agreed!"}
-# ]
+---
 
-# Pipe from comments command
-youtube comments VIDEO_ID -n 5 --format json \
-  | jq '.[] | {comment_id: .id, text: "Thanks!"}' \
-  | youtube reply --stdin
+## Publish Pipeline (webux)
+
+The publish pipeline is exposed as a webux plugin tab ("Publish") and orchestrates the full Shorts production workflow:
+
+```
+Remove silence → Extract transcript → Burn subtitles → Generate title & description → Upload to YouTube → Post-publish script
 ```
 
-**Output:** Generated reply objects with `comment_id` and `text` (use `batch-comment-post` to post to YouTube)
+### Pipeline steps
 
-## Features
+| Step | Tool | Description |
+|------|------|-------------|
+| 0. Remove silence | moviepy | RMS-based silence removal |
+| 1. Extract transcript | faster-whisper | ASS karaoke subtitle generation |
+| 2. Burn subtitles | ffmpeg | Hardcoded subtitles into video |
+| 3. Generate title & description | LLM (prompt-cli) | Runs two prompt templates against transcript |
+| 4. Upload to YouTube | youtube upload | Uploads final video |
+| 5. Post-publish script | bash | Optional script receiving the final video path |
 
-### Quota Tracking
-- Automatically tracks YouTube API quota usage
-- Default limit: 10,000 units/day (YouTube Data API standard)
-- Quota persists across sessions in `~/.cache/fast-market/youtube/quota.json`
-- Prevents accidental quota exhaustion
+Steps 0-2 can run **remotely on Modal** when "Use Modal" is checked in the UI. Steps 3-5 always run locally.
 
-### Piping Support
-All commands support JSON/YAML streaming for pipeline composition:
+### Modal remote processing
 
-```bash
-# Full batch workflow: search → extract comments → generate replies → post
-youtube search "tutorial" -n 3 --format json -o videos.json
-youtube batch-comments videos.json -n 5 --format json -o comments.json
-youtube batch-comment-reply comments.json \
-  -p "Write a friendly, helpful reply" \
-  --format json -o replies.json
-youtube batch-comment-post replies.json --dry-run              # Preview first
-youtube batch-comment-post replies.json --delay 2 -o results.json
+When enabled, steps 0-2 are executed in a single Modal container call (`run_media_pipeline` in `modal_client/remote_steps.py`). The source video is serialized as bytes, sent to Modal, processed, and the output video + ASS file are written back to the video source directory.
 
-# Multi-stage pipeline
-youtube search "tutorial" -n 5 --format json \
-  | youtube comments --stdin -n 3 \
-  | youtube reply --stdin
+See `_doc/adr/010-modal-remote-processing.md` for the full design rationale.
 
-# Extract and transform with jq
-youtube search "python" --format json \
-  | jq '.[] | {id, title, channel_title}' \
-  > summary.json
+### Publish config
+
+Stored under the `publish` key in `~/.config/fast-market/common/youtube/config.yaml`:
+
+```yaml
+youtube:
+  publish:
+    video_source_path: /home/user/Videos
+    video_extensions: mp4,mkv
+    default_title_prompt: youtube-title
+    default_description_prompt: youtube-summary
+    language: fr
+    model: medium
+    privacy: unlisted
+    signature: ""
+    post_publish_script: ""
+    modal_usage_url: https://modal.com/settings
 ```
 
-### Multiple Input Formats
-- JSON files
-- YAML files
-- stdin (auto-detects JSON/YAML)
-- Direct arguments
-
-### Error Handling
-- Clear error messages for configuration issues
-- OAuth flow failure recovery
-- API quota exceeded warnings
+---
 
 ## Architecture
 
 ```
-youtube-agent/
-├── youtube_entry/       # CLI entry point
-│   └── __init__.py      # Exports main()
+youtube-cli/
+├── youtube_entry/          # Entry point — exports main()
 ├── cli/
-│   └── main.py          # Click CLI group
+│   └── main.py             # Click CLI group + command discovery
 ├── core/
-│   ├── config.py        # Config loading
-│   └── engine.py        # YouTube client factory
-├── commands/            # Plugin-style commands
-│   ├── base.py          # CommandManifest
-│   ├── batch_comments/
-│   │   └── register.py  # Batch comments extraction
-│   ├── batch_comment_reply/
-│   │   └── register.py  # LLM-powered reply generation
-│   ├── batch_comment_post/
-│   │   └── register.py  # Batch posting to YouTube
+│   ├── config.py           # Config loading
+│   └── engine.py           # YouTube client factory
+├── commands/               # Auto-discovered plugin commands
+│   ├── base.py             # CommandManifest dataclass
 │   ├── search/
-│   │   └── register.py  # Search implementation
-│   ├── comments/
-│   │   └── register.py  # Comments implementation
-│   ├── reply/
-│   │   └── register.py  # Reply implementation
 │   ├── get_last/
-│   │   └── register.py  # Get last video implementation
+│   ├── get_video/
+│   ├── comments/
+│   ├── batch_extract_comments/
+│   ├── batch_comment_post/
+│   ├── batch_transcript/
+│   ├── reply/
+│   ├── channels/
+│   ├── hot/
+│   ├── stats/
+│   ├── upload/
+│   ├── remove_silence/     # moviepy silence removal
+│   ├── extract_transcript/ # faster-whisper ASS/SRT/TXT transcription
+│   ├── burn_subtitles/     # ffmpeg subtitle burning
+│   ├── modal_diagnose/     # Modal connectivity test
 │   └── setup/
-│       └── register.py  # Setup command
-└── common/              # Shared utilities (symlink)
-    ├── youtube/
-    │   ├── client.py    # YouTube API wrapper
-    │   ├── models.py    # Pydantic models
-    │   └── quota.py     # Quota tracking
-    └── auth/
-        └── youtube.py   # OAuth handling
+├── modal_client/           # Modal remote processing package
+│   ├── app.py              # modal.App + base_image (ffmpeg + whisper + moviepy)
+│   ├── diagnose.py         # Remote environment check functions
+│   └── remote_steps.py     # run_media_pipeline() — all 3 media steps in one container
+├── webux/
+│   └── publish/
+│       ├── models.py       # Job, Step dataclasses
+│       ├── pipeline.py     # Async pipeline orchestration (local + Modal paths)
+│       ├── pool.py         # Job queue management
+│       ├── register.py     # FastAPI router + webux plugin registration
+│       ├── utils.py        # Config, meta, ffprobe helpers
+│       └── frontend.html   # Single-page publish UI
+└── tests/
+    └── fixtures/
+        └── publish/
+            └── test_clip.mkv   # 6s test clip used by modal-diagnose --full
 ```
 
-## Development
+### Command discovery
 
-### Adding New Commands
+All commands in `commands/` are auto-discovered at startup by `common.core.registry.discover_commands()`. Each command directory must contain a `register.py` with a `register(plugin_manifests) -> CommandManifest` function.
 
-1. Create a new directory in `commands/your_command/`
-2. Create `register.py` with:
-   ```python
-   from commands.base import CommandManifest
-   import click
-   
-   def register(plugin_manifests: dict) -> CommandManifest:
-       @click.command("your-command")
-       def cmd():
-           """Your command description."""
-           pass
-       
-       return CommandManifest(
-           name="your-command",
-           click_command=cmd,
-       )
-   ```
+### Adding a new command
 
-3. Command automatically discovered on next run
+```python
+# commands/my_command/register.py
+import click
+from commands.base import CommandManifest
 
-### Testing
-
-```bash
-# Run tests (if available)
-pytest tests/
-
-# Test with debug logging
-YOUTUBE_DEBUG=1 youtube search test
+def register(plugin_manifests: dict) -> CommandManifest:
+    @click.command("my-command")
+    def cmd():
+        """Description."""
+        pass
+    return CommandManifest(name="my-command", click_command=cmd)
 ```
 
-### Dependencies
-- `click>=8.1` - CLI framework
-- `pyyaml>=6.0` - YAML support
-- `pydantic>=2.0` - Data validation
-- `google-api-python-client>=2.0` - YouTube API
-- `google-auth-oauthlib>=1.0` - OAuth flow
-- `yt-dlp` (optional) - Advanced searching
+No further registration needed — the command is discovered automatically.
+
+---
+
+## Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `click` | CLI framework |
+| `pyyaml` | Config files |
+| `pydantic` | Request/response models |
+| `google-api-python-client` | YouTube Data API v3 |
+| `google-auth-oauthlib` | OAuth flow |
+| `yt-dlp` | Advanced video downloading |
+| `numpy` | Audio array processing (silence detection) |
+| `moviepy` | Video editing (silence removal) |
+| `faster-whisper` | Local speech-to-text transcription |
+| `modal` | Remote serverless compute |
