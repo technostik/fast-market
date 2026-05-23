@@ -743,6 +743,9 @@ async function refreshPool() {
       if (item.studio_url) {
         html += `<div><a href="${item.studio_url}" target="_blank" style="color:var(--link);font-size:12px;">✏️ Edit in Studio</a></div>`;
       }
+      if (item.status === 'error' && item.error_message) {
+        html += `<div style="font-size:11px;color:var(--err,#e06c75);margin-top:2px;white-space:pre-wrap;word-break:break-word;">⚠ ${item.error_message}</div>`;
+      }
 
       const timeVal = (item.elapsed_seconds != null) ? item.elapsed_seconds : (item.job && item.job.elapsed_seconds != null ? item.job.elapsed_seconds : null);
       if (timeVal != null) {

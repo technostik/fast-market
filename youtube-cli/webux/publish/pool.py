@@ -24,6 +24,7 @@ class PoolItem:
     video_url: str = ""
     studio_url: str = ""
     elapsed_seconds: Optional[float] = None
+    error_message: str = ""
 
 
 _pool: list[PoolItem] = []
@@ -146,6 +147,7 @@ def get_pool_state() -> dict:
             "video_url": it.video_url,
             "studio_url": it.studio_url,
             "elapsed_seconds": it.elapsed_seconds,
+            "error_message": it.error_message,
         }
         # If processing and we have a job_id, attach live job status
         if it.job_id and it.status == "processing":
@@ -196,6 +198,11 @@ async def _pool_worker():
                 next_item.finished_at = time.time()
                 if job.start_time:
                     next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
+                # Collect error details from the failed step
+                for s in job.steps:
+                    if s.status == "error" and s.output:
+                        next_item.error_message = f"[{s.name}] {s.output}"
+                        break
                 _update_meta_status(next_item.source, "error")
             else:
                 next_item.status = "finished"
@@ -207,9 +214,10 @@ async def _pool_worker():
                 elif job.start_time:
                     next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
                 _update_meta_status(next_item.source, "finished")
-        except Exception:
+        except Exception as exc:
             next_item.status = "error"
             next_item.finished_at = time.time()
+            next_item.error_message = str(exc)
             if 'job' in locals() and job and job.start_time:
                 next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
             _update_meta_status(next_item.source, "error")
