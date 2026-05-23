@@ -139,6 +139,10 @@
       <label>Post-publish script (absolute path)</label>
       <input type="text" id="cfgPostScript">
     </div>
+    <div class="row">
+      <label>Modal usage URL</label>
+      <input type="text" id="cfgModalUsageUrl">
+    </div>
     <button class="btn-sec" onclick="saveConfig()">Save config</button>
   </div>
 
@@ -206,6 +210,7 @@
       <div class="checkrow">
         <input type="checkbox" id="useModal" checked>
         <label for="useModal" style="display:inline; margin:0;">Use Modal (remote processing)</label>
+        <a id="modalUsageLink" href="https://modal.com/settings" target="_blank" style="font-size:11px; color:var(--link); margin-left:6px; opacity:.8;">usage ↗</a>
       </div>
 
       <div class="cols2">
@@ -399,6 +404,8 @@ async function loadPrompts() {
     const cfg = await cfgRes.json();
     defTitle = cfg.default_title_prompt || defTitle;
     defDesc = cfg.default_description_prompt || defDesc;
+    const link = document.getElementById('modalUsageLink');
+    if (link && cfg.modal_usage_url) link.href = cfg.modal_usage_url;
   }
   if (names.includes(defTitle)) t.value = defTitle;
   if (names.includes(defDesc)) s.value = defDesc;
@@ -609,6 +616,7 @@ async function showConfig() {
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
       document.getElementById('cfgSignature').value = c.signature || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
+      document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
     }
   }
 }
@@ -620,7 +628,8 @@ async function saveConfig() {
     default_title_prompt: document.getElementById('cfgTitlePrompt').value || 'youtube-title',
     default_description_prompt: document.getElementById('cfgDescPrompt').value || 'youtube-summary',
     signature: document.getElementById('cfgSignature').value,
-    post_publish_script: document.getElementById('cfgPostScript').value
+    post_publish_script: document.getElementById('cfgPostScript').value,
+    modal_usage_url: document.getElementById('cfgModalUsageUrl').value
   };
   const r = await fetch('/api/publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (r.ok) alert('Saved'); else alert('Save failed');
@@ -640,6 +649,9 @@ async function toggleConfig() {
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
       document.getElementById('cfgSignature').value = c.signature || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
+      document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
+      const link = document.getElementById('modalUsageLink');
+      if (link && c.modal_usage_url) link.href = c.modal_usage_url;
     }
   }
 }

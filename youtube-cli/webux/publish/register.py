@@ -99,6 +99,7 @@ async def get_config():
         "post_publish_script": pub.get("post_publish_script", ""),
         "default_title_prompt": pub.get("default_title_prompt", "youtube-title"),
         "default_description_prompt": pub.get("default_description_prompt", "youtube-summary"),
+        "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings"),
     }
 
 
@@ -109,6 +110,7 @@ class ConfigSaveRequest(BaseModel):
     post_publish_script: str = ""
     default_title_prompt: str = "youtube-title"
     default_description_prompt: str = "youtube-summary"
+    modal_usage_url: str = "https://modal.com/settings"
 
 
 @router.post("/config")
@@ -120,6 +122,7 @@ async def save_config(req: ConfigSaveRequest):
     pub["post_publish_script"] = req.post_publish_script
     pub["default_title_prompt"] = req.default_title_prompt
     pub["default_description_prompt"] = req.default_description_prompt
+    pub["modal_usage_url"] = req.modal_usage_url
     _save_publish_cfg(pub)
     return {"ok": True}
 
