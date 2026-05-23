@@ -51,7 +51,8 @@ def _load_pool_from_disk():
                 description_prefix=item.get("description_prefix", ""),
                 source_urls=item.get("source_urls", []),
                 skip_upload=item.get("skip_upload", False),
-                status=item.get("status", "queued"),
+                # processing items were interrupted by server restart — reset them
+                status="queued" if item.get("status") == "processing" else item.get("status", "queued"),
                 added_at=item.get("added_at", time.time()),
                 finished_at=item.get("finished_at"),
             )
@@ -122,6 +123,21 @@ def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str
     _create_meta(src, description_prefix, source_urls)
     _save_pool_to_disk()
     return True
+
+
+def redo_item(source: str) -> bool:
+    src = str(Path(source).expanduser().resolve())
+    for it in _pool:
+        if it.source == src:
+            it.status = "queued"
+            it.finished_at = None
+            it.elapsed_seconds = None
+            it.error_message = ""
+            it.job_id = None
+            _update_meta_status(src, "queued")
+            _save_pool_to_disk()
+            return True
+    return False
 
 
 def remove_from_pool(source: str) -> bool:

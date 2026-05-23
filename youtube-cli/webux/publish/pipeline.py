@@ -73,9 +73,8 @@ async def _run_modal_steps(
     video_name = Path(current_video).name
 
     try:
-        with app.run():
-            result = await asyncio.to_thread(
-                run_media_pipeline.remote,
+        async with app.run():
+            result = await run_media_pipeline.aio(
                 video_bytes,
                 video_name,
                 do_remove_silence,

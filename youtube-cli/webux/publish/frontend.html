@@ -753,10 +753,23 @@ async function refreshPool() {
       }
     }
 
-    html += `<span class="pool-actions"><button onclick="poolRemove('${item.source}')">✕</button></span>`;
+    const actions = `<span class="pool-actions">` +
+      `<button title="Redo" onclick="poolRedoItem('${item.source}')">🔄</button>` +
+      `<button title="Remove" onclick="poolRemove('${item.source}')">✕</button>` +
+      `</span>`;
+    html += actions;
     row.innerHTML = html;
     list.appendChild(row);
   });
+}
+
+async function poolRedoItem(source) {
+  await fetch('/api/publish/pool/redo-item', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source })
+  });
+  refreshPool();
 }
 
 async function poolRemove(source) {

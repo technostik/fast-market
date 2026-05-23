@@ -32,6 +32,7 @@ from .utils import (
 from .pool import (
     add_to_pool,
     remove_from_pool,
+    redo_item,
     get_pool_state,
     start_pool,
     stop_pool,
@@ -416,6 +417,13 @@ async def pool_add(req: PoolAddRequest):
 async def pool_remove(body: dict):
     src = body.get("source", "")
     ok = remove_from_pool(src)
+    return {"ok": ok}
+
+
+@router.post("/pool/redo-item")
+async def pool_redo_item(body: dict):
+    src = body.get("source", "")
+    ok = redo_item(src)
     return {"ok": ok}
 
 
