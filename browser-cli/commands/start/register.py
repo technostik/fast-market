@@ -240,6 +240,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
             env["DISPLAY"] = display
             cmd.append("--ozone-platform=x11")
 
+            # Always run silently on a virtual display — no infobars, no focus steal
+            cmd += [
+                "--disable-infobars",
+                "--disable-notifications",
+                "--disable-extensions",
+                "--disable-default-apps",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--mute-audio",
+                "--autoplay-policy=no-user-gesture-required",
+                "--disable-features=TranslateUI",
+                "--noerrdialogs",
+            ]
+
         else:
             # ── Real display mode ─────────────────────────────────────────────
             detected = _detect_display()
