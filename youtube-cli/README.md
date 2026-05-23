@@ -293,7 +293,7 @@ youtube:
     privacy: unlisted
     signature: ""
     post_publish_script: ""
-    modal_usage_url: https://modal.com/settings
+    modal_usage_url: https://modal.com/settings/usage
 ```
 
 ---
