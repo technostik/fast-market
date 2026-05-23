@@ -74,7 +74,8 @@ async def _run_modal_steps(
 
     try:
         async with app.run():
-            result = await run_media_pipeline.aio(
+            result = await asyncio.to_thread(
+                run_media_pipeline.remote,
                 video_bytes,
                 video_name,
                 do_remove_silence,
@@ -144,7 +145,6 @@ async def _run_modal_steps(
         else:
             s2.status = "skipped"
 
-    from .utils import _save_meta
     _save_meta(job)
     return out_video_path, ass_path, txt_path
 

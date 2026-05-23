@@ -155,6 +155,7 @@ def get_pool_state() -> dict:
         item_dict = {
             "source": it.source,
             "description_prefix": it.description_prefix,
+            "source_urls": it.source_urls,
             "skip_upload": it.skip_upload,
             "status": it.status,
             "added_at": it.added_at,
