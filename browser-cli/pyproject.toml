@@ -37,4 +37,7 @@ packages = [
     "commands.script",
     "commands.setup",
     "commands.run",
+    "commands.hide",
+    "commands.show",
+    "commands.screenshot",
 ]

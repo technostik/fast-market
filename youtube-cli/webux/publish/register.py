@@ -475,8 +475,23 @@ async def browser_show():
 async def browser_start_silent():
     import subprocess
     try:
-        subprocess.run(["browser", "start", "-s"], check=True, capture_output=True)
+        subprocess.run(["browser", "start", "--hidden"], check=True, capture_output=True)
         return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/browser/screenshot")
+async def browser_screenshot():
+    import base64
+    import subprocess
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", prefix="publish_screenshot_", delete=False)
+    tmp.close()
+    try:
+        subprocess.run(["browser", "screenshot", "--output", tmp.name], check=True, capture_output=True)
+        data = base64.b64encode(open(tmp.name, "rb").read()).decode()
+        return {"ok": True, "image": f"data:image/png;base64,{data}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

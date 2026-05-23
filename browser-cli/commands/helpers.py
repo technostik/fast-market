@@ -14,6 +14,56 @@ from common.cli.helpers import out as _out
 _AGENT_BROWSER = "agent-browser"
 
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
+_STATE_FILE = Path("/tmp/fast-market-browser.json")
+
+
+def read_browser_state() -> dict:
+    """Return the persisted browser state (mode, xvfb_pid, display, cdp_port)."""
+    try:
+        if _STATE_FILE.exists():
+            return json.loads(_STATE_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def write_browser_state(state: dict) -> None:
+    try:
+        _STATE_FILE.write_text(json.dumps(state))
+    except Exception:
+        pass
+
+
+def clear_browser_state() -> None:
+    try:
+        _STATE_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def take_cdp_screenshot(cdp_port: int, output_path: str) -> str:
+    """Take a CDP screenshot of the first tab. Returns output_path."""
+    import base64
+    import urllib.request
+    import websocket
+
+    with urllib.request.urlopen(f"http://localhost:{cdp_port}/json") as resp:
+        tabs = json.loads(resp.read())
+    if not tabs:
+        raise RuntimeError("No browser tabs found")
+
+    ws_url = tabs[0]["webSocketDebuggerUrl"]
+    ws = websocket.create_connection(ws_url, timeout=10)
+    ws.send(json.dumps({"id": 1, "method": "Page.captureScreenshot", "params": {"format": "png"}}))
+    result = json.loads(ws.recv())
+    ws.close()
+
+    data = result.get("result", {}).get("data", "")
+    if not data:
+        raise RuntimeError("Empty screenshot data returned from CDP")
+
+    Path(output_path).write_bytes(base64.b64decode(data))
+    return output_path
 
 
 def out(data: object, fmt: str) -> None:

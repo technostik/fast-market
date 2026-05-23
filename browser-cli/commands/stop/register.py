@@ -5,7 +5,7 @@ import subprocess
 
 import click
 from commands.base import CommandManifest
-from commands.helpers import is_cdp_available
+from commands.helpers import is_cdp_available, read_browser_state, write_browser_state, clear_browser_state
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -24,6 +24,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not is_cdp_available(cdp_port):
             click.echo(f"No browser found on CDP port {cdp_port}.", err=True)
             return
+
+        state = read_browser_state()
 
         # Find the chrome process listening on the CDP port
         try:
@@ -70,6 +72,34 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "Please close it manually.",
                 err=True,
             )
+
+        xvfb_pid = state.get("xvfb_pid")
+        if xvfb_pid:
+            try:
+                os_kill(xvfb_pid)
+                click.echo(f"Stopped Xvfb (PID {xvfb_pid}).", err=True)
+            except (ProcessLookupError, OSError):
+                pass
+
+        xephyr_pid = state.get("xephyr_pid")
+        if xephyr_pid:
+            # Keep Xephyr alive so the next "browser start --hidden" reuses it
+            # without popping a new window on screen.
+            import os as _os
+            try:
+                _os.kill(xephyr_pid, 0)  # Check it's still alive
+                write_browser_state({
+                    "mode": "xephyr",
+                    "xephyr_pid": xephyr_pid,
+                    "display": state.get("display"),
+                    "real_display": state.get("real_display"),
+                })
+                click.echo("Xephyr kept running for next session.", err=True)
+                return
+            except (ProcessLookupError, OSError):
+                pass  # Xephyr already dead — fall through and clear state
+
+        clear_browser_state()
 
     return CommandManifest(
         name="stop",

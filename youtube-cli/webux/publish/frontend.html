@@ -154,11 +154,14 @@
       <button id="poolSkip" class="btn-sec">⏭ Skip</button>
       <button id="poolRedo" class="btn-sec">🔄 Redo</button>
       <button id="poolClear" class="btn-sec" style="margin-left:8px;">🧹 Clear finished</button>
+      <button id="browserStartSilent" class="btn-sec" style="margin-left:8px;" onclick="browserStartSilent()">🚀 Start browser</button>
+      <button id="browserScreenshot" class="btn-sec" onclick="browserScreenshot()">📸 Screenshot</button>
     </div>
-    <div style="margin-bottom:8px;">
-      <button id="browserHide" class="btn-sec" onclick="browserHide()">🙈 Hide browser</button>
-      <button id="browserShow" class="btn-sec" onclick="browserShow()">👁️ Show browser</button>
-      <button id="browserStartSilent" class="btn-sec" onclick="browserStartSilent()">🚀 Start silent</button>
+    <div id="browserScreenshotPreview" style="display:none; margin-bottom:8px;">
+      <div style="display:flex; justify-content:flex-end; margin-bottom:4px;">
+        <button class="btn-sec" style="padding:2px 8px; font-size:11px;" onclick="document.getElementById('browserScreenshotPreview').style.display='none'">✕ Close</button>
+      </div>
+      <img id="browserScreenshotImg" style="max-width:100%; border:1px solid var(--border); border-radius:6px;" />
     </div>
     <div id="poolList"></div>
   </div>
@@ -772,6 +775,17 @@ async function browserShow() {
 
 async function browserStartSilent() {
   await fetch('/api/publish/browser/start-silent', { method: 'POST' });
+}
+
+async function browserScreenshot() {
+  const r = await fetch('/api/publish/browser/screenshot').catch(() => null);
+  if (!r || !r.ok) { appendToConsole('Screenshot request failed'); return; }
+  const data = await r.json();
+  if (!data.ok) { appendToConsole('Screenshot failed: ' + data.error); return; }
+  const preview = document.getElementById('browserScreenshotPreview');
+  const img = document.getElementById('browserScreenshotImg');
+  img.src = data.image;
+  preview.style.display = 'block';
 }
 
 async function poolAction(action) {
