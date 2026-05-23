@@ -74,6 +74,8 @@ async def _run_modal_steps(
 
     try:
         async with app.run():
+            if app.app_id:
+                job.modal_url = f"https://modal.com/id/{app.app_id}"
             result = await asyncio.to_thread(
                 run_media_pipeline.remote,
                 video_bytes,

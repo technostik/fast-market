@@ -63,6 +63,7 @@ class Job:
     status: str = "running"
     video_url: str = ""
     studio_url: str = ""
+    modal_url: str = ""
     start_time: float = field(default_factory=time.time)
     end_time: float | None = None
 
@@ -74,6 +75,7 @@ class Job:
             "status": self.status,
             "video_url": self.video_url,
             "studio_url": self.studio_url,
+            "modal_url": self.modal_url,
             "title": self.title,
             "description": self.description,
             "files": self.files,

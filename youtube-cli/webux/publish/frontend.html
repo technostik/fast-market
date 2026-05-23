@@ -733,6 +733,9 @@ async function refreshPool() {
         html += `${icon} ${s.name} `;
       });
       html += '</div>';
+      if (item.job.modal_url) {
+        html += `<div style="font-size:11px;margin-top:2px;"><a href="${item.job.modal_url}" target="_blank" style="color:var(--link);">🔗 Modal logs</a></div>`;
+      }
     }
 
     // Finished / error item: time + logs (use existing name line above)
