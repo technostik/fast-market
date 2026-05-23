@@ -8,8 +8,7 @@ app = modal.App(APP_NAME)
 def _download_whisper_models():
     """Runs during image build — bakes model weights into the image cache."""
     from faster_whisper import WhisperModel
-    for size in ("medium"):
-        WhisperModel(size, device="cpu", compute_type="int8")
+    WhisperModel("medium", device="cpu", compute_type="int8")
 
 
 base_image = (
