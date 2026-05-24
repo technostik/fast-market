@@ -419,14 +419,21 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         job.status = "done"
         _save_meta(job)
 
-    # Step 5: Post-publish script (always runs if configured, even if upload was skipped)
+    await _run_post_publish_step(job, final_video)
+
+
+async def _run_post_publish_step(job: Job, final_video: str) -> None:
+    """Run step 5 (post-publish script). Sets job.status='error' on failure."""
+    pub_cfg = _load_publish_cfg()
     s5 = job.steps[5]
     s5.start_time = time.time()
     s5.status = "running"
+    s5.output = ""
 
     post_script = pub_cfg.get("post_publish_script", "").strip()
     if post_script:
         script_path = Path(post_script)
+        print(f"[post-publish] Running: bash {script_path}", flush=True)
         if script_path.is_file():
             try:
                 final_for_script = job.files.get("final_video", final_video)
@@ -443,22 +450,35 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
                         if not line: break
                         text = line.decode(errors="replace").rstrip()
                         if text:
+                            print(f"[post-publish]{prefix} {text}", flush=True)
                             if s5.output: s5.output += "\n"
                             s5.output += f"{prefix}{text}"
 
                 await asyncio.gather(
                     _stream(proc.stdout, ""),
-                    _stream(proc.stderr, "[err] "),
+                    _stream(proc.stderr, "[err]"),
                     proc.wait(),
                 )
-                s5.status = "done" if proc.returncode == 0 else "error"
+                rc = proc.returncode
+                s5.status = "done" if rc == 0 else "error"
+                if rc != 0:
+                    print(f"[post-publish] Script exited with code {rc}", flush=True)
+                    job.status = "error"
+                else:
+                    print("[post-publish] Done.", flush=True)
             except Exception as exc:
+                print(f"[post-publish] Exception: {exc}", flush=True)
                 s5.output = str(exc)
                 s5.status = "error"
+                job.status = "error"
         else:
-            s5.output = f"Script not found: {post_script}"
+            msg = f"Script not found: {post_script}"
+            print(f"[post-publish] {msg}", flush=True)
+            s5.output = msg
             s5.status = "error"
+            job.status = "error"
     else:
+        print("[post-publish] No script configured — skipped.", flush=True)
         s5.status = "skipped"
 
     s5.end_time = time.time()

@@ -760,7 +760,11 @@ async function refreshPool() {
       }
     }
 
+    const redoPostPublishBtn = (item.status === 'finished' || item.status === 'error')
+      ? `<button title="Redo post-publish only" onclick="poolRedoPostPublish('${item.source}')">📮</button>`
+      : '';
     const actions = `<span class="pool-actions">` +
+      redoPostPublishBtn +
       `<button title="Redo" onclick="poolRedoItem('${item.source}')">🔄</button>` +
       `<button title="Remove" onclick="poolRemove('${item.source}')">✕</button>` +
       `</span>`;
@@ -776,6 +780,17 @@ async function poolRedoItem(source) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })
   });
+  refreshPool();
+}
+
+async function poolRedoPostPublish(source) {
+  const r = await fetch('/api/publish/redo-post-publish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source })
+  });
+  const data = await r.json();
+  if (data.job_id) currentJob = data.job_id;
   refreshPool();
 }
 

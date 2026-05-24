@@ -53,7 +53,7 @@ def _is_intermediate(path: Path) -> bool:
     return bool(_INTERMEDIATE_RE.search(path.stem))
 
 
-from .pipeline import _run_pipeline_from  # noqa: E402
+from .pipeline import _run_pipeline_from, _run_post_publish_step  # noqa: E402
 
 
 def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False) -> Job:
@@ -391,6 +391,56 @@ async def check_resume(body: dict):
         "source_urls": meta.get("source_urls", []),
         "description_prefix": meta.get("description_prefix", ""),
     }
+
+
+@router.post("/redo-post-publish")
+async def redo_post_publish(body: dict):
+    source = str(Path(body.get("source", "")).expanduser().resolve())
+    if not Path(source).exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {source}")
+
+    meta = _load_meta(source)
+    files = dict(meta.get("files", {}))
+    final_video = files.get("final_video", source)
+    if not Path(final_video).exists():
+        raise HTTPException(status_code=400, detail=f"Final video not found: {final_video}")
+
+    pub = _load_publish_cfg()
+    completed_before = set(meta.get("completed_steps", []))
+    skipped_before = set(meta.get("skipped_steps", []))
+
+    job_id = str(uuid.uuid4())
+    job = Job(
+        job_id=job_id,
+        source=source,
+        prompt_title=pub.get("default_title_prompt", ""),
+        prompt_summary=pub.get("default_description_prompt", ""),
+        do_remove_silence=False,
+        do_burn_subtitles=False,
+        simple_transcript=True,
+        language=pub.get("language", "fr"),
+        model=pub.get("model", "medium"),
+        privacy=pub.get("privacy", "unlisted"),
+        description_prefix=meta.get("description_prefix", ""),
+        source_urls=meta.get("source_urls", []),
+        skip_upload=True,
+        steps=[Step(name=n) for n in STEP_NAMES],
+        files=files,
+        title=meta.get("title", ""),
+        description=meta.get("description", ""),
+    )
+    # Restore steps 0-4 from meta; step 5 starts fresh
+    for i in range(5):
+        if i in completed_before:
+            job.steps[i].status = "done"
+        elif i in skipped_before:
+            job.steps[i].status = "skipped"
+        else:
+            job.steps[i].status = "skipped"
+
+    _jobs[job_id] = job
+    asyncio.create_task(_run_post_publish_step(job, final_video))
+    return {"job_id": job_id}
 
 
 # ── Pool API ──────────────────────────────────────────────────────────────────
