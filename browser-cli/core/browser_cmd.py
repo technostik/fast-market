@@ -47,11 +47,16 @@ class BrowserCmd:
                     frontmatter = yaml.safe_load(parts[1])
                     if frontmatter is None:
                         frontmatter = {}
+                    raw_params = frontmatter.get("parameters") or []
+                    parameters = [
+                        p if isinstance(p, dict) else {"name": str(p), "description": "", "required": True}
+                        for p in raw_params
+                    ]
                     return cls(
                         name=frontmatter.get("name", path.name),
                         path=path,
-                        description=frontmatter.get("description", ""),
-                        parameters=frontmatter.get("parameters") or [],
+                        description=frontmatter.get("description", "") or "",
+                        parameters=parameters,
                     )
                 except Exception:
                     pass
