@@ -125,6 +125,13 @@ def get_agent_config_path() -> Path:
     return p
 
 
+def get_browser_cmds_dir() -> Path:
+    """~/.local/share/fast-market/browser-commands/"""
+    p = _xdg_data_home() / "fast-market" / "browser-commands"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def get_fastmarket_dir() -> Path:
     """~/.local/share/fast-market/"""
     return get_data_dir()

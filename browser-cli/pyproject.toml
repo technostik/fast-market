@@ -40,4 +40,6 @@ packages = [
     "commands.hide",
     "commands.show",
     "commands.screenshot",
+    "commands.apply",
+    "commands.cmd",
 ]
