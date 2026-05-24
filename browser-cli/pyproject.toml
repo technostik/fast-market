@@ -42,4 +42,5 @@ packages = [
     "commands.screenshot",
     "commands.apply",
     "commands.cmd",
+    "commands.repl",
 ]
