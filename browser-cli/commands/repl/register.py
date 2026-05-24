@@ -492,7 +492,7 @@ def _run_apply(
 # REPL loop
 # ---------------------------------------------------------------------------
 
-def _run_repl(cdp_port: int, timeout: int | None) -> None:
+def _run_repl(cdp_port: int, timeout: int | None, initial_params: dict[str, str] | None = None) -> None:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.styles import Style
@@ -505,9 +505,9 @@ def _run_repl(cdp_port: int, timeout: int | None) -> None:
         complete_while_typing=False,
     )
 
-    history: list[str] = []      # raw instructions (with placeholders preserved)
-    params: dict[str, str] = {}  # session-level param store
-    last_applied: str = ""       # for /save default name
+    history: list[str] = []                          # raw instructions (with placeholders preserved)
+    params: dict[str, str] = dict(initial_params or {})  # session-level param store
+    last_applied: str = ""                           # for /save default name
 
     click.echo("Browser REPL — type instructions or /help. Ctrl+D to exit.")
     click.echo()
@@ -619,17 +619,34 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--keep-browser", "-k", is_flag=True, help="Do not stop the browser when the REPL exits.")
     @click.option("--timeout", "-t", type=int, default=None, help="Timeout per instruction in milliseconds.")
     @click.option("--no-auto-browser", is_flag=True, help="Do not auto-launch browser if none is running.")
-    def repl_cmd(cdp_port, keep_browser, timeout, no_auto_browser):
+    @click.option(
+        "--param", "-p",
+        "params",
+        multiple=True,
+        metavar="KEY=VALUE",
+        help="Pre-set a placeholder value (can repeat). e.g. -p url=https://x.com",
+    )
+    def repl_cmd(cdp_port, keep_browser, timeout, no_auto_browser, params):
         """Start an interactive browser REPL.
 
         Type agent-browser instructions one per line.  Use {name} placeholders
         in any instruction — {clipboard} reads the system clipboard, others
         prompt on first use and are remembered for the session.
 
+        Pre-seed placeholder values with -p KEY=VALUE so they are available
+        immediately without prompting.
+
         Use /apply <name> to run a stored command and extend it.
         Use /save to pick steps and save as a reusable command.
         """
         ensure_agent_browser_installed()
+
+        initial_params: dict[str, str] = {}
+        for p in params:
+            if "=" not in p:
+                raise click.BadParameter(f"Expected KEY=VALUE, got: {p!r}", param_hint="-p")
+            key, value = p.split("=", 1)
+            initial_params[key] = value
 
         launched_browser = False
         if not is_cdp_available(cdp_port) and not no_auto_browser:
@@ -637,7 +654,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             _launch_browser(cdp_port)
 
         try:
-            _run_repl(cdp_port, timeout)
+            _run_repl(cdp_port, timeout, initial_params)
         finally:
             if launched_browser and not keep_browser:
                 _stop_browser(cdp_port)
