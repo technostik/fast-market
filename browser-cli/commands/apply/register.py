@@ -78,7 +78,8 @@ class _CmdParamType(click.ParamType):
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("apply")
     @click.argument("cmd_name", type=_CmdNameType())
-    @click.argument("params", nargs=-1, type=_CmdParamType())
+    @click.option("--param", "-p", "params", multiple=True, type=_CmdParamType(), metavar="KEY=VALUE",
+                  help="Set a parameter for {key} substitution (can repeat).")
     @click.option("--cdp-port", type=int, default=9222, show_default=True, help="Chrome DevTools Protocol port.")
     @click.option("--keep-browser", "-k", is_flag=True, help="Do not stop the browser after the command completes.")
     @click.option("--timeout", "-t", type=int, default=None, help="Timeout per instruction in milliseconds.")
@@ -94,7 +95,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Apply (execute) a stored browser command by name.
 
         CMD_NAME is the command name stored in the browser commands directory.
-        PARAMS are KEY=VALUE pairs for {key} placeholder substitution.
+        Use -p KEY=VALUE to provide values for {key} placeholders.
         """
         ensure_agent_browser_installed()
 
@@ -121,7 +122,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     param_dict[pname] = str(default)
                 else:
                     raise click.ClickException(
-                        f"Required parameter '{pname}' not provided. Use: {pname}=<value>"
+                        f"Required parameter '{pname}' not provided. Use: -p {pname}=<value>"
                     )
             elif pname not in param_dict and "default" in p:
                 param_dict[pname] = str(p["default"])

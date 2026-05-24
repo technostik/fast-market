@@ -15,6 +15,7 @@ from commands.helpers import (
     read_clipboard,
     run_agent_cmd,
     stop_browser,
+    substitute_params,
 )
 from common.core.paths import get_browser_cmds_dir
 from core.browser_cmd import BrowserCmd, discover_browser_cmds
@@ -399,15 +400,27 @@ def _run_apply(
 
         params[pname] = val
 
+    # Inject {clipboard} if any instruction uses it
+    uses_clipboard = any(
+        m.group(1) == "clipboard"
+        for inst in instructions
+        for m in _PLACEHOLDER_RE.finditer(inst)
+    )
+    if uses_clipboard and "clipboard" not in params:
+        try:
+            params["clipboard"] = shlex.quote(read_clipboard())
+        except click.ClickException as exc:
+            click.echo(f"    Warning: {exc.format_message()}", err=True)
+
     click.echo(f"Applying '{cmd_name}' ({len(instructions)} step(s))…")
 
     for i, raw_inst in enumerate(instructions):
         # Append original (with placeholders) to history
         history.append(raw_inst)
 
-        # Resolve placeholders for execution
+        # Resolve placeholders for execution (raw substitution, no extra quoting)
         try:
-            resolved, was_sub = _resolve(raw_inst, params)
+            resolved = substitute_params(raw_inst, params)
         except click.ClickException as exc:
             click.echo(f"  [{i + 1}] {raw_inst}", err=True)
             click.echo(f"    Error: {exc.format_message()}", err=True)
