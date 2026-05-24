@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import time
 
 import click
 from click.shell_completion import CompletionItem
@@ -10,8 +9,10 @@ from commands.base import CommandManifest
 from commands.helpers import (
     ensure_agent_browser_installed,
     is_cdp_available,
+    launch_browser,
     read_clipboard,
-    run_agent_cmd,
+    run_instructions,
+    stop_browser,
     substitute_params,
 )
 from common.core.paths import get_browser_cmds_dir
@@ -74,71 +75,6 @@ class _CmdParamType(click.ParamType):
         return value
 
 
-def _launch_browser(cdp_port: int) -> None:
-    import subprocess
-    from pathlib import Path
-
-    user_data_dir = str(Path.home() / ".chrome-debug-profile")
-    subprocess.Popen(
-        [
-            "google-chrome",
-            f"--remote-debugging-port={cdp_port}",
-            f"--user-data-dir={user_data_dir}",
-            "--no-first-run",
-            "--disable-features=OptimizationHints",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    click.echo(f"Launching browser on CDP port {cdp_port}...", err=True)
-    for _ in range(30):
-        if is_cdp_available(cdp_port):
-            return
-        time.sleep(0.5)
-    click.echo(f"Warning: Browser may not have started on port {cdp_port}.", err=True)
-
-
-def _stop_browser(cdp_port: int) -> None:
-    import os
-    import signal
-    import subprocess
-
-    pids: list[int] = []
-    try:
-        r = subprocess.run(["lsof", "-ti", f"TCP:*:{cdp_port}"], capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.strip():
-            pids = [int(p) for p in r.stdout.strip().split("\n")]
-    except (FileNotFoundError, ValueError):
-        pass
-
-    if not pids:
-        try:
-            r = subprocess.run(
-                ["pgrep", "-f", f"--remote-debugging-port={cdp_port}"],
-                capture_output=True, text=True,
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                pids = [int(p) for p in r.stdout.strip().split("\n")]
-        except (FileNotFoundError, ValueError):
-            pass
-
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-
-    time.sleep(0.5)
-
-    for pid in pids:
-        try:
-            os.kill(pid, 0)
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-
-
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("apply")
     @click.argument("cmd_name", type=_CmdNameType())
@@ -170,7 +106,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Error: Browser command '{cmd_name}' not found in {cmds_dir}", err=True)
             sys.exit(1)
 
-        # Parse params
         param_dict: dict[str, str] = {}
         for p in params:
             if "=" not in p:
@@ -178,7 +113,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
             key, value = p.split("=", 1)
             param_dict[key] = value
 
-        # Check required params
         for p in cmd.parameters:
             pname = p.get("name", "")
             if p.get("required", False) and pname not in param_dict:
@@ -187,8 +121,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     param_dict[pname] = str(default)
                 else:
                     raise click.ClickException(
-                        f"Required parameter '{pname}' not provided. "
-                        f"Use: {pname}=<value>"
+                        f"Required parameter '{pname}' not provided. Use: {pname}=<value>"
                     )
             elif pname not in param_dict and "default" in p:
                 param_dict[pname] = str(p["default"])
@@ -197,9 +130,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if not instructions_raw:
             raise click.ClickException(f"Command '{cmd_name}' has no instructions.")
 
-        # Inject {clipboard} if used anywhere — quoted so shlex.split treats it as one token
-        _PLACEHOLDER_RE = __import__("re").compile(r"\{(\w+)\}")
-        _shlex = __import__("shlex")
+        import re as _re
+        import shlex as _shlex
+        _PLACEHOLDER_RE = _re.compile(r"\{(\w+)\}")
         uses_clipboard = any(
             m.group(1) == "clipboard"
             for line in instructions_raw
@@ -208,10 +141,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if uses_clipboard:
             param_dict["clipboard"] = _shlex.quote(read_clipboard())
 
-        # Substitute params
-        instructions = []
-        for line in instructions_raw:
-            instructions.append(substitute_params(line, param_dict))
+        instructions = [substitute_params(line, param_dict) for line in instructions_raw]
 
         if dry_run:
             click.echo(f"Command: {cmd_name}")
@@ -222,57 +152,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 click.echo(f"  [{i}] {inst}")
             return
 
-        # Browser lifecycle
         launched_browser = False
         if not is_cdp_available(cdp_port) and not no_auto_browser:
             launched_browser = True
-            _launch_browser(cdp_port)
+            launch_browser(cdp_port)
 
         import json
 
-        results = []
-        errors = []
-
         try:
-            for i, instruction in enumerate(instructions):
-                if fmt == "text":
-                    click.echo(f"  [{i + 1}/{len(instructions)}] {instruction}", err=True)
-
-                try:
-                    result = run_agent_cmd(instruction, cdp_port, timeout=timeout)
-                except Exception as exc:
-                    entry = {
-                        "instruction": instruction,
-                        "stdout": "",
-                        "stderr": str(exc),
-                        "exit_code": 1,
-                        "success": False,
-                    }
-                    results.append(entry)
-                    errors.append(entry)
-                    if fmt == "text":
-                        click.echo(f"    Error: {exc}", err=True)
-                    continue
-
-                entry = {
-                    "instruction": instruction,
-                    "stdout": result.stdout.strip(),
-                    "stderr": result.stderr.strip(),
-                    "exit_code": result.returncode,
-                    "success": result.returncode == 0,
-                }
-                results.append(entry)
-
-                if fmt == "text" and entry["success"] and entry["stdout"]:
-                    click.echo(entry["stdout"])
-                if entry["exit_code"] != 0:
-                    errors.append(entry)
-                    if fmt == "text" and entry["stderr"]:
-                        click.echo(f"    Error: {entry['stderr']}", err=True)
-
+            results, errors = run_instructions(instructions, cdp_port, timeout, fmt)
         finally:
             if launched_browser and not keep_browser:
-                _stop_browser(cdp_port)
+                stop_browser(cdp_port)
                 if fmt == "text":
                     click.echo("Browser stopped.", err=True)
 

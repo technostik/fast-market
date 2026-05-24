@@ -11,8 +11,10 @@ from commands.base import CommandManifest
 from commands.helpers import (
     ensure_agent_browser_installed,
     is_cdp_available,
+    launch_browser,
     read_clipboard,
     run_agent_cmd,
+    stop_browser,
 )
 from common.core.paths import get_browser_cmds_dir
 from core.browser_cmd import BrowserCmd, discover_browser_cmds
@@ -339,66 +341,6 @@ def _save_session(
 
 
 # ---------------------------------------------------------------------------
-# Browser lifecycle helpers
-# ---------------------------------------------------------------------------
-
-def _launch_browser(cdp_port: int) -> None:
-    import subprocess
-
-    user_data_dir = str(Path.home() / ".chrome-debug-profile")
-    subprocess.Popen(
-        [
-            "google-chrome",
-            f"--remote-debugging-port={cdp_port}",
-            f"--user-data-dir={user_data_dir}",
-            "--no-first-run",
-            "--disable-features=OptimizationHints",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    click.echo(f"Launching browser on CDP port {cdp_port}…", err=True)
-    for _ in range(30):
-        if is_cdp_available(cdp_port):
-            return
-        time.sleep(0.5)
-    click.echo(f"Warning: Browser may not have started on port {cdp_port}.", err=True)
-
-
-def _stop_browser(cdp_port: int) -> None:
-    import os
-    import signal
-    import subprocess
-
-    pids: list[int] = []
-    for finder in [
-        ["lsof", "-ti", f"TCP:*:{cdp_port}"],
-        ["pgrep", "-f", f"--remote-debugging-port={cdp_port}"],
-    ]:
-        try:
-            r = subprocess.run(finder, capture_output=True, text=True)
-            if r.returncode == 0 and r.stdout.strip():
-                pids = [int(p) for p in r.stdout.strip().split("\n")]
-                break
-        except (FileNotFoundError, ValueError):
-            pass
-
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    time.sleep(0.5)
-    for pid in pids:
-        try:
-            os.kill(pid, 0)
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-
-
-# ---------------------------------------------------------------------------
 # /apply: run a stored command, resolve its params, append steps to history
 # ---------------------------------------------------------------------------
 
@@ -651,13 +593,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         launched_browser = False
         if not is_cdp_available(cdp_port) and not no_auto_browser:
             launched_browser = True
-            _launch_browser(cdp_port)
+            launch_browser(cdp_port)
 
         try:
             _run_repl(cdp_port, timeout, initial_params)
         finally:
             if launched_browser and not keep_browser:
-                _stop_browser(cdp_port)
+                stop_browser(cdp_port)
                 click.echo("Browser stopped.", err=True)
 
     return CommandManifest(name="repl", click_command=repl_cmd)

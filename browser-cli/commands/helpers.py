@@ -5,6 +5,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -12,6 +13,8 @@ import click
 from common.cli.helpers import out as _out
 
 _AGENT_BROWSER = "agent-browser"
+
+TIMEOUT_RE = re.compile(r"timed?\s*out|timeout", re.IGNORECASE)
 
 
 def read_clipboard() -> str:
@@ -148,6 +151,166 @@ def run_agent_cmd(
         text=True,
         timeout=timeout_seconds,
     )
+
+
+def launch_browser(cdp_port: int, user_data_dir: str | None = None) -> None:
+    """Launch Chromium with CDP enabled in the background and wait until ready."""
+    if user_data_dir is None:
+        user_data_dir = str(Path.home() / ".chrome-debug-profile")
+
+    subprocess.Popen(
+        [
+            "google-chrome",
+            f"--remote-debugging-port={cdp_port}",
+            f"--user-data-dir={user_data_dir}",
+            "--no-first-run",
+            "--disable-features=OptimizationHints",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    click.echo(f"Launching browser on CDP port {cdp_port}...", err=True)
+    for _ in range(30):
+        if is_cdp_available(cdp_port):
+            return
+        time.sleep(0.5)
+    click.echo(f"Warning: Browser may not have started on port {cdp_port}.", err=True)
+
+
+def stop_browser(cdp_port: int) -> None:
+    """Stop the browser process listening on the given CDP port."""
+    import os
+    import signal
+
+    pids: list[int] = []
+    for finder in [
+        ["lsof", "-ti", f"TCP:*:{cdp_port}"],
+        ["pgrep", "-f", f"--remote-debugging-port={cdp_port}"],
+    ]:
+        try:
+            r = subprocess.run(finder, capture_output=True, text=True)
+            if r.returncode == 0 and r.stdout.strip():
+                pids = [int(p) for p in r.stdout.strip().split("\n")]
+                break
+        except (FileNotFoundError, ValueError):
+            pass
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    time.sleep(0.5)
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def run_instructions(
+    instructions: list[str],
+    cdp_port: int,
+    timeout: int | None,
+    fmt: str,
+) -> tuple[list[dict], list[dict]]:
+    """Execute a list of agent-browser instructions. Returns (results, errors)."""
+    results: list[dict] = []
+    errors: list[dict] = []
+
+    for i, instruction in enumerate(instructions):
+        if fmt == "text":
+            click.echo(f"  [{i + 1}/{len(instructions)}] {instruction}", err=True)
+
+        inst_timeout = None if instruction.startswith("upload ") else timeout
+        entry: dict = {}
+
+        if inst_timeout is not None:
+            start_ms = time.monotonic() * 1000
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    result = run_agent_cmd(instruction, cdp_port, timeout=inst_timeout)
+                except Exception as exc:
+                    entry = {
+                        "instruction": instruction,
+                        "stdout": "",
+                        "stderr": str(exc),
+                        "exit_code": 1,
+                        "success": False,
+                        "attempts": attempt,
+                    }
+                    if TIMEOUT_RE.search(str(exc)):
+                        elapsed_ms = (time.monotonic() * 1000) - start_ms
+                        remaining_ms = inst_timeout - elapsed_ms
+                        if remaining_ms > 0 and attempt < 50:
+                            if fmt == "text":
+                                click.echo(
+                                    f"    Timeout — retrying (attempt {attempt}, "
+                                    f"{remaining_ms:.0f}ms left)…",
+                                    err=True,
+                                )
+                            continue
+                    if fmt == "text":
+                        click.echo(f"    Error: {exc}", err=True)
+                    break
+                else:
+                    entry = {
+                        "instruction": instruction,
+                        "stdout": result.stdout.strip(),
+                        "stderr": result.stderr.strip(),
+                        "exit_code": result.returncode,
+                        "success": result.returncode == 0,
+                        "attempts": attempt,
+                    }
+                    if result.returncode != 0 and TIMEOUT_RE.search(result.stderr):
+                        elapsed_ms = (time.monotonic() * 1000) - start_ms
+                        remaining_ms = inst_timeout - elapsed_ms
+                        if remaining_ms > 0 and attempt < 50:
+                            if fmt == "text":
+                                click.echo(
+                                    f"    Timeout — retrying (attempt {attempt}, "
+                                    f"{remaining_ms:.0f}ms left)…",
+                                    err=True,
+                                )
+                            continue
+                    if fmt == "text" and entry["success"] and entry["stdout"]:
+                        click.echo(entry["stdout"])
+                    break
+        else:
+            try:
+                result = run_agent_cmd(instruction, cdp_port, timeout=None)
+            except Exception as exc:
+                entry = {
+                    "instruction": instruction,
+                    "stdout": "",
+                    "stderr": str(exc),
+                    "exit_code": 1,
+                    "success": False,
+                }
+                if fmt == "text":
+                    click.echo(f"    Error: {exc}", err=True)
+            else:
+                entry = {
+                    "instruction": instruction,
+                    "stdout": result.stdout.strip(),
+                    "stderr": result.stderr.strip(),
+                    "exit_code": result.returncode,
+                    "success": result.returncode == 0,
+                }
+                if fmt == "text" and entry["success"] and entry["stdout"]:
+                    click.echo(entry["stdout"])
+
+        results.append(entry)
+        if entry.get("exit_code", 1) != 0:
+            errors.append(entry)
+            if fmt == "text" and entry.get("stderr"):
+                click.echo(f"    Error: {entry['stderr']}", err=True)
+
+    return results, errors
 
 
 def read_stdin() -> str:

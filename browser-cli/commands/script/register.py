@@ -1,30 +1,22 @@
 from __future__ import annotations
 
-import re
-import time
-
 import click
 from commands.base import CommandManifest
 from commands.completion import ScriptPathParamType, resolve_script_path
 from commands.helpers import (
     ensure_agent_browser_installed,
-    substitute_params,
-    run_agent_cmd,
+    is_cdp_available,
+    launch_browser,
     out,
     read_stdin,
-    is_cdp_available,
+    run_instructions,
+    stop_browser,
+    substitute_params,
 )
-
-# Pattern to detect agent-browser timeout errors
-_TIMEOUT_RE = re.compile(r"timed?\s*out|timeout", re.IGNORECASE)
 
 
 def _split_instructions(raw: str) -> list[str]:
-    """Split raw script content by ';;' separator.
-
-    Single ';' is treated as a literal semicolon.
-    ';;' separates instructions.
-    """
+    """Split raw script content by ';;' separator."""
     parts = raw.split(";;")
     instructions = []
     for part in parts:
@@ -93,7 +85,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "timeout",
         type=int,
         default=None,
-        help="Timeout in milliseconds for each agent-browser instruction (default: 30000).",
+        help="Timeout in milliseconds for each agent-browser instruction.",
     )
     def script_cmd(
         script_input: str | None,
@@ -113,9 +105,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         Multiple instructions can be separated by ';;' on a single line,
         or by newlines in multi-line scripts.
 
-        If SCRIPT_INPUT looks like a file path (no newlines, not absolute text),
-        it is resolved from CWD then workdir.
-
         Use -p KEY=VALUE to set {key} placeholders in the instructions.
 
         If no browser is detected on CDP, one is launched and stopped after
@@ -123,7 +112,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """
         ensure_agent_browser_installed()
 
-        # Parse parameters
         param_dict: dict[str, str] = {}
         for p in params:
             if "=" not in p:
@@ -131,17 +119,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     f"Invalid parameter format: '{p}'. Use KEY=VALUE."
                 )
             key, value = p.split("=", 1)
-            # Strip surrounding quotes from value
             value = value.strip()
             if (value.startswith('"') and value.endswith('"')) or \
                (value.startswith("'") and value.endswith("'")):
                 value = value[1:-1]
             param_dict[key] = value
 
-        # Resolve script content
         if script_file:
             from pathlib import Path
-
             resolved = resolve_script_path(script_file)
             if resolved is None:
                 raise click.ClickException(f"Script file not found: {script_file}")
@@ -153,227 +138,57 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "SCRIPT_INPUT is required (or use --stdin/-s or --file/-f)."
             )
         else:
-            # If it contains newlines, treat as inline script content
             if "\n" in script_input:
                 script_content = script_input.strip()
             else:
-                # Single line without newlines: try as file path first
                 resolved = resolve_script_path(script_input)
                 if resolved is not None:
                     script_content = resolved.read_text().strip()
                 else:
-                    # Treat as inline instruction(s) content (supports ;; separator)
                     script_content = script_input.strip()
 
-        # Parse instructions: split by ';;' first (for inline), then by lines (for multi-line scripts)
-        # Also support newline-separated lines for multi-line scripts
-        instructions = []
-
-        # Check if content uses ;; separator (no newlines, or explicit ;; present)
+        raw_instructions: list[str] = []
         if ";;" in script_content:
-            # Use ;; splitting for inline multi-instruction
-            raw_instructions = _split_instructions(script_content)
-            for inst in raw_instructions:
-                # Each ;; separated part could itself be multi-line (ignore comments/blanks)
-                for line in inst.splitlines():
+            parts = _split_instructions(script_content)
+            for part in parts:
+                for line in part.splitlines():
                     line = line.strip()
-                    if not line:
+                    if not line or line.startswith("#"):
                         continue
-                    # Remove comment
                     if "#" in line:
                         line = line.split("#", 1)[0].strip()
-                    if not line:
-                        continue
-                    instructions.append(line)
+                    if line:
+                        raw_instructions.append(line)
         else:
-            # Traditional line-by-line parsing
             for line in script_content.splitlines():
                 line = line.strip()
-                if not line:
+                if not line or line.startswith("#"):
                     continue
-                # Remove comment
                 if "#" in line:
                     line = line.split("#", 1)[0].strip()
-                if not line:
-                    continue
-                instructions.append(line)
+                if line:
+                    raw_instructions.append(line)
 
-        if not instructions:
+        if not raw_instructions:
             raise click.ClickException("No instructions found in script.")
 
-        # Track if we launched the browser ourselves
+        instructions = [substitute_params(inst, param_dict) for inst in raw_instructions]
+
         launched_browser = False
-        browser_was_running = is_cdp_available(cdp_port)
+        if not is_cdp_available(cdp_port):
+            launched_browser = True
+            launch_browser(cdp_port)
 
-        if not browser_was_running:
-            # Launch browser automatically
-            import subprocess
-            from pathlib import Path
+        try:
+            results, errors = run_instructions(instructions, cdp_port, timeout, fmt)
+        finally:
+            if launched_browser and not keep_browser:
+                stop_browser(cdp_port)
+                if fmt == "text":
+                    click.echo("Browser stopped.", err=True)
 
-            browser_bin = "google-chrome"
-            user_data_dir = str(Path.home() / ".chrome-debug-profile")
-
-            cmd = [
-                browser_bin,
-                f"--remote-debugging-port={cdp_port}",
-                f"--user-data-dir={user_data_dir}",
-                "--no-first-run",
-                "--disable-features=OptimizationHints",
-            ]
-
-            click.echo(
-                f"No browser on CDP port {cdp_port}, launching {browser_bin}...",
-                err=True,
-            )
-            subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-
-            # Wait for browser to be ready
-            for _ in range(30):
-                if is_cdp_available(cdp_port):
-                    launched_browser = True
-                    break
-                time.sleep(0.5)
-            else:
-                click.echo(
-                    f"Warning: Browser may not have started on port {cdp_port}.",
-                    err=True,
-                )
-
-        # Execute instructions
-        results = []
-        errors = []
-        for i, instruction in enumerate(instructions):
-            # Substitute placeholders
-            resolved = substitute_params(instruction, param_dict)
-
-            if fmt == "text":
-                click.echo(f"  [{i + 1}/{len(instructions)}] {resolved}", err=True)
-
-            # upload command behaves differently with --timeout (different internal strategy
-            # that breaks React file handlers on some sites like Instagram)
-            instruction_timeout = None if resolved.startswith("upload ") else timeout
-
-            # Determine if we should retry on timeout
-            retry_budget_ms = instruction_timeout  # None means no retry (single attempt)
-            entry = None
-            if retry_budget_ms is not None:
-                # Retry loop: keep retrying timed-out instructions until budget expires
-                start_ms = time.monotonic() * 1000
-                attempt = 0
-                while True:
-                    attempt += 1
-                    try:
-                        result = run_agent_cmd(resolved, cdp_port, timeout=instruction_timeout)
-                    except Exception as exc:
-                        if fmt == "text" and attempt == 1:
-                            click.echo(f"    Error: {exc}", err=True)
-                        entry = {
-                            "instruction": resolved,
-                            "stdout": "",
-                            "stderr": str(exc),
-                            "exit_code": 1,
-                            "success": False,
-                            "attempts": attempt,
-                        }
-                        # Check if this was a timeout error
-                        if _TIMEOUT_RE.search(str(exc).lower()):
-                            elapsed_ms = (time.monotonic() * 1000) - start_ms
-                            remaining_ms = retry_budget_ms - elapsed_ms
-                            if remaining_ms > 0 and attempt < 50:
-                                if fmt == "text":
-                                    click.echo(
-                                        f"    Retry on timeout ({attempt} attempt{'s' if attempt > 1 else ''}), "
-                                        f"remaining budget: {remaining_ms:.0f}ms",
-                                        err=True,
-                                    )
-                                continue
-                        # Non-timeout error or budget exhausted
-                        break
-                    else:
-                        entry = {
-                            "instruction": resolved,
-                            "stdout": result.stdout.strip(),
-                            "stderr": result.stderr.strip(),
-                            "exit_code": result.returncode,
-                            "success": result.returncode == 0,
-                            "attempts": attempt,
-                        }
-                        # Check if this is still a timeout failure
-                        is_timeout_error = (
-                            result.returncode != 0
-                            and _TIMEOUT_RE.search(result.stderr.lower())
-                        )
-                        if is_timeout_error:
-                            elapsed_ms = (time.monotonic() * 1000) - start_ms
-                            remaining_ms = retry_budget_ms - elapsed_ms
-                            if remaining_ms > 0 and attempt < 50:
-                                if fmt == "text":
-                                    click.echo(
-                                        f"    Retry on timeout ({attempt} attempt{'s' if attempt > 1 else ''}), "
-                                        f"remaining budget: {remaining_ms:.0f}ms",
-                                        err=True,
-                                    )
-                                continue
-                        # Print stdout if successful
-                        if fmt == "text" and entry["success"] and entry["stdout"]:
-                            click.echo(entry["stdout"])
-                        break
-            else:
-                # No retry: single attempt
-                try:
-                    result = run_agent_cmd(resolved, cdp_port, timeout=instruction_timeout)
-                except Exception as exc:
-                    entry = {
-                        "instruction": resolved,
-                        "stdout": "",
-                        "stderr": str(exc),
-                        "exit_code": 1,
-                        "success": False,
-                    }
-                    results.append(entry)
-                    errors.append(entry)
-                    if fmt == "text":
-                        click.echo(f"    Error: {exc}", err=True)
-                    continue
-
-                entry = {
-                    "instruction": resolved,
-                    "stdout": result.stdout.strip(),
-                    "stderr": result.stderr.strip(),
-                    "exit_code": result.returncode,
-                    "success": result.returncode == 0,
-                }
-
-                # Print stdout if successful
-                if fmt == "text" and entry["success"] and entry["stdout"]:
-                    click.echo(entry["stdout"])
-
-            results.append(entry)
-
-            if entry["exit_code"] != 0:
-                errors.append(entry)
-                if fmt == "text" and entry["stderr"].strip():
-                    click.echo(f"    Error: {entry['stderr']}", err=True)
-
-        # Cleanup: stop browser if we launched it and --keep-browser not set
-        if launched_browser and not keep_browser:
-            _stop_browser(cdp_port)
-            if fmt == "text":
-                click.echo("Browser stopped.", err=True)
-
-        # Output results
         if fmt == "json":
-            output = {
-                "instructions": len(instructions),
-                "errors": len(errors),
-                "results": results,
-            }
-            out(output, fmt)
+            out({"instructions": len(instructions), "errors": len(errors), "results": results}, fmt)
         else:
             if errors:
                 click.echo(
@@ -391,50 +206,3 @@ def register(plugin_manifests: dict) -> CommandManifest:
         name="script",
         click_command=script_cmd,
     )
-
-
-def _stop_browser(cdp_port: int) -> None:
-    """Stop the browser process on the given CDP port."""
-    import signal
-    import subprocess
-    import time
-    import os
-
-    pids = []
-    try:
-        result = subprocess.run(
-            ["lsof", "-ti", f"TCP:*:{cdp_port}"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            pids = [int(p.strip()) for p in result.stdout.strip().split("\n")]
-    except (FileNotFoundError, ValueError):
-        pass
-
-    if not pids:
-        try:
-            result = subprocess.run(
-                ["pgrep", "-f", f"--remote-debugging-port={cdp_port}"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                pids = [int(p.strip()) for p in result.stdout.strip().split("\n")]
-        except (FileNotFoundError, ValueError):
-            pass
-
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-
-    time.sleep(0.5)
-
-    for pid in pids:
-        try:
-            os.kill(pid, 0)
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass

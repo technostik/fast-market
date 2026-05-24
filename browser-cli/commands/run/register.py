@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import re
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -25,6 +24,8 @@ from commands.base import CommandManifest
 from commands.helpers import (
     ensure_agent_browser_installed,
     is_cdp_available,
+    launch_browser,
+    stop_browser,
 )
 from commands.run.session_utils import export_data_to_session_dict
 from common.core.config import load_tool_config, get_tool_config_path, ConfigError
@@ -115,93 +116,6 @@ def _validate_workdir(path: str) -> Path:
             f"Refusing to use sensitive directory as workdir: {p}"
         )
     return p
-
-
-# ---------------------------------------------------------------------------
-# Browser lifecycle helpers
-# ---------------------------------------------------------------------------
-
-def _launch_browser(cdp_port: int, user_data_dir: str | None = None) -> None:
-    """Launch Chromium with CDP enabled in the background."""
-    import subprocess
-    import os
-
-    browser_bin = "google-chrome"
-    if user_data_dir is None:
-        user_data_dir = str(Path.home() / ".chrome-debug-profile")
-
-    cmd = [
-        browser_bin,
-        f"--remote-debugging-port={cdp_port}",
-        f"--user-data-dir={user_data_dir}",
-        "--no-first-run",
-        "--disable-features=OptimizationHints",
-    ]
-
-    click.echo(f"No browser on CDP port {cdp_port}, launching {browser_bin}...", err=True)
-    subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-
-    # Wait for browser to be ready (up to 15 s)
-    for _ in range(30):
-        if is_cdp_available(cdp_port):
-            return
-        time.sleep(0.5)
-
-    click.echo(
-        f"Warning: Browser may not have started on port {cdp_port}.",
-        err=True,
-    )
-
-
-def _stop_browser(cdp_port: int) -> None:
-    """Stop the browser process on the given CDP port."""
-    import signal
-    import subprocess
-    import os
-
-    pids: list[int] = []
-    try:
-        result = subprocess.run(
-            ["lsof", "-ti", f"TCP:*:{cdp_port}"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            pids = [int(p.strip()) for p in result.stdout.strip().split("\n")]
-    except (FileNotFoundError, ValueError):
-        pass
-
-    if not pids:
-        try:
-            result = subprocess.run(
-                ["pgrep", "-f", f"--remote-debugging-port={cdp_port}"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                pids = [int(p.strip()) for p in result.stdout.strip().split("\n")]
-        except (FileNotFoundError, ValueError):
-            pass
-
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-
-    time.sleep(0.5)
-
-    for pid in pids:
-        try:
-            os.kill(pid, 0)
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +355,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if not browser_was_running and not no_auto_browser:
             launched_browser = True
-            _launch_browser(cdp_port, user_data_dir)
+            launch_browser(cdp_port, user_data_dir)
 
         # Run the browser loop
         from commands.run.browser_loop import BrowserTaskLoop
@@ -532,7 +446,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         finally:
             # Cleanup: stop browser if we launched it and --keep-browser not set
             if launched_browser and not keep_browser:
-                _stop_browser(cdp_port)
+                stop_browser(cdp_port)
                 if not silent:
                     click.echo("Browser stopped.", err=True)
 
