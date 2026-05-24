@@ -10,6 +10,7 @@ from commands.base import CommandManifest
 from commands.helpers import (
     ensure_agent_browser_installed,
     is_cdp_available,
+    read_clipboard,
     run_agent_cmd,
     substitute_params,
 )
@@ -195,6 +196,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
         instructions_raw = cmd.get_instructions()
         if not instructions_raw:
             raise click.ClickException(f"Command '{cmd_name}' has no instructions.")
+
+        # Inject {clipboard} if used anywhere — quoted so shlex.split treats it as one token
+        _PLACEHOLDER_RE = __import__("re").compile(r"\{(\w+)\}")
+        _shlex = __import__("shlex")
+        uses_clipboard = any(
+            m.group(1) == "clipboard"
+            for line in instructions_raw
+            for m in _PLACEHOLDER_RE.finditer(line)
+        )
+        if uses_clipboard:
+            param_dict["clipboard"] = _shlex.quote(read_clipboard())
 
         # Substitute params
         instructions = []

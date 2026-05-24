@@ -13,6 +13,24 @@ from common.cli.helpers import out as _out
 
 _AGENT_BROWSER = "agent-browser"
 
+
+def read_clipboard() -> str:
+    """Read the current clipboard text using the best available tool."""
+    for cmd in [
+        ["xclip", "-selection", "clipboard", "-o"],
+        ["xsel", "--clipboard", "--output"],
+        ["wl-paste", "--no-newline"],
+    ]:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+            if r.returncode == 0:
+                return r.stdout
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    raise click.ClickException(
+        "Could not read clipboard: install xclip, xsel, or wl-paste."
+    )
+
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 _STATE_FILE = Path("/tmp/fast-market-browser.json")
 

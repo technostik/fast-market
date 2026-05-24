@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import shlex
 import time
 from pathlib import Path
 
@@ -9,6 +11,7 @@ from commands.base import CommandManifest
 from commands.helpers import (
     ensure_agent_browser_installed,
     is_cdp_available,
+    read_clipboard,
     run_agent_cmd,
 )
 from common.core.paths import get_browser_cmds_dir
@@ -35,11 +38,16 @@ Browser instructions (omit the 'agent-browser' prefix):
   STATE        state save <path>   state load <path>   state list
   DEBUG        console   errors   eval <js>   highlight <sel>
 
+Placeholders: use {name} anywhere in an instruction.
+  {clipboard}  always resolves to the current clipboard content
+  {anything}   prompts for a value on first use, then remembers it
+
 REPL commands:
   /help             Show this help
   /apply <name>     Load and run a stored command, adding its steps to history
+  /params           Show (and optionally clear) current session params
   /history          List instructions in this session
-  /clear            Clear session history (keeps browser open)
+  /clear            Clear history and session params
   /save             Interactively pick steps and save as a reusable command
   /exit             Exit (Ctrl+D also works)
 """
@@ -59,7 +67,69 @@ _BROWSER_CMDS = [
     "diff", "trace", "profiler", "batch", "set",
 ]
 
-_REPL_CMDS = ["/help", "/apply", "/history", "/clear", "/save", "/exit"]
+_REPL_CMDS = ["/help", "/apply", "/params", "/history", "/clear", "/save", "/exit"]
+
+_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+
+
+# ---------------------------------------------------------------------------
+# Placeholder resolution
+# ---------------------------------------------------------------------------
+
+def _resolve(text: str, params: dict[str, str]) -> tuple[str, bool]:
+    """Substitute all {name} placeholders in *text*.
+
+    {clipboard} is always read fresh.
+    All other names are looked up in *params*; if missing the user is prompted
+    and the value is stored in *params* for reuse.
+
+    Values are wrapped with shlex.quote() so that multi-word / multiline content
+    (e.g. clipboard text) is passed as a single argument after shlex.split().
+
+    Returns (resolved_text, was_substituted).
+    """
+    from prompt_toolkit import prompt as pt_prompt
+
+    substituted = False
+
+    def replace(match: re.Match) -> str:
+        nonlocal substituted
+        key = match.group(1)
+
+        if key == "clipboard":
+            val = read_clipboard()
+            substituted = True
+            return shlex.quote(val)
+
+        if key in params:
+            substituted = True
+            return shlex.quote(params[key])
+
+        # Prompt the user
+        try:
+            val = pt_prompt(f"  {key}: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            raise click.ClickException(f"Parameter '{key}' not provided — instruction skipped.")
+
+        params[key] = val
+        substituted = True
+        return shlex.quote(val)
+
+    result = _PLACEHOLDER_RE.sub(replace, text)
+    return result, substituted
+
+
+def _detect_placeholder_names(instructions: list[str]) -> list[str]:
+    """Return unique placeholder names found in instructions (excluding 'clipboard')."""
+    seen: set[str] = set()
+    names: list[str] = []
+    for inst in instructions:
+        for m in _PLACEHOLDER_RE.finditer(inst):
+            name = m.group(1)
+            if name != "clipboard" and name not in seen:
+                seen.add(name)
+                names.append(name)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +147,6 @@ def _make_completer():
             text = document.text_before_cursor
 
             if text.startswith("/apply "):
-                # Complete with stored browser command names
                 word = text[len("/apply "):].lstrip()
                 try:
                     cmds = discover_browser_cmds(get_browser_cmds_dir())
@@ -103,9 +172,9 @@ def _make_completer():
 # ---------------------------------------------------------------------------
 
 def _pick_steps(history: list[str]) -> list[str] | None:
-    """Show a TUI checklist to select which steps to save.
+    """TUI checklist to select which steps to include in the saved command.
 
-    Returns the selected steps, or None if cancelled.
+    Returns selected steps or None if cancelled.
     Keys: ↑↓ move · Space/X toggle · Enter confirm · Q/Esc cancel
     """
     from prompt_toolkit import Application
@@ -119,12 +188,12 @@ def _pick_steps(history: list[str]) -> list[str] | None:
     state = {"cursor": 0, "cancelled": False}
 
     def render():
-        lines: list[tuple[str, str]] = []
-        lines.append(("bold", "  Select steps   ↑↓ move · Space/X toggle · Enter save · Q cancel\n\n"))
+        lines: list[tuple[str, str]] = [
+            ("bold", "  Select steps   ↑↓ move · Space/X toggle · Enter save · Q cancel\n\n"),
+        ]
         for i, inst in enumerate(history):
             mark = "✓" if checked[i] else " "
-            at_cursor = i == state["cursor"]
-            if at_cursor:
+            if i == state["cursor"]:
                 lines.append(("fg:ansiblack bg:ansigreen bold", f" ▶ [{mark}] {inst} \n"))
             elif checked[i]:
                 lines.append(("", f"   [{mark}] {inst}\n"))
@@ -165,14 +234,11 @@ def _pick_steps(history: list[str]) -> list[str] | None:
         state["cancelled"] = True
         event.app.exit()
 
-    control = FormattedTextControl(render, focusable=True)
-    layout = Layout(Window(content=control))
-    app = Application(layout=layout, key_bindings=kb, full_screen=False, mouse_support=False)
-    app.run()
+    layout = Layout(Window(FormattedTextControl(render, focusable=True)))
+    Application(layout=layout, key_bindings=kb, full_screen=False, mouse_support=False).run()
 
     if state["cancelled"]:
         return None
-
     return [inst for i, inst in enumerate(history) if checked[i]]
 
 
@@ -180,8 +246,12 @@ def _pick_steps(history: list[str]) -> list[str] | None:
 # /save helper
 # ---------------------------------------------------------------------------
 
-def _save_session(history: list[str], default_name: str = "") -> None:
-    """Pick steps interactively then save as a named browser command."""
+def _save_session(
+    history: list[str],
+    params: dict[str, str],
+    default_name: str = "",
+) -> None:
+    """Pick steps interactively, then write them as a named browser command."""
     import shutil
     import yaml
     from prompt_toolkit import prompt as pt_prompt
@@ -191,40 +261,37 @@ def _save_session(history: list[str], default_name: str = "") -> None:
         click.echo("No instructions in history to save.")
         return
 
-    # Step 1: interactive picker
     click.echo()
     selected = _pick_steps(history)
-    click.echo()  # blank line after TUI
+    click.echo()
 
     if selected is None:
         click.echo("Save cancelled.")
         return
-
     if not selected:
         click.echo("No steps selected — save cancelled.")
         return
 
-    # Step 2: name
+    # Name (tab-completes existing commands; pre-fills last applied name)
     existing_names = [c.name for c in discover_browser_cmds(get_browser_cmds_dir())]
-    name_completer = WordCompleter(existing_names, ignore_case=False)
     try:
         name = pt_prompt(
             "Command name: ",
             default=default_name,
-            completer=name_completer,
+            completer=WordCompleter(existing_names, ignore_case=False),
         ).strip()
     except (KeyboardInterrupt, EOFError):
         click.echo("\nSave cancelled.")
         return
-
     if not name:
         click.echo("Save cancelled (no name given).")
         return
 
-    # Step 3: description (pre-fill from existing command if updating)
-    existing_desc = ""
     cmds_dir = get_browser_cmds_dir()
     cmd_dir = cmds_dir / name
+
+    # Pre-fill description from existing command if overwriting
+    existing_desc = ""
     if cmd_dir.exists():
         existing = BrowserCmd.from_path(cmd_dir)
         if existing:
@@ -235,7 +302,7 @@ def _save_session(history: list[str], default_name: str = "") -> None:
     except (KeyboardInterrupt, EOFError):
         description = existing_desc
 
-    # Step 4: overwrite if needed
+    # Overwrite check
     if cmd_dir.exists():
         try:
             ans = pt_prompt(f"'{name}' already exists. Overwrite? [Y/n]: ", default="y").strip().lower()
@@ -247,15 +314,26 @@ def _save_session(history: list[str], default_name: str = "") -> None:
             return
         shutil.rmtree(cmd_dir)
 
-    # Step 5: write
+    # Auto-detect parameters used in selected steps
+    param_names = _detect_placeholder_names(selected)
+    parameters = []
+    for pname in param_names:
+        entry: dict = {"name": pname, "description": "", "required": True}
+        if pname in params:
+            entry["default"] = params[pname]
+        parameters.append(entry)
+
+    # Write COMMAND.md
     cmd_dir.mkdir(parents=True)
-    cmd_file = cmd_dir / "COMMAND.md"
-    frontmatter = {"name": name, "description": description, "parameters": []}
+    frontmatter = {"name": name, "description": description, "parameters": parameters}
     fm_str = yaml.dump(frontmatter, default_flow_style=False, allow_unicode=True)
     body = "\n".join(selected)
-    cmd_file.write_text(f"---\n{fm_str}---\n{body}\n", encoding="utf-8")
+    (cmd_dir / "COMMAND.md").write_text(f"---\n{fm_str}---\n{body}\n", encoding="utf-8")
 
-    click.echo(f"Saved '{name}' ({len(selected)} step(s)).")
+    click.echo(f"Saved '{name}' ({len(selected)} step(s)).", err=False)
+    if parameters:
+        pnames = ", ".join(p["name"] for p in parameters)
+        click.echo(f"  Parameters detected: {pnames}")
     click.echo(f"  browser apply {name}")
     click.echo(f"  browser cmd edit {name}")
 
@@ -280,7 +358,7 @@ def _launch_browser(cdp_port: int) -> None:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    click.echo(f"Launching browser on CDP port {cdp_port}...", err=True)
+    click.echo(f"Launching browser on CDP port {cdp_port}…", err=True)
     for _ in range(30):
         if is_cdp_available(cdp_port):
             return
@@ -321,14 +399,26 @@ def _stop_browser(cdp_port: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# /apply helper: run a stored command and append its steps to history
+# /apply: run a stored command, resolve its params, append steps to history
 # ---------------------------------------------------------------------------
 
-def _run_apply(cmd_name: str, cdp_port: int, timeout: int | None, history: list[str]) -> str | None:
-    """Load and execute a stored browser command, appending steps to history.
+def _run_apply(
+    cmd_name: str,
+    cdp_port: int,
+    timeout: int | None,
+    history: list[str],
+    params: dict[str, str],
+) -> str | None:
+    """Load and execute a stored command.
 
-    Returns the command name on success, None if the command was not found.
+    Parameters declared in its frontmatter are resolved from *params* or
+    prompted if missing.  Each instruction (with original placeholders) is
+    appended to *history*.
+
+    Returns the command name on success, None if not found.
     """
+    from prompt_toolkit import prompt as pt_prompt
+
     cmds_dir = get_browser_cmds_dir()
     cmd = BrowserCmd.from_path(cmds_dir / cmd_name)
     if cmd is None:
@@ -340,16 +430,56 @@ def _run_apply(cmd_name: str, cdp_port: int, timeout: int | None, history: list[
         click.echo(f"Command '{cmd_name}' has no instructions.", err=True)
         return cmd_name
 
+    # Resolve declared parameters first (so we know defaults / required status)
+    for p in cmd.parameters:
+        pname = p.get("name", "")
+        if not pname:
+            continue
+        if pname in params:
+            continue  # already set in session
+
+        default = str(p.get("default", "")) if "default" in p else ""
+        required = p.get("required", True)
+        desc = p.get("description", "")
+        label = f"  {pname}"
+        if desc:
+            label += f" ({desc})"
+        label += ": "
+
+        try:
+            val = pt_prompt(label, default=default).strip()
+        except (KeyboardInterrupt, EOFError):
+            if not required and default:
+                val = default
+            else:
+                click.echo(f"\n  Skipped '{pname}' — using empty string.", err=True)
+                val = ""
+
+        params[pname] = val
+
     click.echo(f"Applying '{cmd_name}' ({len(instructions)} step(s))…")
 
-    for i, inst in enumerate(instructions):
-        click.echo(f"  [{i + 1}/{len(instructions)}] {inst}", err=True)
-        history.append(inst)
+    for i, raw_inst in enumerate(instructions):
+        # Append original (with placeholders) to history
+        history.append(raw_inst)
+
+        # Resolve placeholders for execution
         try:
-            result = run_agent_cmd(inst, cdp_port, timeout=timeout)
+            resolved, was_sub = _resolve(raw_inst, params)
+        except click.ClickException as exc:
+            click.echo(f"  [{i + 1}] {raw_inst}", err=True)
+            click.echo(f"    Error: {exc.format_message()}", err=True)
+            continue
+
+        display = resolved.replace("\n", "\\n").replace("\r", "\\r")
+        click.echo(f"  [{i + 1}/{len(instructions)}] {display}", err=True)
+
+        try:
+            result = run_agent_cmd(resolved, cdp_port, timeout=timeout)
         except Exception as exc:
             click.echo(f"    Error: {exc}", err=True)
             continue
+
         if result.stdout.strip():
             click.echo(result.stdout.strip())
         if result.returncode != 0 and result.stderr.strip():
@@ -368,7 +498,6 @@ def _run_repl(cdp_port: int, timeout: int | None) -> None:
     from prompt_toolkit.styles import Style
 
     style = Style.from_dict({"prompt": "ansigreen bold"})
-
     session: PromptSession = PromptSession(
         history=InMemoryHistory(),
         completer=_make_completer(),
@@ -376,8 +505,9 @@ def _run_repl(cdp_port: int, timeout: int | None) -> None:
         complete_while_typing=False,
     )
 
-    history: list[str] = []        # all instructions added this session
-    last_applied: str = ""         # name of last /apply-ed command (default for /save)
+    history: list[str] = []      # raw instructions (with placeholders preserved)
+    params: dict[str, str] = {}  # session-level param store
+    last_applied: str = ""       # for /save default name
 
     click.echo("Browser REPL — type instructions or /help. Ctrl+D to exit.")
     click.echo()
@@ -411,9 +541,25 @@ def _run_repl(cdp_port: int, timeout: int | None) -> None:
                 if not arg:
                     click.echo("Usage: /apply <command-name>", err=True)
                 else:
-                    result_name = _run_apply(arg, cdp_port, timeout, history)
+                    result_name = _run_apply(arg, cdp_port, timeout, history, params)
                     if result_name:
                         last_applied = result_name
+
+            elif cmd == "/params":
+                if not params:
+                    click.echo("No session params set.")
+                else:
+                    click.echo("Session params:")
+                    for k, v in params.items():
+                        click.echo(f"  {k} = {v!r}")
+                    try:
+                        from prompt_toolkit import prompt as pt_prompt
+                        ans = pt_prompt("Clear all params? [y/N]: ", default="n").strip().lower()
+                        if ans in ("y", "yes"):
+                            params.clear()
+                            click.echo("Params cleared.")
+                    except (KeyboardInterrupt, EOFError):
+                        click.echo()
 
             elif cmd == "/history":
                 if not history:
@@ -424,11 +570,12 @@ def _run_repl(cdp_port: int, timeout: int | None) -> None:
 
             elif cmd == "/clear":
                 history.clear()
+                params.clear()
                 last_applied = ""
-                click.echo("Session history cleared.")
+                click.echo("History and params cleared.")
 
             elif cmd == "/save":
-                _save_session(history, default_name=last_applied)
+                _save_session(history, params, default_name=last_applied)
 
             else:
                 click.echo(f"Unknown REPL command: {cmd}  (try /help)")
@@ -436,9 +583,22 @@ def _run_repl(cdp_port: int, timeout: int | None) -> None:
             continue
 
         # ---- Browser instruction ----
+        # Store original (with placeholders) in history
         history.append(line)
+
+        # Resolve placeholders
         try:
-            result = run_agent_cmd(line, cdp_port, timeout=timeout)
+            resolved, was_sub = _resolve(line, params)
+        except click.ClickException as exc:
+            click.echo(f"Error: {exc.format_message()}", err=True)
+            continue
+
+        if was_sub and resolved != line:
+            display = resolved.replace("\n", "\\n").replace("\r", "\\r")
+            click.echo(f"  → {display}", err=True)
+
+        try:
+            result = run_agent_cmd(resolved, cdp_port, timeout=timeout)
         except Exception as exc:
             click.echo(f"Error: {exc}", err=True)
             continue
@@ -462,7 +622,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def repl_cmd(cdp_port, keep_browser, timeout, no_auto_browser):
         """Start an interactive browser REPL.
 
-        Type agent-browser instructions one per line and see results.
+        Type agent-browser instructions one per line.  Use {name} placeholders
+        in any instruction — {clipboard} reads the system clipboard, others
+        prompt on first use and are remembered for the session.
+
         Use /apply <name> to run a stored command and extend it.
         Use /save to pick steps and save as a reusable command.
         """
