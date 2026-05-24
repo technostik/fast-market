@@ -26,6 +26,7 @@ from commands.setup.workdir import register as workdir_register
 # Import all plugins so they self-register
 from commands.setup.plugins import all_plugins, get_plugin  # noqa: F401
 from commands.setup.plugins import youtube as _yt_plugin  # noqa: F401
+from commands.discovery import discover_fastmarket_commands
 from commands.setup.plugins import llm as _llm_plugin  # noqa: F401
 from commands.setup.plugins import agent as _agent_plugin  # noqa: F401
 from commands.setup.plugins import workdir as _workdir_plugin  # noqa: F401
@@ -447,19 +448,8 @@ def register():
         for plugin in all_plugins().values():
             plugin.ensure_exists()
 
-        # Create default tool configs
-        tools = [
-            "browser",
-            "corpus",
-            "image",
-            "message",
-            "monitor",
-            "prompt",
-            "skill",
-            "tiktok",
-            "webux",
-            "youtube",
-        ]
+        # Create default tool configs for every discovered *-cli
+        tools = discover_fastmarket_commands()
         for tool in tools:
             _ensure_default_tool_config(tool, backup_existing=True)
 

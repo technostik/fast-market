@@ -5,7 +5,7 @@
 #
 # Usage: install-all-cli.sh [--exclude <dir>] [--exclude-dep <pkg>] ...
 # Examples:
-#   install-all-cli.sh --exclude image-cli --exclude tiktok-cli
+#   install-all-cli.sh --exclude image-cli
 #   install-all-cli.sh --exclude-dep torch --exclude-dep nvidia
 
 set -e

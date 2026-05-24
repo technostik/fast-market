@@ -9,6 +9,7 @@ recordings
 .opencode
 .qwen
 .kilo
+.claude
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

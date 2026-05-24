@@ -32,8 +32,7 @@ fast-market/
 ├── message-cli/               # Messaging (Telegram)
 ├── prompt-cli/                # LLM prompt management
 ├── task-cli/                  # Agentic task execution
-├── skill-cli/                 # Skill management
-├── tiktok-cli/                # TikTok operations
+├── skill-cli/                # Skill management
 └── toolsetup-cli/             # Tool configuration
 ```
 
@@ -54,9 +53,8 @@ pip install -e './image-cli'
 pip install -e './message-cli'
 pip install -e './prompt-cli[openai]'
 pip install -e './task-cli'
-pip install -e './skill-cli'
-pip install -e './tiktok-cli'
-pip install -e './toolsetup-cli'
+  pip install -e './skill-cli'
+  pip install -e './toolsetup-cli'
 ```
 
 Or install everything at once:
@@ -69,9 +67,8 @@ pip install -e './corpus-cli[ml,youtube]' \
                -e './message-cli' \
                -e './prompt-cli[openai]' \
                -e './task-cli' \
-               -e './skill-cli' \
-               -e './tiktok-cli' \
-               -e './toolsetup-cli'
+                -e './skill-cli' \
+                -e './toolsetup-cli'
 ```
 
 ### Optional Dependency Groups

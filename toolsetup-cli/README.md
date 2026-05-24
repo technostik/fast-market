@@ -82,21 +82,25 @@ toolsetup autocomplete-configure
 ```
 
 This will:
-1. Generate completion scripts for: corpus, image, message, monitor, prompt, skill, task, tiktok, toolsetup, youtube
-2. Save to `~/.config/fast-market/completions/fast-market.bash`
-3. Print instructions to add to your shell config
+1. Auto-discover all fast-market CLIs (every `*-cli/pyproject.toml` in the monorepo)
+2. Generate completion scripts for the discovered commands
+3. Save to `~/.config/fast-market/completions/fast-market.bash`
+4. Print instructions to add to your shell config
 
 ### Shell Options
 
 ```bash
 # For bash (default)
-toolsetup autocomplete-configure --shell bash
+toolsetup autocomplete configure --shell bash
 
 # For zsh
-toolsetup autocomplete-configure --shell zsh
+toolsetup autocomplete configure --shell zsh
 
 # For fish
-toolsetup autocomplete-configure --shell fish
+toolsetup autocomplete configure --shell fish
+
+# See exactly which commands will get completions
+toolsetup autocomplete list
 ```
 
 ### Enable Completions
@@ -135,7 +139,8 @@ After setup, you can use:
 - `skill` - Skill management
 - `corpus` - Corpus indexing
 - `youtube` - YouTube CLI
-- `tiktok` - TikTok CLI
+- `browser` - Browser automation (CDP)
+- `webux` - Web UI hub
 - `image` - Image generation
 - `message` - Messaging (Telegram)
 - `monitor` - Web monitoring
