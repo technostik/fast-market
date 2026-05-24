@@ -725,13 +725,17 @@ async function refreshPool() {
     const st = item.status;
     let html = `<span>${name} <small style="color:var(--dim)">(${st})</small></span>`;
 
-    // Show steps if we have job progress (no outputs here — see global console)
+    // Show steps + live timer if we have job progress
     if (item.job && item.job.steps) {
+      const startTs = item.job.start_time ? Math.floor(item.job.start_time) : null;
       html += '<div style="font-size:11px;color:var(--dim);margin-top:2px;">';
       item.job.steps.forEach(s => {
         const icon = s.status === 'done' ? '✅' : (s.status === 'running' ? '⏳' : (s.status === 'error' ? '❌' : '○'));
         html += `${icon} ${s.name} `;
       });
+      if (startTs) {
+        html += `— <span class="pool-elapsed" data-start="${startTs}"></span>`;
+      }
       html += '</div>';
       if (item.job.modal_url) {
         html += `<div style="font-size:11px;margin-top:2px;"><a href="${item.job.modal_url}" target="_blank" style="color:var(--link);">🔗 Modal logs</a></div>`;
@@ -858,6 +862,23 @@ renderSteps = function(job) {
   if (job.steps) job.steps.forEach(s => { if (s.output) appendToConsole(s.name + ': ' + s.output); });
 };
 
+function _tickElapsed() {
+  const now = Math.floor(Date.now() / 1000);
+  document.querySelectorAll('.pool-elapsed').forEach(el => {
+    const start = parseInt(el.dataset.start, 10);
+    if (!start) return;
+    const s = now - start;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    el.textContent = h > 0
+      ? `${h}h${String(m).padStart(2,'0')}m${String(sec).padStart(2,'0')}s`
+      : m > 0
+        ? `${m}m${String(sec).padStart(2,'0')}s`
+        : `${sec}s`;
+  });
+}
+
 function initPool() {
   document.getElementById('poolStart').onclick = () => poolAction('start');
   document.getElementById('poolStop').onclick = () => poolAction('stop');
@@ -865,6 +886,7 @@ function initPool() {
   document.getElementById('poolRedo').onclick = () => poolAction('redo');
   document.getElementById('poolClear').onclick = () => poolAction('clear-finished');
   setInterval(refreshPool, 2000);
+  setInterval(_tickElapsed, 1000);
   refreshPool();
 }
 
