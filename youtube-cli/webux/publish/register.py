@@ -158,6 +158,8 @@ async def list_videos(
                 completed = set(meta.get("completed_steps", []))
                 skipped = set(meta.get("skipped_steps", []))
                 passed = completed | skipped
+                if set(range(len(STEP_NAMES))).issubset(passed):
+                    continue  # all steps done via immediate publish (no pool "finished" marker)
                 available = [c + 1 for c in passed if c + 1 < len(STEP_NAMES)]
                 resumable = bool(available)
             except Exception:
