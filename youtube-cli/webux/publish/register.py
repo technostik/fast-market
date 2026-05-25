@@ -145,23 +145,29 @@ async def list_videos(
         reverse=True,
     )
 
-    # Hide videos that have finished meta
+    # Build video list, hiding finished ones and tagging resumable ones
     visible = []
     for f in files:
         meta_path = f.with_name(f.stem + "-meta.json")
+        resumable = False
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 if meta.get("status") == "finished":
                     continue
+                completed = set(meta.get("completed_steps", []))
+                skipped = set(meta.get("skipped_steps", []))
+                passed = completed | skipped
+                available = [c + 1 for c in passed if c + 1 < len(STEP_NAMES)]
+                resumable = bool(available)
             except Exception:
                 pass
-        visible.append(f)
+        visible.append((f, resumable))
 
     return {
         "videos": [
-            {"name": f.name, "path": str(f), "mtime": f.stat().st_mtime}
-            for f in visible
+            {"name": f.name, "path": str(f), "mtime": f.stat().st_mtime, "resumable": resumable}
+            for f, resumable in visible
         ]
     }
 

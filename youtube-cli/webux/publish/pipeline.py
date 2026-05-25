@@ -316,11 +316,15 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
             s2.status = "skipped"
         _save_meta(job)
     else:
-        sv = job.files.get("subtitled", "")
-        if sv and Path(sv).exists():
-            current_video = sv
+        # Prefer the already-renamed final video (set by step 3), then subtitled, then no_silence
+        for _key in ("final_video", "subtitled", "no_silence"):
+            _v = job.files.get(_key, "")
+            if _v and Path(_v).exists():
+                current_video = _v
+                break
 
-    job.files["final_video"] = current_video
+    if not (job.files.get("final_video") and Path(job.files["final_video"]).exists()):
+        job.files["final_video"] = current_video
     await _run_llm_and_upload(job, txt_path, current_video, from_step)
 
 

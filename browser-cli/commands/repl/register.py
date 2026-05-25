@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -19,6 +22,142 @@ from commands.helpers import (
 )
 from common.core.paths import get_browser_cmds_dir
 from core.browser_cmd import BrowserCmd, discover_browser_cmds
+
+
+# ---------------------------------------------------------------------------
+# Snapshot panel
+# ---------------------------------------------------------------------------
+
+_SNAP_REF_RE = re.compile(r"@e\d+")
+_SNAP_PANEL_FILE = Path("/tmp/browser_repl_snapshot.txt")
+
+
+def _parse_snapshot_refs(output: str) -> list[tuple[str, str]]:
+    """Extract (ref, label) pairs from agent-browser snapshot output."""
+    entries: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for line in output.splitlines():
+        refs = _SNAP_REF_RE.findall(line)
+        if not refs:
+            continue
+        for ref in refs:
+            if ref in seen:
+                continue
+            seen.add(ref)
+            # Strip tree-drawing chars, brackets, and the ref itself to get label
+            label = re.sub(r"[─-╿├└│]+", "", line)
+            label = re.sub(r"\[ref=@e\d+\]", "", label)
+            label = re.sub(r"@e\d+", "", label)
+            label = re.sub(r"\s+", " ", label).strip().lstrip("-").strip()
+            entries.append((ref, label))
+    return entries
+
+
+def _format_snapshot_panel(snapshot_output: str) -> str:
+    entries = _parse_snapshot_refs(snapshot_output)
+    w = 38
+    bar = "─" * w
+    if not entries:
+        return f"─── Snapshot ───────────────────────\n  (no interactive elements)\n{bar}"
+    lines = ["─── Snapshot ───────────────────────"]
+    for ref, label in entries:
+        max_label = w - len(ref) - 3
+        if len(label) > max_label:
+            label = label[: max_label - 1] + "…"
+        lines.append(f" {ref}  {label}")
+    lines.append(bar)
+    return "\n".join(lines)
+
+
+class _SnapshotPanel:
+    """Side panel showing snapshot @eN refs — tmux pane or inline fallback."""
+
+    def __init__(self, cdp_port: int, timeout: int | None) -> None:
+        self.cdp_port = cdp_port
+        self.timeout = timeout
+        self.active = False
+        self._pane_id: str | None = None
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _in_tmux() -> bool:
+        return bool(os.environ.get("TMUX"))
+
+    def open(self) -> None:
+        self.active = True
+        self._write("Loading snapshot…")
+        if self._in_tmux():
+            self._open_tmux_pane()
+        else:
+            click.echo(
+                "  [snapshot] No tmux session detected — snapshot shown inline after each command.",
+                err=True,
+            )
+        # Initial refresh (background so the prompt returns immediately)
+        threading.Thread(target=self._do_refresh, daemon=True).start()
+
+    def _open_tmux_pane(self) -> None:
+        # Remember current pane so we can refocus it after the split
+        r = subprocess.run(
+            ["tmux", "display-message", "-p", "#{pane_id}"],
+            capture_output=True, text=True,
+        )
+        original_pane = r.stdout.strip()
+
+        # Loop in the new pane: clear + cat the panel file every 300 ms
+        watch = (
+            "sh -c 'while true; do clear; "
+            f"cat {_SNAP_PANEL_FILE} 2>/dev/null || echo \"(no snapshot)\"; "
+            "sleep 0.3; done'"
+        )
+        r2 = subprocess.run(
+            ["tmux", "split-window", "-h", "-p", "33", "-P", "-F", "#{pane_id}", watch],
+            capture_output=True, text=True,
+        )
+        self._pane_id = r2.stdout.strip() or None
+
+        # Refocus the original (REPL) pane
+        if original_pane:
+            subprocess.run(["tmux", "select-pane", "-t", original_pane], capture_output=True)
+
+    def close(self) -> None:
+        self.active = False
+        if self._pane_id:
+            subprocess.run(
+                ["tmux", "kill-pane", "-t", self._pane_id],
+                capture_output=True,
+            )
+            self._pane_id = None
+        _SNAP_PANEL_FILE.unlink(missing_ok=True)
+        click.echo("  [snapshot] Panel closed.", err=True)
+
+    def refresh_after_cmd(self) -> None:
+        if self._in_tmux():
+            threading.Thread(target=self._do_refresh, daemon=True).start()
+        else:
+            # Inline mode: synchronous, printed right after command output
+            self._do_refresh(inline=True)
+
+    def _do_refresh(self, inline: bool = False) -> None:
+        try:
+            result = run_agent_cmd("snapshot", self.cdp_port, timeout=self.timeout)
+        except Exception:
+            return
+        if result.returncode != 0 or not result.stdout.strip():
+            return
+        content = _format_snapshot_panel(result.stdout)
+        self._write(content)
+        if inline:
+            click.echo()
+            click.echo(content)
+            click.echo()
+
+    def _write(self, content: str) -> None:
+        with self._lock:
+            try:
+                _SNAP_PANEL_FILE.write_text(content, encoding="utf-8")
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +186,7 @@ Placeholders: use {name} anywhere in an instruction.
 
 REPL commands:
   /help             Show this help
+  /snapshot         Toggle side panel listing all @eN refs (tmux or inline)
   /apply <name>     Load and run a stored command, adding its steps to history
   /params           Show (and optionally clear) current session params
   /history          List instructions in this session
@@ -70,7 +210,7 @@ _BROWSER_CMDS = [
     "diff", "trace", "profiler", "batch", "set",
 ]
 
-_REPL_CMDS = ["/help", "/apply", "/params", "/history", "/clear", "/save", "/exit"]
+_REPL_CMDS = ["/help", "/snapshot", "/apply", "/params", "/history", "/clear", "/save", "/exit"]
 
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 
@@ -463,6 +603,7 @@ def _run_repl(cdp_port: int, timeout: int | None, initial_params: dict[str, str]
     history: list[str] = []                          # raw instructions (with placeholders preserved)
     params: dict[str, str] = dict(initial_params or {})  # session-level param store
     last_applied: str = ""                           # for /save default name
+    snapshot_panel: _SnapshotPanel | None = None
 
     click.echo("Browser REPL — type instructions or /help. Ctrl+D to exit.")
     click.echo()
@@ -475,6 +616,8 @@ def _run_repl(cdp_port: int, timeout: int | None, initial_params: dict[str, str]
             continue
         except EOFError:
             click.echo()
+            if snapshot_panel and snapshot_panel.active:
+                snapshot_panel.close()
             break
 
         if not line:
@@ -487,7 +630,17 @@ def _run_repl(cdp_port: int, timeout: int | None, initial_params: dict[str, str]
             arg = parts[1].strip() if len(parts) > 1 else ""
 
             if cmd == "/exit":
+                if snapshot_panel and snapshot_panel.active:
+                    snapshot_panel.close()
                 break
+
+            elif cmd == "/snapshot":
+                if snapshot_panel and snapshot_panel.active:
+                    snapshot_panel.close()
+                else:
+                    if snapshot_panel is None:
+                        snapshot_panel = _SnapshotPanel(cdp_port, timeout)
+                    snapshot_panel.open()
 
             elif cmd == "/help":
                 click.echo(_HELP_TEXT)
@@ -562,6 +715,9 @@ def _run_repl(cdp_port: int, timeout: int | None, initial_params: dict[str, str]
             click.echo(result.stdout.strip())
         if result.returncode != 0 and result.stderr.strip():
             click.echo(f"Error: {result.stderr.strip()}", err=True)
+
+        if snapshot_panel and snapshot_panel.active:
+            snapshot_panel.refresh_after_cmd()
 
 
 # ---------------------------------------------------------------------------
