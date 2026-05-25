@@ -299,7 +299,12 @@ async def start(req: StartRequest):
 async def status(job_id: str):
     job = _jobs.get(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        # Return a terminal response so browsers stop polling (avoids infinite 404 loop after restart)
+        return {
+            "status": "done", "gone": True, "job_id": job_id,
+            "steps": [], "title": "", "description": "", "files": {},
+            "video_url": "", "studio_url": "", "modal_url": "", "elapsed_seconds": None,
+        }
     return job.to_dict()
 
 

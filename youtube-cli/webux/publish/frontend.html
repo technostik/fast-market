@@ -469,7 +469,10 @@ async function pollStatus() {
   if (!currentJob) return;
   clearTimeout(pollTimer);
   const r = await fetch('/api/publish/status/' + currentJob).catch(() => null);
-  if (!r || !r.ok) { pollTimer = setTimeout(pollStatus, 2000); return; }
+  if (!r || !r.ok) {
+    if (r && r.status === 404) { currentJob = null; return; }
+    pollTimer = setTimeout(pollStatus, 2000); return;
+  }
   const j = await r.json();
   renderSteps(j);
   if (j.status === 'done' || j.status === 'error') {
@@ -514,6 +517,7 @@ function renderSteps(job) {
 }
 
 function showResult(job) {
+  if (job.gone || (!job.title && !job.video_url)) return;
   const box = document.getElementById('result');
   box.style.display = 'block';
   document.getElementById('resultTitle').textContent = job.title || '(no title)';
@@ -725,9 +729,15 @@ async function uploadFile(file) {
 }
 
 /* ── Pool UI ───────────────────────────────────────────── */
+let poolPollTimer = null;
+function schedulePoolRefresh() {
+  clearTimeout(poolPollTimer);
+  poolPollTimer = setTimeout(refreshPool, 2000);
+}
+
 async function refreshPool() {
   const r = await fetch('/api/publish/pool').catch(() => null);
-  if (!r || !r.ok) return;
+  if (!r || !r.ok) { schedulePoolRefresh(); return; }
   const data = await r.json();
   // Feed all subcommand outputs from pool items into global console
   data.items.forEach(item => {
@@ -800,6 +810,12 @@ async function refreshPool() {
     row.innerHTML = html;
     list.appendChild(row);
   });
+
+  // Keep polling only while something is active
+  const hasActive = data.running || (data.items || []).some(
+    i => i.status !== 'finished' && i.status !== 'error'
+  );
+  if (hasActive) schedulePoolRefresh();
 }
 
 async function poolRedoItem(source) {
@@ -928,7 +944,6 @@ function initPool() {
   document.getElementById('poolSkip').onclick = () => poolAction('skip');
   document.getElementById('poolRedo').onclick = () => poolAction('redo');
   document.getElementById('poolClear').onclick = () => poolAction('clear-finished');
-  setInterval(refreshPool, 2000);
   setInterval(_tickElapsed, 1000);
   refreshPool();
 }
