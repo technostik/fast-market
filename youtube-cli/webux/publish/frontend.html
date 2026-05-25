@@ -270,6 +270,10 @@
           <select id="resumeStep"></select>
           <button class="btn-resume" onclick="doResume()" style="padding:4px 10px;">Resume</button>
         </div>
+        <div id="resumeMarkDone" style="display:none; margin-top:6px; font-size:12px; color:var(--warn);">
+          ⚠ Upload (step 4) not in completed steps.
+          <button class="btn-sec" onclick="markUploadDone()" style="padding:2px 8px; font-size:11px; margin-left:6px;">Mark as done</button>
+        </div>
         <div id="resumeFiles" class="step-dl" style="margin-top:6px;"></div>
       </div>
     </div>
@@ -542,7 +546,7 @@ function showResumeOptions(source, data) {
   const area = document.getElementById('resumeArea');
   const sel = document.getElementById('resumeStep');
   sel.innerHTML = '';
-  const STEP_NAMES = ["Remove silence","Extract transcript","Burn subtitles","Generate title & description","Upload to YouTube"];
+  const STEP_NAMES = ["Remove silence","Extract transcript","Burn subtitles","Generate title & description","Upload to YouTube","Post-publish script"];
   for (const st of data.available_from_steps) {
     const o = document.createElement('option');
     o.value = st;
@@ -551,8 +555,29 @@ function showResumeOptions(source, data) {
   }
   area.style.display = 'block';
   area.dataset.source = source;
+  // Warn if upload (step 4) was done but not in completed_steps
+  const markDiv = document.getElementById('resumeMarkDone');
+  const uploadDone = data.completed_steps && data.completed_steps.includes(4);
+  const uploadSkipped = data.skipped_steps && data.skipped_steps.includes(4);
+  const uploadPassed = uploadDone || uploadSkipped;
+  // Show warning only when some later step is available but step 4 wasn't completed
+  const hasLaterStep = data.available_from_steps && data.available_from_steps.some(s => s >= 5);
+  markDiv.style.display = (!uploadPassed && hasLaterStep) ? 'block' : 'none';
   const filesDiv = document.getElementById('resumeFiles');
   filesDiv.innerHTML = (data.step_files || []).flat().map(f => `<a href="/api/publish/download?file=${encodeURIComponent(f.path)}" download>${f.name}</a>`).join('');
+}
+
+async function markUploadDone() {
+  const source = document.getElementById('resumeArea').dataset.source;
+  const r = await fetch('/api/publish/mark-step-done', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ source, step: 4 })
+  });
+  if (!r.ok) { alert('Failed to mark step as done'); return; }
+  document.getElementById('resumeMarkDone').style.display = 'none';
+  // Refresh resume options
+  checkResumeAvailable(source);
 }
 
 async function doResume() {

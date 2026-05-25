@@ -392,7 +392,11 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
     else:
         job.steps[3].status = "skipped"
 
-    if job.skip_upload:
+    if from_step > 4:
+        # Upload already done — skip it, preserve existing status from meta
+        if job.steps[4].status == "pending":
+            job.steps[4].status = "skipped"
+    elif job.skip_upload:
         job.steps[4].status = "skipped"
         job.end_time = time.time()
         job.status = "done"

@@ -399,6 +399,29 @@ async def check_resume(body: dict):
     }
 
 
+@router.post("/mark-step-done")
+async def mark_step_done(body: dict):
+    """Mark a specific step as done in the meta without re-running it."""
+    source = str(Path(body.get("source", "")).expanduser().resolve())
+    step = body.get("step")
+    if step is None or not isinstance(step, int) or not (0 <= step < len(STEP_NAMES)):
+        raise HTTPException(status_code=400, detail="Invalid step index")
+    meta = _load_meta(source)
+    completed = set(meta.get("completed_steps", []))
+    skipped = set(meta.get("skipped_steps", []))
+    completed.add(step)
+    skipped.discard(step)
+    meta["completed_steps"] = sorted(completed)
+    meta["skipped_steps"] = sorted(skipped)
+    try:
+        p = Path(source).parent / f"{Path(source).stem}-meta.json"
+        import json as _json
+        p.write_text(_json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "completed_steps": meta["completed_steps"]}
+
+
 @router.post("/redo-post-publish")
 async def redo_post_publish(body: dict):
     source = str(Path(body.get("source", "")).expanduser().resolve())
