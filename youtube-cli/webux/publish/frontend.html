@@ -110,6 +110,12 @@
     .review-box h3 { margin:0 0 10px; font-size:14px; color:var(--warn); }
     .review-section { margin-bottom:10px; }
     .review-section strong { display:block; font-size:12px; color:var(--dim); margin-bottom:3px; }
+    /* modal */
+    .modal-overlay { position:fixed; top:0; left:0; width:100%; height:100%;
+                     background:rgba(0,0,0,0.6); z-index:1000;
+                     display:flex; align-items:center; justify-content:center; }
+    .modal-box { background:var(--bg); border:1px solid var(--border); border-radius:10px;
+                 padding:16px; width:90%; max-width:620px; max-height:90vh; overflow-y:auto; }
     .review-content { font-size:12px; white-space:pre-wrap; word-break:break-word;
                       background:#0f172a; border:1px solid var(--border); border-radius:4px;
                       padding:8px; max-height:200px; overflow-y:auto; font-family:monospace; }
@@ -315,8 +321,11 @@
     <div class="review-section">
       <strong>Transcript:</strong>
       <div id="reviewTranscript" class="review-content"></div>
-      <button id="runTranscriptBtn" class="btn-sec" style="margin-top:6px;font-size:11px;padding:4px 10px;display:none;" onclick="runTranscriptScript()">▶ Run script on transcript</button>
-      <span id="runTranscriptStatus" style="font-size:11px;color:var(--dim);margin-left:8px;display:none;"></span>
+      <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn-sec" style="font-size:11px;padding:4px 10px;" onclick="openQuickPrompt()">⚡ Quick prompt</button>
+        <button id="runTranscriptBtn" class="btn-sec" style="font-size:11px;padding:4px 10px;display:none;" onclick="runTranscriptScript()">▶ Run script on transcript</button>
+        <span id="runTranscriptStatus" style="font-size:11px;color:var(--dim);display:none;"></span>
+      </div>
     </div>
   </div>
 
@@ -324,6 +333,33 @@
     <div class="result-title" id="resultTitle"></div>
     <div class="result-desc" id="resultDesc"></div>
     <div class="result-links" id="resultLinks"></div>
+  </div>
+
+  <!-- Quick prompt modal -->
+  <div id="quickPromptModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h3 style="margin:0;font-size:15px;">⚡ Quick Prompt</h3>
+        <button class="btn-sec" style="padding:2px 8px;font-size:12px;" onclick="closeQuickPrompt()">✕</button>
+      </div>
+      <div class="review-section">
+        <strong>Prompt:</strong>
+        <select id="qpPromptSelect" style="width:100%;padding:6px 8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);border-radius:6px;font-size:13px;margin-top:3px;"></select>
+      </div>
+      <div class="review-section">
+        <strong>Input:</strong>
+        <div id="qpInput" class="review-content" style="max-height:80px;"></div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <button id="qpApplyBtn" class="btn-go" onclick="applyQuickPrompt()" style="padding:5px 16px;">▶ Apply</button>
+        <span id="qpStatus" style="font-size:12px;color:var(--dim);margin-left:10px;display:none;"></span>
+      </div>
+      <div class="review-section" id="qpResultSection" style="display:none;">
+        <strong>Result:</strong>
+        <textarea id="qpResult" class="review-content" style="min-height:100px;resize:vertical;font-family:monospace;width:100%;box-sizing:border-box;" readonly></textarea>
+        <button class="btn-sec" style="margin-top:4px;font-size:11px;padding:3px 10px;" onclick="copyQuickPromptResult()">📋 Copy</button>
+      </div>
+    </div>
   </div>
 
   <div id="globalConsole" style="margin-top:16px;height:140px;max-width:860px;background:#0f172a;border:1px solid var(--border);border-radius:6px;padding:8px;font-family:monospace;font-size:11px;overflow-y:auto;white-space:pre-wrap;color:#aaa;display:none;">
@@ -1062,6 +1098,77 @@ async function browserScreenshot() {
 async function poolAction(action) {
   await fetch(`/api/publish/pool/${action}`, { method: 'POST' });
   refreshPool();
+}
+
+/* ── Quick prompt ──────────────────────────────────────── */
+
+function openQuickPrompt() {
+  const modal = document.getElementById('quickPromptModal');
+  const input = document.getElementById('reviewTranscript');
+  document.getElementById('qpInput').textContent = input.textContent || '';
+  document.getElementById('qpResultSection').style.display = 'none';
+  document.getElementById('qpStatus').style.display = 'none';
+  document.getElementById('qpApplyBtn').disabled = false;
+  modal.style.display = 'flex';
+  loadQpPrompts();
+}
+
+function closeQuickPrompt() {
+  document.getElementById('quickPromptModal').style.display = 'none';
+}
+
+async function loadQpPrompts() {
+  const sel = document.getElementById('qpPromptSelect');
+  sel.innerHTML = '<option value="">— select —</option>';
+  const r = await fetch('/api/publish/list-prompts').catch(() => null);
+  if (!r || !r.ok) return;
+  const data = await r.json();
+  for (const name of (data.prompts || [])) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+}
+
+async function applyQuickPrompt() {
+  const sel = document.getElementById('qpPromptSelect');
+  const promptName = sel.value;
+  if (!promptName) { alert('Select a prompt'); return; }
+  const content = document.getElementById('qpInput').textContent || '';
+  if (!content) { alert('No content to process'); return; }
+
+  const statusEl = document.getElementById('qpStatus');
+  const applyBtn = document.getElementById('qpApplyBtn');
+  statusEl.style.display = 'inline-block';
+  statusEl.textContent = '⏳ Running...';
+  applyBtn.disabled = true;
+
+  const r = await fetch('/api/publish/quick-prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt_name: promptName, content })
+  }).catch(() => null);
+  if (!r || !r.ok) {
+    statusEl.textContent = '❌ Request failed';
+    applyBtn.disabled = false;
+    return;
+  }
+  const data = await r.json();
+  applyBtn.disabled = false;
+  if (data.ok) {
+    document.getElementById('qpResult').value = data.result;
+    document.getElementById('qpResultSection').style.display = 'block';
+    statusEl.style.display = 'none';
+  } else {
+    statusEl.textContent = '❌ ' + (data.error || 'Unknown error');
+  }
+}
+
+function copyQuickPromptResult() {
+  const ta = document.getElementById('qpResult');
+  ta.select();
+  navigator.clipboard.writeText(ta.value).catch(() => {});
 }
 
 async function addToPool() {

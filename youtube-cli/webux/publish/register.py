@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -190,6 +191,35 @@ async def list_prompts():
     stdout, _ = await proc.communicate()
     names = [n.strip() for n in stdout.decode(errors="replace").splitlines() if n.strip()]
     return {"prompts": names}
+
+
+class QuickPromptRequest(BaseModel):
+    prompt_name: str
+    content: str
+
+
+@router.post("/quick-prompt")
+async def quick_prompt(req: QuickPromptRequest):
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        f.write(req.content)
+        tmp = f.name
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _pr(), "apply", req.prompt_name, f"content=@{tmp}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode:
+            err = stderr.decode(errors="replace").strip()
+            return {"ok": False, "error": err or f"Exit code {proc.returncode}"}
+        result = stdout.decode(errors="replace").strip()
+        return {"ok": True, "result": result}
+    finally:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 # ── Video preview API ─────────────────────────────────────────────────────────
