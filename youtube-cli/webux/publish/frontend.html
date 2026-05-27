@@ -149,6 +149,10 @@
       <input type="text" id="cfgPostScript">
     </div>
     <div class="row">
+      <label>Transcript script (absolute path)</label>
+      <input type="text" id="cfgTranscriptScript">
+    </div>
+    <div class="row">
       <label>Modal usage URL</label>
       <input type="text" id="cfgModalUsageUrl">
     </div>
@@ -172,6 +176,7 @@
       </div>
       <img id="browserScreenshotImg" style="max-width:100%; border:1px solid var(--border); border-radius:6px;" />
     </div>
+    <div id="transcriptScriptStatus" style="font-size:12px;color:var(--dim);margin-bottom:6px;display:none;"></div>
     <div id="poolList"></div>
   </div>
 
@@ -310,6 +315,8 @@
     <div class="review-section">
       <strong>Transcript:</strong>
       <div id="reviewTranscript" class="review-content"></div>
+      <button id="runTranscriptBtn" class="btn-sec" style="margin-top:6px;font-size:11px;padding:4px 10px;display:none;" onclick="runTranscriptScript()">▶ Run script on transcript</button>
+      <span id="runTranscriptStatus" style="font-size:11px;color:var(--dim);margin-left:8px;display:none;"></span>
     </div>
   </div>
 
@@ -500,7 +507,7 @@ async function pollStatus() {
   }
   const j = await r.json();
   renderSteps(j);
-  updateReviewBox(j);
+  updateReviewBox(j, j.source);
   if (j.status === 'done' || j.status === 'error') {
     showResult(j);
     document.getElementById('resumeBtn').style.display = 'none';
@@ -542,8 +549,11 @@ function renderSteps(job) {
   }
 }
 
-function updateReviewBox(job) {
+let _reviewSource = null;
+
+function updateReviewBox(job, source) {
   const box = document.getElementById('reviewBox');
+  _reviewSource = source || null;
   const step3 = job.steps && job.steps[3];
   if (!step3 || step3.status !== 'done' || !job.title) {
     box.style.display = 'none';
@@ -553,6 +563,15 @@ function updateReviewBox(job) {
   document.getElementById('reviewDescription').textContent = job.description || '';
   document.getElementById('reviewTranscript').textContent = job.transcript_text || '(transcript not available)';
   box.style.display = 'block';
+  // Show "Run transcript script" button when source is known and transcript is available
+  const runBtn = document.getElementById('runTranscriptBtn');
+  const statusEl = document.getElementById('runTranscriptStatus');
+  if (_reviewSource && job.transcript_text) {
+    runBtn.style.display = 'inline-block';
+    statusEl.style.display = 'none';
+  } else {
+    runBtn.style.display = 'none';
+  }
 }
 
 function showResult(job) {
@@ -690,6 +709,7 @@ async function showConfig() {
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
       document.getElementById('cfgSignature').value = c.signature || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
+      document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
     }
   }
@@ -703,6 +723,7 @@ async function saveConfig() {
     default_description_prompt: document.getElementById('cfgDescPrompt').value || 'youtube-summary',
     signature: document.getElementById('cfgSignature').value,
     post_publish_script: document.getElementById('cfgPostScript').value,
+    transcript_script: document.getElementById('cfgTranscriptScript').value,
     modal_usage_url: document.getElementById('cfgModalUsageUrl').value
   };
   const r = await fetch('/api/publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -723,6 +744,7 @@ async function toggleConfig() {
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
       document.getElementById('cfgSignature').value = c.signature || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
+      document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
       const link = document.getElementById('modalUsageLink');
       if (link && c.modal_usage_url) link.href = c.modal_usage_url;
@@ -840,8 +862,16 @@ async function refreshPool() {
     const redoPostPublishBtn = (item.status === 'finished' || item.status === 'error')
       ? `<button title="Redo post-publish only" onclick="poolRedoPostPublish('${item.source}')">📮</button>`
       : '';
+    const infoBtn = (item.status === 'finished' || item.status === 'error')
+      ? `<button title="Show info" onclick="poolShowInfo('${item.source}')">📋</button>`
+      : '';
+    const transcriptBtn = (item.status === 'finished' || item.status === 'error')
+      ? `<button title="Run transcript script" onclick="poolRunTranscriptScript('${item.source}')">📜</button>`
+      : '';
     const actions = `<span class="pool-actions">` +
       redoPostPublishBtn +
+      infoBtn +
+      transcriptBtn +
       `<button title="Redo" onclick="poolRedoItem('${item.source}')">🔄</button>` +
       `<button title="Remove" onclick="poolRemove('${item.source}')">✕</button>` +
       `</span>`;
@@ -853,7 +883,7 @@ async function refreshPool() {
   // Update review box for the currently processing pool item
   const processingItem = (data.items || []).find(i => i.status === 'processing' && i.job);
   if (processingItem && processingItem.job) {
-    updateReviewBox(processingItem.job);
+    updateReviewBox(processingItem.job, processingItem.source);
   }
 
   // Keep polling only while something is active
@@ -890,6 +920,120 @@ async function poolRemove(source) {
     body: JSON.stringify({ source })
   });
   refreshPool();
+}
+
+async function poolShowInfo(source) {
+  const r = await fetch('/api/publish/review-info', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source })
+  }).catch(() => null);
+  if (!r || !r.ok) return;
+  const data = await r.json();
+  const fakeJob = {
+    steps: [{status:'done'}, {status:'done'}, {status:'done'}, {status:'done'}],
+    title: data.title,
+    description: data.description,
+    transcript_text: data.transcript_text,
+  };
+  updateReviewBox(fakeJob, source);
+}
+
+let _transcriptJobId = null;
+let _transcriptPoolJobId = null;
+
+async function poolRunTranscriptScript(source) {
+  const statusEl = document.getElementById('transcriptScriptStatus');
+  statusEl.style.display = 'block';
+  statusEl.textContent = '📜 Running transcript script...';
+  const r = await fetch('/api/publish/run-transcript-script', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source })
+  }).catch(() => null);
+  if (!r || !r.ok) {
+    statusEl.textContent = '❌ Failed to start transcript script';
+    setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+    return;
+  }
+  const data = await r.json();
+  _transcriptPoolJobId = data.job_id;
+  pollTranscriptPoolJob();
+}
+
+async function pollTranscriptPoolJob() {
+  if (!_transcriptPoolJobId) return;
+  const r = await fetch('/api/publish/status/' + _transcriptPoolJobId).catch(() => null);
+  if (!r || !r.ok) { _transcriptPoolJobId = null; return; }
+  const j = await r.json();
+  const statusEl = document.getElementById('transcriptScriptStatus');
+  if (j.status === 'done' || j.status === 'error') {
+    const s6 = j.steps && j.steps[6];
+    if (s6 && s6.status === 'done') {
+      statusEl.textContent = '✅ Transcript script done';
+    } else if (s6 && s6.status === 'error') {
+      statusEl.textContent = '❌ Error: ' + (s6.output || '');
+    } else if (s6 && s6.status === 'skipped') {
+      statusEl.textContent = '⏭️ Skipped (no script configured)';
+    } else {
+      statusEl.textContent = '❌ Transcript script failed';
+    }
+    _transcriptPoolJobId = null;
+    setTimeout(() => { statusEl.style.display = 'none'; }, 8000);
+  } else {
+    statusEl.textContent = '📜 Running transcript script...';
+    setTimeout(pollTranscriptPoolJob, 1500);
+  }
+}
+
+async function runTranscriptScript() {
+  const source = _reviewSource;
+  if (!source) return;
+  const runBtn = document.getElementById('runTranscriptBtn');
+  const statusEl = document.getElementById('runTranscriptStatus');
+  runBtn.style.display = 'none';
+  statusEl.style.display = 'inline-block';
+  statusEl.textContent = '⏳ Running...';
+  const r = await fetch('/api/publish/run-transcript-script', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source })
+  }).catch(() => null);
+  if (!r || !r.ok) {
+    statusEl.textContent = '❌ Failed';
+    runBtn.style.display = 'inline-block';
+    return;
+  }
+  const data = await r.json();
+  _transcriptJobId = data.job_id;
+  pollTranscriptScriptStatus();
+}
+
+async function pollTranscriptScriptStatus() {
+  if (!_transcriptJobId) return;
+  const r = await fetch('/api/publish/status/' + _transcriptJobId).catch(() => null);
+  if (!r || !r.ok) { _transcriptJobId = null; return; }
+  const j = await r.json();
+  const statusEl = document.getElementById('runTranscriptStatus');
+  const runBtn = document.getElementById('runTranscriptBtn');
+  const s6 = j.steps && j.steps[6];
+  if (!s6) return;
+  if (s6.status === 'running') {
+    statusEl.textContent = '⏳ Running...';
+    setTimeout(pollTranscriptScriptStatus, 1500);
+  } else if (s6.status === 'done') {
+    statusEl.textContent = '✅ Done';
+    runBtn.style.display = 'inline-block';
+    _transcriptJobId = null;
+  } else if (s6.status === 'error') {
+    statusEl.textContent = '❌ Error: ' + (s6.output || 'unknown');
+    runBtn.style.display = 'inline-block';
+    _transcriptJobId = null;
+  } else if (s6.status === 'skipped') {
+    statusEl.textContent = '⏭️ Skipped (no script configured)';
+    runBtn.style.display = 'inline-block';
+    _transcriptJobId = null;
+  }
 }
 
 async function browserHide() {

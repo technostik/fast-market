@@ -53,7 +53,7 @@ def _is_intermediate(path: Path) -> bool:
     return bool(_INTERMEDIATE_RE.search(path.stem))
 
 
-from .pipeline import _run_pipeline_from, _run_post_publish_step  # noqa: E402
+from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script  # noqa: E402
 
 
 def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False) -> Job:
@@ -98,6 +98,7 @@ async def get_config():
         "video_extensions": pub.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
         "signature": pub.get("signature", ""),
         "post_publish_script": pub.get("post_publish_script", ""),
+        "transcript_script": pub.get("transcript_script", ""),
         "default_title_prompt": pub.get("default_title_prompt", "youtube-title"),
         "default_description_prompt": pub.get("default_description_prompt", "youtube-summary"),
         "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings/usage"),
@@ -109,6 +110,7 @@ class ConfigSaveRequest(BaseModel):
     video_extensions: str = DEFAULT_VIDEO_EXTENSIONS
     signature: str = ""
     post_publish_script: str = ""
+    transcript_script: str = ""
     default_title_prompt: str = "youtube-title"
     default_description_prompt: str = "youtube-summary"
     modal_usage_url: str = "https://modal.com/settings/usage"
@@ -121,6 +123,7 @@ async def save_config(req: ConfigSaveRequest):
     pub["video_extensions"] = req.video_extensions
     pub["signature"] = req.signature
     pub["post_publish_script"] = req.post_publish_script
+    pub["transcript_script"] = req.transcript_script
     pub["default_title_prompt"] = req.default_title_prompt
     pub["default_description_prompt"] = req.default_description_prompt
     pub["modal_usage_url"] = req.modal_usage_url
@@ -478,6 +481,84 @@ async def redo_post_publish(body: dict):
 
     _jobs[job_id] = job
     asyncio.create_task(_run_post_publish_step(job, final_video))
+    return {"job_id": job_id}
+
+
+@router.post("/review-info")
+async def review_info(body: dict):
+    source = str(Path(body.get("source", "")).expanduser().resolve())
+    if not Path(source).exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {source}")
+    meta = _load_meta(source)
+    title = meta.get("title", "")
+    description = meta.get("description", "")
+    transcript_text = meta.get("transcript_text", "")
+    files = meta.get("files", {})
+    if not transcript_text:
+        txt_path = files.get("transcript_txt", "")
+        if txt_path and Path(txt_path).exists():
+            transcript_text = Path(txt_path).read_text(encoding="utf-8")
+        else:
+            ass_path = files.get("transcript", "")
+            if ass_path and Path(ass_path).exists():
+                transcript_text = _ass_to_plain_text(ass_path)
+    return {"title": title, "description": description, "transcript_text": transcript_text}
+
+
+@router.post("/run-transcript-script")
+async def run_transcript_script(body: dict):
+    source = str(Path(body.get("source", "")).expanduser().resolve())
+    if not Path(source).exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {source}")
+    meta = _load_meta(source)
+    files = dict(meta.get("files", {}))
+    transcript_path = files.get("transcript_txt", "")
+    if not transcript_path or not Path(transcript_path).exists():
+        ass_path = files.get("transcript", "")
+        if ass_path and Path(ass_path).exists():
+            stem = _stem(source)
+            transcript_path = str(Path(source).parent / f"{stem}_transcript.txt")
+            plain = _ass_to_plain_text(ass_path)
+            Path(transcript_path).write_text(plain, encoding="utf-8")
+            files["transcript_txt"] = transcript_path
+        else:
+            raise HTTPException(status_code=400, detail="Transcript not found")
+
+    completed_before = set(meta.get("completed_steps", []))
+    skipped_before = set(meta.get("skipped_steps", []))
+
+    pub = _load_publish_cfg()
+    job_id = str(uuid.uuid4())
+    job = Job(
+        job_id=job_id,
+        source=source,
+        prompt_title=pub.get("default_title_prompt", ""),
+        prompt_summary=pub.get("default_description_prompt", ""),
+        do_remove_silence=False,
+        do_burn_subtitles=False,
+        simple_transcript=True,
+        language=pub.get("language", "fr"),
+        model=pub.get("model", "medium"),
+        privacy=pub.get("privacy", "unlisted"),
+        description_prefix=meta.get("description_prefix", ""),
+        source_urls=meta.get("source_urls", []),
+        skip_upload=True,
+        steps=[Step(name=n) for n in STEP_NAMES],
+        files=files,
+        title=meta.get("title", ""),
+        description=meta.get("description", ""),
+        transcript_text=meta.get("transcript_text", ""),
+    )
+    for i in range(6):
+        if i in completed_before:
+            job.steps[i].status = "done"
+        elif i in skipped_before:
+            job.steps[i].status = "skipped"
+        else:
+            job.steps[i].status = "skipped"
+
+    _jobs[job_id] = job
+    asyncio.create_task(_run_transcript_script(job, transcript_path))
     return {"job_id": job_id}
 
 

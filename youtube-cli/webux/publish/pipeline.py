@@ -516,3 +516,67 @@ async def _run_post_publish_step(job: Job, final_video: str) -> None:
 
     s5.end_time = time.time()
     _save_meta(job)
+
+
+async def _run_transcript_script(job: Job, transcript_path: str) -> None:
+    """Run step 6 (transcript script). Only triggered manually — never auto-started."""
+    pub_cfg = _load_publish_cfg()
+    s6 = job.steps[6]
+    s6.start_time = time.time()
+    s6.status = "running"
+    s6.output = ""
+
+    script = pub_cfg.get("transcript_script", "").strip()
+    if script:
+        script_path = Path(script)
+        print(f"[transcript-script] Running: bash {script_path}", flush=True)
+        if script_path.is_file():
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "bash", str(script_path), transcript_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=os.environ.copy(),
+                )
+
+                async def _stream(stream, prefix):
+                    while True:
+                        line = await stream.readline()
+                        if not line:
+                            break
+                        text = line.decode(errors="replace").rstrip()
+                        if text:
+                            print(f"[transcript-script]{prefix} {text}", flush=True)
+                            if s6.output:
+                                s6.output += "\n"
+                            s6.output += f"{prefix}{text}"
+
+                await asyncio.gather(
+                    _stream(proc.stdout, ""),
+                    _stream(proc.stderr, "[err]"),
+                    proc.wait(),
+                )
+                rc = proc.returncode
+                s6.status = "done" if rc == 0 else "error"
+                if rc != 0:
+                    print(f"[transcript-script] Script exited with code {rc}", flush=True)
+                    job.status = "error"
+                else:
+                    print("[transcript-script] Done.", flush=True)
+            except Exception as exc:
+                print(f"[transcript-script] Exception: {exc}", flush=True)
+                s6.output = str(exc)
+                s6.status = "error"
+                job.status = "error"
+        else:
+            msg = f"Script not found: {script}"
+            print(f"[transcript-script] {msg}", flush=True)
+            s6.output = msg
+            s6.status = "error"
+            job.status = "error"
+    else:
+        print("[transcript-script] No script configured — skipped.", flush=True)
+        s6.status = "skipped"
+
+    s6.end_time = time.time()
+    _save_meta(job)

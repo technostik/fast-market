@@ -13,6 +13,7 @@ STEP_NAMES = [
     "Generate title & description",
     "Upload to YouTube",
     "Post-publish script",
+    "Run transcript script",
 ]
 
 DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
@@ -25,6 +26,7 @@ _STEP_FILE_KEYS: list[list[str]] = [
     ["transcript", "transcript_txt"],
     ["subtitled"],
     ["final_video"],
+    [],
     [],
     [],
 ]
@@ -73,6 +75,7 @@ class Job:
         job_elapsed = (self.end_time - self.start_time) if self.end_time else (now - self.start_time)
         return {
             "job_id": self.job_id,
+            "source": self.source,
             "status": self.status,
             "video_url": self.video_url,
             "studio_url": self.studio_url,
