@@ -634,8 +634,18 @@ async function postSelected(){
   });
 
   spinner.style.display = 'none';
-  const body = await resp.json().catch(() => ({}));
   output.style.display = 'block';
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText || 'API request failed' }));
+    exitCode.textContent = `HTTP ${resp.status} ${resp.statusText}`;
+    exitCode.style.color = 'var(--error)';
+    errorEl.textContent = `API error: ${err.detail || 'unknown'}`;
+    logEl.textContent = `[HTTP ${resp.status}] POST /api/yt_poster/post — ${err.detail || resp.statusText}`;
+    return;
+  }
+
+  const body = await resp.json().catch(() => ({}));
   const rawOutput = body.output || '';
   const hasFailed = rawOutput.includes('Failed:') || rawOutput.includes('post_status":"error"');
   const hasErrors = rawOutput.includes('Error:') || rawOutput.includes('✗') || rawOutput.includes('quota');

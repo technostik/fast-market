@@ -89,8 +89,16 @@ def load(file: str = Query(...)) -> list:
 
 @router.post("/post")
 def post(payload: PostRequest) -> dict[str, int | str | bool]:
+    logger.info(
+        "yt_poster_post_start",
+        file=payload.file,
+        indices=payload.indices,
+        dry_run=payload.dry_run,
+    )
+
     source_path = _resolve_workdir_relative(payload.file)
     if not source_path.exists() or not source_path.is_file():
+        logger.warning("yt_poster_post_file_not_found", path=str(source_path))
         raise HTTPException(status_code=404, detail="Input file not found")
 
     data = _load_array(source_path)
@@ -112,6 +120,7 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
         cmd=" ".join(cmd),
         selected_count=len(selected),
         dry_run=payload.dry_run,
+        source_file=str(source_path),
     )
 
     report_path = source_path.parent / f"{source_path.stem}.batch-post-report.json"
@@ -129,12 +138,20 @@ def post(payload: PostRequest) -> dict[str, int | str | bool]:
             "command": cmd_str,
             "stdout": proc.stdout or "",
             "stderr": proc.stderr or "",
-            "output": output,  # combined for backward compatibility
+            "output": output,
             "items": selected,
         }
         report_path.write_text(
             json.dumps(report, ensure_ascii=False, indent=2),
             encoding="utf-8",
+        )
+
+        logger.info(
+            "yt_poster_post_done",
+            exit_code=proc.returncode,
+            output_length=len(output),
+            report=str(report_path),
+            post_type=post_type,
         )
 
         return {

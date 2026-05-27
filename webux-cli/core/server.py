@@ -159,13 +159,27 @@ def build_app(
     @app.middleware("http")
     async def lazy_api_mount(request: Request, call_next):
         path = request.url.path
+        mounted_this_request = False
+
         for plugin in manifests.values():
             if plugin.lazy and plugin.name not in mounted_routers:
                 prefix = f"/api/{plugin.name}"
                 if path == prefix or path.startswith(f"{prefix}/"):
                     _mount_plugin_router(app, plugin, mounted_routers)
                     logger.info("webux_plugin_lazy_mounted", name=plugin.name)
-                    break
+                    mounted_this_request = True
+
+        if path.startswith("/api/") and not mounted_this_request:
+            mounted_names = {p.name for p in manifests.values() if p.name in mounted_routers}
+            matched = any(path.startswith(f"/api/{n}/") or path == f"/api/{n}" for n in mounted_names)
+            if not matched:
+                logger.warning(
+                    "webux_no_matching_plugin",
+                    path=path,
+                    mounted=list(mounted_names),
+                    known=list(manifests.keys()),
+                )
+
         return await call_next(request)
 
     @app.get("/")
