@@ -124,6 +124,12 @@ async def _run_modal_steps(
             s0.progress = 100
             s0.output = f"⏱ Duration: {final:.0f}s" if final else ""
             job.files["no_silence"] = out_video_path
+            if final and final > 180:
+                s0.status = "error"
+                s0.output = "video too long"
+                job.status = "error"
+                _save_meta(job)
+                return out_video_path, ass_path, txt_path
         else:
             s0.status = "skipped"
 
@@ -202,7 +208,7 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
             duration = _get_video_duration(out_path)
             if duration > 180:
                 s0.end_time = time.time(); s0.status = "error"
-                s0.output += f"\n⏱ Video is {duration:.0f}s — exceeds 180s limit for YouTube Shorts."
+                s0.output += "\nvideo too long"
                 job.status = "error"; _save_meta(job); return
             s0.end_time = time.time(); s0.status = "done"; s0.progress = 100
             s0.output += f"\n⏱ Duration: {duration:.0f}s"
