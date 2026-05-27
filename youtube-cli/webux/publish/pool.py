@@ -55,6 +55,8 @@ def _load_pool_from_disk():
                 status="queued" if item.get("status") == "processing" else item.get("status", "queued"),
                 added_at=item.get("added_at", time.time()),
                 finished_at=item.get("finished_at"),
+                video_url=item.get("video_url", ""),
+                studio_url=item.get("studio_url", ""),
             )
             for item in data.get("items", [])
         ]
@@ -74,6 +76,8 @@ def _save_pool_to_disk():
                 "status": it.status,
                 "added_at": it.added_at,
                 "finished_at": it.finished_at,
+                "video_url": it.video_url,
+                "studio_url": it.studio_url,
             }
             for it in _pool
         ]
@@ -290,3 +294,17 @@ def clear_finished():
     global _pool
     _pool = [it for it in _pool if it.status != "finished"]
     _save_pool_to_disk()
+
+
+def find_pool_item(source: str) -> dict | None:
+    src = str(Path(source).expanduser().resolve())
+    for it in _pool:
+        if it.source == src:
+            return {
+                "source": it.source,
+                "description_prefix": it.description_prefix,
+                "source_urls": it.source_urls,
+                "video_url": it.video_url,
+                "studio_url": it.studio_url,
+            }
+    return None

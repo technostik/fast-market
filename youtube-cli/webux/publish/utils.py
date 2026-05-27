@@ -51,6 +51,10 @@ def _save_meta(job) -> None:
         meta["description_prefix"] = job.description_prefix
     if job.transcript_text:
         meta["transcript_text"] = job.transcript_text
+    if job.video_url:
+        meta["video_url"] = job.video_url
+    if job.studio_url:
+        meta["studio_url"] = job.studio_url
     try:
         with open(_meta_path(job.source), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)

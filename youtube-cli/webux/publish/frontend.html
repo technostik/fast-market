@@ -318,6 +318,30 @@
       <strong>Description:</strong>
       <div id="reviewDescription" class="review-content"></div>
     </div>
+    <div id="reviewDescPrefixSection" class="review-section" style="display:none;">
+      <strong>Description Prefix:</strong>
+      <div id="reviewDescPrefix" class="review-content"></div>
+    </div>
+    <div id="reviewLinksSection" class="review-section" style="display:none;">
+      <strong>Links:</strong>
+      <div id="reviewLinks" class="review-content"></div>
+    </div>
+    <div id="reviewVideoSection" class="review-section" style="display:none;">
+      <strong>Video:</strong>
+      <div><a id="reviewVideoLink" href="#" target="_blank" style="color:var(--link);font-size:12px;"></a></div>
+    </div>
+    <div id="reviewEditSection" class="review-section" style="display:none;">
+      <strong>Edit:</strong>
+      <div><a id="reviewEditLink" href="#" target="_blank" style="color:var(--link);font-size:12px;"></a></div>
+    </div>
+    <div id="reviewSourceSection" class="review-section" style="display:none;">
+      <strong>Source:</strong>
+      <div><a id="reviewSourceLink" href="#" style="color:var(--link);font-size:12px;"></a></div>
+    </div>
+    <div id="reviewFinalVideoSection" class="review-section" style="display:none;">
+      <strong>Final video:</strong>
+      <div><a id="reviewFinalVideoLink" href="#" style="color:var(--link);font-size:12px;"></a></div>
+    </div>
     <div class="review-section">
       <strong>Transcript:</strong>
       <div id="reviewTranscript" class="review-content"></div>
@@ -598,6 +622,75 @@ function updateReviewBox(job, source) {
   document.getElementById('reviewTitle').textContent = job.title;
   document.getElementById('reviewDescription').textContent = job.description || '';
   document.getElementById('reviewTranscript').textContent = job.transcript_text || '(transcript not available)';
+
+  // Description prefix
+  const prefixEl = document.getElementById('reviewDescPrefix');
+  const prefixSection = document.getElementById('reviewDescPrefixSection');
+  if (job.description_prefix) {
+    prefixEl.textContent = job.description_prefix;
+    prefixSection.style.display = '';
+  } else {
+    prefixSection.style.display = 'none';
+  }
+
+  // Links (source_urls)
+  const linksEl = document.getElementById('reviewLinks');
+  const linksSection = document.getElementById('reviewLinksSection');
+  if (job.source_urls && job.source_urls.length) {
+    linksEl.innerHTML = job.source_urls.map(u => `<a href="${u}" target="_blank" style="color:var(--link);">${u}</a>`).join('<br>');
+    linksSection.style.display = '';
+  } else {
+    linksSection.style.display = 'none';
+  }
+
+  // Video (YouTube URL)
+  const videoSection = document.getElementById('reviewVideoSection');
+  const videoLink = document.getElementById('reviewVideoLink');
+  if (job.video_url) {
+    videoLink.textContent = job.video_url;
+    videoLink.href = job.video_url;
+    videoSection.style.display = '';
+  } else {
+    videoSection.style.display = 'none';
+  }
+
+  // Edit (YouTube Studio URL)
+  const editSection = document.getElementById('reviewEditSection');
+  const editLink = document.getElementById('reviewEditLink');
+  if (job.studio_url) {
+    editLink.textContent = job.studio_url;
+    editLink.href = job.studio_url;
+    editSection.style.display = '';
+  } else {
+    editSection.style.display = 'none';
+  }
+
+  // Source file (click to preview)
+  const sourceSection = document.getElementById('reviewSourceSection');
+  const sourceLink = document.getElementById('reviewSourceLink');
+  if (source) {
+    const fileName = source.split('/').pop();
+    sourceLink.textContent = fileName;
+    sourceLink.href = '#';
+    sourceLink.onclick = (e) => { e.preventDefault(); previewFile(source); };
+    sourceSection.style.display = '';
+  } else {
+    sourceSection.style.display = 'none';
+  }
+
+  // Final video (click to preview)
+  const finalVideoSection = document.getElementById('reviewFinalVideoSection');
+  const finalVideoLink = document.getElementById('reviewFinalVideoLink');
+  if (job.final_video) {
+    const fileName = job.final_video.split('/').pop();
+    finalVideoLink.textContent = fileName;
+    finalVideoLink.href = '#';
+    finalVideoLink.onclick = (e) => { e.preventDefault(); previewFile(job.final_video); };
+    finalVideoSection.style.display = '';
+  } else {
+    finalVideoSection.style.display = 'none';
+  }
+
   box.style.display = 'block';
   // Show "Run transcript script" button when source is known and transcript is available
   const runBtn = document.getElementById('runTranscriptBtn');
@@ -971,8 +1064,13 @@ async function poolShowInfo(source) {
     title: data.title,
     description: data.description,
     transcript_text: data.transcript_text,
+    description_prefix: data.description_prefix,
+    source_urls: data.source_urls,
+    video_url: data.video_url,
+    studio_url: data.studio_url,
+    final_video: data.final_video,
   };
-  updateReviewBox(fakeJob, source);
+  updateReviewBox(fakeJob, data.source);
 }
 
 let _transcriptJobId = null;

@@ -532,7 +532,21 @@ async def review_info(body: dict):
             ass_path = files.get("transcript", "")
             if ass_path and Path(ass_path).exists():
                 transcript_text = _ass_to_plain_text(ass_path)
-    return {"title": title, "description": description, "transcript_text": transcript_text}
+    from .pool import find_pool_item
+    pool_item = find_pool_item(source)
+    video_url = meta.get("video_url", "") or (pool_item["video_url"] if pool_item else "")
+    studio_url = meta.get("studio_url", "") or (pool_item["studio_url"] if pool_item else "")
+    return {
+        "title": title,
+        "description": description,
+        "transcript_text": transcript_text,
+        "description_prefix": meta.get("description_prefix", ""),
+        "source_urls": meta.get("source_urls", []),
+        "video_url": video_url,
+        "studio_url": studio_url,
+        "source": source,
+        "final_video": meta.get("files", {}).get("final_video", ""),
+    }
 
 
 @router.post("/run-transcript-script")
