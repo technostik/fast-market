@@ -363,6 +363,7 @@ async def resume(req: ResumeRequest):
         files=files,
         title=meta.get("title", ""),
         description=meta.get("description", ""),
+        transcript_text=meta.get("transcript_text", ""),
     )
     for i in completed_before:
         if i < from_step:
@@ -464,6 +465,7 @@ async def redo_post_publish(body: dict):
         files=files,
         title=meta.get("title", ""),
         description=meta.get("description", ""),
+        transcript_text=meta.get("transcript_text", ""),
     )
     # Restore steps 0-4 from meta; step 5 starts fresh
     for i in range(5):

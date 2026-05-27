@@ -104,6 +104,15 @@
     }
     .resume-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
     .resume-row select { flex:1; max-width:220px; }
+    /* review box */
+    .review-box { display:none; margin-top:12px; padding:12px; border-radius:8px;
+                  background:var(--bg2); border:1px solid var(--warn); }
+    .review-box h3 { margin:0 0 10px; font-size:14px; color:var(--warn); }
+    .review-section { margin-bottom:10px; }
+    .review-section strong { display:block; font-size:12px; color:var(--dim); margin-bottom:3px; }
+    .review-content { font-size:12px; white-space:pre-wrap; word-break:break-word;
+                      background:#0f172a; border:1px solid var(--border); border-radius:4px;
+                      padding:8px; max-height:200px; overflow-y:auto; font-family:monospace; }
   </style>
 </head>
 <body>
@@ -287,6 +296,22 @@
   </div>
 
   <div class="steps" id="steps"></div>
+
+  <div id="reviewBox" class="review-box">
+    <h3>📋 Review Content</h3>
+    <div class="review-section">
+      <strong>Title:</strong>
+      <div id="reviewTitle" class="review-content"></div>
+    </div>
+    <div class="review-section">
+      <strong>Description:</strong>
+      <div id="reviewDescription" class="review-content"></div>
+    </div>
+    <div class="review-section">
+      <strong>Transcript:</strong>
+      <div id="reviewTranscript" class="review-content"></div>
+    </div>
+  </div>
 
   <div id="result" class="result">
     <div class="result-title" id="resultTitle"></div>
@@ -475,6 +500,7 @@ async function pollStatus() {
   }
   const j = await r.json();
   renderSteps(j);
+  updateReviewBox(j);
   if (j.status === 'done' || j.status === 'error') {
     showResult(j);
     document.getElementById('resumeBtn').style.display = 'none';
@@ -514,6 +540,19 @@ function renderSteps(job) {
     el.innerHTML = html;
     container.appendChild(el);
   }
+}
+
+function updateReviewBox(job) {
+  const box = document.getElementById('reviewBox');
+  const step3 = job.steps && job.steps[3];
+  if (!step3 || step3.status !== 'done' || !job.title) {
+    box.style.display = 'none';
+    return;
+  }
+  document.getElementById('reviewTitle').textContent = job.title;
+  document.getElementById('reviewDescription').textContent = job.description || '';
+  document.getElementById('reviewTranscript').textContent = job.transcript_text || '(transcript not available)';
+  box.style.display = 'block';
 }
 
 function showResult(job) {
@@ -810,6 +849,12 @@ async function refreshPool() {
     row.innerHTML = html;
     list.appendChild(row);
   });
+
+  // Update review box for the currently processing pool item
+  const processingItem = (data.items || []).find(i => i.status === 'processing' && i.job);
+  if (processingItem && processingItem.job) {
+    updateReviewBox(processingItem.job);
+  }
 
   // Keep polling only while something is active
   const hasActive = data.running || (data.items || []).some(

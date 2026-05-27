@@ -49,6 +49,8 @@ def _save_meta(job) -> None:
         meta["source_urls"] = job.source_urls
     if job.description_prefix:
         meta["description_prefix"] = job.description_prefix
+    if job.transcript_text:
+        meta["transcript_text"] = job.transcript_text
     try:
         with open(_meta_path(job.source), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)

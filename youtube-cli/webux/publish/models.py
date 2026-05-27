@@ -60,6 +60,7 @@ class Job:
     files: dict[str, str] = field(default_factory=dict)
     title: str = ""
     description: str = ""
+    transcript_text: str = ""
     status: str = "running"
     video_url: str = ""
     studio_url: str = ""
@@ -78,6 +79,7 @@ class Job:
             "modal_url": self.modal_url,
             "title": self.title,
             "description": self.description,
+            "transcript_text": self.transcript_text,
             "files": self.files,
             "start_time": self.start_time,
             "elapsed_seconds": round(job_elapsed, 1),

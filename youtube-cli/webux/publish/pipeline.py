@@ -110,8 +110,10 @@ async def _run_modal_steps(
         Path(ass_path).write_bytes(result["ass_bytes"])
 
     txt_path = str(d / f"{stem}_transcript.txt")
-    if result["ass_txt"]:
-        Path(txt_path).write_text(result["ass_txt"], encoding="utf-8")
+    ass_txt = result.get("ass_txt", "")
+    if ass_txt:
+        Path(txt_path).write_text(ass_txt, encoding="utf-8")
+        job.transcript_text = ass_txt
 
     # ── Update step statuses ───────────────────────────────────────────────
     if from_step <= 0:
@@ -139,7 +141,10 @@ async def _run_modal_steps(
         elapsed = round(now - s1.start_time, 1)
         s1.status = "done"
         s1.progress = 100
-        s1.output = f"Done in {elapsed}s [modal]"
+        s1_out = f"Done in {elapsed}s [modal]"
+        if job.transcript_text:
+            s1_out += f"\n\nTranscript:\n{job.transcript_text}"
+        s1.output = s1_out
         job.files["transcript"] = ass_path
         job.files["transcript_txt"] = txt_path
 
@@ -280,13 +285,14 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
         s1.end_time = time.time()
         elapsed_s = round(s1.end_time - s1.start_time, 1)
         mode_label = "simple" if job.simple_transcript else "advanced"
-        s1.output = f"Done in {elapsed_s}s [{mode_label} mode]"
-        s1.status = "done"; s1.progress = 100
         plain = _ass_to_plain_text(ass_path)
+        s1.output = f"Done in {elapsed_s}s [{mode_label} mode]\n\nTranscript:\n{plain}"
+        s1.status = "done"; s1.progress = 100
         with open(txt_path, "w", encoding="utf-8") as _f:
             _f.write(plain)
         job.files["transcript"] = ass_path
         job.files["transcript_txt"] = txt_path
+        job.transcript_text = plain
         _save_meta(job)
     else:
         ass_path = job.files.get("transcript") or ass_path
@@ -392,7 +398,20 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             final_video = renamed_path
             job.files["final_video"] = final_video
 
-        s3.output = f"Title: {job.title[:80]}"
+        transcript_text = job.transcript_text
+        if not transcript_text and transcript_path and Path(transcript_path).exists():
+            try:
+                transcript_text = Path(transcript_path).read_text(encoding="utf-8")
+            except Exception:
+                transcript_text = "(transcript unavailable)"
+        elif not transcript_text:
+            transcript_text = "(transcript unavailable)"
+
+        s3.output = (
+            f"Title: {job.title}\n\n"
+            f"Description:\n{job.description}\n\n"
+            f"Transcript:\n{transcript_text}"
+        )
         s3.end_time = time.time(); s3.status = "done"
         _save_meta(job)
     else:
