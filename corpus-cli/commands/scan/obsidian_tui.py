@@ -69,6 +69,7 @@ class ObsidianScanApp(App[None]):
         Binding("i", "include",     "Include",    show=True),
         Binding("r", "remove",      "Remove",     show=True),
         Binding("x", "exclude",     "Exclude",    show=True),
+        Binding("c", "clean",       "Clean",      show=True),
         Binding("f", "toggle_view", "Full/New",   show=True),
         Binding("q", "quit",        "Quit",       show=True),
     ]
@@ -301,6 +302,21 @@ class ObsidianScanApp(App[None]):
             self.store.upsert_pool_item("obsidian", rel, _STATUS_EXCLUDED, {}, added_at=now)
             self._status_map[rel] = _STATUS_EXCLUDED
         self.notify(f"Excluded {len(targets)} file(s).", timeout=2)
+        self._refresh_tree()
+
+    def action_clean(self) -> None:
+        nd = self._current_node
+        if nd is None:
+            return
+        targets = self._collect_with_status(nd, {_STATUS_SYNCED})
+        if not targets:
+            self._notify_empty("clean")
+            return
+        for rel in targets:
+            self.store.delete_document("obsidian", rel)
+            self.store.remove_from_pool("obsidian", rel)
+            del self._status_map[rel]
+        self.notify(f"Cleaned {len(targets)} file(s) from corpus.", timeout=2)
         self._refresh_tree()
 
     def action_toggle_view(self) -> None:

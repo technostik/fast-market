@@ -106,7 +106,9 @@ def _scan_youtube(plugin, store, debug: bool) -> None:
             if old_privacy != new_privacy:
                 # Privacy changed — update metadata in pool
                 store.upsert_pool_item(
-                    "youtube", sid, pool_status, item.metadata or {}, added_at=existing["added_at"]
+                    "youtube", sid, pool_status,
+                    _yt_meta(item),
+                    added_at=existing["added_at"],
                 )
                 refreshed += 1
                 # Re-queue failed items that are now public so the next sync
@@ -116,7 +118,7 @@ def _scan_youtube(plugin, store, debug: bool) -> None:
                     requeued += 1
         elif sid not in indexed_ids:
             # Genuinely new video — not yet in pool or indexed
-            store.upsert_pool_item("youtube", sid, "pending", item.metadata or {}, added_at=now)
+            store.upsert_pool_item("youtube", sid, "pending", _yt_meta(item), added_at=now)
             added += 1
 
     pool_stats = store.pool_stats()
@@ -129,6 +131,15 @@ def _scan_youtube(plugin, store, debug: bool) -> None:
         f"synced={yt_pool.get('synced', 0)}  "
         f"failed={yt_pool.get('failed', 0)}]"
     )
+
+
+def _yt_meta(item) -> dict:
+    """Pool metadata for a YouTube ItemMeta — always includes updated_at so
+    sync_pool_items can reconstruct the publication date from the pool."""
+    meta = dict(item.metadata or {})
+    if item.updated_at and "updated_at" not in meta:
+        meta["updated_at"] = item.updated_at.isoformat()
+    return meta
 
 
 def _scan_obsidian(plugin, store) -> None:

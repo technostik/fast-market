@@ -118,7 +118,8 @@ class ObsidianPlugin(SourcePlugin):
         links = re.findall(r"\[\[([^\]]+)\]\]", body)
         plain = re.sub(r"\[\[([^\]]+)\]\]", r"\1", body)
 
-        size_bytes = (item_meta.metadata or {}).get("size_bytes", 0)
+        stat = path.stat()
+        size_bytes = stat.st_size
         logger.info(
             "indexed_note",
             title=path.stem,
@@ -130,13 +131,40 @@ class ObsidianPlugin(SourcePlugin):
         metadata["vault_path"] = str(self.vault)
         metadata["size_bytes"] = size_bytes
 
+        # Prefer frontmatter date (captures when the idea was written) over mtime.
+        # mtime changes on every edit; frontmatter date is stable.
+        note_date: datetime | None = _frontmatter_date(metadata)
+        if note_date is None:
+            note_date = datetime.fromtimestamp(stat.st_mtime)
+
         return Document(
             source_plugin=self.name,
             source_id=item_meta.source_id,
             title=path.stem,
             raw_text=plain,
-            updated_at=item_meta.updated_at,
+            updated_at=note_date,
             metadata=metadata,
             tags=sorted(tags),
             links=links,
         )
+
+
+_FRONTMATTER_DATE_KEYS = ("date", "created", "created_at", "date_created")
+
+
+def _frontmatter_date(meta: dict) -> datetime | None:
+    import datetime as _dt_mod
+    for key in _FRONTMATTER_DATE_KEYS:
+        val = meta.get(key)
+        if val is None:
+            continue
+        if isinstance(val, datetime):
+            return val
+        if isinstance(val, _dt_mod.date) and not isinstance(val, datetime):
+            return datetime(val.year, val.month, val.day)
+        if isinstance(val, str):
+            try:
+                return datetime.fromisoformat(val)
+            except ValueError:
+                pass
+    return None
