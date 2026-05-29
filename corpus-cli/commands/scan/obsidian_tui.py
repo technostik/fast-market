@@ -1,6 +1,8 @@
 """Interactive Textual TUI for selecting Obsidian notes to add to the sync pool."""
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -9,8 +11,9 @@ from typing import TYPE_CHECKING
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
-from textual.widgets import Footer, Header, Markdown, Tree
+from textual.containers import Horizontal, Vertical
+from textual.events import Key
+from textual.widgets import Footer, Header, Input, Label, Markdown, Tree
 from textual import on
 
 if TYPE_CHECKING:
@@ -53,6 +56,21 @@ class ObsidianScanApp(App[None]):
     """Navigate the Obsidian vault and add/remove/exclude files from the sync pool."""
 
     CSS = """
+    #search-row {
+        height: 3;
+        border-bottom: solid $panel-darken-2;
+        padding: 0 1;
+    }
+    #search-mode-label {
+        width: 13;
+        content-align: center middle;
+        padding: 0 1;
+        margin-right: 1;
+        color: $accent;
+    }
+    #search-input {
+        width: 1fr;
+    }
     #tree-pane {
         width: 40%;
         border-right: solid $panel-darken-2;
@@ -66,12 +84,13 @@ class ObsidianScanApp(App[None]):
     """
 
     BINDINGS = [
-        Binding("i", "include",     "Include",    show=True),
-        Binding("r", "remove",      "Remove",     show=True),
-        Binding("x", "exclude",     "Exclude",    show=True),
-        Binding("c", "clean",       "Clean",      show=True),
-        Binding("f", "toggle_view", "Full/New",   show=True),
-        Binding("q", "quit",        "Quit",       show=True),
+        Binding("i", "include",      "Include",  show=True),
+        Binding("r", "remove",       "Remove",   show=True),
+        Binding("x", "exclude",      "Exclude",  show=True),
+        Binding("c", "clean",        "Clean",    show=True),
+        Binding("/", "focus_search", "Search",   show=True),
+        Binding("f", "toggle_view",  "Full/New", show=True),
+        Binding("q", "quit",         "Quit",     show=True),
     ]
 
     def __init__(
@@ -89,11 +108,20 @@ class ObsidianScanApp(App[None]):
         self._full_view = False
         self._current_node: NodeData | None = None
         self._dir_stats_cache: dict[str, DirStats] = {}
+        self._search_text: str = ""
+        self._search_mode: str = "title"  # "title" | "content"
+        self._search_timer = None
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
         yield Header()
+        with Horizontal(id="search-row"):
+            yield Label("[ Title ]", id="search-mode-label")
+            yield Input(
+                placeholder="/ to search  ·  Tab: title/content  ·  Esc: clear",
+                id="search-input",
+            )
         with Horizontal():
             yield Tree(
                 Text.from_markup(f"[bold]📁 {self.vault.name}/[/]"),
@@ -107,17 +135,82 @@ class ObsidianScanApp(App[None]):
         self.title = "Corpus Scan — Obsidian"
         self._refresh_tree()
 
+    # ── Search ───────────────────────────────────────────────────────────────
+
+    def action_focus_search(self) -> None:
+        self.query_one("#search-input", Input).focus()
+
+    def _toggle_search_mode(self) -> None:
+        self._search_mode = "content" if self._search_mode == "title" else "title"
+        label = self.query_one("#search-mode-label", Label)
+        if self._search_mode == "content":
+            label.update("[Content]")
+        else:
+            label.update("[ Title ]")
+        self._refresh_tree()
+
+    def on_key(self, event: Key) -> None:
+        search_input = self.query_one("#search-input", Input)
+        if not search_input.has_focus:
+            return
+        if event.key == "tab":
+            event.prevent_default()
+            self._toggle_search_mode()
+        elif event.key == "escape":
+            search_input.clear()
+            self.set_focus(self.query_one("#tree-pane", Tree))
+
+    @on(Input.Changed, "#search-input")
+    def _on_search_changed(self, event: Input.Changed) -> None:
+        self._search_text = event.value
+        if self._search_timer is not None:
+            self._search_timer.stop()
+        self._search_timer = self.set_timer(0.25, self._refresh_tree)
+
+    def _matching_paths(self) -> set[str] | None:
+        """Returns matching rel paths for current search query, or None if search is empty."""
+        query = _normalize(self._search_text)
+        if not query:
+            return None
+        matches: set[str] = set()
+        for f in self.vault.rglob("*.md"):
+            rel_parts = f.relative_to(self.vault).parts
+            if any(part in self._exclude_dirs for part in rel_parts[:-1]):
+                continue
+            rel = f.relative_to(self.vault).as_posix()
+            if self._search_mode == "title":
+                if query in _normalize(f.stem):
+                    matches.add(rel)
+            else:
+                try:
+                    content = f.read_text(encoding="utf-8", errors="replace")
+                    if query in _normalize(content):
+                        matches.add(rel)
+                except Exception:
+                    pass
+        return matches
+
     # ── Tree construction ────────────────────────────────────────────────────
 
     def _refresh_tree(self) -> None:
         self._dir_stats_cache = self._compute_all_stats()
+        matching = self._matching_paths()
         tree = self.query_one("#tree-pane", Tree)
+
+        # Snapshot expanded dirs before tearing down so we can restore them.
+        previously_expanded = _collect_expanded(tree.root)
+
         for child in list(tree.root.children):
             child.remove()
-        self._populate_dir(tree.root, self.vault, "")
+        self._populate_dir(tree.root, self.vault, "", matching)
         tree.root.expand()
+
+        if matching is None:
+            # Normal mode: restore user's open dirs.
+            _restore_expanded(tree.root, previously_expanded)
+        # Search mode: _populate_dir already expanded all matching dirs.
+
         self._update_subtitle()
-        # Refresh preview for current node (stats may have changed)
         self._update_preview(self._current_node)
 
     def _compute_all_stats(self) -> dict[str, DirStats]:
@@ -141,7 +234,13 @@ class ObsidianScanApp(App[None]):
                 _inc(stats, "", status)
         return stats
 
-    def _populate_dir(self, node, directory: Path, dir_rel: str) -> bool:
+    def _populate_dir(
+        self,
+        node,
+        directory: Path,
+        dir_rel: str,
+        matching: set[str] | None = None,
+    ) -> bool:
         has_visible = False
         try:
             entries = sorted(
@@ -160,19 +259,27 @@ class ObsidianScanApp(App[None]):
                 s = self._dir_stats_cache.get(child_rel, DirStats())
                 if s.total == 0:
                     continue
-                if not self._full_view and s.actionable == 0:
+                # When searching, skip the actionable filter — show all dirs with matches.
+                if matching is None and not self._full_view and s.actionable == 0:
                     continue
                 label = _dir_label(entry.name, s, self._full_view)
                 child = node.add(label, data=NodeData(child_rel, True, entry))
-                if not self._populate_dir(child, entry, child_rel):
+                if not self._populate_dir(child, entry, child_rel, matching):
                     child.remove()
                 else:
                     has_visible = True
+                    if matching is not None:
+                        child.expand()
 
             elif entry.suffix == ".md":
+                if matching is not None:
+                    if child_rel not in matching:
+                        continue
+                else:
+                    status = self._status_map.get(child_rel, _STATUS_NEW)
+                    if not self._full_view and status in (_STATUS_SYNCED, _STATUS_EXCLUDED):
+                        continue
                 status = self._status_map.get(child_rel, _STATUS_NEW)
-                if not self._full_view and status in (_STATUS_SYNCED, _STATUS_EXCLUDED):
-                    continue
                 node.add_leaf(
                     _file_label(entry.name, status),
                     data=NodeData(child_rel, False, entry),
@@ -183,24 +290,33 @@ class ObsidianScanApp(App[None]):
 
     def _update_subtitle(self) -> None:
         root = self._dir_stats_cache.get("", DirStats())
-        mode = "[bold green]New only[/]" if not self._full_view else "[bold yellow]Full[/]"
+        if self._search_text:
+            mode_str = f"[bold cyan]Search: {self._search_mode}[/]"
+        elif not self._full_view:
+            mode_str = "[bold green]New only[/]"
+        else:
+            mode_str = "[bold yellow]Full[/]"
         self.sub_title = (
             f"Pool: {root.pending} pending  "
             f"| {root.new} new  "
             f"| {root.synced} synced  "
-            f"| View: {mode}"
+            f"| View: {mode_str}"
         )
 
     # ── Preview ──────────────────────────────────────────────────────────────
 
     def _update_preview(self, nd: NodeData | None) -> None:
         content = self._preview_content(nd)
-        preview = self.query_one("#preview-pane", Markdown)
 
-        async def _do_update() -> None:
+        async def _do() -> None:
+            preview = self.query_one("#preview-pane", Markdown)
             await preview.update(content)
 
-        self.run_worker(_do_update(), exclusive=True, group="preview")
+        # Pass the callable _do (not the coroutine _do()) so Textual only creates
+        # the coroutine when it actually runs the worker.  If exclusive=True cancels
+        # a previous worker before it starts, no coroutine is ever created for it
+        # and Python won't warn "coroutine was never awaited".
+        self.run_worker(_do, exclusive=True, group="preview")
 
     def _preview_content(self, nd: NodeData | None) -> str:
         if nd is None:
@@ -341,6 +457,39 @@ class ObsidianScanApp(App[None]):
     def action_toggle_view(self) -> None:
         self._full_view = not self._full_view
         self._refresh_tree()
+
+
+# ── Normalisation ─────────────────────────────────────────────────────────────
+
+def _normalize(text: str) -> str:
+    """Accent-insensitive, case-insensitive, separator-insensitive normalisation.
+
+    Strips combining diacritics, lowercases, and removes -, _, and whitespace so
+    that e.g. "Héllo-World", "hello world", "hello_world" all normalise to "helloworld".
+    """
+    nfkd = unicodedata.normalize("NFKD", text)
+    no_accents = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return re.sub(r"[-_\s]+", "", no_accents.lower())
+
+
+# ── Tree expand helpers ───────────────────────────────────────────────────────
+
+def _collect_expanded(node) -> set[str]:
+    """Return rel_paths of every currently-expanded directory node."""
+    result: set[str] = set()
+    for child in node.children:
+        if child.is_expanded and child.data is not None and child.data.is_dir:
+            result.add(child.data.rel_path)
+        result |= _collect_expanded(child)
+    return result
+
+
+def _restore_expanded(node, expanded: set[str]) -> None:
+    """Expand any node whose rel_path appears in *expanded*."""
+    for child in node.children:
+        if child.data is not None and child.data.is_dir and child.data.rel_path in expanded:
+            child.expand()
+        _restore_expanded(child, expanded)
 
 
 # ── Label helpers ─────────────────────────────────────────────────────────────
