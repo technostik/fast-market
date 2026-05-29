@@ -126,15 +126,6 @@ class SQLAlchemyStore:
             logger.info("db_migration_complete", backend="sqlalchemy", target="memory")
             return
 
-        try:
-            with self.engine.connect() as conn:
-                result = conn.execute(text("SELECT version_num FROM alembic_version"))
-                current_version = result.scalar()
-                logger.info("db_already_migrated", version=current_version)
-                return
-        except Exception:
-            pass
-
         alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
         expanded = Path(self._path).expanduser()
         run_alembic_migrations(
@@ -142,7 +133,11 @@ class SQLAlchemyStore:
             alembic_ini,
             db_url_override=f"sqlite+pysqlite:///{expanded}",
         )
-        logger.info("db_migration_complete", backend="sqlalchemy", path=str(expanded))
+        with self.engine.connect() as conn:
+            current_version = conn.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar()
+        logger.info("db_migration_complete", backend="sqlalchemy", version=current_version)
 
     def _session(self):
         return session_scope(self.SessionLocal)

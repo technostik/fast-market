@@ -65,9 +65,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--silent", "-s", is_flag=True, default=False)
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
     @click.option("--debug", is_flag=True, default=False)
-    # Legacy options kept for backfill/reindex bypass path
+    @click.option(
+        "--non-public",
+        is_flag=True,
+        default=False,
+        help=(
+            "Sync non-public videos (private/unlisted/members-only) using YouTube API captions. "
+            "Without this flag only public videos are processed (RSS/transcript-api)."
+        ),
+    )
+    # Legacy: kept for backfill bypass path only
     @click.option("--use-api", is_flag=True, default=False, hidden=True)
-    @click.option("--non-public", is_flag=True, default=False, hidden=True)
     @click.pass_context
     def sync_cmd(
         ctx,
@@ -156,6 +164,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 status="pending",
                 limit=effective_limit or None,
             )
+
+            # YouTube: route public vs non-public to different transcript methods.
+            # Public videos use RSS/youtube-transcript-api (no API quota for fetching).
+            # Non-public videos require YouTube API captions (needs OAuth).
+            if name == "youtube":
+                if non_public:
+                    pool_items = [
+                        i for i in pool_items
+                        if (i.get("metadata") or {}).get("privacy_status", "unknown") != "public"
+                    ]
+                else:
+                    pool_items = [
+                        i for i in pool_items
+                        if (i.get("metadata") or {}).get("privacy_status", "public") == "public"
+                    ]
 
             if not pool_items:
                 results.append(

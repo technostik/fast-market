@@ -99,33 +99,28 @@ class YouTubePlugin(SourcePlugin):
         known_id_dates: dict[str, datetime | None] | None = None,
         use_api: bool = False,
         non_public: bool = False,
+        scan_all: bool = False,
         debug: bool = False,
     ) -> list[ItemMeta]:
-        logger.warning(
-            "DEBUG: YouTubePlugin.list_items called",
+        logger.info(
+            "youtube_list_items",
             non_public=non_public,
             use_api=use_api,
-            debug=debug,
+            scan_all=scan_all,
             limit=limit,
             known_ids_count=len(known_id_dates or {}),
         )
 
+        if scan_all:
+            return self._list_items_via_api(
+                limit, known_id_dates, scan_all=True, debug=debug
+            )
         if non_public:
-            if debug:
-                logger.info(
-                    "DEBUG: Calling _list_items_via_api with include_non_public=True"
-                )
             return self._list_items_via_api(
                 limit, known_id_dates, include_non_public=True, debug=debug
             )
         if use_api:
-            if debug:
-                logger.info(
-                    "DEBUG: Calling _list_items_via_api with include_non_public=False"
-                )
             return self._list_items_via_api(limit, known_id_dates, debug=debug)
-        if debug:
-            logger.info("DEBUG: Calling _list_items_via_rss")
         return self._list_items_via_rss(limit, known_id_dates, debug=debug)
 
     def _list_items_via_api(
@@ -133,140 +128,85 @@ class YouTubePlugin(SourcePlugin):
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
         include_non_public: bool = False,
+        scan_all: bool = False,
         debug: bool = False,
     ) -> list[ItemMeta]:
         from googleapiclient.errors import HttpError
 
-        logger.warning(
-            "DEBUG: _list_items_via_api called",
-            limit=limit,
-            include_non_public=include_non_public,
-            debug=debug,
-        )
-
         known = set(known_id_dates or {})
         all_new: list[ItemMeta] = []
+        skipped_known = 0
         skipped_privacy = 0
-        skipped_indexed = 0
 
-        logger.info("youtube_api_list_videos", channel_id=self.channel_id)
+        logger.info(
+            "youtube_api_list_videos",
+            channel_id=self.channel_id,
+            scan_all=scan_all,
+            include_non_public=include_non_public,
+        )
         client = self._get_api_client(debug=debug)
 
-        if debug:
-            logger.info("DEBUG: YouTube API client initialized successfully")
-
-        max_fetch = limit * 50
-        if include_non_public:
-            # For non-public videos, we may need to search deeper into the channel history
-            # since many recent videos may already be indexed
-            max_fetch = max(
-                max_fetch, 500
-            )  # Fetch more for non-public to find unindexed videos
+        # scan_all and include_non_public both need the full-channel batch approach
+        # (get_all_owned_videos) which returns every video regardless of privacy status.
+        # Public-only mode uses the lighter get_channel_videos call.
+        use_batch = include_non_public or scan_all
 
         try:
-            if include_non_public:
-                # Fetch videos in batches until we find unindexed ones
+            if use_batch:
                 videos = []
                 page_token = None
                 batch_size = 100
-                max_batches = 10  # Limit to avoid excessive API usage
+                max_batches = 10  # caps at ~1 000 videos
 
                 for batch_num in range(max_batches):
-                    if debug:
-                        logger.warning(
-                            "DEBUG: Fetching batch",
-                            batch=batch_num + 1,
-                            batch_size=batch_size,
-                            total_so_far=len(videos),
-                        )
-
                     batch_videos, page_token = client.get_all_owned_videos(
                         self.channel_id, max_results=batch_size, page_token=page_token
                     )
-
                     if debug:
-                        logger.warning(
-                            "DEBUG: Batch returned videos", count=len(batch_videos)
+                        logger.info(
+                            "youtube_api_batch",
+                            batch=batch_num + 1,
+                            returned=len(batch_videos),
+                            total_so_far=len(videos) + len(batch_videos),
                         )
-
                     if not batch_videos:
                         break
-
                     videos.extend(batch_videos)
 
-                    # Count unindexed non-public videos found so far
-                    unindexed_non_public = [
-                        v
-                        for v in videos
-                        if v.video_id not in known
-                        and (v.privacy_status or "unknown") not in _PUBLIC_STATUSES
-                    ]
-                    if debug:
-                        logger.warning(
-                            "DEBUG: Unindexed non-public videos so far",
-                            count=len(unindexed_non_public),
-                            need=limit,
-                        )
+                    # Early-stop only when hunting for non-public specifically
+                    if include_non_public and not scan_all:
+                        unindexed_non_public = [
+                            v for v in videos
+                            if v.video_id not in known
+                            and (v.privacy_status or "unknown") not in _PUBLIC_STATUSES
+                        ]
+                        if len(unindexed_non_public) >= limit:
+                            break
 
-                    # Stop once we have enough unindexed non-public videos
-                    if len(unindexed_non_public) >= limit:
-                        if debug:
-                            logger.warning(
-                                "DEBUG: Found enough non-public unindexed videos, stopping"
-                            )
-                        break
-
-                    # If no more pages, stop
                     if not page_token:
-                        if debug:
-                            logger.warning("DEBUG: No more pages available")
                         break
 
-                if debug:
-                    logger.warning(
-                        "DEBUG: Total videos fetched across batches", count=len(videos)
-                    )
-                    privacy_counts = {}
-                    for v in videos:
-                        privacy = v.privacy_status or "unknown"
-                        privacy_counts[privacy] = privacy_counts.get(privacy, 0) + 1
-                    logger.warning("DEBUG: Privacy status breakdown", **privacy_counts)
-
+                # Supplement with any configured members-only video IDs
                 yt_cfg = self._get_config().get("youtube", {})
                 members_ids = yt_cfg.get("members_video_ids", [])
-                if debug:
-                    logger.warning(
-                        "DEBUG: Members video IDs configured",
-                        count=len(members_ids),
-                        ids=members_ids,
-                    )
-
                 if members_ids:
                     fetched_ids = {v.video_id for v in videos}
                     extra_ids = [vid for vid in members_ids if vid not in fetched_ids]
-                    if debug:
-                        logger.warning(
-                            "DEBUG: Fetching additional member videos",
-                            count=len(extra_ids),
-                            ids=extra_ids,
-                        )
                     if extra_ids:
-                        extra = client.get_videos_by_ids(extra_ids)
-                        videos.extend(extra)
-                        if debug:
-                            logger.warning(
-                                "DEBUG: Total videos after adding members",
-                                total=len(videos),
-                            )
+                        videos.extend(client.get_videos_by_ids(extra_ids))
+
+                if debug:
+                    privacy_counts: dict[str, int] = {}
+                    for v in videos:
+                        p = v.privacy_status or "unknown"
+                        privacy_counts[p] = privacy_counts.get(p, 0) + 1
+                    logger.info("youtube_api_privacy_breakdown", **privacy_counts)
             else:
+                max_fetch = min(limit * 50, 500)
+                videos = client.get_channel_videos(self.channel_id, max_results=max_fetch)
                 if debug:
-                    logger.info("DEBUG: Fetching public channel videos")
-                    logger.info("DEBUG: Max results", max_results=max_fetch)
-                videos = client.get_channel_videos(
-                    self.channel_id, max_results=max_fetch
-                )
-                if debug:
-                    logger.info("DEBUG: API returned videos", count=len(videos))
+                    logger.info("youtube_api_public_fetch", returned=len(videos))
+
         except HttpError as e:
             if e.resp.status == 403 and "quota" in str(e).lower():
                 logger.error("youtube_api_quota_exceeded", channel_id=self.channel_id)
@@ -277,22 +217,19 @@ class YouTubePlugin(SourcePlugin):
 
         for video in videos:
             if video.video_id in known:
-                skipped_indexed += 1
+                skipped_known += 1
                 continue
 
             privacy = video.privacy_status or "unknown"
 
-            if include_non_public:
+            if scan_all:
+                pass  # No privacy filter — return everything
+            elif include_non_public:
                 if privacy in _PUBLIC_STATUSES:
-                    continue
+                    continue  # scan non-public only
             elif not self.index_non_public and privacy not in _PUBLIC_STATUSES:
-                logger.info(
-                    "video_skipped_privacy",
-                    video_id=video.video_id,
-                    privacy_status=privacy,
-                )
                 skipped_privacy += 1
-                continue
+                continue  # scan public only
 
             duration = 0
             if video.duration:
@@ -331,27 +268,11 @@ class YouTubePlugin(SourcePlugin):
                 )
             )
 
-        if debug and all_new:
-            # Calculate date range
-            dates = [item.updated_at for item in all_new if item.updated_at]
-            if dates:
-                min_date = min(dates)
-                max_date = max(dates)
-                logger.info(
-                    "DEBUG: Date range of videos found",
-                    min_date=min_date.isoformat(),
-                    max_date=max_date.isoformat(),
-                )
-            logger.info(
-                "DEBUG: Sample video metadata",
-                video_0=all_new[0].metadata if all_new else None,
-            )
-
         logger.info(
             "api_fetched",
             source=self.name,
             total_api=len(videos),
-            already_indexed=skipped_indexed,
+            already_known=skipped_known,
             skipped_privacy=skipped_privacy,
             new_available=len(all_new),
         )
