@@ -216,6 +216,96 @@ class SyncEngine:
             plugin.name, processed, indexed, skipped, failures, warning=warning
         )
 
+    def sync_pool_items(
+        self,
+        plugin: SourcePlugin,
+        pool_items: list[dict],
+        vault_path: str | None = None,
+    ) -> SyncResult:
+        """Fetch and index items that were previously discovered by scan.
+
+        Each pool_item dict has keys: source_plugin, source_id, metadata, added_at, synced_at.
+        On success the caller is responsible for marking the pool item as 'synced'.
+        """
+        from plugins.base import ItemMeta
+        from datetime import datetime as _dt
+
+        permanent_failures = self.store.get_permanent_failures(plugin.name)
+        processed = indexed = skipped = 0
+        failures: list[SyncFailure] = []
+
+        for item_dict in pool_items:
+            source_id = item_dict["source_id"]
+            if source_id in permanent_failures:
+                skipped += 1
+                continue
+
+            meta = item_dict.get("metadata") or {}
+            updated_raw = meta.get("updated_at") or item_dict.get("added_at")
+            try:
+                updated_at = _dt.fromisoformat(updated_raw) if updated_raw else None
+            except (ValueError, TypeError):
+                updated_at = None
+
+            item_meta = ItemMeta(
+                source_id=source_id,
+                updated_at=updated_at,
+                metadata=meta,
+            )
+            processed += 1
+            try:
+                document = plugin.fetch(item_meta)
+                document.handle = make_handle(
+                    document.source_plugin, document.source_id, document.title
+                )
+                content_hash = self.embedder.hash_text(document.raw_text)
+                changed = self.store.upsert_document(document, content_hash)
+
+                if not changed:
+                    skipped += 1
+                    _log_item(plugin.name, document, "skipped")
+                    self.store.mark_pool_item(plugin.name, source_id, "synced")
+                    continue
+
+                chunks = self._build_chunks(document)
+                self.store.replace_chunks(document.source_plugin, document.source_id, chunks)
+                self.store.clear_failure(plugin.name, source_id)
+                self.store.mark_pool_item(plugin.name, source_id, "synced")
+                indexed += 1
+                _log_item(plugin.name, document, "indexed", chunks=len(chunks))
+
+            except SyncError as exc:
+                error_type = "permanent" if exc.permanent else "transient"
+                self.store.record_failure(plugin.name, source_id, str(exc), error_type, vault_path)
+                self.store.mark_pool_item(plugin.name, source_id, "failed")
+                logger.error(
+                    "sync_item_failed",
+                    source=plugin.name,
+                    source_id=source_id,
+                    error_type=error_type,
+                    error=str(exc),
+                )
+                failures.append(SyncFailure(source_id=source_id, error=str(exc)))
+            except Exception as exc:
+                self.store.record_failure(plugin.name, source_id, str(exc), "transient", vault_path)
+                self.store.mark_pool_item(plugin.name, source_id, "failed")
+                logger.error(
+                    "sync_item_failed",
+                    source=plugin.name,
+                    source_id=source_id,
+                    error_type="transient",
+                    error=str(exc),
+                )
+                failures.append(SyncFailure(source_id=source_id, error=str(exc)))
+
+        warning: str | None = None
+        if processed == 0 and not pool_items:
+            warning = f"No pending items in pool for {plugin.name}."
+        elif processed == 0 and pool_items:
+            warning = f"All {len(pool_items)} pool items skipped (permanent failures)."
+
+        return SyncResult(plugin.name, processed, indexed, skipped, failures, warning=warning)
+
     def reindex(self, plugin: SourcePlugin) -> ReindexResult:
         rows = self.store.get_documents_raw(plugin.name)
         self.store.delete_source_chunks(plugin.name)

@@ -68,3 +68,21 @@ class SyncFailureModel(Base):
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_retry_at: Mapped[str | None] = mapped_column(String, nullable=True)
     vault_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PoolItemModel(Base):
+    __tablename__ = "pool_items"
+    __table_args__ = (
+        UniqueConstraint("source_plugin", "source_id", name="uq_pool_items_source"),
+        Index("ix_pool_items_source_plugin", "source_plugin"),
+        Index("ix_pool_items_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_plugin: Mapped[str] = mapped_column(String, nullable=False)
+    source_id: Mapped[str] = mapped_column(String, nullable=False)
+    # pending | synced | excluded | failed
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    added_at: Mapped[str] = mapped_column(String, nullable=False)
+    synced_at: Mapped[str | None] = mapped_column(String, nullable=True)

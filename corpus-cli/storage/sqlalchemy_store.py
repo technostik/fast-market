@@ -18,7 +18,7 @@ from common.storage.base import (
     run_alembic_migrations,
     session_scope,
 )
-from storage.models import ChunkModel, DocumentModel, SyncFailureModel
+from storage.models import ChunkModel, DocumentModel, PoolItemModel, SyncFailureModel
 
 logger = structlog.get_logger(__name__)
 
@@ -744,6 +744,171 @@ class SQLAlchemyStore:
             item["sync_failures_permanent"] = int(row["sync_failures_permanent"] or 0)
 
         return [merged[name] for name in sorted(merged)]
+
+    # ── Pool methods ────────────────────────────────────────────────────────
+
+    def upsert_pool_item(
+        self,
+        plugin_name: str,
+        source_id: str,
+        status: str,
+        metadata: dict,
+        added_at: str | None = None,
+        synced_at: str | None = None,
+    ) -> bool:
+        """Insert or update a pool item. Returns True if newly inserted."""
+        now = datetime.utcnow().isoformat()
+        with self._session() as session:
+            existing = session.execute(
+                select(PoolItemModel).where(
+                    PoolItemModel.source_plugin == plugin_name,
+                    PoolItemModel.source_id == source_id,
+                )
+            ).scalar_one_or_none()
+            if existing:
+                existing.status = status
+                existing.metadata_json = json.dumps(metadata)
+                if synced_at:
+                    existing.synced_at = synced_at
+                return False
+            session.add(
+                PoolItemModel(
+                    source_plugin=plugin_name,
+                    source_id=source_id,
+                    status=status,
+                    metadata_json=json.dumps(metadata),
+                    added_at=added_at or now,
+                    synced_at=synced_at,
+                )
+            )
+            return True
+
+    def add_to_pool(self, items: list, plugin_name: str) -> int:
+        """Batch-add ItemMeta items to pool as 'pending'. Skips already-pooled IDs.
+        Returns count of newly added items."""
+        now = datetime.utcnow().isoformat()
+        existing_ids = set(self.get_pool_ids(plugin_name).keys())
+        added = 0
+        with self._session() as session:
+            for item in items:
+                if item.source_id in existing_ids:
+                    continue
+                session.add(
+                    PoolItemModel(
+                        source_plugin=plugin_name,
+                        source_id=item.source_id,
+                        status="pending",
+                        metadata_json=json.dumps(item.metadata or {}),
+                        added_at=now,
+                        synced_at=None,
+                    )
+                )
+                added += 1
+        return added
+
+    def remove_from_pool(self, plugin_name: str, source_id: str) -> bool:
+        """Delete a pool item. Returns True if it existed."""
+        with self._session() as session:
+            res = session.execute(
+                delete(PoolItemModel).where(
+                    PoolItemModel.source_plugin == plugin_name,
+                    PoolItemModel.source_id == source_id,
+                )
+            )
+        return bool(res.rowcount)
+
+    def get_pool_items(
+        self,
+        plugin_name: str | None = None,
+        status: str | None = "pending",
+        limit: int | None = None,
+    ) -> list[dict]:
+        """Return pool items as dicts, ordered by added_at ascending."""
+        query = (
+            "SELECT source_plugin, source_id, status, metadata_json, added_at, synced_at "
+            "FROM pool_items WHERE 1=1"
+        )
+        params: dict = {}
+        if plugin_name:
+            query += " AND source_plugin=:plugin_name"
+            params["plugin_name"] = plugin_name
+        if status:
+            query += " AND status=:status"
+            params["status"] = status
+        query += " ORDER BY added_at ASC"
+        if limit:
+            query += " LIMIT :limit"
+            params["limit"] = limit
+        with self._session() as session:
+            rows = session.execute(text(query), params).mappings().all()
+        return [
+            {
+                "source_plugin": r["source_plugin"],
+                "source_id": r["source_id"],
+                "status": r["status"],
+                "metadata": json.loads(r["metadata_json"] or "{}"),
+                "added_at": r["added_at"],
+                "synced_at": r["synced_at"],
+            }
+            for r in rows
+        ]
+
+    def get_pool_ids(self, plugin_name: str) -> dict[str, str]:
+        """Return {source_id: status} for all pool items of a plugin."""
+        with self._session() as session:
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT source_id, status FROM pool_items WHERE source_plugin=:plugin_name"
+                    ),
+                    {"plugin_name": plugin_name},
+                )
+                .mappings()
+                .all()
+            )
+        return {r["source_id"]: r["status"] for r in rows}
+
+    def mark_pool_item(self, plugin_name: str, source_id: str, status: str) -> None:
+        """Update status of a pool item, setting synced_at when status='synced'."""
+        now = datetime.utcnow().isoformat()
+        with self._session() as session:
+            row = session.execute(
+                select(PoolItemModel).where(
+                    PoolItemModel.source_plugin == plugin_name,
+                    PoolItemModel.source_id == source_id,
+                )
+            ).scalar_one_or_none()
+            if row:
+                row.status = status
+                if status == "synced":
+                    row.synced_at = now
+
+    def pool_stats(self) -> list[dict]:
+        """Return [{source_plugin, pending, synced, excluded, failed}] per plugin."""
+        with self._session() as session:
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT source_plugin, status, COUNT(*) as cnt "
+                        "FROM pool_items GROUP BY source_plugin, status"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        merged: dict[str, dict] = {}
+        for row in rows:
+            plugin = row["source_plugin"]
+            if plugin not in merged:
+                merged[plugin] = {
+                    "source_plugin": plugin,
+                    "pending": 0,
+                    "synced": 0,
+                    "excluded": 0,
+                    "failed": 0,
+                }
+            merged[plugin][row["status"]] = int(row["cnt"] or 0)
+        return [merged[k] for k in sorted(merged)]
 
 
 def _apply_filters(
