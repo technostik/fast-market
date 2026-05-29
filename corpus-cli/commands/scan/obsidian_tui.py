@@ -122,17 +122,23 @@ class ObsidianScanApp(App[None]):
 
     def _compute_all_stats(self) -> dict[str, DirStats]:
         stats: dict[str, DirStats] = {"": DirStats()}
+        seen: set[str] = set()
         for f in self.vault.rglob("*.md"):
             rel_parts = f.relative_to(self.vault).parts
             if any(part in self._exclude_dirs for part in rel_parts[:-1]):
                 continue
             source_id = f.relative_to(self.vault).as_posix()
+            seen.add(source_id)
             status = self._status_map.get(source_id, _STATUS_NEW)
             current_rel = ""
             _inc(stats, current_rel, status)
             for part in rel_parts[:-1]:
                 current_rel = (current_rel + "/" + part).lstrip("/")
                 _inc(stats, current_rel, status)
+        # Orphaned: tracked in status_map but no longer on disk — count at root only.
+        for source_id, status in self._status_map.items():
+            if source_id not in seen:
+                _inc(stats, "", status)
         return stats
 
     def _populate_dir(self, node, directory: Path, dir_rel: str) -> bool:
@@ -251,13 +257,21 @@ class ObsidianScanApp(App[None]):
             status = self._status_map.get(nd.rel_path, _STATUS_NEW)
             return [nd.rel_path] if status in statuses else []
         result: list[str] = []
+        on_disk: set[str] = set()
         for f in nd.abs_path.rglob("*.md"):
             rel_parts = f.relative_to(self.vault).parts
             if any(part in self._exclude_dirs for part in rel_parts[:-1]):
                 continue
             rel = f.relative_to(self.vault).as_posix()
+            on_disk.add(rel)
             if self._status_map.get(rel, _STATUS_NEW) in statuses:
                 result.append(rel)
+        # Also collect orphaned entries (in status_map but not on disk).
+        prefix = (nd.rel_path + "/") if nd.rel_path else ""
+        for rel, status in self._status_map.items():
+            if rel not in on_disk and status in statuses:
+                if not nd.rel_path or rel.startswith(prefix):
+                    result.append(rel)
         return result
 
     def _notify_empty(self, action: str) -> None:
