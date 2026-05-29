@@ -159,10 +159,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
             # mode == "new": consume pending pool items
             effective_limit = limit if limit is not None else _DEFAULT_LIMITS.get(name)
+
+            # For YouTube the privacy filter runs in Python (privacy_status lives in
+            # metadata_json, not a first-class column), so we must fetch all pending
+            # items first and apply the limit only after filtering.
+            db_limit = None if name == "youtube" else (effective_limit or None)
             pool_items = store.get_pool_items(
                 plugin_name=name,
                 status="pending",
-                limit=effective_limit or None,
+                limit=db_limit,
             )
 
             # YouTube: route public vs non-public to different transcript methods.
@@ -179,6 +184,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         i for i in pool_items
                         if (i.get("metadata") or {}).get("privacy_status", "public") == "public"
                     ]
+                if effective_limit:
+                    pool_items = pool_items[:effective_limit]
 
             if not pool_items:
                 results.append(

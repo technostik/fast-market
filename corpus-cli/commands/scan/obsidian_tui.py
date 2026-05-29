@@ -188,8 +188,13 @@ class ObsidianScanApp(App[None]):
     # ── Preview ──────────────────────────────────────────────────────────────
 
     def _update_preview(self, nd: NodeData | None) -> None:
+        content = self._preview_content(nd)
         preview = self.query_one("#preview-pane", Markdown)
-        preview.update(self._preview_content(nd))
+
+        async def _do_update() -> None:
+            await preview.update(content)
+
+        self.run_worker(_do_update(), exclusive=True, group="preview")
 
     def _preview_content(self, nd: NodeData | None) -> str:
         if nd is None:
