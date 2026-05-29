@@ -1,7 +1,7 @@
 """Interactive Textual TUI for selecting Obsidian notes to add to the sync pool."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header, Tree
+from textual.containers import Horizontal
+from textual.widgets import Footer, Header, Markdown, Tree
 from textual import on
 
 if TYPE_CHECKING:
@@ -17,11 +18,12 @@ if TYPE_CHECKING:
 
 _SYSTEM_DIRS = {".obsidian", ".trash", ".git"}
 
-# Statuses managed in the pool / document store
-_STATUS_NEW = "new"
-_STATUS_PENDING = "pending"
-_STATUS_SYNCED = "synced"
+_STATUS_NEW      = "new"
+_STATUS_PENDING  = "pending"
+_STATUS_SYNCED   = "synced"
 _STATUS_EXCLUDED = "excluded"
+
+_PREVIEW_MAX_CHARS = 10_000
 
 
 @dataclass
@@ -51,18 +53,24 @@ class ObsidianScanApp(App[None]):
     """Navigate the Obsidian vault and add/remove/exclude files from the sync pool."""
 
     CSS = """
-    Tree {
-        height: 1fr;
+    #tree-pane {
+        width: 40%;
+        border-right: solid $panel-darken-2;
         scrollbar-gutter: stable;
+    }
+    #preview-pane {
+        width: 60%;
+        padding: 1 2;
+        overflow-y: auto;
     }
     """
 
     BINDINGS = [
-        Binding("i", "include", "Include", show=True),
-        Binding("r", "remove", "Remove", show=True),
-        Binding("x", "exclude", "Exclude", show=True),
-        Binding("f", "toggle_view", "Full/New", show=True),
-        Binding("q", "quit", "Quit", show=True),
+        Binding("i", "include",     "Include",    show=True),
+        Binding("r", "remove",      "Remove",     show=True),
+        Binding("x", "exclude",     "Exclude",    show=True),
+        Binding("f", "toggle_view", "Full/New",   show=True),
+        Binding("q", "quit",        "Quit",       show=True),
     ]
 
     def __init__(
@@ -74,23 +82,24 @@ class ObsidianScanApp(App[None]):
     ) -> None:
         super().__init__()
         self.vault = vault
-        # live state: {rel_posix_path: status}
         self._status_map = status_map
         self.store = store
         self._exclude_dirs: set[str] = _SYSTEM_DIRS | (extra_exclude_dirs or set())
         self._full_view = False
         self._current_node: NodeData | None = None
-        # computed once per refresh
         self._dir_stats_cache: dict[str, DirStats] = {}
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Tree(
-            Text.from_markup(f"[bold]📁 {self.vault.name}/[/]"),
-            data=NodeData("", True, self.vault),
-        )
+        with Horizontal():
+            yield Tree(
+                Text.from_markup(f"[bold]📁 {self.vault.name}/[/]"),
+                data=NodeData("", True, self.vault),
+                id="tree-pane",
+            )
+            yield Markdown("", id="preview-pane")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -101,24 +110,23 @@ class ObsidianScanApp(App[None]):
 
     def _refresh_tree(self) -> None:
         self._dir_stats_cache = self._compute_all_stats()
-        tree = self.query_one(Tree)
+        tree = self.query_one("#tree-pane", Tree)
         for child in list(tree.root.children):
             child.remove()
         self._populate_dir(tree.root, self.vault, "")
         tree.root.expand()
         self._update_subtitle()
+        # Refresh preview for current node (stats may have changed)
+        self._update_preview(self._current_node)
 
     def _compute_all_stats(self) -> dict[str, DirStats]:
-        """Single filesystem walk to compute DirStats for every directory."""
         stats: dict[str, DirStats] = {"": DirStats()}
         for f in self.vault.rglob("*.md"):
             rel_parts = f.relative_to(self.vault).parts
-            # Skip files inside system-excluded dirs
             if any(part in self._exclude_dirs for part in rel_parts[:-1]):
                 continue
             source_id = f.relative_to(self.vault).as_posix()
             status = self._status_map.get(source_id, _STATUS_NEW)
-            # Accumulate into every ancestor directory (including vault root "")
             current_rel = ""
             _inc(stats, current_rel, status)
             for part in rel_parts[:-1]:
@@ -127,7 +135,6 @@ class ObsidianScanApp(App[None]):
         return stats
 
     def _populate_dir(self, node, directory: Path, dir_rel: str) -> bool:
-        """Add visible children of `directory` to `node`. Returns True if any added."""
         has_visible = False
         try:
             entries = sorted(
@@ -150,8 +157,7 @@ class ObsidianScanApp(App[None]):
                     continue
                 label = _dir_label(entry.name, s, self._full_view)
                 child = node.add(label, data=NodeData(child_rel, True, entry))
-                populated = self._populate_dir(child, entry, child_rel)
-                if not populated:
+                if not self._populate_dir(child, entry, child_rel):
                     child.remove()
                 else:
                     has_visible = True
@@ -160,31 +166,81 @@ class ObsidianScanApp(App[None]):
                 status = self._status_map.get(child_rel, _STATUS_NEW)
                 if not self._full_view and status in (_STATUS_SYNCED, _STATUS_EXCLUDED):
                     continue
-                node.add_leaf(_file_label(entry.name, status), data=NodeData(child_rel, False, entry))
+                node.add_leaf(
+                    _file_label(entry.name, status),
+                    data=NodeData(child_rel, False, entry),
+                )
                 has_visible = True
 
         return has_visible
 
     def _update_subtitle(self) -> None:
-        root_stats = self._dir_stats_cache.get("", DirStats())
+        root = self._dir_stats_cache.get("", DirStats())
         mode = "[bold green]New only[/]" if not self._full_view else "[bold yellow]Full[/]"
         self.sub_title = (
-            f"Pool: {root_stats.pending} pending  "
-            f"| {root_stats.new} new  "
-            f"| {root_stats.synced} synced  "
+            f"Pool: {root.pending} pending  "
+            f"| {root.new} new  "
+            f"| {root.synced} synced  "
             f"| View: {mode}"
         )
+
+    # ── Preview ──────────────────────────────────────────────────────────────
+
+    def _update_preview(self, nd: NodeData | None) -> None:
+        preview = self.query_one("#preview-pane", Markdown)
+        preview.update(self._preview_content(nd))
+
+    def _preview_content(self, nd: NodeData | None) -> str:
+        if nd is None:
+            return ""
+
+        if nd.is_dir:
+            s = self._dir_stats_cache.get(nd.rel_path, DirStats())
+            name = nd.abs_path.name or self.vault.name
+            lines = [
+                f"## 📁 {name}/",
+                "",
+                f"| Status   | Count |",
+                f"|----------|-------|",
+                f"| new      | {s.new} |",
+                f"| pending  | {s.pending} |",
+                f"| synced   | {s.synced} |",
+                f"| excluded | {s.excluded} |",
+                f"| **total**| **{s.total}** |",
+            ]
+            return "\n".join(lines)
+
+        # File preview
+        try:
+            text = nd.abs_path.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            return f"*Could not read file: {exc}*"
+
+        status = self._status_map.get(nd.rel_path, _STATUS_NEW)
+        status_badge = {
+            _STATUS_NEW:      "🟢 new",
+            _STATUS_PENDING:  "🟡 pending (in pool)",
+            _STATUS_SYNCED:   "✅ synced",
+            _STATUS_EXCLUDED: "🚫 excluded",
+        }.get(status, status)
+
+        header = f"**{nd.abs_path.name}** — {status_badge}\n\n---\n\n"
+
+        if len(text) > _PREVIEW_MAX_CHARS:
+            text = text[:_PREVIEW_MAX_CHARS] + "\n\n*…[truncated]*"
+
+        return header + text
 
     # ── Events ───────────────────────────────────────────────────────────────
 
     @on(Tree.NodeHighlighted)
     def _on_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
         self._current_node = event.node.data
+        self._update_preview(event.node.data)
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _collect_with_status(self, nd: NodeData, statuses: set[str]) -> list[str]:
-        """Gather vault-relative paths under nd that currently have one of the given statuses."""
         if not nd.is_dir:
             status = self._status_map.get(nd.rel_path, _STATUS_NEW)
             return [nd.rel_path] if status in statuses else []
@@ -322,16 +378,12 @@ def run_obsidian_scan_tui(
     store: SQLAlchemyStore,
     extra_exclude_dirs: set[str] | None = None,
 ) -> None:
-    """Build the initial status map from store state and launch the TUI."""
     status_map: dict[str, str] = {}
 
-    # Files already indexed in the document store → synced
     for source_id in store.get_indexed_id_dates("obsidian"):
         status_map[source_id] = _STATUS_SYNCED
 
-    # Pool items override with their current status (pending / excluded / failed)
     for source_id, status in store.get_pool_ids("obsidian").items():
-        # Pool 'synced' entries without a document entry stay synced
         status_map[source_id] = status
 
     app = ObsidianScanApp(vault, status_map, store, extra_exclude_dirs)

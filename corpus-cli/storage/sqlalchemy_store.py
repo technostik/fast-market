@@ -740,6 +740,79 @@ class SQLAlchemyStore:
 
         return [merged[name] for name in sorted(merged)]
 
+    def full_status(self) -> list[dict]:
+        """Rich per-source status: indexed docs, pool breakdown, failures.
+
+        For YouTube the pool 'pending' count is split by privacy status so the
+        caller knows which sync command applies to each group.
+        """
+        with self._session() as session:
+            doc_rows = (
+                session.execute(
+                    text(
+                        "SELECT source_plugin, COUNT(*) as cnt "
+                        "FROM documents GROUP BY source_plugin"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            pool_rows = (
+                session.execute(
+                    text(
+                        "SELECT source_plugin, source_id, status, metadata_json "
+                        "FROM pool_items"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            failure_rows = (
+                session.execute(
+                    text(
+                        "SELECT source_plugin, "
+                        "SUM(CASE WHEN error_type='transient' THEN 1 ELSE 0 END) as transient, "
+                        "SUM(CASE WHEN error_type='permanent' THEN 1 ELSE 0 END) as permanent "
+                        "FROM sync_failures GROUP BY source_plugin"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+
+        data: dict[str, dict] = {}
+
+        for row in doc_rows:
+            p = row["source_plugin"]
+            _ensure(data, p)
+            data[p]["indexed"] = int(row["cnt"])
+
+        for row in pool_rows:
+            p = row["source_plugin"]
+            _ensure(data, p)
+            status = row["status"]
+            data[p]["pool"][status] = data[p]["pool"].get(status, 0) + 1
+
+            if p == "youtube" and status == "pending":
+                meta = json.loads(row["metadata_json"] or "{}")
+                privacy = meta.get("privacy_status", "unknown")
+                if privacy == "public":
+                    data[p]["pool"]["pending_public"] = (
+                        data[p]["pool"].get("pending_public", 0) + 1
+                    )
+                else:
+                    data[p]["pool"]["pending_nonpublic"] = (
+                        data[p]["pool"].get("pending_nonpublic", 0) + 1
+                    )
+
+        for row in failure_rows:
+            p = row["source_plugin"]
+            _ensure(data, p)
+            data[p]["failures"]["transient"] = int(row["transient"] or 0)
+            data[p]["failures"]["permanent"] = int(row["permanent"] or 0)
+
+        return [data[k] for k in sorted(data)]
+
     # ── Pool methods ────────────────────────────────────────────────────────
 
     def upsert_pool_item(
@@ -963,3 +1036,13 @@ def _apply_filters_dicts(
                 continue
         out.append(item)
     return out
+
+
+def _ensure(data: dict, plugin: str) -> None:
+    if plugin not in data:
+        data[plugin] = {
+            "source_plugin": plugin,
+            "indexed": 0,
+            "pool": {"pending": 0, "synced": 0, "failed": 0, "excluded": 0},
+            "failures": {"transient": 0, "permanent": 0},
+        }
