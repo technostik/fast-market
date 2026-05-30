@@ -696,6 +696,7 @@ async def browser_show():
 async def browser_start_silent():
     import subprocess
     try:
+        subprocess.run(["browser", "stop"], check=False, capture_output=True)
         subprocess.run(["browser", "start", "--hidden"], check=True, capture_output=True)
         return {"ok": True}
     except Exception as e:
