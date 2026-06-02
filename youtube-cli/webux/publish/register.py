@@ -57,7 +57,7 @@ def _is_intermediate(path: Path) -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, use_groq: bool = False) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
@@ -77,6 +77,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         description_prefix=description_prefix,
         source_urls=source_urls or [],
         skip_upload=skip_upload,
+        use_groq=use_groq,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -283,6 +284,7 @@ class StartRequest(BaseModel):
     source_urls: list[str] = []
     skip_upload: bool = False
     use_modal: bool = True
+    use_groq: bool = False
 
 
 class ResumeRequest(BaseModel):
@@ -294,6 +296,7 @@ class ResumeRequest(BaseModel):
     simple_transcript: bool = True
     skip_upload: bool = False
     use_modal: bool = True
+    use_groq: bool = False
     language: str = "fr"
     model: str = "medium"
     privacy: str = "unlisted"
@@ -323,6 +326,7 @@ async def start(req: StartRequest):
         source_urls=_validate_urls(req.source_urls),
         skip_upload=req.skip_upload,
         use_modal=req.use_modal,
+        use_groq=req.use_groq,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -392,6 +396,7 @@ async def resume(req: ResumeRequest):
         source_urls=_validate_urls(req.source_urls),
         skip_upload=req.skip_upload,
         use_modal=req.use_modal,
+        use_groq=req.use_groq,
         steps=[Step(name=n) for n in STEP_NAMES],
         files=files,
         title=meta.get("title", ""),
@@ -618,11 +623,12 @@ class PoolAddRequest(BaseModel):
     description_prefix: str = ""
     source_urls: list[str] = []
     skip_upload: bool = False
+    use_groq: bool = False
 
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.use_groq)
     return {"ok": ok}
 
 

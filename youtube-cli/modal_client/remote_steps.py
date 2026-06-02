@@ -4,7 +4,7 @@ import modal
 from modal_client.app import app, base_image
 
 
-@app.function(image=base_image, timeout=1800)
+@app.function(image=base_image, timeout=1800, secrets=[modal.Secret.from_dotenv()])
 def run_media_pipeline(
     video_bytes: bytes,
     video_name: str,
@@ -16,6 +16,7 @@ def run_media_pipeline(
     language: str = "fr",
     model_size: str = "medium",
     subtitle_size: int = 96,
+    use_groq: bool = False,
 ) -> dict:
     """
     Run up to three media processing steps inside one Modal container:
@@ -59,7 +60,11 @@ def run_media_pipeline(
         # ── Step 1: Transcribe → ASS ──────────────────────────────────────────
         ass_path = os.path.join(tmpdir, f"{stem}.ass")
         if do_transcribe:
-            _transcribe_to_ass(current_path, ass_path, language, model_size)
+            if use_groq:
+                groq_api_key = os.environ.get("GROQ_API_KEY", "")
+                _groq_transcribe_to_ass(current_path, ass_path, language, groq_api_key)
+            else:
+                _transcribe_to_ass(current_path, ass_path, language, model_size)
         elif ass_bytes:
             with open(ass_path, "wb") as f:
                 f.write(ass_bytes)
@@ -276,6 +281,142 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 group_tagged = build_tagged(group["words"])
                 if group_tagged:
                     ass_content += f"Dialogue: 0,{g_start},{g_end},Default,,0,0,0,,{group_tagged}\n"
+
+    with open(output_ass_path, "w", encoding="utf-8") as f:
+        f.write(ass_content)
+
+
+def _groq_transcribe_to_ass(
+    input_path: str,
+    output_ass_path: str,
+    language: str,
+    groq_api_key: str,
+) -> None:
+    import os
+    import re
+    import subprocess
+    import tempfile
+    import requests
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=os.path.dirname(output_ass_path)) as _tmp:
+        tmp_audio = _tmp.name
+
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", input_path, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k", tmp_audio],
+            check=True, capture_output=True,
+        )
+        form_data = [
+            ("model", "whisper-large-v3"),
+            ("response_format", "verbose_json"),
+            ("timestamp_granularities[]", "word"),
+            ("timestamp_granularities[]", "segment"),
+        ]
+        if language and language != "auto":
+            form_data.append(("language", language))
+        with open(tmp_audio, "rb") as _f:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {groq_api_key}"},
+                files={"file": (os.path.basename(tmp_audio), _f, "audio/mpeg")},
+                data=form_data,
+                timeout=120,
+            )
+        resp.raise_for_status()
+        result = resp.json()
+    finally:
+        try:
+            os.unlink(tmp_audio)
+        except Exception:
+            pass
+
+    flat_words = result.get("words", [])
+    raw_segments = result.get("segments", [])
+
+    result_segments = []
+    word_idx = 0
+    for seg in raw_segments:
+        seg_words = []
+        while word_idx < len(flat_words):
+            w = flat_words[word_idx]
+            if w["start"] < seg["end"] - 0.001:
+                seg_words.append({"word": w["word"].strip(), "start": w["start"], "end": w["end"]})
+                word_idx += 1
+            else:
+                break
+        result_segments.append({"start": seg["start"], "end": seg["end"], "text": seg["text"].strip(), "words": seg_words})
+    if word_idx < len(flat_words):
+        remaining = flat_words[word_idx:]
+        result_segments.append({
+            "start": remaining[0]["start"],
+            "end": remaining[-1]["end"],
+            "text": " ".join(w["word"].strip() for w in remaining),
+            "words": [{"word": w["word"].strip(), "start": w["start"], "end": w["end"]} for w in remaining],
+        })
+
+    subtitle_size = 96
+    primary_color = "&H0000FF00"
+    secondary_color = "&H00FFFFFF"
+    outline_color = "&H00000000"
+    back_color = "&H00000000"
+
+    ass_content = f"""[Script Info]
+Title: Auto Karaoke Subtitles
+PlayResX: 1080
+PlayResY: 1920
+ScriptType: v4.00+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,{subtitle_size},{primary_color},{secondary_color},{outline_color},{back_color},1,0,0,0,100,100,0,0,1,14,14,10,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    def _ms(ms: int) -> str:
+        h = ms // 3600000; ms %= 3600000
+        m = ms // 60000; ms %= 60000
+        s = ms // 1000; cs = (ms % 1000) // 10
+        return f"{h}:{m:02d}:{s:02d}:{cs:02d}"
+
+    def _tagged(wlist):
+        parts = []
+        for w in wlist:
+            dur_cs = int((w["end"] - w["start"]) * 100)
+            word = w["word"].strip()
+            if word and dur_cs > 0:
+                parts.append("{\\k" + str(dur_cs) + "}" + word)
+        return " ".join(parts)
+
+    max_chars = 35
+    for seg in result_segments:
+        start_ms = int(seg["start"] * 1000)
+        end_ms = int(seg["end"] * 1000)
+        words = seg.get("words", [])
+        if not words:
+            ass_content += f"Dialogue: 0,{_ms(start_ms)},{_ms(end_ms)},Default,,0,0,0,,{seg['text']}\n"
+            continue
+        full_tagged = _tagged(words)
+        clean = re.sub(r"\{\\k\d+\}", "", full_tagged).strip()
+        if len(clean) <= max_chars:
+            ass_content += f"Dialogue: 0,{_ms(start_ms)},{_ms(end_ms)},Default,,0,0,0,,{full_tagged}\n"
+        else:
+            sub_groups, cur, cur_len, cur_start = [], [], 0, seg["start"]
+            for wi in words:
+                wlen = len(wi["word"]) + 1
+                if cur_len + wlen > max_chars and cur:
+                    sub_groups.append({"words": cur[:], "start": cur_start, "end": wi["start"]})
+                    cur, cur_len, cur_start = [wi], wlen, wi["start"]
+                else:
+                    cur.append(wi); cur_len += wlen
+            if cur:
+                sub_groups.append({"words": cur, "start": cur_start, "end": cur[-1]["end"]})
+            for grp in sub_groups:
+                if not grp["words"]:
+                    continue
+                tagged = _tagged(grp["words"])
+                if tagged:
+                    ass_content += f"Dialogue: 0,{_ms(int(grp['start']*1000))},{_ms(int(grp['end']*1000))},Default,,0,0,0,,{tagged}\n"
 
     with open(output_ass_path, "w", encoding="utf-8") as f:
         f.write(ass_content)

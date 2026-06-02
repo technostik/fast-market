@@ -34,9 +34,161 @@ try:
         generate_karaoke_ass,
         transcribe_to_srt,
         transcribe_to_txt,
+        ms_to_ass_time,
     )
 except Exception:
-    generate_karaoke_ass = transcribe_to_srt = transcribe_to_txt = None
+    generate_karaoke_ass = transcribe_to_srt = transcribe_to_txt = ms_to_ass_time = None
+
+
+def _groq_transcribe_to_ass(
+    video_path: str,
+    ass_path: str,
+    language: str = "fr",
+    subtitle_size: int = 96,
+    max_line_chars: int = 35,
+) -> str:
+    """Transcribe using Groq whisper-large-v3, write karaoke ASS, return plain text."""
+    import re as _re
+    import subprocess
+    import tempfile
+    import os
+    import requests
+
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY not set in environment")
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as _tmp:
+        tmp_audio = _tmp.name
+
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", video_path, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k", tmp_audio],
+            check=True, capture_output=True,
+        )
+        form_data = [
+            ("model", "whisper-large-v3"),
+            ("response_format", "verbose_json"),
+            ("timestamp_granularities[]", "word"),
+            ("timestamp_granularities[]", "segment"),
+        ]
+        if language and language != "auto":
+            form_data.append(("language", language))
+        with open(tmp_audio, "rb") as _f:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (os.path.basename(tmp_audio), _f, "audio/mpeg")},
+                data=form_data,
+                timeout=120,
+            )
+        resp.raise_for_status()
+        result = resp.json()
+    finally:
+        try:
+            os.unlink(tmp_audio)
+        except Exception:
+            pass
+
+    flat_words = result.get("words", [])
+    raw_segments = result.get("segments", [])
+    plain_text = result.get("text", "").strip()
+
+    # Group flat words into segments using the segment boundaries
+    result_segments = []
+    word_idx = 0
+    for seg in raw_segments:
+        seg_start = seg["start"]
+        seg_end = seg["end"]
+        seg_words = []
+        while word_idx < len(flat_words):
+            w = flat_words[word_idx]
+            if w["start"] < seg_end - 0.001:
+                seg_words.append({"word": w["word"].strip(), "start": w["start"], "end": w["end"]})
+                word_idx += 1
+            else:
+                break
+        result_segments.append({"start": seg_start, "end": seg_end, "text": seg["text"].strip(), "words": seg_words})
+    # Flush any remaining words as a final segment
+    if word_idx < len(flat_words):
+        remaining = flat_words[word_idx:]
+        result_segments.append({
+            "start": remaining[0]["start"],
+            "end": remaining[-1]["end"],
+            "text": " ".join(w["word"].strip() for w in remaining),
+            "words": [{"word": w["word"].strip(), "start": w["start"], "end": w["end"]} for w in remaining],
+        })
+
+    # Use imported helper or inline fallback
+    _ms_to_ass = ms_to_ass_time
+    if _ms_to_ass is None:
+        def _ms_to_ass(ms: int) -> str:
+            h = ms // 3600000; ms %= 3600000
+            m = ms // 60000; ms %= 60000
+            s = ms // 1000; cs = (ms % 1000) // 10
+            return f"{h}:{m:02d}:{s:02d}:{cs:02d}"
+
+    primary_color = "&H0000FF00"
+    secondary_color = "&H00FFFFFF"
+    outline_color = "&H00000000"
+    back_color = "&H00000000"
+
+    ass_content = (
+        f"[Script Info]\nTitle: Auto Karaoke Subtitles\nPlayResX: 1080\nPlayResY: 1920\nScriptType: v4.00+\n"
+        f"[V4+ Styles]\n"
+        f"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Default,Arial,{subtitle_size},{primary_color},{secondary_color},{outline_color},{back_color},1,0,0,0,100,100,0,0,1,14,14,10,0,0,0,1\n\n"
+        f"[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+
+    def _split_long(words, seg_start, seg_end, max_chars):
+        if not words:
+            return [{"words": [], "start": seg_start, "end": seg_end}]
+        groups, cur, cur_len, cur_start = [], [], 0, seg_start
+        for wi in words:
+            wlen = len(wi["word"]) + 1
+            if cur_len + wlen > max_chars and cur:
+                groups.append({"words": cur[:], "start": cur_start, "end": wi["start"]})
+                cur, cur_len, cur_start = [wi], wlen, wi["start"]
+            else:
+                cur.append(wi)
+                cur_len += wlen
+        if cur:
+            groups.append({"words": cur, "start": cur_start, "end": cur[-1]["end"]})
+        return groups
+
+    def _build_tagged(wlist):
+        parts = []
+        for w in wlist:
+            dur_cs = int((w["end"] - w["start"]) * 100)
+            word = w["word"].strip()
+            if word and dur_cs > 0:
+                parts.append("{\\k" + str(dur_cs) + "}" + word)
+        return " ".join(parts)
+
+    for seg in result_segments:
+        start_ms = int(seg["start"] * 1000)
+        end_ms = int(seg["end"] * 1000)
+        words = seg.get("words", [])
+        if not words:
+            ass_content += f"Dialogue: 0,{_ms_to_ass(start_ms)},{_ms_to_ass(end_ms)},Default,,0,0,0,,{seg['text']}\n"
+            continue
+        full_tagged = _build_tagged(words)
+        clean = _re.sub(r"\{\\k\d+\}", "", full_tagged).strip()
+        if len(clean) <= max_line_chars:
+            ass_content += f"Dialogue: 0,{_ms_to_ass(start_ms)},{_ms_to_ass(end_ms)},Default,,0,0,0,,{full_tagged}\n"
+        else:
+            for grp in _split_long(words, seg["start"], seg["end"], max_line_chars):
+                if not grp["words"]:
+                    continue
+                tagged = _build_tagged(grp["words"])
+                if tagged:
+                    ass_content += f"Dialogue: 0,{_ms_to_ass(int(grp['start']*1000))},{_ms_to_ass(int(grp['end']*1000))},Default,,0,0,0,,{tagged}\n"
+
+    with open(ass_path, "w", encoding="utf-8") as _f:
+        _f.write(ass_content)
+
+    return plain_text
 
 
 async def _run_modal_steps(
@@ -88,6 +240,7 @@ async def _run_modal_steps(
                 job.language,
                 job.model,
                 96,
+                job.use_groq,
             )
     except Exception as exc:
         for i in range(from_step, 3):
@@ -141,7 +294,7 @@ async def _run_modal_steps(
         elapsed = round(now - s1.start_time, 1)
         s1.status = "done"
         s1.progress = 100
-        s1_out = f"Done in {elapsed}s [modal]"
+        s1_out = f"Done in {elapsed}s [modal+groq]" if job.use_groq else f"Done in {elapsed}s [modal]"
         if job.transcript_text:
             s1_out += f"\n\nTranscript:\n{job.transcript_text}"
         s1.output = s1_out
@@ -236,7 +389,15 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
         s1.status = "running"
         s1.progress = 0.0
 
-        if generate_karaoke_ass is not None:
+        if job.use_groq:
+            try:
+                plain = await asyncio.to_thread(
+                    _groq_transcribe_to_ass, current_video, ass_path, job.language,
+                )
+                rc = 0
+            except Exception as exc:
+                s1.output = str(exc); rc = 1; plain = ""
+        elif generate_karaoke_ass is not None:
             if job.simple_transcript:
                 try:
                     await asyncio.to_thread(
@@ -284,8 +445,8 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
             s1.end_time = time.time(); s1.status = "error"; job.status = "error"; _save_meta(job); return
         s1.end_time = time.time()
         elapsed_s = round(s1.end_time - s1.start_time, 1)
-        mode_label = "simple" if job.simple_transcript else "advanced"
-        plain = _ass_to_plain_text(ass_path)
+        mode_label = "groq" if job.use_groq else ("simple" if job.simple_transcript else "advanced")
+        plain = plain if job.use_groq else _ass_to_plain_text(ass_path)
         s1.output = f"Done in {elapsed_s}s [{mode_label} mode]\n\nTranscript:\n{plain}"
         s1.status = "done"; s1.progress = 100
         with open(txt_path, "w", encoding="utf-8") as _f:

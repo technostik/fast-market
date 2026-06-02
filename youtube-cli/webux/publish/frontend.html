@@ -235,6 +235,10 @@
         <label for="useModal" style="display:inline; margin:0;">Use Modal (remote processing)</label>
         <a id="modalUsageLink" href="https://modal.com/settings/usage" target="_blank" style="font-size:11px; color:var(--link); margin-left:6px; opacity:.8;">usage ↗</a>
       </div>
+      <div class="checkrow">
+        <input type="checkbox" id="useGroq">
+        <label for="useGroq" style="display:inline; margin:0;">Use Groq API for transcription (whisper-large-v3, fast)</label>
+      </div>
 
       <div class="cols2">
         <div class="row">
@@ -537,6 +541,7 @@ async function startJob() {
     simple_transcript: document.getElementById('simpleTranscript').checked,
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
+    use_groq: document.getElementById('useGroq').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -784,6 +789,7 @@ async function doResume() {
     simple_transcript: document.getElementById('simpleTranscript').checked,
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
+    use_groq: document.getElementById('useGroq').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -1282,7 +1288,8 @@ async function addToPool() {
       source: sel.value,
       description_prefix: document.getElementById('descPrefix').value,
       source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
-      skip_upload: document.getElementById('skipUpload').checked
+      skip_upload: document.getElementById('skipUpload').checked,
+      use_groq: document.getElementById('useGroq').checked
     })
   });
   refreshPool();
