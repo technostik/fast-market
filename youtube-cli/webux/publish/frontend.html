@@ -415,17 +415,20 @@ async function loadVideos() {
   const r = await fetch('/api/publish/list-videos').catch(() => null);
   if (!r || !r.ok) return;
   const data = await r.json();
-  let firstResumable = null;
   for (const v of data.videos || []) {
     const opt = document.createElement('option');
     opt.value = v.path;
     opt.textContent = v.resumable ? '↩ ' + v.name : v.name;
     sel.appendChild(opt);
-    if (v.resumable && !firstResumable) firstResumable = v.path;
   }
   sel.onchange = onFileSelected;
-  // Auto-select the most recent resumable video, otherwise the most recent overall
-  const autoSelect = firstResumable || (data.videos && data.videos.length > 0 ? data.videos[0].path : null);
+  let autoSelect = null;
+  if (data.videos) {
+    for (const v of data.videos) {
+      if (!v.resumable) { autoSelect = v.path; break; }
+    }
+    if (!autoSelect) autoSelect = data.videos[0]?.path ?? null;
+  }
   if (autoSelect) {
     sel.value = autoSelect;
     onFileSelected();

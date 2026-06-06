@@ -144,8 +144,27 @@ async def list_videos(
     if not d.exists() or not d.is_dir():
         return {"videos": [], "error": f"Directory not found: {path}"}
     exts = {("." + e.strip().lstrip(".")).lower() for e in extensions.split(",") if e.strip()}
+
+    # Collect all pipeline output file paths (no_silence, subtitled, final_video, etc.)
+    # from existing meta files so we can exclude them from the source list.
+    pipeline_outputs: set[str] = set()
+    for meta_file in d.glob("*-meta.json"):
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            for val in meta.get("files", {}).values():
+                if val:
+                    resolved = str(Path(val).resolve())
+                    pipeline_outputs.add(resolved)
+        except Exception:
+            pass
+
     files = sorted(
-        [f for f in d.iterdir() if f.suffix.lower() in exts and not _is_intermediate(f)],
+        [
+            f for f in d.iterdir()
+            if f.suffix.lower() in exts
+            and not _is_intermediate(f)
+            and str(f.resolve()) not in pipeline_outputs
+        ],
         key=lambda f: f.stat().st_mtime,
         reverse=True,
     )
