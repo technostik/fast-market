@@ -18,6 +18,7 @@ base_image = (
         "faster-whisper>=1.0",
         "moviepy>=2.0",
         "numpy>=1.24",
+        "requests>=2.28",
     )
     .run_function(_download_whisper_models)
 )

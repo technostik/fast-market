@@ -215,11 +215,15 @@ async def _run_modal_steps(
         do_transcribe = False
 
     # Mark steps as running
+    mode_note = "modal+groq" if job.use_groq else "modal"
     for i in range(from_step, 3):
         s = job.steps[i]
         s.start_time = time.time()
         s.status = "running"
         s.progress = 0.0
+        s.output = f"Connecting to Modal… (first run may take 2–5 min to build the image) [{mode_note}]"
+
+    _save_meta(job)
 
     video_bytes = Path(current_video).read_bytes()
     video_name = Path(current_video).name
