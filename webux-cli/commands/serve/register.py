@@ -4,9 +4,11 @@ import logging
 import os
 import signal
 import threading
+import time
 import webbrowser
 
 import click
+import psutil
 import uvicorn
 
 from commands.base import CommandManifest
@@ -16,16 +18,37 @@ from common.webux.registry import discover_webux_plugins
 from core.server import build_app
 
 logger = structlog.get_logger(__name__)
+
+
+def _kill_process_on_port(port: int) -> None:
+    for conn in psutil.net_connections():
+        if conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
+            proc = psutil.Process(conn.pid)
+            logger.info("restart_kill", pid=conn.pid, port=port)
+            proc.send_signal(signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except psutil.TimeoutExpired:
+                logger.warning("restart_force_kill", pid=conn.pid)
+                proc.kill()
+                proc.wait()
+            break
+
+
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("serve")
     @click.option("--host", default="0.0.0.0")
     @click.option("--port", "-p", default=8007, type=int)
     @click.option("--open", "open_browser", is_flag=True, default=False)
+    @click.option("--restart", is_flag=True, default=False, help="Kill existing server on port before starting")
     @click.pass_context
-    def serve_cmd(ctx: click.Context, host: str, port: int, open_browser: bool) -> None:
+    def serve_cmd(ctx: click.Context, host: str, port: int, open_browser: bool, restart: bool) -> None:
         logging.getLogger().setLevel(
             logging.DEBUG if ctx.obj.get("verbose") else logging.CRITICAL
         )
+
+        if restart:
+            _kill_process_on_port(port)
 
         config = load_tool_config("webux")
         discovered = discover_webux_plugins(config)
