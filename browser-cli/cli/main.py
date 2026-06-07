@@ -12,6 +12,8 @@ main = create_cli_group(
         "Control a Chromium-based browser via CDP for agent automation.\n\n"
         "See https://github.com/vercel-labs/agent-browser for full command reference."
     ),
+    default_command="start",
+    default_args={"hidden": True},
 )
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 

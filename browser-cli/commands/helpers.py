@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -336,3 +339,265 @@ def is_cdp_available(cdp_port: int = 9222) -> bool:
         return result == 0
     finally:
         sock.close()
+
+
+# ── Browser resolution ────────────────────────────────────────────────────
+
+_BROWSER_CANDIDATES = [
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "chromium-bsu",
+]
+
+_INSTALL_HINT = (
+    "No Chromium-based browser binary was found.\n"
+    "On Ubuntu/Debian, install Chromium with:\n"
+    "  sudo apt install chromium\n"
+    "Or point to an existing binary with:\n"
+    "  browser start --browser /path/to/chromium"
+)
+
+
+def resolve_browser(requested: str) -> str:
+    if shutil.which(requested):
+        return requested
+    if requested not in _BROWSER_CANDIDATES:
+        raise click.ClickException(
+            f"Browser binary not found: '{requested}'\n" + _INSTALL_HINT
+        )
+    for candidate in _BROWSER_CANDIDATES:
+        if shutil.which(candidate):
+            click.echo(f"'{requested}' not found — using '{candidate}' instead.", err=True)
+            return candidate
+    raise click.ClickException(_INSTALL_HINT)
+
+
+# ── Display helpers ───────────────────────────────────────────────────────
+
+def detect_display() -> str | None:
+    if os.environ.get("DISPLAY"):
+        return os.environ["DISPLAY"]
+    if os.environ.get("WAYLAND_DISPLAY"):
+        return os.environ["WAYLAND_DISPLAY"]
+    uid = os.getuid()
+    try:
+        for entry in os.scandir("/proc"):
+            if not entry.name.isdigit():
+                continue
+            try:
+                if entry.stat().st_uid != uid:
+                    continue
+                with open(f"/proc/{entry.name}/environ", "rb") as f:
+                    env = dict(
+                        kv.split(b"=", 1) for kv in f.read().split(b"\0") if b"=" in kv
+                    )
+                if b"DISPLAY" in env:
+                    return env[b"DISPLAY"].decode()
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return None
+
+
+def find_free_display() -> str:
+    for n in range(99, 200):
+        if not Path(f"/tmp/.X{n}-lock").exists():
+            return f":{n}"
+    raise click.ClickException("No free X display numbers available (checked :99–:199)")
+
+
+def start_xvfb(display: str) -> int:
+    """Start Xvfb on the given display. Returns its PID."""
+    if not shutil.which("Xvfb"):
+        raise click.ClickException(
+            "Xvfb not found. Install it with:\n  sudo apt install xvfb"
+        )
+    proc = subprocess.Popen(
+        ["Xvfb", display, "-screen", "0", "1920x1080x24", "-nolisten", "tcp"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    time.sleep(1.0)
+    if proc.poll() is not None:
+        raise click.ClickException(f"Xvfb failed to start on display {display}")
+    return proc.pid
+
+
+def start_xephyr(display: str, width: int = 1920, height: int = 1080) -> int | None:
+    """Start Xephyr on the given display. Returns its PID, or None on failure."""
+    proc = subprocess.Popen(
+        ["Xephyr", display, "-screen", f"{width}x{height}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    time.sleep(1.0)
+    if proc.poll() is not None:
+        return None
+    return proc.pid
+
+
+def minimize_xephyr(xephyr_pid: int, real_display: str) -> None:
+    """Minimize the Xephyr window so it starts tucked in the taskbar."""
+    if not shutil.which("xdotool"):
+        return
+    env = {**os.environ, "DISPLAY": real_display}
+    for _ in range(10):
+        result = subprocess.run(
+            ["xdotool", "search", "--pid", str(xephyr_pid)],
+            capture_output=True, text=True, env=env,
+        )
+        ids = result.stdout.strip().split()
+        if ids:
+            subprocess.run(["xdotool", "windowminimize", ids[-1]], env=env, check=False)
+            return
+        time.sleep(0.3)
+
+
+# ── Hidden browser auto-launch (Zephyr + silent) ──────────────────────────
+
+def launch_hidden_browser(
+    cdp_port: int = 9222,
+    user_data_dir: str | None = None,
+    browser_bin: str = "google-chrome",
+) -> dict | None:
+    """Launch Chromium in a hidden Xephyr window with silent flags.
+    
+    If Xephyr is unavailable, falls back to Xvfb (fully invisible).
+    
+    Returns state dict on success, or None if a browser was already running.
+    """
+    if is_cdp_available(cdp_port):
+        return None
+
+    browser = resolve_browser(browser_bin)
+
+    if user_data_dir is None:
+        user_data_dir = str(Path.home() / ".chrome-debug-profile")
+
+    cmd = [
+        browser,
+        f"--remote-debugging-port={cdp_port}",
+        f"--user-data-dir={user_data_dir}",
+        "--no-first-run",
+        "--disable-features=OptimizationHints",
+        "--remote-allow-origins=*",
+    ]
+
+    env = os.environ.copy()
+    xvfb_pid: int | None = None
+    xephyr_pid: int | None = None
+    display: str | None = None
+    real_display: str | None = detect_display() or None
+    mode = "xephyr"
+
+    # ── Virtual display setup (Xephyr preferred, fallback to Xvfb) ────────
+    if shutil.which("Xephyr"):
+        display = find_free_display()
+        xephyr_pid = start_xephyr(display)
+        if xephyr_pid is not None:
+            if real_display:
+                minimize_xephyr(xephyr_pid, real_display)
+        else:
+            click.echo("Xephyr failed to start — falling back to Xvfb.", err=True)
+
+    if xephyr_pid is None:
+        if not shutil.which("Xvfb"):
+            raise click.ClickException(
+                "No virtual display server available. Install Xephyr or Xvfb."
+            )
+        if display is None:
+            display = find_free_display()
+        xvfb_pid = start_xvfb(display)
+        mode = "xvfb"
+
+    env.pop("WAYLAND_DISPLAY", None)
+    env.pop("XDG_SESSION_TYPE", None)
+    env["DISPLAY"] = display
+    cmd.append("--ozone-platform=x11")
+
+    # Silent flags (always applied for virtual display)
+    cmd += [
+        "--disable-infobars",
+        "--disable-notifications",
+        "--disable-extensions",
+        "--disable-default-apps",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--mute-audio",
+        "--autoplay-policy=no-user-gesture-required",
+        "--disable-features=TranslateUI",
+        "--noerrdialogs",
+    ]
+
+    # ── Launch ──────────────────────────────────────────────────────────────
+    stderr_log = tempfile.NamedTemporaryFile(mode="w", suffix="_browser_start.log", delete=False)
+    stderr_log.close()
+
+    click.echo(f"Starting {browser} on CDP port {cdp_port}...", err=True)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=open(stderr_log.name, "w"),
+        start_new_session=True,
+        env=env,
+    )
+
+    # Wait up to 15 s for CDP to become available
+    for _ in range(30):
+        if is_cdp_available(cdp_port):
+            click.echo(f"Browser started successfully on CDP port {cdp_port}.", err=True)
+            try:
+                os.unlink(stderr_log.name)
+            except OSError:
+                pass
+            state = {
+                "mode": mode,
+                "cdp_port": cdp_port,
+                "xvfb_pid": xvfb_pid,
+                "xephyr_pid": xephyr_pid,
+                "display": display,
+                "real_display": real_display,
+            }
+            write_browser_state(state)
+            return state
+        time.sleep(0.5)
+
+    # ── Startup failed ────────────────────────────────────────────────────
+    exit_code = proc.poll()
+    if exit_code is not None:
+        click.echo(f"Browser process exited immediately (exit code {exit_code}).", err=True)
+    else:
+        click.echo(
+            f"CDP port {cdp_port} never became available after 15 s "
+            f"(process still running as PID {proc.pid}).",
+            err=True,
+        )
+
+    try:
+        with open(stderr_log.name) as f:
+            stderr_text = f.read(3000).strip()
+        if stderr_text:
+            click.echo(f"\nChromium output:\n{stderr_text}\n", err=True)
+    except OSError:
+        pass
+    finally:
+        try:
+            os.unlink(stderr_log.name)
+        except OSError:
+            pass
+
+    if xvfb_pid:
+        try:
+            os.kill(xvfb_pid, 9)
+        except OSError:
+            pass
+    if xephyr_pid:
+        try:
+            os.kill(xephyr_pid, 9)
+        except OSError:
+            pass
+
+    raise click.ClickException("Failed to start hidden browser.")

@@ -9,7 +9,7 @@ from commands.base import CommandManifest
 from commands.helpers import (
     ensure_agent_browser_installed,
     is_cdp_available,
-    launch_browser,
+    launch_hidden_browser,
     read_clipboard,
     run_instructions,
     stop_browser,
@@ -156,7 +156,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         launched_browser = False
         if not is_cdp_available(cdp_port) and not no_auto_browser:
             launched_browser = True
-            launch_browser(cdp_port)
+            launch_hidden_browser(cdp_port)
 
         import json
 

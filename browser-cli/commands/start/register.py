@@ -13,119 +13,14 @@ from commands.helpers import (
     ensure_agent_browser_installed,
     is_cdp_available,
     read_browser_state,
+    resolve_browser,
+    detect_display,
+    find_free_display,
+    start_xvfb,
+    start_xephyr,
+    minimize_xephyr,
     write_browser_state,
 )
-
-_BROWSER_CANDIDATES = [
-    "google-chrome",
-    "google-chrome-stable",
-    "chromium",
-    "chromium-browser",
-    "chromium-bsu",
-]
-
-_INSTALL_HINT = (
-    "No Chromium-based browser binary was found.\n"
-    "On Ubuntu/Debian, install Chromium with:\n"
-    "  sudo apt install chromium\n"
-    "Or point to an existing binary with:\n"
-    "  browser start --browser /path/to/chromium"
-)
-
-
-def _resolve_browser(requested: str) -> str:
-    if shutil.which(requested):
-        return requested
-    if requested not in _BROWSER_CANDIDATES:
-        raise click.ClickException(
-            f"Browser binary not found: '{requested}'\n" + _INSTALL_HINT
-        )
-    for candidate in _BROWSER_CANDIDATES:
-        if shutil.which(candidate):
-            click.echo(f"'{requested}' not found — using '{candidate}' instead.", err=True)
-            return candidate
-    raise click.ClickException(_INSTALL_HINT)
-
-
-def _detect_display() -> str | None:
-    if os.environ.get("DISPLAY"):
-        return os.environ["DISPLAY"]
-    if os.environ.get("WAYLAND_DISPLAY"):
-        return os.environ["WAYLAND_DISPLAY"]
-    uid = os.getuid()
-    try:
-        for entry in os.scandir("/proc"):
-            if not entry.name.isdigit():
-                continue
-            try:
-                if entry.stat().st_uid != uid:
-                    continue
-                with open(f"/proc/{entry.name}/environ", "rb") as f:
-                    env = dict(
-                        kv.split(b"=", 1) for kv in f.read().split(b"\0") if b"=" in kv
-                    )
-                if b"DISPLAY" in env:
-                    return env[b"DISPLAY"].decode()
-            except OSError:
-                continue
-    except OSError:
-        pass
-    return None
-
-
-def _find_free_display() -> str:
-    for n in range(99, 200):
-        if not Path(f"/tmp/.X{n}-lock").exists():
-            return f":{n}"
-    raise click.ClickException("No free X display numbers available (checked :99–:199)")
-
-
-def _start_xvfb(display: str) -> int:
-    """Start Xvfb on the given display. Returns its PID."""
-    if not shutil.which("Xvfb"):
-        raise click.ClickException(
-            "Xvfb not found. Install it with:\n  sudo apt install xvfb"
-        )
-    proc = subprocess.Popen(
-        ["Xvfb", display, "-screen", "0", "1920x1080x24", "-nolisten", "tcp"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(1.0)
-    if proc.poll() is not None:
-        raise click.ClickException(f"Xvfb failed to start on display {display}")
-    return proc.pid
-
-
-def _start_xephyr(display: str, width: int = 1920, height: int = 1080) -> int | None:
-    """Start Xephyr on the given display. Returns its PID, or None on failure."""
-    proc = subprocess.Popen(
-        ["Xephyr", display, "-screen", f"{width}x{height}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(1.0)
-    if proc.poll() is not None:
-        return None
-    return proc.pid
-
-
-def _minimize_xephyr(xephyr_pid: int, real_display: str) -> None:
-    """Minimize the Xephyr window so it starts tucked in the taskbar."""
-    if not shutil.which("xdotool"):
-        return
-    env = {**os.environ, "DISPLAY": real_display}
-    for _ in range(10):
-        result = subprocess.run(
-            ["xdotool", "search", "--pid", str(xephyr_pid)],
-            capture_output=True, text=True, env=env,
-        )
-        ids = result.stdout.strip().split()
-        if ids:
-            subprocess.run(["xdotool", "windowminimize", ids[-1]], env=env, check=False)
-            return
-        time.sleep(0.3)
-
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("start")
@@ -159,7 +54,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Browser already running on CDP port {cdp_port}.", err=True)
             return
 
-        browser = _resolve_browser(browser)
+        browser = resolve_browser(browser)
 
         if user_data_dir is None:
             user_data_dir = str(Path.home() / ".chrome-debug-profile")
@@ -182,7 +77,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if xvfb or hidden:
             # ── Virtual display mode ──────────────────────────────────────────
-            real_display = os.environ.get("DISPLAY") or _detect_display() or ":0"
+            real_display = os.environ.get("DISPLAY") or detect_display() or ":0"
 
             if hidden and not xvfb:
                 # Reuse an existing Xephyr session when available so no new
@@ -209,13 +104,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 if xephyr_pid is None:
                     # No existing Xephyr — start a fresh one and minimize immediately
                     if shutil.which("Xephyr"):
-                        display = _find_free_display()
+                        display = find_free_display()
                         click.echo(f"Starting Xephyr on display {display}...", err=True)
-                        xephyr_pid = _start_xephyr(display)
+                        xephyr_pid = start_xephyr(display)
                         if xephyr_pid is not None:
                             mode = "xephyr"
                             click.echo(f"Xephyr started (PID {xephyr_pid}) on {display}.", err=True)
-                            _minimize_xephyr(xephyr_pid, real_display)
+                            minimize_xephyr(xephyr_pid, real_display)
                         else:
                             click.echo("Xephyr failed to start — falling back to Xvfb.", err=True)
                     else:
@@ -228,9 +123,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             if xephyr_pid is None:
                 # Xvfb: explicit --xvfb flag, or Xephyr unavailable/failed
                 if display is None:
-                    display = _find_free_display()
+                    display = find_free_display()
                 click.echo(f"Starting Xvfb on display {display}...", err=True)
-                xvfb_pid = _start_xvfb(display)
+                xvfb_pid = start_xvfb(display)
                 mode = "xvfb"
                 click.echo(f"Xvfb started (PID {xvfb_pid}) on {display}.", err=True)
 
@@ -256,7 +151,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         else:
             # ── Real display mode ─────────────────────────────────────────────
-            detected = _detect_display()
+            detected = detect_display()
             headless = detected is None
 
             if detected and not os.environ.get("DISPLAY"):
