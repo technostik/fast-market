@@ -7,6 +7,28 @@ import click
 from commands.base import CommandManifest
 
 
+def _format_upload_error(status: int, reason: str, body: str) -> str:
+    msg = f"YouTube API returned {status} {reason}"
+    if body:
+        msg += f"\n{body}"
+    if status == 403:
+        msg += (
+            "\n\nPossible causes:"
+            "\n  - Quota exceeded (run 'youtube setup status' to check)"
+            "\n  - OAuth token lacks upload permission (run 'youtube setup refresh')"
+            "\n  - Video may violate YouTube's content policy"
+        )
+    elif status == 404:
+        msg += "\n\nThe video file was not found or the upload session expired."
+    elif status == 410:
+        msg += "\n\nThe upload session expired. Try uploading again."
+    elif status == 429:
+        msg += "\n\nToo many requests. Wait a moment and try again."
+    elif status >= 500:
+        msg += "\n\nYouTube server error. Try again later."
+    return msg
+
+
 def upload_video(
     video_file: str,
     title: str,
@@ -18,6 +40,7 @@ def upload_video(
     """Upload a video to YouTube. Returns the video URL."""
     from core.engine import build_youtube_client
     from googleapiclient.http import MediaFileUpload  # type: ignore[import]
+    from googleapiclient.errors import ResumableUploadError, HttpError
 
     client = build_youtube_client()
     body = {
@@ -33,15 +56,26 @@ def upload_video(
     }
 
     media = MediaFileUpload(video_file, resumable=True)
-    request = client.youtube.videos().insert(
-        part="snippet,status",
-        body=body,
-        media_body=media,
-    )
+    try:
+        request = client.youtube.videos().insert(
+            part="snippet,status",
+            body=body,
+            media_body=media,
+        )
+    except HttpError as e:
+        raise click.ClickException(
+            _format_upload_error(e.resp.status, e.reason, e.content.decode(errors="replace"))
+        )
 
     response = None
     while response is None:
-        status, response = request.next_chunk()
+        try:
+            status, response = request.next_chunk()
+        except ResumableUploadError as e:
+            status_code = e.resp.status if hasattr(e, "resp") else 0
+            reason = e.reason if hasattr(e, "reason") else "unknown"
+            body = e.content.decode(errors="replace") if hasattr(e, "content") else ""
+            raise click.ClickException(_format_upload_error(status_code, reason, body))
         if status and progress_callback:
             progress_callback(int(status.progress() * 100))
 
