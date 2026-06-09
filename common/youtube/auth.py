@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import time
+import webbrowser
 from pathlib import Path
 
 from common import structlog
@@ -12,6 +15,8 @@ SCOPE_READONLY = "https://www.googleapis.com/auth/youtube.readonly"
 SCOPE_FULL = "https://www.googleapis.com/auth/youtube.force-ssl"
 
 DEFAULT_SCOPES = [SCOPE_FULL]
+
+HEADLESS_AUTH_TIMEOUT = 300
 
 
 def get_youtube_auth_dir() -> Path:
@@ -32,6 +37,39 @@ class YouTubeOAuth(AuthProvider):
             client_secret_path = get_client_secret_path()
         self.client_secret_path = client_secret_path
         self.token_path = Path(client_secret_path).expanduser().parent / "token.json"
+
+    def _headless_oauth_flow(self, flow):
+        """Run OAuth without a browser: alert with URL, wait up to 5 min for token."""
+        auth_url, _ = flow.authorization_url(prompt="consent")
+        logger.error(
+            "oauth_no_browser",
+            auth_url=auth_url,
+            token_path=str(self.token_path),
+        )
+        subprocess.run(
+            [
+                "message",
+                "alert",
+                "🔑 YouTube OAuth required — no browser available.\n"
+                f"1. Open this URL in any browser: {auth_url}\n"
+                f"2. Authenticate and grant permissions\n"
+                f"3. Copy the generated token.json to: {self.token_path}\n"
+                "The system will wait up to 5 minutes.",
+            ]
+        )
+        deadline = time.time() + HEADLESS_AUTH_TIMEOUT
+        while time.time() < deadline:
+            if self.token_path.exists():
+                from google.oauth2.credentials import Credentials
+                logger.info("oauth_token_detected", path=str(self.token_path))
+                return Credentials.from_authorized_user_file(str(self.token_path))
+            time.sleep(5)
+        raise RuntimeError(
+            f"YouTube OAuth token not provided within "
+            f"{HEADLESS_AUTH_TIMEOUT // 60} minutes.\n"
+            f"Auth URL: {auth_url}\n"
+            f"Expected token path: {self.token_path}"
+        )
 
     def get_client(self, scopes: list[str] | None = None):
         """Return authenticated YouTube API client.
@@ -56,7 +94,6 @@ class YouTubeOAuth(AuthProvider):
         if self.token_path.exists():
             creds = Credentials.from_authorized_user_file(str(self.token_path))
 
-        # Check if current token has the required scopes
         if creds and creds.valid:
             token_scopes = set(getattr(creds, "scopes", []) or [])
             required = set(scopes)
@@ -66,7 +103,7 @@ class YouTubeOAuth(AuthProvider):
                     current_scopes=sorted(token_scopes),
                     required_scopes=sorted(required),
                 )
-                creds = None  # Force re-auth with new scopes
+                creds = None
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
@@ -76,9 +113,10 @@ class YouTubeOAuth(AuthProvider):
                     str(Path(self.client_secret_path).expanduser()),
                     scopes=scopes,
                 )
-                # prompt=consent forces Google to re-show the consent screen
-                # even if the user previously authorized a subset of these scopes
-                creds = flow.run_local_server(port=0, prompt="consent")
+                try:
+                    creds = flow.run_local_server(port=0, prompt="consent")
+                except webbrowser.Error:
+                    creds = self._headless_oauth_flow(flow)
             self.token_path.write_text(creds.to_json(), encoding="utf-8")
             logger.info("oauth_token_saved", path=str(self.token_path))
 
@@ -86,9 +124,6 @@ class YouTubeOAuth(AuthProvider):
 
     def refresh_auth(self, scopes: list[str] | None = None) -> None:
         """Force re-authentication, deleting any existing token.
-
-        Use this when the user needs to grant additional scopes
-        (e.g. switching from readonly to full access for comments).
 
         Args:
             scopes: OAuth scopes to request. Defaults to [SCOPE_FULL].
@@ -100,7 +135,6 @@ class YouTubeOAuth(AuthProvider):
             self.token_path.unlink()
             logger.info("oauth_token_deleted", path=str(self.token_path))
 
-        # Trigger a fresh OAuth flow
         self.get_client(scopes=scopes)
         logger.info("oauth_refresh_complete", scopes=scopes)
 
