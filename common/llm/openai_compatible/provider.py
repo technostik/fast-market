@@ -170,10 +170,22 @@ class _RealOpenAICompatibleProvider(LLMProvider):
                         and exc.response.status_code == 500
                     )
                 ):
-                    import warnings
+                    # openai.APIConnectionError is not a subclass of ConnectionError
+                    # but should be retried (transient connection blips)
+                    import sys
 
-                    warnings.warn(f"OpenAI-compatible API call failed: {exc}")
-                    raise
+                    _openai = sys.modules.get("openai")
+                    if not (
+                        _openai
+                        and hasattr(_openai, "APIConnectionError")
+                        and isinstance(exc, _openai.APIConnectionError)
+                    ):
+                        import warnings
+
+                        warnings.warn(
+                            f"OpenAI-compatible API call failed: {exc}"
+                        )
+                        raise
                 import time
 
                 time.sleep(1)
