@@ -211,7 +211,7 @@ async def _run_modal_steps(
     if from_step == 2:
         existing_ass = job.files.get("transcript", "")
         if existing_ass and Path(existing_ass).exists():
-            ass_bytes = Path(existing_ass).read_bytes()
+            ass_bytes = await asyncio.to_thread(Path(existing_ass).read_bytes)
         do_transcribe = False
 
     # Mark steps as running
@@ -225,7 +225,7 @@ async def _run_modal_steps(
 
     _save_meta(job)
 
-    video_bytes = Path(current_video).read_bytes()
+    video_bytes = await asyncio.to_thread(Path(current_video).read_bytes)
     video_name = Path(current_video).name
 
     try:
@@ -260,16 +260,16 @@ async def _run_modal_steps(
     # ── Write outputs to disk ──────────────────────────────────────────────
     out_video_name = result["video_name"]
     out_video_path = str(d / out_video_name)
-    Path(out_video_path).write_bytes(result["video_bytes"])
+    await asyncio.to_thread(Path(out_video_path).write_bytes, result["video_bytes"])
 
     ass_path = str(d / f"{stem}.ass")
     if result["ass_bytes"]:
-        Path(ass_path).write_bytes(result["ass_bytes"])
+        await asyncio.to_thread(Path(ass_path).write_bytes, result["ass_bytes"])
 
     txt_path = str(d / f"{stem}_transcript.txt")
     ass_txt = result.get("ass_txt", "")
     if ass_txt:
-        Path(txt_path).write_text(ass_txt, encoding="utf-8")
+        await asyncio.to_thread(Path(txt_path).write_text, ass_txt, encoding="utf-8")
         job.transcript_text = ass_txt
 
     # ── Update step statuses ───────────────────────────────────────────────
@@ -367,7 +367,7 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
                 rc, _ = await _run(s0, _yt(), "remove-silence", job.source, "-o", out_path)
             if rc != 0:
                 s0.end_time = time.time(); s0.status = "error"; job.status = "error"; _save_meta(job); return
-            duration = _get_video_duration(out_path)
+            duration = await _get_video_duration(out_path)
             if duration > 180:
                 s0.end_time = time.time(); s0.status = "error"
                 s0.output += "\nvideo too long"
@@ -418,7 +418,7 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
                     if pct > (s1.progress or 0):
                         s1.progress = round(pct, 1)
 
-                video_dur = _get_video_duration(current_video)
+                video_dur = await _get_video_duration(current_video)
                 expected_secs = max(video_dur * 7, 60)
 
                 t1_task = asyncio.create_task(

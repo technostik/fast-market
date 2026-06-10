@@ -1311,7 +1311,11 @@ function appendToConsole(text) {
   if (!consoleEl) consoleEl = document.getElementById('consoleContent');
   const box = document.getElementById('globalConsole');
   box.style.display = 'block';
+  const MAX_CONSOLE = 50_000;
   consoleEl.textContent += (consoleEl.textContent ? '\n' : '') + text;
+  if (consoleEl.textContent.length > MAX_CONSOLE) {
+    consoleEl.textContent = consoleEl.textContent.slice(-MAX_CONSOLE);
+  }
   // always auto-scroll to latest line
   box.scrollTop = box.scrollHeight;
   lastConsoleContent = consoleEl.textContent;

@@ -111,9 +111,10 @@ def _ass_to_plain_text(ass_path: str) -> str:
     return "\n".join(lines)
 
 
-def _get_video_duration(path: str) -> float:
+async def _get_video_duration(path: str) -> float:
     import subprocess
-    result = subprocess.run(
+    result = await asyncio.to_thread(
+        subprocess.run,
         [
             "ffprobe", "-v", "quiet",
             "-show_entries", "format/duration",
