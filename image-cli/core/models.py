@@ -82,6 +82,10 @@ class EngineConfig:
     torch_dtype: str = "bfloat16"
     local_files_only: bool = True
     force_device: str | None = None
+    # Cloudflare Workers AI fields (used by flux2cloud plugin)
+    account_id: str = ""
+    api_token: str = ""
+    cf_model: str = "@cf/black-forest-labs/flux-2-klein-4b"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EngineConfig:
@@ -92,6 +96,9 @@ class EngineConfig:
             torch_dtype=data.get("torch_dtype", cls().torch_dtype),
             local_files_only=data.get("local_files_only", cls().local_files_only),
             force_device=data.get("force_device", cls().force_device),
+            account_id=data.get("account_id", ""),
+            api_token=data.get("api_token", ""),
+            cf_model=data.get("cf_model", "@cf/black-forest-labs/flux-2-klein-4b"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -100,6 +107,9 @@ class EngineConfig:
             "torch_dtype": self.torch_dtype,
             "local_files_only": self.local_files_only,
             "force_device": self.force_device,
+            "account_id": self.account_id,
+            "api_token": self.api_token,
+            "cf_model": self.cf_model,
         }
 
 
