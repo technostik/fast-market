@@ -45,10 +45,8 @@ from .pool import (
 
 router = APIRouter()
 
-_jobs: dict[str, Job] = {}
-
 _load_pool_from_disk()
-
+_jobs: dict[str, Job] = {}
 
 def _is_intermediate(path: Path) -> bool:
     return bool(_INTERMEDIATE_RE.search(path.stem))

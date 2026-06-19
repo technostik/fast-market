@@ -143,6 +143,7 @@ def redo_item(source: str) -> bool:
             it.job_id = None
             _update_meta_status(src, "queued")
             _save_pool_to_disk()
+            start_pool()
             return True
     return False
 
@@ -157,6 +158,14 @@ def remove_from_pool(source: str) -> bool:
 
 
 def get_pool_state() -> dict:
+    # Auto-start the pool worker if there are items to process
+    if not _pool_state["running"]:
+        has_pending = any(
+            it.status == "queued" or it.status == "processing"
+            for it in _pool
+        )
+        if has_pending:
+            start_pool()
     items = []
     for it in _pool:
         item_dict = {
@@ -279,19 +288,29 @@ def skip_current():
             it.status = "skipped"
             it.finished_at = time.time()
             _update_meta_status(cur, "skipped")
+            _save_pool_to_disk()
             break
     _pool_state["current"] = None
 
 
 def redo_current():
     cur = _pool_state.get("current")
-    if not cur:
+    target = None
+    if cur:
+        target = next((it for it in _pool if it.source == cur), None)
+    if not target:
+        # No current processing item — redo the most recent error item
+        target = next((it for it in reversed(_pool) if it.status == "error"), None)
+    if not target:
         return
-    for it in _pool:
-        if it.source == cur:
-            it.status = "queued"
-            _update_meta_status(cur, "queued")
-            break
+    target.status = "queued"
+    target.finished_at = None
+    target.elapsed_seconds = None
+    target.error_message = ""
+    target.job_id = None
+    _update_meta_status(target.source, "queued")
+    _save_pool_to_disk()
+    start_pool()
 
 
 def clear_finished():
