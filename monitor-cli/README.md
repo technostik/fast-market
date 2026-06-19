@@ -17,17 +17,17 @@ Rule-based content monitoring agent that watches web sources and triggers action
 ## Installation
 
 ```bash
-pip install -e ./monitor-agent
+pip install -e ./monitor-cli
 ```
 
 ### Optional Dependencies
 
 ```bash
 # YouTube API support (for @handle resolution)
-pip install -e "./monitor-agent[youtube]"
+pip install -e "./monitor-cli[youtube]"
 
 # Development tools
-pip install -e "./monitor-agent[dev]"
+pip install -e "./monitor-cli[dev]"
 ```
 
 ## Configuration
@@ -1066,14 +1066,34 @@ crontab -e
 How to have the correct venv and avoid concurrent calls : 
 * * * * * /usr/bin/flock -n /tmp/monitor.lock bash -c 'source /path/to/venv/bin/activate && /path/to/venv/bin/monitor run --cron
 
+## Web Interface via webux
+
+When `webux-cli` is installed, the monitor provides a **Monitor** tab in `webux serve` automatically. No configuration needed.
+
+```bash
+webux serve
+# Open http://localhost:8007 — Monitor tab appears in the nav
+```
+
+The Monitor tab offers:
+- **Logs**: trigger log viewer with rule/source/action filters, date navigation, pagination, mismatch view
+- **Status**: statistics grid (all-time and today), source/rule/action IDs
+- **Diagnose**: runs `toolsetup diagnose` and shows health check results
+- **Rerun**: re-execute any past trigger action with the **🔄 Rerun** button
+- **Running indicator**: live display of the currently executing action with elapsed time, Wait and Stop controls
+
+The tab is registered via `webux/monitor/register.py` using the `fast_market.webux_plugins` entry point.
+
 ## Architecture
 
 ```
-monitor-agent/
-├── core/              # Rule engine, executor, storage
-├── plugins/           # youtube, rss, yt_search, directory source plugins
-├── commands/          # CLI commands
-└── monitor_entry/    # Entry point
+monitor-cli/
+├── core/              # Rule engine, executor, storage, scheduler, models
+├── plugins/           # youtube, rss, yt_search, channel_list, directory, json source plugins
+├── commands/          # CLI commands: setup, run, logs, status, diagnose, config, serve, wait, stop
+├── api/               # Standalone FastAPI server (monitor serve)
+├── webux/             # webux plugin — Monitor tab in webux serve
+└── monitor_entry/     # Entry point
 ```
 
 **Flow:**
@@ -1089,7 +1109,7 @@ monitor-agent/
 ### Run Tests
 
 ```bash
-cd monitor-agent
+cd monitor-cli
 pytest tests/ -v
 ```
 
@@ -1108,6 +1128,8 @@ See `plugins/AGENTS.md` for details.
 3. Return `CommandManifest`
 
 See `commands/AGENTS.md` for details.
+
+See [AGENTS.md](AGENTS.md) for full architecture, extension points, and pitfalls.
 
 ## Troubleshooting
 

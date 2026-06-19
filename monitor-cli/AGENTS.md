@@ -163,6 +163,13 @@ Core:
 4. Create `commands/serve/register.py` with uvicorn.run()
 5. Include `api` and `ui` in package list
 
+### Add a webux Plugin Tab
+The monitor already provides a **Monitor** tab in `webux serve` via `webux/monitor/register.py`.
+To extend it:
+1. Add API routes to the `router` in `webux/monitor/register.py`
+2. Update the inline `_HTML` string in that file for frontend changes
+3. The `_get_monitor_storage_class()` helper handles cross-module import isolation
+
 ### Add New Rule Operator
 1. Update `_evaluate_single_condition()` in `core/rule_engine.py`
 2. Add operator case with clear error message for unknown operators
@@ -218,9 +225,10 @@ Core:
 
 ## 📚 Related Documentation
 
-- `GOLDEN_RULES.md` — Core principles: DRY, KISS, CODE IS LAW, FAIL LOUDLY
-- `BUILD_NEW_AGENT_CLI.md` — General agent architecture guide
-- `corpus-agent/AGENTS.md` — Similar indexing agent for reference
+- See `README.md` for full CLI reference, DSL syntax, and cron setup
+- See `.doc/GOLDEN_RULES.md` — Core principles: DRY, KISS, CODE IS LAW, FAIL LOUDLY
+- See `common/AGENTS.md` for shared infrastructure (structlog, config, storage paths)
+- See `webux/AGENTS.md` for the webux plugin that provides the Monitor tab in `webux serve`
 
 ## 🔍 Key Design Decisions
 

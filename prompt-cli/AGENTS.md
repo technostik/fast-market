@@ -5,15 +5,23 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 
 ## 🏗️ Essential Components
 
-- `cli/main.py` — CLI entry point that discovers and registers all commands
+- `cli/main.py` — CLI entry point that discovers and registers all commands via `discover_commands()`
 - `commands/apply/register.py` — Core execution engine with three input modes (saved/direct/stdin)
-- `commands/task/register.py` — Agentic task execution with LLM-driven CLI loop
+- `commands/batch_apply/register.py` — Apply a prompt to multiple inputs in bulk
+- `commands/create/register.py` — Create new prompt templates
+- `commands/edit/register.py` — Edit a prompt in the default editor
+- `commands/update/register.py` — Update prompt content or metadata
+- `commands/delete/register.py` — Delete a saved prompt
+- `commands/get/register.py` — Show a single prompt with parameters
+- `commands/list/register.py` — List all saved prompts
+- `commands/logs/register.py` — View and manage prompt execution logs
+- `commands/validate/register.py` — Validate prompt template syntax
+- `commands/show_sys_prompt/register.py` — Render the full system prompt for debugging
 - `commands/alias/register.py` — Command alias management with description support
+- `commands/providers/register.py` — List configured LLM providers
 - `commands/setup/register.py` — Configuration wizard for provider, task prompts, and task management
 - `core/substitution.py` — Parameter resolution with file/stdin injection
 - `core/models.py` — Domain models (Prompt, PromptExecution)
-- `core/session.py` — Task session tracking and serialization
-- `core/task_prompt.py` — Task prompt configuration (TaskPromptConfig)
 - `common/core/aliases.py` — Alias resolution with caching and nested alias support
 - `common/core/paths.py` — XDG-compliant paths including skills directory
 - `common/llm/base.py` — Provider interfaces (LLMProvider, LazyLLMProvider, LLMRequest, LLMResponse)
@@ -38,7 +46,7 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 ## 🔗 Dependencies & Integration
 
 - Imports from: `common.core.config` (config loading), `common.core.registry` (plugin discovery), `common.cli.helpers` (output formatting), `common.storage` (base storage)
-- Used by: End users via CLI, potential API layer in future
+- Used by: End users via CLI; `task-cli` references prompt setup subcommands for task config management
 - External deps: `click` (CLI), `pyyaml` (config), `sqlalchemy` (executions storage), `python-frontmatter` (prompt parsing), `anthropic`, `openai` (optional)
 
 ## ✅ Do's
@@ -80,8 +88,8 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 - Keep injection patterns (`@file`, `-`) consistent
 
 **To add a command to task whitelist:**
-1. Add to `_DEFAULT_ALLOWED` in `commands/task/executor.py`, or
-2. Use `prompt setup task-commands add <name>`
+1. Add to `_default_agent_config()` in `task-cli/commands/setup/register.py`, or
+2. Use `task setup allowed-commands add <name>`
 
 **To add command aliases:**
 1. Create/edit `~/.config/prompt-agent/aliases.yaml`
@@ -119,9 +127,9 @@ Provide a unified CLI for managing reusable LLM prompt templates with pluggable 
 ## 📚 Related Documentation
 
 - See `AGENTS.md` in root for project-wide golden rules (DRY, KISS, CODE IS LAW, FAIL LOUDLY)
-- Refer to provider-specific READMEs in `plugins/` for implementation details
+- See `task-cli/AGENTS.md` for the agentic task execution CLI (task execution moved there)
+- See `task-cli/README.md` for `task apply` usage
 - Check `CHANGELOG.md` for test scenarios and edge cases
-- See `TASK.md` for `prompt task` command usage examples
 
 ## 💾 Prompt Storage
 

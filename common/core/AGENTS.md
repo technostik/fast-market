@@ -169,12 +169,26 @@ Used for YouTube video durations (`PT1H2M3S` format).
 - `create_or_update_alias(name, command, description)` - Creates/updates alias
 - `remove_alias(name)` - Removes alias
 
+## YAML Utilities
+
+- `yaml_utils.py` — `dump_yaml(data, ...)` — YAML serializer using a custom `_BlockStringDumper` that writes multiline strings in block style (`|`) instead of quoted style. Use this everywhere YAML output should be human-readable (prompts, config files).
+
+```python
+from common.core.yaml_utils import dump_yaml
+
+yaml_text = dump_yaml({"key": "line1\nline2"})
+# key: |
+#   line1
+#   line2
+```
+
 ## Do's
 - Always use path functions from this module instead of hardcoding paths
 - Respect XDG conventions for all file storage
 - Use `requires_common_config()` before calling `load_tool_config()`
 - Use `load_tool_config()` for any tool that needs configuration
 - Use `resolve_llm_config()` when you need LLM settings specifically
+- Use `dump_yaml()` from `yaml_utils` for any YAML output — not `yaml.dump()` directly
 
 ## Don'ts
 - Never hardcode `~/.config`, `~/.local/share`, or `~/.cache` for project configs
@@ -182,6 +196,7 @@ Used for YouTube video durations (`PT1H2M3S` format).
 - Never write `llm.providers` to tool-specific config (it will be stripped)
 - Never call `load_tool_config()` without first calling `requires_common_config()`
 
-
-## Webux Plugin Registry
-- `common/webux/` provides the shared `WebuxPluginManifest` contract and entry-point discovery for the unified webux hub.
+## 📚 Related Documentation
+- See `README.md` for usage, installation, and CLI reference
+- See `common/llm/AGENTS.md` for LLM config format details
+- See `common/webux/AGENTS.md` for the webux plugin registry (`WebuxPluginManifest`)

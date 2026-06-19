@@ -237,6 +237,18 @@ At the end of each run, statistics are displayed showing:
 - Actions breakdown (skill executions, task executions, user questions)
 - Unique skills used
 
+### skill rename
+
+Rename a skill and update its `name` field in `SKILL.md` frontmatter.
+
+```bash
+skill rename <old-name> <new-name>
+skill rename my-skill new-name --force    # overwrite if new-name exists
+skill rename my-skill new-name -f         # short form
+```
+
+---
+
 ### skill path
 
 Print skills directory path.
@@ -244,6 +256,55 @@ Print skills directory path.
 ```bash
 skill path
 ```
+
+### skill exec
+
+Execute a plan YAML file directly (sequential, no LLM routing).
+
+```bash
+skill exec plan.yaml                          # Execute plan file
+skill exec plan.yaml -P openai -m gpt-4       # Specific provider
+skill exec plan.yaml -w /path                 # Working directory
+skill exec plan.yaml -v                       # Verbose output
+skill exec plan.yaml --run-isolated           # Isolated dir for entire run
+skill exec plan.yaml --skill-isolated         # Isolated subdir per skill
+skill exec plan.yaml --shared-context         # Enable shared context tool
+skill exec plan.yaml --no-eval                # Skip evaluation phase
+skill exec plan.yaml --no-ask                 # Disable user interaction
+skill exec plan.yaml --auto-learn             # Update LEARN.md after each skill
+skill exec plan.yaml -p KEY=VALUE             # Substitute {{KEY}} in plan (repeatable)
+skill exec plan.yaml --export result.yaml     # Export executed plan to file
+skill exec plan.yaml --export-successful ok.yaml  # Export only successful steps
+skill exec plan.yaml -I                       # Interactive mode (approve/skip each step)
+```
+
+---
+
+### skill setup
+
+Manage skill agent configuration (allowed commands, prompt templates).
+
+```bash
+# Show current config
+skill setup show
+
+# Edit config in default editor
+skill setup edit
+
+# Show config file path
+skill setup --path
+skill setup path
+```
+
+#### Allowed Commands
+
+```bash
+skill setup allowed-commands list
+skill setup allowed-commands add python3
+skill setup allowed-commands remove rm
+```
+
+---
 
 ### skill completion
 
@@ -345,15 +406,24 @@ skill-cli/
 │   ├── show/            # Show skill details
 │   ├── create/          # Create new skill
 │   ├── delete/          # Delete skill
+│   ├── rename/          # Rename skill (updates SKILL.md frontmatter)
 │   ├── edit/            # Edit skill files
-│   ├── apply/           # Execute skill
-│   ├── run/             # Orchestrate skills (LLM)
+│   ├── apply/           # Execute single skill
+│   ├── run/             # Orchestrate skills with LLM routing
+│   ├── run-plan/        # Convert tasks to auto-skills (skill plan)
+│   ├── exec/            # Execute plan YAML sequentially
 │   ├── path/            # Show skills path
 │   ├── auto_learn/      # Auto-learn management
+│   ├── setup/           # Agent config management
 │   └── params.py        # Custom Click types
-├── core/                # Core functionality
+├── core/
+│   ├── skill.py         # Skill data class and discovery
+│   ├── runner.py        # Single-skill execution
+│   └── router.py        # Multi-skill orchestration loop
 └── skill_entry/         # Package entry point
 ```
+
+See [`AGENTS.md`](AGENTS.md) for contributor guidance (architecture, do's/don'ts, pitfalls, extension points).
 
 ## Development
 

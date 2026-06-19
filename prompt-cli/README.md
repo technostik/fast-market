@@ -440,42 +440,14 @@ Create shortcuts for frequently used commands in `prompt task`:
 prompt alias alert-me "message alert"
 prompt alias img-gen "image generate"
 ```
-Aliases are automatically documented in task system prompts, so the LLM knows available shortcuts.
+Aliases are automatically documented in the `task-cli` system prompts, so the LLM knows available shortcuts.
 
 Aliases can include descriptions for better documentation:
 ```bash
 prompt alias alert-me "message alert" -d "Send an alert message"
 ```
 
-### Task Sessions
-The `prompt task` command tracks and displays session information:
-```bash
-# Normal output shows session header with task details
-prompt task "analyze data"
-
-# Output:
-# ============================================================
-# TASK SESSION: analyze data
-# Provider: anthropic, Model: claude-sonnet-4-20250514
-# Workdir: /path/to/current/dir
-# ============================================================
-
-# Suppress session output
-prompt task "quick task" --silent
-
-# Save session to YAML file for later review
-prompt task "complex task" --save-session session.yaml
-
-# Debug mode shows full session YAML
-prompt task "debug task" --debug full
-```
-
-Session information includes:
-- Task description
-- Provider and model used
-- Working directory
-- Parameters (if any)
-- All turns, tool calls, and results
+For agentic task execution using these aliases, see `task-cli` (`task apply`).
 
 ### Three Input Modes
 1. **Saved prompts** — Reusable templates with stored settings
@@ -503,37 +475,33 @@ All executions are recorded with:
 ## Architecture
 
 ```
-prompt-agent/
-├── cli/                 # CLI entry point
-│   ├── main.py          # Command registration
-│   └── commands/        # Individual commands
-│       ├── apply/       # Main execution logic
-│       ├── create/      # Prompt creation
-│       ├── get/          # Prompt retrieval
-│       ├── list/        # Listing
-│       ├── update/      # Updates
-│       ├── delete/      # Deletion
-│       ├── alias/       # Alias management
-│       ├── providers/    # Provider listing
-│       └── setup/       # Configuration wizard
-├── core/                # Core domain models
-│   ├── models.py        # Prompt, Execution
-│   └── substitution.py  # Placeholder resolution
-├── common/              # Shared infrastructure
-│   └── core/
-│       └── aliases.py   # Alias resolution
-├── plugins/             # LLM providers
-│   ├── base.py          # Provider interfaces
-│   ├── anthropic/       # Anthropic provider
-│   ├── openai/          # OpenAI provider
-│   ├── openai_compatible/ # Custom endpoints
-│   └── ollama/          # Local Ollama
-├── storage/             # Persistence
-│   ├── store.py         # PromptStore interface
-│   └── migrations/      # Alembic DB migrations
+prompt-cli/
+├── cli/main.py          # Entry point; auto-discovers all commands/
+├── commands/
+│   ├── apply/           # Main execution logic (3 input modes)
+│   ├── batch_apply/     # Bulk prompt execution
+│   ├── create/          # Prompt creation
+│   ├── edit/            # Edit prompt in editor
+│   ├── get/             # Show single prompt
+│   ├── list/            # List all prompts
+│   ├── logs/            # View execution logs
+│   ├── update/          # Update prompt content/metadata
+│   ├── delete/          # Delete prompt
+│   ├── validate/        # Validate template syntax
+│   ├── show_sys_prompt/ # Debug: render system prompt
+│   ├── alias/           # Alias management
+│   ├── providers/       # List configured providers
+│   └── setup/           # Configuration wizard + task config
+├── core/
+│   ├── models.py        # Prompt, PromptExecution
+│   └── substitution.py  # Placeholder resolution (@file, stdin)
+├── storage/
+│   ├── store.py         # PromptStore (flat-file Markdown)
+│   └── file_store.py    # FilePromptStore
 └── tests/               # Test suite
-    └── test_aliases.py  # Alias tests
 ```
+
+LLM providers live in `common/llm/` (anthropic, openai, openai_compatible, ollama, groq, xai). For agentic task execution, see `task-cli/`.
 
 ## Development
 
@@ -549,26 +517,13 @@ pytest tests/
 
 ### Adding a New Provider
 
-1. Create plugin directory: `plugins/newprovider/`
-2. Implement provider class extending `LazyLLMProvider`
-3. Add `register()` function returning `PluginManifest`
-4. Update `pyproject.toml` with new package
-5. Add to `_SUPPORTED_PROVIDERS` in `setup.py`
+Providers live in `common/llm/<name>/`. See `common/llm/AGENTS.md` for the full guide.
 
-Example provider structure:
-```python
-from plugins.base import LLMProvider, LazyLLMProvider, LLMRequest, LLMResponse
-
-class NewProvider(LazyLLMProvider):
-    name = "newprovider"
-    
-    def _initialize(self):
-        # Lazy initialization
-        self._provider = _RealNewProvider(...)
-    
-def register(config: dict) -> PluginManifest:
-    return PluginManifest(name="newprovider", provider_class=NewProvider)
-```
+1. Create `common/llm/newprovider/` with `plugin.py`
+2. Implement class extending `LazyLLMProvider`
+3. Add `_initialize()` that creates the real provider instance
+4. Implement `complete()` and `list_models()`
+5. Add `register()` returning `PluginManifest`
 
 ### Adding a New Command
 
@@ -592,7 +547,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
 ### Adding Command Aliases
 
-Aliases are defined in `~/.config/prompt-agent/aliases.yaml` or managed via CLI:
+Aliases are defined in `~/.config/fast-market/aliases.yaml` or managed via CLI:
 
 ```yaml
 aliases:
@@ -604,3 +559,7 @@ The alias system is implemented in `common/core/aliases.py`:
 - `load_aliases()` — Load from YAML with caching
 - `resolve_alias(cmd_str)` — Replace alias with actual command
 - `get_reverse_aliases()` — Map commands to their aliases (for docs)
+
+## Contributing
+
+See [`AGENTS.md`](AGENTS.md) for module-level contributor guidance (architecture, do's/don'ts, pitfalls).

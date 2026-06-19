@@ -10,8 +10,11 @@ Standalone CLI to manage skills stored in `~/.local/share/fast-market/skills/`. 
 - `commands/show/register.py` — Show skill details, supports `--learn` for LEARN.md
 - `commands/create/register.py` — Scaffold new skill
 - `commands/delete/register.py` — Remove skill
+- `commands/rename/register.py` — Rename a skill and update SKILL.md frontmatter `name` field
 - `commands/edit/register.py` — Edit skill files, supports `--learn` for LEARN.md and `--shell` for scripts/run.sh
 - `commands/run/register.py` — Orchestrate multiple skills (LLM-powered) with isolated subdirs
+- `commands/run-plan/register.py` — Execute a plan YAML (`skill plan`) or convert named tasks to auto-skills
+- `commands/exec/register.py` — Execute a run-plan file directly (no LLM routing, sequential execution)
 - `commands/apply/register.py` — Apply/execute a skill
 - `commands/auto_learn/register.py` — Auto-learn templates and compact command
 - `commands/path/register.py` — Print skills directory path
