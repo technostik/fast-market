@@ -8,6 +8,7 @@ Fast Market provides a collection of pluggable CLI tools that help you:
 - **Manage content corpus** — Index and search content from YouTube, Obsidian
 - **Monitor sources** — Watch YouTube channels, RSS feeds, and search keywords for new content
 - **Generate images** — AI-powered image generation with FLUX.2
+- **Generate sound** — Text-to-speech and music generation with Kokoro, Qwen3-TTS, MusicGen
 - **Send messages** — Alert and interact via Telegram
 - **Execute prompts** — Reusable LLM prompt templates with multiple providers
 - **Run agentic tasks** — LLM-driven iterative CLI execution
@@ -28,12 +29,13 @@ fast-market/
 ├── corpus-cli/                # Content indexing and search
 ├── monitor-cli/               # Rule-based source monitoring
 ├── youtube-cli/               # YouTube Data API operations
-├── image-cli/                 # AI image generation
-├── message-cli/               # Messaging (Telegram)
-├── prompt-cli/                # LLM prompt management
-├── task-cli/                  # Agentic task execution
-├── skill-cli/                # Skill management
-└── toolsetup-cli/             # Tool configuration
+ ├── image-cli/                 # AI image generation
+ ├── sound-cli/                 # TTS and music generation
+ ├── message-cli/               # Messaging (Telegram)
+ ├── prompt-cli/                # LLM prompt management
+ ├── task-cli/                  # Agentic task execution
+ ├── skill-cli/                # Skill management
+ └── toolsetup-cli/             # Tool configuration
 ```
 
 All tools use:
@@ -50,6 +52,7 @@ pip install -e './corpus-cli[ml,youtube]'
 pip install -e './monitor-cli[youtube]'
 pip install -e './youtube-cli'
 pip install -e './image-cli'
+pip install -e './sound-cli[kokoro]'
 pip install -e './message-cli'
 pip install -e './prompt-cli[openai]'
 pip install -e './task-cli'
@@ -64,6 +67,7 @@ pip install -e './corpus-cli[ml,youtube]' \
                -e './monitor-cli[youtube]' \
                -e './youtube-cli' \
                -e './image-cli' \
+               -e './sound-cli[kokoro]' \
                -e './message-cli' \
                -e './prompt-cli[openai]' \
                -e './task-cli' \
@@ -79,6 +83,9 @@ pip install -e './corpus-cli[ml,youtube]' \
 | `youtube` | corpus-cli, monitor-cli | YouTube API support |
 | `whisper` | corpus-cli | YouTube transcription |
 | `openai` | prompt-cli | OpenAI provider support |
+| `kokoro` | sound-cli | Kokoro TTS engine |
+| `qwen3` | sound-cli | Qwen3-TTS voice design engine |
+| `musicgen` | sound-cli | MusicGen music generation |
 | `dev` | All | Development testing tools |
 
 ## Configuration
@@ -241,6 +248,38 @@ image setup -a flux2          # Add engine
 # Serve API
 image serve -p 8080
 ```
+
+---
+
+### sound — Sound Generation
+
+Generate speech and music from text using AI engines.
+
+```bash
+# Text-to-Speech
+sound speak "Hello world"                                      # Kokoro with default voice
+sound speak "Bonjour" -e qwen3 --voice "A soft French voice" -L French   # Qwen3 voice design
+sound speak "Hi" --voice "am_michael" --speed 1.5              # Kokoro voice override
+
+# Music Generation
+sound music "lofi piano beat"
+sound music "upbeat electronic" -d 10                           # Custom duration
+
+# Setup
+sound setup -c                                                  # Show current config
+sound setup -p                                                  # Show config file path
+sound setup path                                                # Show workdir
+sound setup path ~/my-output                                    # Set workdir
+sound setup edit                                                # Edit config in editor
+sound setup reset                                               # Reset to defaults
+```
+
+**Available engines:**
+- `kokoro` — Lightweight TTS with weighted voice mixing (`am_michael*0.7,am_fenrir*0.3`)
+- `qwen3` — Voice design via natural language descriptions (GPU recommended)
+- `musicgen` — Text-to-music generation (GPU recommended)
+
+**Config location:** `~/.config/fast-market/sound/config.yaml`
 
 ---
 

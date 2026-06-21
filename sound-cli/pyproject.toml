@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sound-agent"
+version = "0.1.0"
+description = "Sound generation CLI with TTS (Kokoro, Qwen3-TTS) and music generation (MusicGen)"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "auto-click-auto>=0.1.0",
+    "pyyaml>=6.0",
+    "soundfile>=0.12",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+kokoro = ["kokoro>=0.9,<1.0"]
+qwen3 = ["qwen-tts>=0.1"]
+musicgen = ["transformers"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+sound = "sound_entry:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "common*", "cli*", "core*",
+    "plugins*", "plugins.kokoro*", "plugins.qwen3*", "plugins.musicgen*",
+    "commands*", "commands.speak*", "commands.music*", "commands.setup*",
+    "sound_entry*",
+]

@@ -2,6 +2,21 @@
 
 Tool with pluggable input and output to help market content for web creators
 
+## CLI Tools
+
+| Tool | Directory | Purpose |
+|------|-----------|---------|
+| `corpus` | `corpus-cli/` | Content indexing and search |
+| `monitor` | `monitor-cli/` | Rule-based source monitoring |
+| `youtube` | `youtube-cli/` | YouTube Data API operations |
+| `image` | `image-cli/` | AI image generation |
+| `sound` | `sound-cli/` | TTS and music generation |
+| `message` | `message-cli/` | Telegram messaging |
+| `prompt` | `prompt-cli/` | LLM prompt management |
+| `task` | `task-cli/` | Agentic task execution |
+| `skill` | `skill-cli/` | Skill management |
+| `toolsetup` | `toolsetup-cli/` | Tool configuration |
+
 # Coding rules
 
 See .doc/GOLDEN_RULES.md
