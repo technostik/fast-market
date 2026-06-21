@@ -94,6 +94,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 voice=actual_voice,
                 speed=actual_speed,
                 language=actual_language,
+                clone=engine_config.get("clone"),
+                ref_text=engine_config.get("ref_text"),
             )
 
             workdir = config.get("workdir") or "."

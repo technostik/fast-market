@@ -18,7 +18,10 @@ def load_sound_config(path: str | None = None) -> dict:
         "qwen3": {
             "voice": "A warm, friendly male voice with a professional tone",
             "language": "English",
-            "model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+            "voice_design_model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+            "base_model": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+            "clone": None,
+            "ref_text": None,
         },
         "musicgen": {
             "model": "facebook/musicgen-medium",
@@ -43,7 +46,10 @@ def get_default_config() -> dict:
         "qwen3": {
             "voice": "A warm, friendly male voice with a professional tone",
             "language": "English",
-            "model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+            "voice_design_model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+            "base_model": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+            "clone": None,
+            "ref_text": None,
         },
         "musicgen": {
             "model": "facebook/musicgen-medium",
