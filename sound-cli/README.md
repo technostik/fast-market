@@ -45,7 +45,10 @@ kokoro:
 qwen3:
   voice: "A warm, friendly male voice with a professional tone"
   language: English
-  model: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+  voice_design_model: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign   # creates reference
+  base_model:          Qwen/Qwen3-TTS-12Hz-1.7B-Base          # stable TTS
+  clone: null            # path to reference audio for voice cloning
+  ref_text: null         # transcript of clone audio (ICL mode)
 
 musicgen:
   model: facebook/musicgen-medium
@@ -55,6 +58,35 @@ output_format: wav
 ```
 
 Output files are written to the common config `workdir` (set in `~/.config/fast-market/common/config.yaml`).
+
+### Stable Voice System (Qwen3)
+
+Qwen3 uses a **dual-model architecture** for stable, reproducible voices:
+
+1. **VoiceDesign model** (`voice_design_model`) — generates a reference audio from a natural-language voice description
+2. **Base model** (`base_model`) — clones that reference for every TTS request, guaranteeing the same timbre
+
+The voice identity is **hashed** from the voice description (+ optional `clone` config). A cached reference is stored at `~/.cache/fast-market/sound/ref_voices/{hash}.wav`. As long as none of `voice`, `clone`, or `ref_text` change, the same reference is reused.
+
+When you change the voice description, a new hash is computed and a new reference is generated automatically.
+
+#### Voice Cloning
+
+Set `clone` to a `.wav` file path and optionally `ref_text` to its transcript:
+
+```yaml
+qwen3:
+  voice: "A warm, friendly male voice"
+  clone: /path/to/recording.wav
+  ref_text: "Transcript of the recording"
+```
+
+The workflow:
+1. **Base model** clones the voice from the reference audio
+2. If `ref_text` is provided, ICL (In-Context Learning) mode is used for better quality; otherwise x‑vector only
+3. The result is cached and reused for stable TTS
+
+**Log messages** on stderr indicate whether a new reference is being generated or a cached one is used.
 
 ## Commands
 
@@ -104,12 +136,17 @@ Generate music from a text prompt.
 - **Hardware**: Works on CPU, faster on GPU
 - **Install**: `pip install sound-agent[kokoro]`
 
-### Qwen3-TTS VoiceDesign
+### Qwen3-TTS (Dual Model)
 - **Package**: `qwen-tts>=0.1`
-- **Model**: `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` (auto-downloaded on first use)
+- **Models**:
+  - `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` — voice design from description
+  - `Qwen/Qwen3-TTS-12Hz-1.7B-Base` — stable voice cloning
+- **Workflow**: VoiceDesign creates a reference → Base model clones it for every TTS → same voice every time
 - **Voices**: Natural language voice descriptions (design any voice)
+- **Cloning**: Optional `clone` config key pointing to a `.wav` file, with optional `ref_text` transcript
+- **Reference cache**: `~/.cache/fast-market/sound/ref_voices/{voice_hash}.wav`
 - **Languages**: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian
-- **Hardware**: GPU recommended (1.7B param model)
+- **Hardware**: GPU recommended (2 × 1.7B param models)
 - **Install**: `pip install sound-agent[qwen3]`
 
 ### MusicGen

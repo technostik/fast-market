@@ -31,7 +31,7 @@ sound-cli/
 | `base.py` | `TTSPlugin` ABC, `MusicGenPlugin` ABC, `PluginManifest` |
 | `kokoro/plugin.py` | `KokoroPlugin` - weighted voice mixing TTS |
 | `kokoro/register.py` | Declares kokoro plugin to the system |
-| `qwen3/plugin.py` | `Qwen3TTSPlugin` - natural language voice design |
+| `qwen3/plugin.py` | `Qwen3TTSPlugin` - dual-model voice design + cloning with stable reference caching |
 | `qwen3/register.py` | Declares qwen3 plugin to the system |
 | `musicgen/plugin.py` | `MusicGenModelPlugin` - text-to-music generation |
 | `musicgen/register.py` | Declares musicgen plugin to the system |
@@ -52,6 +52,8 @@ sound-cli/
 - Support multiple TTS engines (kokoro with voice embeddings, qwen3 with voice design)
 - Weighted voice mixing for kokoro (e.g. `am_michael*0.7,am_fenrir*0.3`)
 - Natural language voice descriptions for qwen3
+- **Qwen3 stable voice system**: dual-model architecture (VoiceDesign + Base) with hash-based reference caching
+- Optional voice cloning via `clone` + `ref_text` config keys
 - Save WAV output to workdir
 
 ### Music Generation
@@ -85,13 +87,50 @@ kokoro:
 qwen3:
   voice: "A warm, friendly male voice with a professional tone"
   language: English
-  model: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+  voice_design_model: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+  base_model:          Qwen/Qwen3-TTS-12Hz-1.7B-Base
+  clone: null            # path to reference .wav for voice cloning
+  ref_text: null         # transcript of clone audio (ICL mode)
 
 musicgen:
   model: facebook/musicgen-medium
   duration: 5.0
 
 output_format: wav
+```
+
+## Stable Voice System (Qwen3)
+
+The Qwen3 plugin uses two HuggingFace models:
+
+| Model | Config key | Purpose |
+|-------|-----------|---------|
+| `Qwen3-TTS-12Hz-1.7B-VoiceDesign` | `voice_design_model` | Creates reference audio from NL description via `generate_voice_design()` |
+| `Qwen3-TTS-12Hz-1.7B-Base` | `base_model` | Clones reference via `generate_voice_clone()` for stable TTS |
+
+### Voice identity
+
+A SHA‑256 hash (first 16 hex chars) is computed from a composite key:
+
+| Scenario | Key |
+|----------|-----|
+| No clone | `voice` (the description string) |
+| With clone | `voice||clone_path||ref_text` |
+
+If the cached reference exists at `~/.cache/fast-market/sound/ref_voices/{hash}.wav` it is reused; otherwise a new one is generated.
+
+### Reference creation
+
+| Config | Model used | Method |
+|--------|-----------|--------|
+| No clone | VoiceDesign | `generate_voice_design(instruct=voice, do_sample=False)` |
+| Clone (+ ref_text) | Base | `generate_voice_clone(ref_audio=clone, ref_text=ref_text)` → ICL mode |
+| Clone (no ref_text) | Base | `generate_voice_clone(ref_audio=clone, x_vector_only_mode=True)` |
+
+### Synthesis (always)
+
+```python
+base_model.generate_voice_clone(text=user_text, ref_audio=ref_path, ref_text=REFERENCE_TEXT)
 ```
 
 ## Commands
