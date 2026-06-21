@@ -101,7 +101,8 @@ def _generate_completion_script(shell: str, tools: list[str]) -> list[str]:
         elif shell == "zsh":
             lines.append(f'eval "$(_{tool.upper()}_COMPLETE=zsh_source {tool})"')
         elif shell == "fish":
-            lines.append(f"_{tool}_complete | source /dev/stdin")
+            env_var = f"_{tool.upper()}_COMPLETE"
+            lines.append(f"eval ({env_var}=fish_source {tool})")
 
     return lines
 

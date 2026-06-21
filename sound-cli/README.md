@@ -98,12 +98,17 @@ The workflow:
 | `sound music "lofi piano track"` | Generate music from prompt |
 | `sound music "upbeat electronic" -d 10` | Music with custom duration |
 
-### `sound speak <TEXT>`
+### `sound speak [TEXT]`
 
-Synthesize speech from text using a TTS engine.
+Synthesize speech from text using a TTS engine. Text can come from three sources:
+
+1. **Positional argument** — `sound speak "Hello world"`
+2. **File** — `sound speak -f script.txt`
+3. **Stdin pipe** — `echo "Hello world" | sound speak`
 
 | Option | Short | Description |
 |--------|-------|-------------|
+| `--file` | `-f` | Read text from a file |
 | `--engine` | `-e` | TTS engine: `kokoro` or `qwen3` (from config) |
 | `--voice` | `-v` | Voice spec (semantics depend on engine) |
 | `--speed` | `-s` | Playback speed, default 1.0 (kokoro only) |
@@ -114,6 +119,19 @@ Synthesize speech from text using a TTS engine.
 **Voice semantics by engine:**
 - **kokoro**: Weighted voice mix. Format: `name[*weight,...]`. Example: `am_michael*0.7,am_fenrir*0.3`. Weights are normalized to sum to 1.0. A single name like `am_michael` uses that voice directly.
 - **qwen3**: Natural language voice description. Example: `"A soft, elegant French female voice"`. Pairs with `--language` for multilingual generation.
+
+**Examples:**
+```bash
+# Positional argument
+sound speak "Hello world"
+
+# Read from file
+sound speak -f long_text.txt
+
+# Pipe input
+cat article.txt | sound speak --voice "A calm narrator voice"
+fortune | sound speak -e qwen3 -L French
+```
 
 ### `sound music <PROMPT>`
 
@@ -155,6 +173,33 @@ Generate music from a text prompt.
 - **Generation**: Text-to-music with duration control
 - **Hardware**: GPU recommended
 - **Install**: `pip install sound-agent[musicgen]`
+
+## Shell Completion
+
+Shell completion (tab-completing engines, options, flags) is supported via Click's native completion.
+
+```bash
+# Show completion script for your shell
+sound --show-completion
+
+# Install (add to ~/.bashrc / ~/.zshrc / ~/.config/fish/config.fish)
+sound --install-completion
+```
+
+Alternatively, manually add to your shell rc:
+
+```bash
+# bash
+eval "$(_SOUND_COMPLETE=bash_source sound)"
+
+# zsh
+eval "$(_SOUND_COMPLETE=zsh_source sound)"
+
+# fish
+_SOUND_COMPLETE=fish_source sound | source
+```
+
+After installation, restart your shell or source the rc file. Options like `--engine` will tab-complete available engine names.
 
 ## Voice Mixing (Kokoro)
 

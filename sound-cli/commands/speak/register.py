@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 
@@ -21,7 +22,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
     ]
 
     @click.command("speak")
-    @click.argument("TEXT")
+    @click.argument("TEXT", required=False)
+    @click.option(
+        "--file", "-f",
+        type=click.Path(exists=True, dir_okay=False),
+        default=None,
+        help="Read text from a file (alternative to TEXT arg / piping)",
+    )
     @click.option(
         "--engine", "-e",
         type=click.Choice(engine_choices),
@@ -63,8 +70,28 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Output format",
     )
     @click.pass_context
-    def speak_cmd(ctx, text, engine, voice, speed, output, language, fmt):
-        """Synthesize speech from TEXT."""
+    def speak_cmd(ctx, text, file, engine, voice, speed, output, language, fmt):
+        """Synthesize speech from TEXT.
+
+        TEXT can be provided as a positional argument, read from a file
+        (--file), or piped via stdin.
+        """
+        # --- resolve text source ------------------------------------------------
+        if file:
+            text = Path(file).read_text(encoding="utf-8").strip()
+        elif text:
+            pass
+        elif not sys.stdin.isatty():
+            text = sys.stdin.read().strip()
+
+        if not text:
+            click.echo(
+                "Error: No text provided. Pass TEXT argument, --file, or pipe input.",
+                err=True,
+            )
+            ctx.exit(1)
+
+        # --- load config & engines ------------------------------------------------
         config = load_sound_config()
 
         plugins = build_engine(config, tool_root=Path(__file__).resolve().parents[2])

@@ -54,6 +54,7 @@ sound-cli/
 - Natural language voice descriptions for qwen3
 - **Qwen3 stable voice system**: dual-model architecture (VoiceDesign + Base) with hash-based reference caching
 - Optional voice cloning via `clone` + `ref_text` config keys
+- Three text sources: positional argument, `--file` path, or stdin pipe
 - Save WAV output to workdir
 
 ### Music Generation
@@ -138,10 +139,14 @@ base_model.generate_voice_clone(text=user_text, ref_audio=ref_path, ref_text=REF
 | Command | Description |
 |---------|-------------|
 | `sound speak "hello"` | Synthesize speech with default engine |
+| `sound speak -f script.txt` | Read text from file |
+| `echo "hi" \| sound speak` | Pipe text via stdin |
 | `sound speak "hello" -e qwen3 -L French` | TTS with language |
 | `sound speak "hi" --voice "am_michael" --speed 1.5` | Kokoro with options |
 | `sound music "lofi beat"` | Generate music from prompt |
 | `sound music "jazz" -d 10` | Music with custom duration |
+| `sound --show-completion` | Print shell completion script |
+| `sound --install-completion` | Install shell completion |
 
 ## Engine Interfaces
 
