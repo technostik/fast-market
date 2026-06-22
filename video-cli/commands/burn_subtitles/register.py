@@ -72,11 +72,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.argument("ass_file", type=click.Path(exists=True))
     @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
     @click.option("--font-size", default=96, show_default=True, help="Subtitle font size")
+    @click.option("--modal/--local", default=False, show_default=True, help="Run this step on Modal instead of locally.")
     def burn_subtitles_cmd(
         video_file: str,
         ass_file: str,
         output: str | None,
         font_size: int,
+        modal: bool,
     ):
         """Burn ASS karaoke subtitles (green/white, middle-centered) into a video."""
         video_path = Path(video_file).resolve()
@@ -85,7 +87,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
             else video_path.parent / f"{video_path.stem}_subtitled{video_path.suffix}"
         )
         click.echo(f"Burning subtitles into {video_path.name}...", err=True)
-        burn_ass_subtitles(str(video_path), ass_file, str(output_path), font_size, progress_cb=None)
+        if modal:
+            from commands.remote import run_remote_burn_subtitles
+            run_remote_burn_subtitles(video_path, Path(ass_file).resolve(), output_path, font_size)
+        else:
+            burn_ass_subtitles(str(video_path), ass_file, str(output_path), font_size, progress_cb=None)
         click.echo(str(output_path))
 
     return CommandManifest(name="burn-subtitles", click_command=burn_subtitles_cmd)

@@ -12,6 +12,7 @@ dependencies = [
     "pyyaml>=6.0",
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "psutil>=5.9",
     "structlog>=24.2",
     "common",
 ]
@@ -23,6 +24,7 @@ webux = "webux_entry:main"
 fileviewer = "webux.fileviewer.register:register"
 yt_poster = "webux.yt_poster.register:register"
 skill_runner = "webux.skill_runner.register:register"
+short_publish = "webux.short_publish.register:register"
 
 [tool.setuptools]
 packages = [
@@ -34,6 +36,7 @@ packages = [
     "webux.fileviewer",
     "webux.yt_poster",
     "webux.skill_runner",
+    "webux.short_publish",
     "commands",
     "commands.serve",
 ]

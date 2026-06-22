@@ -1,5 +1,5 @@
 """
-Regression tests for the YouTube publish pipeline steps 0-2.
+Regression tests for the video processing pipeline steps 0-2.
 
 Steps covered:
   0  remove silence     (remove_silence_simple)
@@ -15,7 +15,7 @@ Test assets (all committed to git):
   tests/fixtures/publish/golden/durations.json  reference durations per step
 
 To regenerate golden fixtures after an intentional change:
-  cd youtube-cli
+  cd video-cli
   pytest tests/test_publish_regression.py --generate-golden
 """
 

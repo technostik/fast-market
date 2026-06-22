@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 from typing import Callable
@@ -68,23 +67,27 @@ def _discover_from_repo_layout(config: dict) -> dict[str, WebuxPluginManifest]:
             continue
         for register_path in sorted(webux_dir.glob("*/register.py")):
             plugin_key = f"{cli_dir.name}:{register_path.parent.name}"
-            module_name = (
-                f"fast_market_dynamic_webux_{cli_dir.name.replace('-', '_')}_"
-                f"{register_path.parent.name}_register"
-            )
             logger.debug(
                 "webux_plugin_loading_repo",
                 plugin=plugin_key,
                 path=str(register_path),
             )
             try:
-                spec = importlib.util.spec_from_file_location(module_name, register_path)
-                if spec is None or spec.loader is None:
-                    raise RuntimeError(f"cannot create module spec for {register_path}")
-                module = importlib.util.module_from_spec(spec)
                 sys.path.insert(0, str(cli_dir))
+                import importlib
+
+                package_module = f"webux.{register_path.parent.name}.register"
                 try:
-                    spec.loader.exec_module(module)
+                    module = importlib.import_module(package_module)
+                except Exception:
+                    # A different CLI may already have provided a top-level
+                    # ``webux`` package during repo-layout scanning. Clear it
+                    # and retry so relative imports inside this plugin resolve
+                    # against the current CLI directory.
+                    for name in list(sys.modules):
+                        if name == "webux" or name.startswith("webux."):
+                            sys.modules.pop(name, None)
+                    module = importlib.import_module(package_module)
                 finally:
                     sys.path.pop(0)
             except Exception as exc:

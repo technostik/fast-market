@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-agent"
+version = "0.1.0"
+description = "Video processing CLI tool for silence removal, transcription, subtitles, and Modal diagnostics"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "auto-click-auto>=0.1.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "requests>=2.0",
+    "numpy>=1.24",
+    "moviepy>=2.0",
+    "faster-whisper>=1.0",
+    "modal>=1.0",
+]
+
+[project.scripts]
+video = "video_entry:main"
+
+[tool.setuptools]
+packages = [
+    "cli",
+    "commands",
+    "commands.remove_silence",
+    "commands.extract_transcript",
+    "commands.burn_subtitles",
+    "commands.modal_diagnose",
+    "commands.pipeline",
+    "video_entry",
+    "modal_client",
+]
+
+[tool.setuptools.package-data]
+common = ["py.typed"]

@@ -19,21 +19,13 @@ dependencies = [
     "google-auth-oauthlib>=1.0",
     "google-auth>=2.0",
     "python-multipart>=0.0.6",
-    "numpy>=1.24",
-    "moviepy>=2.0",
-    "faster-whisper>=1.0",
-    "modal>=1.0",
 ]
 
 [project.optional-dependencies]
 ytdlp = ["yt-dlp"]
-transcribe = ["faster-whisper>=1.0"]
 
 [project.scripts]
 youtube = "youtube_entry:main"
-
-[project.entry-points."fast_market.webux_plugins"]
-publish = "webux.publish.register:register"
 
 [tool.setuptools]
 packages = [
@@ -47,15 +39,8 @@ packages = [
     "commands.search",
     "commands.comments",
     "commands.reply",
-    "commands.remove_silence",
-    "commands.extract_transcript",
-    "commands.burn_subtitles",
     "commands.upload",
     "youtube_entry",
-    "webux",
-    "webux.publish",
-    "modal_client",
-    "commands.modal_diagnose",
 ]
 
 [tool.setuptools.package-data]

@@ -278,6 +278,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--language", "-l", default="fr", show_default=True, help="Language code or 'auto'")
     @click.option("--model", "-m", default="medium", show_default=True, help="Whisper model size")
     @click.option("--font-size", default=96, show_default=True, help="Font size (ASS only)")
+    @click.option("--modal/--local", default=False, show_default=True, help="Run this step on Modal instead of locally.")
     def extract_transcript_cmd(
         input_file: str,
         output: str | None,
@@ -285,6 +286,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         language: str,
         model: str,
         font_size: int,
+        modal: bool,
     ):
         """Transcribe a video to ASS karaoke, SRT, or plain TXT subtitles.
 
@@ -306,7 +308,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         click.echo(f"Transcribing {input_path.name} ({model}, {language}, {fmt})...", err=True)
 
-        if fmt == "ass":
+        if modal:
+            from commands.remote import run_remote_extract_transcript
+            run_remote_extract_transcript(input_path, output_path, fmt, language, model, font_size)
+        elif fmt == "ass":
             generate_karaoke_ass(str(input_path), str(output_path), language, model, font_size, progress_cb=None)
         elif fmt == "srt":
             transcribe_to_srt(str(input_path), str(output_path), language, model, progress_cb=None)

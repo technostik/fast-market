@@ -1,11 +1,11 @@
-# ADR 010: Modal Remote Processing for YouTube Media Pipeline
+# ADR 010: Modal Remote Processing for Video Media Pipeline
 
 ## Status
 Accepted
 
 ## Context
 
-The `youtube-cli` publish pipeline (`webux/publish/pipeline.py`) runs three CPU/GPU-intensive steps locally before uploading to YouTube:
+The `webux-cli` short publish pipeline (`webux/short_publish/pipeline.py`) delegates three CPU/GPU-intensive steps to the standalone `video` CLI before uploading to YouTube:
 
 1. **Remove silence** — `moviepy` RMS analysis + video concatenation
 2. **Transcribe** — `faster-whisper` ASS karaoke subtitle generation
@@ -21,22 +21,20 @@ These steps are slow on local hardware, especially transcription (whisper on CPU
 
 ### Package layout
 
-A `modal_client/` package lives inside `youtube-cli/` alongside `commands/` and `webux/`. It is intentionally named `modal_client/` (not `modal/`) to avoid shadowing the installed `modal` Python package in `sys.path`.
-
-**Planned migration**: this package will eventually move to `common/modal_client/` to be shared across CLIs. No other code needs to change when that happens because it is imported by path (`from modal_client.app import ...`).
+A `modal_client/` package lives inside `video-cli/` alongside the media-processing `commands/`. It is intentionally named `modal_client/` (not `modal/`) to avoid shadowing the installed `modal` Python package in `sys.path`.
 
 ```
-youtube-cli/
+video-cli/
   modal_client/
     __init__.py
     app.py           # modal.App("fast-market") + base_image definition
     diagnose.py      # run_diagnose(), run_file_roundtrip() — used by modal-diagnose command
-    remote_steps.py  # run_media_pipeline() — used by the publish pipeline
+    remote_steps.py  # per-step remote functions plus run_media_pipeline() for combined runs
 ```
 
 ### Single container function
 
-All three media steps are combined into **one** Modal function `run_media_pipeline` in `modal_client/remote_steps.py`. This means:
+The media steps can run as **one** Modal function (`run_media_pipeline`) for combined video pipeline runs, or as granular per-step functions (`remote_remove_silence`, `remote_extract_transcript`, `remote_burn_subtitles`) for resumable publish jobs. This means:
 - One cold start per pipeline run (not three)
 - One `app.run()` context manager (not nested)
 - All intermediate files stay on the remote machine's `/tmp`
@@ -69,32 +67,13 @@ run_media_pipeline(
 
 ### Pipeline branching
 
-`_run_pipeline_from(job, from_step)` in `pipeline.py` branches at the top of steps 0-2:
-
-```python
-if job.use_modal and from_step <= 2:
-    current_video, ass_path, txt_path = await _run_modal_steps(job, from_step, ...)
-    if job.status == "error":
-        return
-    await _run_llm_and_upload(job, txt_path, current_video, max(from_step, 3))
-    return
-# else: existing local path unchanged below
-```
+`_run_pipeline_from(job, from_step)` in `webux-cli/webux/short_publish/pipeline.py` preserves per-step resume semantics by invoking `video remove-silence`, `video extract-transcript`, and `video burn-subtitles` as subprocesses. When `job.use_modal` is true, each subprocess receives `--modal`; otherwise it uses the default local path. The webux pipeline intentionally does **not** call `video pipeline`, because that combined command would collapse independent step retry/resume behavior.
 
 Steps 3-5 (LLM title/description generation, YouTube upload, post-publish script) always run locally — they are fast, involve no heavy compute, and require local credentials/network state.
 
-### `_run_modal_steps` async helper
+### Per-step subprocess boundary
 
-Lives in `pipeline.py`. Handles the file I/O boundary:
-
-1. Reads `current_video` as bytes
-2. Resolves `do_remove_silence`, `do_transcribe`, `ass_bytes` from `job` state and `from_step`
-3. Marks steps 0-2 as `"running"` in the job object
-4. Calls `run_media_pipeline.remote(...)` via `asyncio.to_thread` (blocking call, non-blocking to the event loop) inside `with app.run():`
-5. On error: marks affected steps as `"error"`, sets `job.status = "error"`, saves meta, returns
-6. On success: writes output video and ASS file to the video source directory (`d`), writes plain-text transcript, updates `job.steps[i].status`, `job.files`, saves meta
-
-`app.run()` is a synchronous context manager — it is safe to use inside an `async` function. The `.remote()` call inside `asyncio.to_thread` prevents blocking the FastAPI event loop.
+`webux-cli/webux/short_publish/utils.py` resolves the `video` binary with `_video()`, matching the existing `_yt()` and `_pr()` helpers. The publish pipeline captures stdout/stderr through the shared `_run()` subprocess helper so status output remains visible in the web UI.
 
 ### Resume compatibility
 
@@ -102,11 +81,11 @@ The `from_step` parameter is respected:
 
 | `from_step` | `do_remove_silence` | `do_transcribe` | `ass_bytes` |
 |-------------|---------------------|-----------------|-------------|
-| 0 | `job.do_remove_silence` | True | None |
-| 1 | False | True | None |
-| 2 | False | False | read from `job.files["transcript"]` |
+| 0 | `video remove-silence` | source video | `job.files["no_silence"]` |
+| 1 | `video extract-transcript` | no-silence video or source | `job.files["transcript"]` and transcript text |
+| 2 | `video burn-subtitles` | current video + existing ASS | `job.files["subtitled"]` |
 
-For `from_step == 2`, the existing local `.ass` file is read and passed as `ass_bytes` to Modal so subtitle burning uses the already-computed transcript.
+For `from_step == 2`, the existing local `.ass` file path is passed to `video burn-subtitles` so subtitle burning uses the already-computed transcript.
 
 ### Job model
 
@@ -121,16 +100,16 @@ A checkbox `id="useModal"` (checked by default) is added to `frontend.html` next
 
 ### Diagnostic command
 
-`youtube modal-diagnose [--full] [--clip PATH]` tests Modal connectivity. `--full` runs three steps:
+`video modal-diagnose [--full] [--clip PATH]` tests Modal connectivity. `--full` runs three steps:
 1. Environment check (Python version, ffmpeg, whisper, moviepy)
 2. File roundtrip: upload clip → ffmpeg remux MKV→MP4 → download
 3. Full pipeline: `run_media_pipeline` with `model_size="tiny"` for speed, saves output video and ASS, prints transcript preview
 
-The fixture clip used by default: `tests/fixtures/publish/test_clip.mkv` (6s, ~671 KB).
+The fixture clip used by default: `video-cli/tests/fixtures/publish/test_clip.mkv` (6s, ~671 KB).
 
 ## Rationale
 
-**Why one function instead of three?** Three separate `@app.function` calls would each need their own `app.run()` context (or the app would need to be deployed). One function has one cold start and keeps intermediate files local to the worker's `/tmp`.
+**Why one function instead of three?** Three separate `@app.function` calls would each need their own `app.run()` context (or the app would need to be deployed). The combined `video pipeline --modal` path has one cold start and keeps intermediate files local to the worker's `/tmp`; resumable webux jobs use per-step calls to preserve retry boundaries.
 
 **Why duplicate logic instead of mounting code?** Mounting local source via `modal.Mount` would couple Modal deployment to the local directory layout and slow down iteration. The duplicated helpers are stable (they are exact ports of the command implementations) and easy to audit by diffing with the originals.
 
@@ -141,6 +120,5 @@ The fixture clip used by default: `tests/fixtures/publish/test_clip.mkv` (6s, ~6
 ## Consequences
 
 - Steps 0-2 produce no granular progress updates when running on Modal (the whole block shows `"running"` until Modal returns). The existing progress bar for local runs is unaffected.
-- The output video filename after Modal processing matches what `run_media_pipeline` returns (`video_name` in the result dict), which may differ from the local naming convention (`_subtitled.mp4`). Downstream steps (LLM, upload) use `job.files["final_video"]` which is set correctly regardless.
 - Cold starts add ~10-30s overhead on first invocation after a period of inactivity. Subsequent runs within the same session reuse warm containers.
-- The `modal_client/` package must be kept in sync with the logic in `commands/remove_silence/`, `commands/extract_transcript/`, and `commands/burn_subtitles/` if those commands are updated. There is no automated check for this drift.
+- The `video-cli/modal_client/` package must be kept in sync with the logic in `video-cli/commands/remove_silence/`, `video-cli/commands/extract_transcript/`, and `video-cli/commands/burn_subtitles/` if those commands are updated. There is no automated check for this drift.

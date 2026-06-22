@@ -81,6 +81,10 @@ def _pr() -> str:
     return shutil.which("prompt") or "prompt"
 
 
+def _video() -> str:
+    return shutil.which("video") or "video"
+
+
 def _stem(p: str) -> str:
     return Path(p).stem
 

@@ -122,7 +122,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=-65.0, show_default=True,
         help="Silence threshold in dB",
     )
-    def remove_silence_cmd(input_file: str, output: str | None, threshold: float):
+    @click.option("--modal/--local", default=False, show_default=True, help="Run this step on Modal instead of locally.")
+    def remove_silence_cmd(input_file: str, output: str | None, threshold: float, modal: bool):
         """Remove silence from a video (RMS-based, exact YouTools algorithm)."""
         input_path = Path(input_file).resolve()
         output_path = (
@@ -131,14 +132,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
         )
 
         click.echo(f"Removing silence from {input_path.name}...", err=True)
-        _, orig_dur, final_dur = remove_silence_simple(
-            str(input_path), str(output_path), threshold, progress_cb=None
-        )
-        reduction = (orig_dur - final_dur) / orig_dur * 100
-        click.echo(
-            f"Duration: {orig_dur:.1f}s → {final_dur:.1f}s ({reduction:.1f}% removed)",
-            err=True,
-        )
+        if modal:
+            from commands.remote import run_remote_remove_silence
+            result = run_remote_remove_silence(input_path, output_path, threshold)
+            orig_dur = result.get("original_duration") or 0
+            final_dur = result.get("final_duration") or 0
+        else:
+            _, orig_dur, final_dur = remove_silence_simple(
+                str(input_path), str(output_path), threshold, progress_cb=None
+            )
+        if orig_dur and final_dur:
+            reduction = (orig_dur - final_dur) / orig_dur * 100
+            click.echo(
+                f"Duration: {orig_dur:.1f}s → {final_dur:.1f}s ({reduction:.1f}% removed)",
+                err=True,
+            )
         click.echo(str(output_path))
 
     return CommandManifest(name="remove-silence", click_command=remove_silence_cmd)

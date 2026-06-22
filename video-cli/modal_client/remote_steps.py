@@ -4,8 +4,7 @@ import modal
 from modal_client.app import app, base_image
 
 
-@app.function(image=base_image, timeout=1800, secrets=[modal.Secret.from_dotenv()])
-def run_media_pipeline(
+def _run_media_pipeline_impl(
     video_bytes: bytes,
     video_name: str,
     do_remove_silence: bool = True,
@@ -64,7 +63,7 @@ def run_media_pipeline(
                 groq_api_key = os.environ.get("GROQ_API_KEY", "")
                 _groq_transcribe_to_ass(current_path, ass_path, language, groq_api_key)
             else:
-                _transcribe_to_ass(current_path, ass_path, language, model_size)
+                _transcribe_to_ass(current_path, ass_path, language, model_size, subtitle_size)
         elif ass_bytes:
             with open(ass_path, "wb") as f:
                 f.write(ass_bytes)
@@ -94,6 +93,110 @@ def run_media_pipeline(
             "original_duration": original_duration,
             "final_duration": final_duration,
         }
+
+
+@app.function(image=base_image, timeout=1800, secrets=[modal.Secret.from_dotenv()])
+def run_media_pipeline(
+    video_bytes: bytes,
+    video_name: str,
+    do_remove_silence: bool = True,
+    threshold: float = -65.0,
+    do_transcribe: bool = True,
+    ass_bytes: bytes | None = None,
+    do_burn_subtitles: bool = True,
+    language: str = "fr",
+    model_size: str = "medium",
+    subtitle_size: int = 96,
+    use_groq: bool = False,
+) -> dict:
+    return _run_media_pipeline_impl(
+        video_bytes, video_name, do_remove_silence, threshold, do_transcribe,
+        ass_bytes, do_burn_subtitles, language, model_size, subtitle_size, use_groq
+    )
+
+
+@app.function(image=base_image, timeout=1800, secrets=[modal.Secret.from_dotenv()])
+def remote_remove_silence(video_bytes: bytes, video_name: str, threshold: float = -65.0) -> dict:
+    return _run_media_pipeline_impl(
+        video_bytes,
+        video_name,
+        do_remove_silence=True,
+        threshold=threshold,
+        do_transcribe=False,
+        ass_bytes=None,
+        do_burn_subtitles=False,
+    )
+
+
+@app.function(image=base_image, timeout=1800, secrets=[modal.Secret.from_dotenv()])
+def remote_extract_transcript(
+    video_bytes: bytes,
+    video_name: str,
+    language: str = "fr",
+    model_size: str = "medium",
+    subtitle_size: int = 96,
+    use_groq: bool = False,
+    output_format: str = "ass",
+) -> dict:
+    if output_format == "ass":
+        return _run_media_pipeline_impl(
+            video_bytes,
+            video_name,
+            do_remove_silence=False,
+            do_transcribe=True,
+            ass_bytes=None,
+            do_burn_subtitles=False,
+            language=language,
+            model_size=model_size,
+            subtitle_size=subtitle_size,
+            use_groq=use_groq,
+        )
+
+    import os
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, video_name)
+        with open(input_path, "wb") as f:
+            f.write(video_bytes)
+        output_path = os.path.join(tmpdir, f"{Path(video_name).stem}.{output_format}")
+        if output_format == "srt":
+            _transcribe_to_srt(input_path, output_path, language, model_size)
+        elif output_format == "txt":
+            _transcribe_to_txt(input_path, output_path, language, model_size)
+        else:
+            raise ValueError(f"unsupported output_format: {output_format}")
+        with open(output_path, "rb") as f:
+            transcript_bytes = f.read()
+        text = transcript_bytes.decode("utf-8", errors="replace")
+        return {
+            "video_bytes": video_bytes,
+            "video_name": video_name,
+            "ass_bytes": b"",
+            "transcript_bytes": transcript_bytes,
+            "ass_txt": text,
+            "original_duration": None,
+            "final_duration": None,
+        }
+
+
+@app.function(image=base_image, timeout=1800, secrets=[modal.Secret.from_dotenv()])
+def remote_burn_subtitles(
+    video_bytes: bytes,
+    video_name: str,
+    ass_bytes: bytes,
+    subtitle_size: int = 96,
+) -> dict:
+    return _run_media_pipeline_impl(
+        video_bytes,
+        video_name,
+        do_remove_silence=False,
+        do_transcribe=False,
+        ass_bytes=ass_bytes,
+        do_burn_subtitles=True,
+        subtitle_size=subtitle_size,
+    )
 
 
 # ── Helpers (run on the Modal worker) ────────────────────────────────────────
@@ -178,6 +281,7 @@ def _transcribe_to_ass(
     output_ass_path: str,
     language: str,
     model_size: str,
+    subtitle_size: int = 96,
 ) -> None:
     import re
     from faster_whisper import WhisperModel
@@ -199,7 +303,6 @@ def _transcribe_to_ass(
             "words": word_list,
         })
 
-    subtitle_size = 96
     primary_color = "&H0000FF00"
     secondary_color = "&H00FFFFFF"
     outline_color = "&H00000000"
@@ -354,7 +457,6 @@ def _groq_transcribe_to_ass(
             "words": [{"word": w["word"].strip(), "start": w["start"], "end": w["end"]} for w in remaining],
         })
 
-    subtitle_size = 96
     primary_color = "&H0000FF00"
     secondary_color = "&H00FFFFFF"
     outline_color = "&H00000000"
@@ -420,6 +522,38 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     with open(output_ass_path, "w", encoding="utf-8") as f:
         f.write(ass_content)
+
+
+def _fmt_srt_time(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int((seconds % 1) * 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _transcribe_to_srt(input_path: str, output_path: str, language: str, model_size: str) -> None:
+    from faster_whisper import WhisperModel
+
+    lang = language if language != "auto" else None
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    segments_gen, _ = model.transcribe(input_path, language=lang)
+    with open(output_path, "w", encoding="utf-8") as f:
+        for i, seg in enumerate(segments_gen, 1):
+            f.write(f"{i}\n")
+            f.write(f"{_fmt_srt_time(seg.start)} --> {_fmt_srt_time(seg.end)}\n")
+            f.write(f"{seg.text.strip()}\n\n")
+
+
+def _transcribe_to_txt(input_path: str, output_path: str, language: str, model_size: str) -> None:
+    from faster_whisper import WhisperModel
+
+    lang = language if language != "auto" else None
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    segments_gen, _ = model.transcribe(input_path, language=lang)
+    lines = [seg.text.strip() for seg in segments_gen if seg.text.strip()]
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
 
 
 def _burn_subtitles(

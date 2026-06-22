@@ -119,6 +119,14 @@ def _mount_plugin_router(
         return
     if plugin.api_router is not None:
         app.include_router(plugin.api_router, prefix=f"/api/{plugin.name}")
+        for route in app.router.routes:
+            if not hasattr(route, "path"):
+                include_context = getattr(route, "include_context", None)
+                original_router = getattr(route, "original_router", None)
+                first_path = ""
+                if original_router is not None and getattr(original_router, "routes", None):
+                    first_path = getattr(original_router.routes[0], "path", "")
+                route.path = f"{getattr(include_context, 'prefix', '')}{first_path}"
     mounted.add(plugin.name)
 
 

@@ -113,7 +113,7 @@ tools/install-all-cli.sh
 | `skill_runner` | `webux-cli/webux/skill_runner/` | Skills |
 | `corpus` | `corpus-cli/webux/corpus/` | Corpus |
 | `corpus_browser` | `corpus-cli/webux/corpus_browser/` | Corpus Browser |
-| `publish` | `youtube-cli/webux/publish/` | Publish |
+| `short_publish` | `webux-cli/webux/short_publish/` | Publish |
 
 ---
 

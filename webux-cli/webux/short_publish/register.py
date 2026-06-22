@@ -747,8 +747,8 @@ def register(config: dict) -> WebuxPluginManifest:
     del config
     html = (Path(__file__).parent / "frontend.html").read_text(encoding="utf-8")
     return WebuxPluginManifest(
-        name="publish",
-        tab_label="Publish",
+        name="short_publish",
+        tab_label="Short Publish",
         tab_icon="🚀",
         api_router=router,
         frontend_html=html,

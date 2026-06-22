@@ -11,6 +11,11 @@ PUBLISH_FIXTURES = FIXTURES_DIR / "publish"
 GOLDEN_DIR = PUBLISH_FIXTURES / "golden"
 TEST_VIDEO = PUBLISH_FIXTURES / "test_clip.mkv"
 
+import sys
+ROOT = Path(__file__).parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -40,9 +45,6 @@ def _probe_duration(path: Path) -> float:
 def maybe_regenerate_golden(request, test_video: Path, tmp_path_factory):
     if not request.config.getoption("--generate-golden"):
         return
-
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
 
     from commands.extract_transcript.register import generate_karaoke_ass
     from commands.remove_silence.register import remove_silence_simple
