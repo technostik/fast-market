@@ -412,7 +412,7 @@ let pollTimer = null;
 async function loadVideos() {
   const sel = document.getElementById('fileSelect');
   sel.innerHTML = '<option value="">— select —</option>';
-  const r = await fetch('/api/publish/list-videos').catch(() => null);
+  const r = await fetch('/api/short_publish/list-videos').catch(() => null);
   if (!r || !r.ok) return;
   const data = await r.json();
   for (const v of data.videos || []) {
@@ -440,7 +440,7 @@ function previewFile(path) {
   const vid = document.getElementById('videoPreview');
   const nameEl = document.getElementById('videoName');
   wrap.style.display = 'block';
-  vid.src = '/api/publish/video-preview?file=' + encodeURIComponent(path);
+  vid.src = '/api/short_publish/video-preview?file=' + encodeURIComponent(path);
   nameEl.textContent = path.split('/').pop();
 }
 
@@ -451,7 +451,7 @@ function previewSource() {
   const vid = document.getElementById('videoPreview');
   const nameEl = document.getElementById('videoName');
   wrap.style.display = 'block';
-  vid.src = '/api/publish/video-preview?file=' + encodeURIComponent(sel.value);
+  vid.src = '/api/short_publish/video-preview?file=' + encodeURIComponent(sel.value);
   nameEl.textContent = sel.options[sel.selectedIndex].textContent;
 }
 
@@ -466,11 +466,11 @@ function onFileSelected() {
     return;
   }
   wrap.style.display = 'block';
-  vid.src = '/api/publish/video-preview?file=' + encodeURIComponent(sel.value);
+  vid.src = '/api/short_publish/video-preview?file=' + encodeURIComponent(sel.value);
   nameEl.textContent = sel.options[sel.selectedIndex].textContent;
   checkResumeAvailable(sel.value);
   // Pre-fill from meta if exists
-  fetch('/api/publish/check-resume', {
+  fetch('/api/short_publish/check-resume', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({source: sel.value})
@@ -498,8 +498,8 @@ function onFileSelected() {
 
 async function loadPrompts() {
   const [promptRes, cfgRes] = await Promise.all([
-    fetch('/api/publish/list-prompts').catch(() => null),
-    fetch('/api/publish/config').catch(() => null)
+    fetch('/api/short_publish/list-prompts').catch(() => null),
+    fetch('/api/short_publish/config').catch(() => null)
   ]);
   if (!promptRes || !promptRes.ok) return;
   const data = await promptRes.json();
@@ -532,9 +532,9 @@ async function loadPrompts() {
 async function savePromptDefaults(title, desc) {
   const body = { default_title_prompt: title, default_description_prompt: desc };
   // merge with current config to avoid overwriting other fields
-  const cur = await fetch('/api/publish/config').then(r => r.json()).catch(() => ({}));
+  const cur = await fetch('/api/short_publish/config').then(r => r.json()).catch(() => ({}));
   Object.assign(body, cur);
-  await fetch('/api/publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  await fetch('/api/short_publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
 }
 
 async function startJob() {
@@ -557,12 +557,12 @@ async function startJob() {
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n')
   };
   // Immediate publish (only if pool not running)
-  const poolState = await fetch('/api/publish/pool').then(r => r.json()).catch(() => ({}));
+  const poolState = await fetch('/api/short_publish/pool').then(r => r.json()).catch(() => ({}));
   if (poolState.running) {
     alert('Pool is running. Use "Add to pool" instead or stop the pool first.');
     return;
   }
-  const r = await fetch('/api/publish/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const r = await fetch('/api/short_publish/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (!r.ok) { alert('Failed to start'); return; }
   const data = await r.json();
   currentJob = data.job_id;
@@ -573,7 +573,7 @@ async function startJob() {
 async function pollStatus() {
   if (!currentJob) return;
   clearTimeout(pollTimer);
-  const r = await fetch('/api/publish/status/' + currentJob).catch(() => null);
+  const r = await fetch('/api/short_publish/status/' + currentJob).catch(() => null);
   if (!r || !r.ok) {
     if (r && r.status === 404) { currentJob = null; return; }
     pollTimer = setTimeout(pollStatus, 2000); return;
@@ -610,7 +610,7 @@ function renderSteps(job) {
     }
     if (s.output_files && s.output_files.length) {
       html += '<div class="step-dl">' + s.output_files.map(f => {
-        const dl = `<a href="/api/publish/download?file=${encodeURIComponent(f.path)}" download>⬇ ${f.name}</a>`;
+        const dl = `<a href="/api/short_publish/download?file=${encodeURIComponent(f.path)}" download>⬇ ${f.name}</a>`;
         const preview = f.path.match(/\.(mp4|mkv|mov|webm)$/i)
           ? `<button class="btn-sec" style="padding:1px 5px;font-size:10px;" onclick="previewFile('${f.path}')">👁</button>`
           : '';
@@ -732,7 +732,7 @@ function showResult(job) {
 }
 
 async function checkResumeAvailable(source) {
-  const r = await fetch('/api/publish/check-resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({source}) }).catch(() => null);
+  const r = await fetch('/api/short_publish/check-resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({source}) }).catch(() => null);
   if (!r || !r.ok) return;
   const data = await r.json();
   const btn = document.getElementById('resumeBtn');
@@ -768,12 +768,12 @@ function showResumeOptions(source, data) {
   const hasLaterStep = data.available_from_steps && data.available_from_steps.some(s => s >= 5);
   markDiv.style.display = (!uploadPassed && hasLaterStep) ? 'block' : 'none';
   const filesDiv = document.getElementById('resumeFiles');
-  filesDiv.innerHTML = (data.step_files || []).flat().map(f => `<a href="/api/publish/download?file=${encodeURIComponent(f.path)}" download>${f.name}</a>`).join('');
+  filesDiv.innerHTML = (data.step_files || []).flat().map(f => `<a href="/api/short_publish/download?file=${encodeURIComponent(f.path)}" download>${f.name}</a>`).join('');
 }
 
 async function markUploadDone() {
   const source = document.getElementById('resumeArea').dataset.source;
-  const r = await fetch('/api/publish/mark-step-done', {
+  const r = await fetch('/api/short_publish/mark-step-done', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ source, step: 4 })
@@ -804,7 +804,7 @@ async function doResume() {
     description_prefix: document.getElementById('descPrefix').value,
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n')
   };
-  const r = await fetch('/api/publish/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const r = await fetch('/api/short_publish/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (!r.ok) { alert('Resume failed'); return; }
   const data = await r.json();
   currentJob = data.job_id;
@@ -825,7 +825,7 @@ async function uploadNew() {
     if (!file) return;
     const fd = new FormData();
     fd.append('file', file);
-    const r = await fetch('/api/publish/upload-external', { method: 'POST', body: fd }).catch(() => null);
+    const r = await fetch('/api/short_publish/upload-external', { method: 'POST', body: fd }).catch(() => null);
     if (!r || !r.ok) { alert('Upload failed'); return; }
     const data = await r.json();
     const sel = document.getElementById('fileSelect');
@@ -843,7 +843,7 @@ async function showConfig() {
   const p = document.getElementById('configPanel');
   p.style.display = p.style.display === 'block' ? 'none' : 'block';
   if (p.style.display === 'block') {
-    const r = await fetch('/api/publish/config').catch(() => null);
+    const r = await fetch('/api/short_publish/config').catch(() => null);
     if (r && r.ok) {
       const c = await r.json();
       document.getElementById('cfgPath').value = c.video_source_path || '';
@@ -869,7 +869,7 @@ async function saveConfig() {
     transcript_script: document.getElementById('cfgTranscriptScript').value,
     modal_usage_url: document.getElementById('cfgModalUsageUrl').value
   };
-  const r = await fetch('/api/publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const r = await fetch('/api/short_publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (r.ok) alert('Saved'); else alert('Save failed');
 }
 
@@ -878,7 +878,7 @@ async function toggleConfig() {
   const willShow = p.style.display !== 'block';
   p.style.display = willShow ? 'block' : 'none';
   if (willShow) {
-    const r = await fetch('/api/publish/config').catch(() => null);
+    const r = await fetch('/api/short_publish/config').catch(() => null);
     if (r && r.ok) {
       const c = await r.json();
       document.getElementById('cfgPath').value = c.video_source_path || '';
@@ -912,7 +912,7 @@ function initDropZone() {
 async function uploadFile(file) {
   const fd = new FormData();
   fd.append('file', file);
-  const r = await fetch('/api/publish/upload-external', { method: 'POST', body: fd }).catch(() => null);
+  const r = await fetch('/api/short_publish/upload-external', { method: 'POST', body: fd }).catch(() => null);
   if (!r || !r.ok) { alert('Upload failed'); return; }
   const data = await r.json();
   const sel = document.getElementById('fileSelect');
@@ -924,7 +924,7 @@ async function uploadFile(file) {
   onFileSelected();
 
   // Auto-add uploaded file to pool
-  await fetch('/api/publish/pool/add', {
+  await fetch('/api/short_publish/pool/add', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ source: data.path })
@@ -940,7 +940,7 @@ function schedulePoolRefresh() {
 }
 
 async function refreshPool() {
-  const r = await fetch('/api/publish/pool').catch(() => null);
+  const r = await fetch('/api/short_publish/pool').catch(() => null);
   if (!r || !r.ok) { schedulePoolRefresh(); return; }
   const data = await r.json();
   // Feed all subcommand outputs from pool items into global console
@@ -1037,7 +1037,7 @@ async function refreshPool() {
 }
 
 async function poolRedoItem(source) {
-  await fetch('/api/publish/pool/redo-item', {
+  await fetch('/api/short_publish/pool/redo-item', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })
@@ -1046,7 +1046,7 @@ async function poolRedoItem(source) {
 }
 
 async function poolRedoPostPublish(source) {
-  const r = await fetch('/api/publish/redo-post-publish', {
+  const r = await fetch('/api/short_publish/redo-post-publish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })
@@ -1057,7 +1057,7 @@ async function poolRedoPostPublish(source) {
 }
 
 async function poolRemove(source) {
-  await fetch('/api/publish/pool/remove', {
+  await fetch('/api/short_publish/pool/remove', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })
@@ -1066,7 +1066,7 @@ async function poolRemove(source) {
 }
 
 async function poolShowInfo(source) {
-  const r = await fetch('/api/publish/review-info', {
+  const r = await fetch('/api/short_publish/review-info', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })
@@ -1094,7 +1094,7 @@ async function poolRunTranscriptScript(source) {
   const statusEl = document.getElementById('transcriptScriptStatus');
   statusEl.style.display = 'block';
   statusEl.textContent = '📜 Running transcript script...';
-  const r = await fetch('/api/publish/run-transcript-script', {
+  const r = await fetch('/api/short_publish/run-transcript-script', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })
@@ -1111,7 +1111,7 @@ async function poolRunTranscriptScript(source) {
 
 async function pollTranscriptPoolJob() {
   if (!_transcriptPoolJobId) return;
-  const r = await fetch('/api/publish/status/' + _transcriptPoolJobId).catch(() => null);
+  const r = await fetch('/api/short_publish/status/' + _transcriptPoolJobId).catch(() => null);
   if (!r || !r.ok) { _transcriptPoolJobId = null; return; }
   const j = await r.json();
   const statusEl = document.getElementById('transcriptScriptStatus');
@@ -1142,7 +1142,7 @@ async function runTranscriptScript() {
   runBtn.style.display = 'none';
   statusEl.style.display = 'inline-block';
   statusEl.textContent = '⏳ Running...';
-  const r = await fetch('/api/publish/run-transcript-script', {
+  const r = await fetch('/api/short_publish/run-transcript-script', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })
@@ -1159,7 +1159,7 @@ async function runTranscriptScript() {
 
 async function pollTranscriptScriptStatus() {
   if (!_transcriptJobId) return;
-  const r = await fetch('/api/publish/status/' + _transcriptJobId).catch(() => null);
+  const r = await fetch('/api/short_publish/status/' + _transcriptJobId).catch(() => null);
   if (!r || !r.ok) { _transcriptJobId = null; return; }
   const j = await r.json();
   const statusEl = document.getElementById('runTranscriptStatus');
@@ -1185,19 +1185,19 @@ async function pollTranscriptScriptStatus() {
 }
 
 async function browserHide() {
-  await fetch('/api/publish/browser/hide', { method: 'POST' });
+  await fetch('/api/short_publish/browser/hide', { method: 'POST' });
 }
 
 async function browserShow() {
-  await fetch('/api/publish/browser/show', { method: 'POST' });
+  await fetch('/api/short_publish/browser/show', { method: 'POST' });
 }
 
 async function browserStartSilent() {
-  await fetch('/api/publish/browser/start-silent', { method: 'POST' });
+  await fetch('/api/short_publish/browser/start-silent', { method: 'POST' });
 }
 
 async function browserScreenshot() {
-  const r = await fetch('/api/publish/browser/screenshot').catch(() => null);
+  const r = await fetch('/api/short_publish/browser/screenshot').catch(() => null);
   if (!r || !r.ok) { appendToConsole('Screenshot request failed'); return; }
   const data = await r.json();
   if (!data.ok) { appendToConsole('Screenshot failed: ' + data.error); return; }
@@ -1208,7 +1208,7 @@ async function browserScreenshot() {
 }
 
 async function poolAction(action) {
-  await fetch(`/api/publish/pool/${action}`, { method: 'POST' });
+  await fetch(`/api/short_publish/pool/${action}`, { method: 'POST' });
   refreshPool();
 }
 
@@ -1232,7 +1232,7 @@ function closeQuickPrompt() {
 async function loadQpPrompts() {
   const sel = document.getElementById('qpPromptSelect');
   sel.innerHTML = '<option value="">— select —</option>';
-  const r = await fetch('/api/publish/list-prompts').catch(() => null);
+  const r = await fetch('/api/short_publish/list-prompts').catch(() => null);
   if (!r || !r.ok) return;
   const data = await r.json();
   for (const name of (data.prompts || [])) {
@@ -1256,7 +1256,7 @@ async function applyQuickPrompt() {
   statusEl.textContent = '⏳ Running...';
   applyBtn.disabled = true;
 
-  const r = await fetch('/api/publish/quick-prompt', {
+  const r = await fetch('/api/short_publish/quick-prompt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt_name: promptName, content })
@@ -1289,7 +1289,7 @@ async function addToPool() {
     alert('Select a video first');
     return;
   }
-  await fetch('/api/publish/pool/add', {
+  await fetch('/api/short_publish/pool/add', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
