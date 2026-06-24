@@ -1,1 +1,0 @@
-"""Plugin manifests for webux."""

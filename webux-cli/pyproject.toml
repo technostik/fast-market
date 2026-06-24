@@ -31,7 +31,6 @@ packages = [
     "webux_entry",
     "cli",
     "core",
-    "plugins",
     "webux",
     "webux.fileviewer",
     "webux.yt_poster",

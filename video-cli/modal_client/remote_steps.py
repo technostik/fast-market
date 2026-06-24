@@ -61,7 +61,7 @@ def _run_media_pipeline_impl(
         if do_transcribe:
             if use_groq:
                 groq_api_key = os.environ.get("GROQ_API_KEY", "")
-                _groq_transcribe_to_ass(current_path, ass_path, language, groq_api_key)
+                _groq_transcribe_to_ass(current_path, ass_path, language, groq_api_key, subtitle_size)
             else:
                 _transcribe_to_ass(current_path, ass_path, language, model_size, subtitle_size)
         elif ass_bytes:
@@ -394,6 +394,7 @@ def _groq_transcribe_to_ass(
     output_ass_path: str,
     language: str,
     groq_api_key: str,
+    subtitle_size: int = 96,
 ) -> None:
     import os
     import re

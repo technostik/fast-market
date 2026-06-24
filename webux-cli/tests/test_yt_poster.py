@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 # Add webux-cli to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from plugins.yt_poster.plugin import router
+from webux.yt_poster.plugin import router
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ class TestSaveReply:
 
     def test_save_reply_success(self, client, workdir, sample_data):
         """Test successfully saving an edited reply."""
-        with patch("plugins.yt_poster.plugin._workdir", return_value=workdir):
+        with patch("webux.yt_poster.plugin._workdir", return_value=workdir):
             response = client.post(
                 "/save_reply",
                 json={
@@ -85,7 +85,7 @@ class TestSaveReply:
 
     def test_save_reply_file_not_found(self, client, workdir):
         """Test saving reply when file doesn't exist."""
-        with patch("plugins.yt_poster.plugin._workdir", return_value=workdir):
+        with patch("webux.yt_poster.plugin._workdir", return_value=workdir):
             response = client.post(
                 "/save_reply",
                 json={
@@ -100,7 +100,7 @@ class TestSaveReply:
 
     def test_save_reply_index_out_of_range(self, client, workdir, sample_data):
         """Test saving reply with invalid index."""
-        with patch("plugins.yt_poster.plugin._workdir", return_value=workdir):
+        with patch("webux.yt_poster.plugin._workdir", return_value=workdir):
             response = client.post(
                 "/save_reply",
                 json={
@@ -115,7 +115,7 @@ class TestSaveReply:
 
     def test_save_reply_negative_index(self, client, workdir, sample_data):
         """Test saving reply with negative index."""
-        with patch("plugins.yt_poster.plugin._workdir", return_value=workdir):
+        with patch("webux.yt_poster.plugin._workdir", return_value=workdir):
             response = client.post(
                 "/save_reply",
                 json={
@@ -129,7 +129,7 @@ class TestSaveReply:
 
     def test_save_reply_updates_both_fields(self, client, workdir, sample_data):
         """Test that saving updates both 'reply' and 'generated_reply' fields."""
-        with patch("plugins.yt_poster.plugin._workdir", return_value=workdir):
+        with patch("webux.yt_poster.plugin._workdir", return_value=workdir):
             response = client.post(
                 "/save_reply",
                 json={
