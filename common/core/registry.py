@@ -26,6 +26,8 @@ def discover_plugins(
     from plugins.base import PluginManifest
 
     plugins_dir = _resolve_tool_root(tool_root) / "plugins"
+    if not plugins_dir.exists():
+        return {}
     manifests: dict[str, PluginManifest] = {}
 
     for entry in sorted(plugins_dir.iterdir()):
