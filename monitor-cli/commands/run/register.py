@@ -16,7 +16,7 @@ from commands.base import CommandManifest
 from commands.helpers import get_storage, out_formatted
 from common.core.config import load_common_config, load_tool_config, save_common_config
 from common.core.duration import parse_duration
-from core.executor import execute_action
+from core.executor import execute_action, format_action_error_output, resolve_action_command
 from core.models import ItemMetadata, RuleMismatchLog, RunErrorLog, TriggerLog
 from core.rule_engine import evaluate_rule_with_details
 from core.time_scheduler import should_run_rule
@@ -556,6 +556,7 @@ def _execute_actions_for_trigger(
             actions_skipped += 1
             continue
 
+        resolved_command = resolve_action_command(action, item, source, rule.id)
         try:
             _action_start = _time.monotonic()
             if timeout_config:
@@ -653,6 +654,7 @@ def _execute_actions_for_trigger(
                 )
 
         except Exception as e:
+            error_output = format_action_error_output(resolved_command, str(e))
             error_msg = f"Action execution error for '{action.id}': {str(e)}"
             errors.append(error_msg)
             click.echo(f"[ERROR] {error_msg}", err=True)
@@ -661,21 +663,21 @@ def _execute_actions_for_trigger(
                 RunErrorLog(
                     id=str(uuid.uuid4()),
                     error_type="action_exception",
-                    message=error_msg,
+                    message=f"{error_msg}\n--- Command ---\n{resolved_command}",
                     logged_at=triggered_at,
                     source_id=source.id,
                     action_id=action.id,
                     rule_id=rule.id,
                     item_id=item.id,
                     item_title=item.title,
-                    output=str(e),
+                    output=error_output,
                 )
             )
             action_results.append(
                 {
                     "action_id": action_id,
                     "exit_code": -1,
-                    "output": str(e),
+                    "output": error_output,
                 }
             )
 

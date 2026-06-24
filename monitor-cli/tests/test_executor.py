@@ -5,7 +5,12 @@ from datetime import datetime, timezone
 import pytest
 
 from core.models import ItemMetadata, Source
-from core.executor import execute_action
+from core.executor import (
+    execute_action,
+    format_action_error_output,
+    resolve_action_command,
+    _wrap_login_shell_command,
+)
 from core.models import Action
 
 
@@ -120,3 +125,31 @@ def test_executor_failed_command(sample_item, sample_source):
 
     code, output, _ = execute_action(action, sample_item, sample_source, "test-rule-1")
     assert code == 1
+    assert "--- Command ---" in output
+    assert "exit 1" in output
+    assert "--- Output ---" in output
+
+
+def test_resolve_action_command_substitutes_placeholders(sample_item, sample_source):
+    action = Action(
+        id="url-action",
+        command='skill exec plan.yaml -p "URL=$ITEM_URL"',
+        description="Pass item URL to skill",
+    )
+
+    resolved = resolve_action_command(action, sample_item, sample_source, "rule-1")
+    assert sample_item.url in resolved
+    assert "$ITEM_URL" not in resolved
+
+
+def test_format_action_error_output_includes_command():
+    formatted = format_action_error_output("echo hi", "boom")
+    assert "--- Command ---" in formatted
+    assert "echo hi" in formatted
+    assert "boom" in formatted
+
+
+def test_wrap_login_shell_command_prioritizes_pyenv():
+    wrapped = _wrap_login_shell_command("skill exec plan.yaml")
+    assert "pyenv/shims" in wrapped
+    assert "skill exec plan.yaml" in wrapped
