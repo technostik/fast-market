@@ -325,6 +325,9 @@ async def _run_post_publish_step(job: Job, final_video: str) -> None:
         s5.status = "skipped"
 
     s5.end_time = time.time()
+    if job.steps[6].status == "pending":
+        # Run transcript script is manual-only — never auto-started by the pipeline.
+        job.steps[6].status = "skipped"
     if job.status != "error":
         job.status = "done"
         job.end_time = time.time()
