@@ -19,6 +19,84 @@ def ms_to_ass_time(ms: int) -> str:
     return f"{hours}:{minutes:02d}:{seconds:02d}:{cs:02d}"
 
 
+def _fetch_groq_segments(input_path: str, language: str) -> list[dict]:
+    """Transcribe via Groq's hosted whisper-large-v3 API. Returns word-level segments."""
+    import os
+    import tempfile
+    import subprocess
+    import requests
+
+    try:
+        from dotenv import load_dotenv
+
+        env_path = Path(__file__).parent.parent.parent.parent / ".env"
+        load_dotenv(env_path)
+    except ImportError:
+        pass
+
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        raise click.ClickException(
+            "GROQ_API_KEY environment variable not set (required for --use-groq)."
+        )
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as _tmp:
+        tmp_audio = _tmp.name
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", input_path, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k", tmp_audio],
+            check=True, capture_output=True,
+        )
+        form_data = [
+            ("model", "whisper-large-v3"),
+            ("response_format", "verbose_json"),
+            ("timestamp_granularities[]", "word"),
+            ("timestamp_granularities[]", "segment"),
+        ]
+        if language and language != "auto":
+            form_data.append(("language", language))
+        with open(tmp_audio, "rb") as f:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (os.path.basename(tmp_audio), f, "audio/mpeg")},
+                data=form_data,
+                timeout=120,
+            )
+        resp.raise_for_status()
+        result = resp.json()
+    finally:
+        try:
+            os.unlink(tmp_audio)
+        except Exception:
+            pass
+
+    flat_words = result.get("words", [])
+    raw_segments = result.get("segments", [])
+
+    result_segments = []
+    word_idx = 0
+    for seg in raw_segments:
+        seg_words = []
+        while word_idx < len(flat_words):
+            w = flat_words[word_idx]
+            if w["start"] < seg["end"] - 0.001:
+                seg_words.append({"word": w["word"].strip(), "start": w["start"], "end": w["end"]})
+                word_idx += 1
+            else:
+                break
+        result_segments.append({"start": seg["start"], "end": seg["end"], "text": seg["text"].strip(), "words": seg_words})
+    if word_idx < len(flat_words):
+        remaining = flat_words[word_idx:]
+        result_segments.append({
+            "start": remaining[0]["start"],
+            "end": remaining[-1]["end"],
+            "text": " ".join(w["word"].strip() for w in remaining),
+            "words": [{"word": w["word"].strip(), "start": w["start"], "end": w["end"]} for w in remaining],
+        })
+    return result_segments
+
+
 def generate_karaoke_ass(
     input_path: str,
     output_ass_path: str,
@@ -27,46 +105,55 @@ def generate_karaoke_ass(
     subtitle_size: int = 96,
     max_line_chars: int = 35,
     progress_cb=None,
+    use_groq: bool = False,
 ) -> None:
     """
     Transcribe video to ASS karaoke subtitles with word-level green/white highlighting.
     Green = primary (being read), White = secondary (pre-read), middle-centered.
     If progress_cb is given it receives (current_pct, 100).
     """
-    from faster_whisper import WhisperModel
-    import subprocess, json
-
-    # best-effort total duration for percentage
-    total_dur = None
-    try:
-        dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
-        dur_out = subprocess.check_output(dur_cmd, text=True)
-        total_dur = float(json.loads(dur_out)["format"]["duration"])
-    except Exception:
-        pass
-
-    lang = language if language != "auto" else None
-    model = WhisperModel(model_size, device="cpu", compute_type="int8")
-    segments_iter, _ = model.transcribe(input_path, word_timestamps=True, language=lang)
-
-    result_segments = []
-    for seg in segments_iter:
-        word_list = [
-            {"word": w.word.strip(), "start": w.start, "end": w.end}
-            for w in (seg.words or [])
-        ]
-        result_segments.append({
-            "start": seg.start,
-            "end": seg.end,
-            "text": seg.text.strip(),
-            "words": word_list,
-        })
-        if progress_cb and total_dur:
+    if use_groq:
+        result_segments = _fetch_groq_segments(input_path, language)
+        if progress_cb:
             try:
-                pct = min(100.0, (seg.end / total_dur) * 100)
-                progress_cb(round(pct, 1), 100)
+                progress_cb(100, 100)
             except Exception:
                 pass
+    else:
+        from faster_whisper import WhisperModel
+        import subprocess, json
+
+        # best-effort total duration for percentage
+        total_dur = None
+        try:
+            dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
+            dur_out = subprocess.check_output(dur_cmd, text=True)
+            total_dur = float(json.loads(dur_out)["format"]["duration"])
+        except Exception:
+            pass
+
+        lang = language if language != "auto" else None
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        segments_iter, _ = model.transcribe(input_path, word_timestamps=True, language=lang)
+
+        result_segments = []
+        for seg in segments_iter:
+            word_list = [
+                {"word": w.word.strip(), "start": w.start, "end": w.end}
+                for w in (seg.words or [])
+            ]
+            result_segments.append({
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text.strip(),
+                "words": word_list,
+            })
+            if progress_cb and total_dur:
+                try:
+                    pct = min(100.0, (seg.end / total_dur) * 100)
+                    progress_cb(round(pct, 1), 100)
+                except Exception:
+                    pass
 
     primary_color = "&H0000FF00"   # green — word being read
     secondary_color = "&H00FFFFFF" # white — words not yet read
@@ -175,39 +262,49 @@ def transcribe_to_srt(
     language: str = "fr",
     model_size: str = "medium",
     progress_cb=None,
+    use_groq: bool = False,
 ) -> None:
     """Segment-level SRT transcription via faster_whisper (fallback: openai-whisper on CPU)."""
-    import subprocess, json
-    total_dur = None
-    try:
-        dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
-        dur_out = subprocess.check_output(dur_cmd, text=True)
-        total_dur = float(json.loads(dur_out)["format"]["duration"])
-    except Exception:
-        pass
-    try:
-        from faster_whisper import WhisperModel
-        lang = language if language != "auto" else None
-        model = WhisperModel(model_size, device="cpu", compute_type="int8")
-        segments_gen, _ = model.transcribe(input_path, language=lang)
-        segments = []
-        for seg in segments_gen:
-            segments.append((seg.start, seg.end, seg.text.strip()))
-            if progress_cb and total_dur:
-                try:
-                    pct = min(100.0, (seg.end / total_dur) * 100)
-                    progress_cb(round(pct, 1), 100)
-                except Exception:
-                    pass
-    except ImportError:
-        import whisper  # type: ignore[import]
-        lang = language if language != "auto" else None
-        model = whisper.load_model(model_size, device="cpu")
-        result = model.transcribe(input_path, language=lang)
-        segments = [
-            (seg["start"], seg["end"], seg["text"].strip())
-            for seg in result["segments"]
-        ]
+    if use_groq:
+        result_segments = _fetch_groq_segments(input_path, language)
+        segments = [(s["start"], s["end"], s["text"]) for s in result_segments]
+        if progress_cb:
+            try:
+                progress_cb(100, 100)
+            except Exception:
+                pass
+    else:
+        import subprocess, json
+        total_dur = None
+        try:
+            dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
+            dur_out = subprocess.check_output(dur_cmd, text=True)
+            total_dur = float(json.loads(dur_out)["format"]["duration"])
+        except Exception:
+            pass
+        try:
+            from faster_whisper import WhisperModel
+            lang = language if language != "auto" else None
+            model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            segments_gen, _ = model.transcribe(input_path, language=lang)
+            segments = []
+            for seg in segments_gen:
+                segments.append((seg.start, seg.end, seg.text.strip()))
+                if progress_cb and total_dur:
+                    try:
+                        pct = min(100.0, (seg.end / total_dur) * 100)
+                        progress_cb(round(pct, 1), 100)
+                    except Exception:
+                        pass
+        except ImportError:
+            import whisper  # type: ignore[import]
+            lang = language if language != "auto" else None
+            model = whisper.load_model(model_size, device="cpu")
+            result = model.transcribe(input_path, language=lang)
+            segments = [
+                (seg["start"], seg["end"], seg["text"].strip())
+                for seg in result["segments"]
+            ]
 
     with open(output_path, "w", encoding="utf-8") as f:
         for i, (start, end, text) in enumerate(segments, 1):
@@ -224,37 +321,47 @@ def transcribe_to_txt(
     language: str = "fr",
     model_size: str = "medium",
     progress_cb=None,
+    use_groq: bool = False,
 ) -> None:
     """Plain-text transcription (no timestamps) via faster_whisper."""
-    import subprocess, json
-    total_dur = None
-    try:
-        dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
-        dur_out = subprocess.check_output(dur_cmd, text=True)
-        total_dur = float(json.loads(dur_out)["format"]["duration"])
-    except Exception:
-        pass
-    try:
-        from faster_whisper import WhisperModel
-        lang = language if language != "auto" else None
-        model = WhisperModel(model_size, device="cpu", compute_type="int8")
-        segments_gen, _ = model.transcribe(input_path, language=lang)
-        lines = []
-        for seg in segments_gen:
-            if seg.text.strip():
-                lines.append(seg.text.strip())
-            if progress_cb and total_dur:
-                try:
-                    pct = min(100.0, (seg.end / total_dur) * 100)
-                    progress_cb(round(pct, 1), 100)
-                except Exception:
-                    pass
-    except ImportError:
-        import whisper  # type: ignore[import]
-        lang = language if language != "auto" else None
-        model = whisper.load_model(model_size, device="cpu")
-        result = model.transcribe(input_path, language=lang)
-        lines = [seg["text"].strip() for seg in result["segments"] if seg["text"].strip()]
+    if use_groq:
+        result_segments = _fetch_groq_segments(input_path, language)
+        lines = [s["text"].strip() for s in result_segments if s["text"].strip()]
+        if progress_cb:
+            try:
+                progress_cb(100, 100)
+            except Exception:
+                pass
+    else:
+        import subprocess, json
+        total_dur = None
+        try:
+            dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
+            dur_out = subprocess.check_output(dur_cmd, text=True)
+            total_dur = float(json.loads(dur_out)["format"]["duration"])
+        except Exception:
+            pass
+        try:
+            from faster_whisper import WhisperModel
+            lang = language if language != "auto" else None
+            model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            segments_gen, _ = model.transcribe(input_path, language=lang)
+            lines = []
+            for seg in segments_gen:
+                if seg.text.strip():
+                    lines.append(seg.text.strip())
+                if progress_cb and total_dur:
+                    try:
+                        pct = min(100.0, (seg.end / total_dur) * 100)
+                        progress_cb(round(pct, 1), 100)
+                    except Exception:
+                        pass
+        except ImportError:
+            import whisper  # type: ignore[import]
+            lang = language if language != "auto" else None
+            model = whisper.load_model(model_size, device="cpu")
+            result = model.transcribe(input_path, language=lang)
+            lines = [seg["text"].strip() for seg in result["segments"] if seg["text"].strip()]
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -279,6 +386,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--model", "-m", default="medium", show_default=True, help="Whisper model size")
     @click.option("--font-size", default=96, show_default=True, help="Font size (ASS only)")
     @click.option("--modal/--local", default=False, show_default=True, help="Run this step on Modal instead of locally.")
+    @click.option("--use-groq", is_flag=True, default=False, help="Use Groq's whisper-large-v3 API instead of local faster-whisper (requires GROQ_API_KEY).")
     def extract_transcript_cmd(
         input_file: str,
         output: str | None,
@@ -287,6 +395,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         model: str,
         font_size: int,
         modal: bool,
+        use_groq: bool,
     ):
         """Transcribe a video to ASS karaoke, SRT, or plain TXT subtitles.
 
@@ -310,13 +419,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if modal:
             from commands.remote import run_remote_extract_transcript
-            run_remote_extract_transcript(input_path, output_path, fmt, language, model, font_size)
+            run_remote_extract_transcript(input_path, output_path, fmt, language, model, font_size, use_groq)
         elif fmt == "ass":
-            generate_karaoke_ass(str(input_path), str(output_path), language, model, font_size, progress_cb=None)
+            generate_karaoke_ass(str(input_path), str(output_path), language, model, font_size, progress_cb=None, use_groq=use_groq)
         elif fmt == "srt":
-            transcribe_to_srt(str(input_path), str(output_path), language, model, progress_cb=None)
+            transcribe_to_srt(str(input_path), str(output_path), language, model, progress_cb=None, use_groq=use_groq)
         else:
-            transcribe_to_txt(str(input_path), str(output_path), language, model, progress_cb=None)
+            transcribe_to_txt(str(input_path), str(output_path), language, model, progress_cb=None, use_groq=use_groq)
 
         click.echo(str(output_path))
 

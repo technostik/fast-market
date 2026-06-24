@@ -77,6 +77,8 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
         ]
         if job.use_modal:
             cmd.append("--modal")
+        if job.use_groq:
+            cmd.append("--use-groq")
         rc, _ = await _run(s1, *cmd)
         if rc != 0:
             s1.end_time = time.time(); s1.status = "error"; job.status = "error"; _save_meta(job); return

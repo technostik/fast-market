@@ -25,6 +25,7 @@ def run_remote_extract_transcript(
     language: str,
     model: str,
     font_size: int,
+    use_groq: bool = False,
 ) -> dict:
     try:
         from modal_client.app import app
@@ -34,7 +35,7 @@ def run_remote_extract_transcript(
     click.echo("Running extract-transcript on Modal...", err=True)
     with app.run():
         result = remote_extract_transcript.remote(
-            input_path.read_bytes(), input_path.name, language, model, font_size, False, fmt
+            input_path.read_bytes(), input_path.name, language, model, font_size, use_groq, fmt
         )
     if fmt in {"srt", "txt"}:
         output_path.write_bytes(result.get("transcript_bytes", b""))
