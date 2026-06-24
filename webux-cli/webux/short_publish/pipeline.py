@@ -237,8 +237,6 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             job.steps[4].status = "skipped"
     elif job.skip_upload:
         job.steps[4].status = "skipped"
-        job.end_time = time.time()
-        job.status = "done"
         _save_meta(job)
     else:
         s4 = job.steps[4]
@@ -262,8 +260,6 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         else:
             job.video_url = watch_url
             job.studio_url = ""
-        job.end_time = time.time()
-        job.status = "done"
         _save_meta(job)
 
     await _run_post_publish_step(job, final_video)
@@ -329,6 +325,9 @@ async def _run_post_publish_step(job: Job, final_video: str) -> None:
         s5.status = "skipped"
 
     s5.end_time = time.time()
+    if job.status != "error":
+        job.status = "done"
+        job.end_time = time.time()
     _save_meta(job)
 
 
@@ -393,4 +392,7 @@ async def _run_transcript_script(job: Job, transcript_path: str) -> None:
         s6.status = "skipped"
 
     s6.end_time = time.time()
+    if job.status != "error":
+        job.status = "done"
+        job.end_time = time.time()
     _save_meta(job)
