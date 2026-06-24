@@ -52,7 +52,7 @@ def _is_intermediate(path: Path) -> bool:
     return bool(_INTERMEDIATE_RE.search(path.stem))
 
 
-from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script  # noqa: E402
+from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
 def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, use_groq: bool = False) -> Job:
@@ -85,7 +85,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
 async def _run_single_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False):
     """Legacy direct run (kept for compatibility)."""
     job = _create_publish_job(source, description_prefix, source_urls, skip_upload)
-    await _run_pipeline_from(job, 0)
+    await _run_job_safely(_run_pipeline_from(job, 0), job)
 
 
 # ── Config API ────────────────────────────────────────────────────────────────
@@ -347,7 +347,7 @@ async def start(req: StartRequest):
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
-    asyncio.create_task(_run_pipeline_from(job, 0))
+    asyncio.create_task(_run_job_safely(_run_pipeline_from(job, 0), job))
     return {"job_id": job_id}
 
 
@@ -428,7 +428,7 @@ async def resume(req: ResumeRequest):
             job.steps[i].status = "skipped"
 
     _jobs[job_id] = job
-    asyncio.create_task(_run_pipeline_from(job, from_step))
+    asyncio.create_task(_run_job_safely(_run_pipeline_from(job, from_step), job))
     return {"job_id": job_id}
 
 
@@ -532,7 +532,7 @@ async def redo_post_publish(body: dict):
             job.steps[i].status = "skipped"
 
     _jobs[job_id] = job
-    asyncio.create_task(_run_post_publish_step(job, final_video))
+    asyncio.create_task(_run_job_safely(_run_post_publish_step(job, final_video), job))
     return {"job_id": job_id}
 
 
@@ -624,7 +624,7 @@ async def run_transcript_script(body: dict):
             job.steps[i].status = "skipped"
 
     _jobs[job_id] = job
-    asyncio.create_task(_run_transcript_script(job, transcript_path))
+    asyncio.create_task(_run_job_safely(_run_transcript_script(job, transcript_path), job))
     return {"job_id": job_id}
 
 

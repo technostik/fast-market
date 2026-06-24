@@ -224,8 +224,8 @@ async def _pool_worker():
             next_item.job_id = job.job_id
             _save_pool_to_disk()
 
-            from .pipeline import _run_pipeline_from
-            await _run_pipeline_from(job, 0)
+            from .pipeline import _run_pipeline_from, _run_job_safely
+            await _run_job_safely(_run_pipeline_from(job, 0), job)
 
             if job.status == "error":
                 next_item.status = "error"

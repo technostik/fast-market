@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from pathlib import Path
 
@@ -18,6 +19,26 @@ from .utils import (
     _run,
     _extract_video_id,
 )
+
+
+async def _run_job_safely(coro, job: Job) -> None:
+    """Await a pipeline coroutine, turning any unhandled exception into a
+    persisted job/step error instead of letting it vanish silently (e.g. when
+    scheduled via asyncio.create_task with nothing awaiting the result)."""
+    try:
+        await coro
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        err_text = f"[error] {type(exc).__name__}: {exc}"
+        running_step = next((s for s in job.steps if s.status == "running"), None)
+        if running_step:
+            running_step.status = "error"
+            running_step.end_time = time.time()
+            running_step.output = f"{running_step.output}\n{err_text}" if running_step.output else err_text
+        job.status = "error"
+        job.end_time = time.time()
+        _save_meta(job)
 
 
 async def _run_pipeline_from(job: Job, from_step: int) -> None:
