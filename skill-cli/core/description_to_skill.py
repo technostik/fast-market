@@ -16,7 +16,7 @@ from common.learn import extract_skill_from_description
 from common.llm.registry import discover_providers, get_default_provider_name
 
 from core.repl import prompt_confirm, prompt_free_text, prompt_with_options
-from core.skill import discover_skills
+from core.skill import discover_skills, discover_skills_layered
 
 logger = structlog.get_logger(__name__)
 
@@ -48,7 +48,7 @@ def load_tools_description(agent_config: dict) -> str:
 
 def load_existing_skills() -> str:
     """Format existing skills for the prompt."""
-    skills = discover_skills(get_skills_dir())
+    skills = discover_skills_layered()
     if not skills:
         return "No existing skills"
 

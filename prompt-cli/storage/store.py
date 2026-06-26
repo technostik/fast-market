@@ -54,6 +54,9 @@ class PromptStore:
     def get_prompt_file_path(self, name: str) -> Path | None:
         return self._file_store.get_file_path(name)
 
+    def is_shared(self, name: str) -> bool:
+        return self._file_store.is_shared(name)
+
     def validate_prompt(self, name: str) -> Prompt:
         return self._file_store.validate_prompt(name)
 

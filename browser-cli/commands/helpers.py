@@ -159,7 +159,9 @@ def run_agent_cmd(
 def launch_browser(cdp_port: int, user_data_dir: str | None = None) -> None:
     """Launch Chromium with CDP enabled in the background and wait until ready."""
     if user_data_dir is None:
-        user_data_dir = str(Path.home() / ".chrome-debug-profile")
+        from common.core.paths import get_browser_user_data_dir
+
+        user_data_dir = str(get_browser_user_data_dir())
 
     subprocess.Popen(
         [
@@ -475,7 +477,9 @@ def launch_hidden_browser(
     browser = resolve_browser(browser_bin)
 
     if user_data_dir is None:
-        user_data_dir = str(Path.home() / ".chrome-debug-profile")
+        from common.core.paths import get_browser_user_data_dir
+
+        user_data_dir = str(get_browser_user_data_dir())
 
     cmd = [
         browser,

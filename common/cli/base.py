@@ -22,7 +22,29 @@ def create_cli_group(
         default_args: Keyword arguments to pass to the default command (e.g. flag values)
     """
 
+    def _set_profile(ctx: click.Context, param: click.Parameter, value: str | None):
+        """Eagerly export the chosen profile so all path/config lookups see it."""
+        if value:
+            from common.core.profile import validate_profile_name, ProfileError
+
+            try:
+                validate_profile_name(value)
+            except ProfileError as exc:
+                raise click.BadParameter(str(exc))
+            os.environ["FASTMARKET_PROFILE"] = value
+        return value
+
     @click.group(invoke_without_command=True, help=description)
+    @click.option(
+        "--profile",
+        "-P",
+        default=None,
+        is_eager=True,
+        expose_value=True,
+        callback=_set_profile,
+        metavar="NAME",
+        help="Persona/profile to use (overrides FASTMARKET_PROFILE and the active-profile file).",
+    )
     @click.option(
         "--verbose", "-v", is_flag=True, default=False, help="Show logs on stderr."
     )
@@ -39,10 +61,11 @@ def create_cli_group(
         help="Print shell completion script",
     )
     @click.pass_context
-    def main(ctx: click.Context, verbose: bool, install_completion: bool, show_completion: bool) -> None:
+    def main(ctx: click.Context, profile: str | None, verbose: bool, install_completion: bool, show_completion: bool) -> None:
         ctx.ensure_object(dict)
         ctx.obj["verbose"] = verbose
         ctx.obj["tool_name"] = tool_name
+        ctx.obj["profile"] = profile
 
         if install_completion or show_completion:
             _handle_completion(ctx, tool_name, install_completion, show_completion)

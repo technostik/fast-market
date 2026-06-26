@@ -16,7 +16,12 @@ from commands.helpers import (
     substitute_params,
 )
 from common.core.paths import get_browser_cmds_dir
-from core.browser_cmd import BrowserCmd, discover_browser_cmds
+from core.browser_cmd import (
+    BrowserCmd,
+    discover_browser_cmds,
+    discover_browser_cmds_layered,
+    resolve_browser_cmd_dir,
+)
 
 
 class _CmdNameType(click.ParamType):
@@ -24,7 +29,7 @@ class _CmdNameType(click.ParamType):
 
     def shell_complete(self, ctx, param, incomplete):
         try:
-            cmds = discover_browser_cmds(get_browser_cmds_dir())
+            cmds = discover_browser_cmds_layered()
         except Exception:
             return []
         return [
@@ -45,7 +50,7 @@ class _CmdParamType(click.ParamType):
         if not cmd_name:
             return []
         try:
-            cmd_path = get_browser_cmds_dir() / str(cmd_name)
+            cmd_path = resolve_browser_cmd_dir(str(cmd_name)) or (get_browser_cmds_dir() / str(cmd_name))
             cmd = BrowserCmd.from_path(cmd_path)
         except Exception:
             return []
@@ -100,7 +105,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         ensure_agent_browser_installed()
 
         cmds_dir = get_browser_cmds_dir()
-        cmd_path = cmds_dir / cmd_name
+        cmd_path = resolve_browser_cmd_dir(cmd_name) or (cmds_dir / cmd_name)
         cmd = BrowserCmd.from_path(cmd_path)
 
         if cmd is None:

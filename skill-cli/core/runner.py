@@ -12,7 +12,7 @@ from common.core.config import load_tool_config
 from common.core.duration import parse_duration
 from common.core.paths import get_skills_dir
 from common.core.yaml_utils import dump_yaml
-from core.skill import Skill, discover_skills
+from core.skill import Skill, discover_skills, discover_skills_layered
 
 logger = structlog.get_logger(__name__)
 
@@ -134,7 +134,7 @@ def resolve_skill_script(
         (ref.split("/", 1) + [None])[:2] if "/" in ref else (ref, None)
     )
 
-    skills = discover_skills(get_skills_dir())
+    skills = discover_skills_layered()
     skill = next((s for s in skills if s.name == skill_name), None)
     if not skill:
         return None, None

@@ -12,7 +12,13 @@ from click.shell_completion import CompletionItem
 from commands.base import CommandManifest
 from common.cli.helpers import open_editor
 from common.core.paths import get_browser_cmds_dir
-from core.browser_cmd import BrowserCmd, _COMMAND_TEMPLATE, discover_browser_cmds
+from core.browser_cmd import (
+    BrowserCmd,
+    _COMMAND_TEMPLATE,
+    discover_browser_cmds,
+    discover_browser_cmds_layered,
+    resolve_browser_cmd_dir,
+)
 
 
 class _CmdNameType(click.ParamType):
@@ -20,7 +26,7 @@ class _CmdNameType(click.ParamType):
 
     def shell_complete(self, ctx, param, incomplete):
         try:
-            cmds = discover_browser_cmds(get_browser_cmds_dir())
+            cmds = discover_browser_cmds_layered()
         except Exception:
             return []
         return [
@@ -47,9 +53,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Output format.",
     )
     def list_cmd(fmt):
-        """List all stored browser commands."""
+        """List all stored browser commands (active profile + shared)."""
         cmds_dir = get_browser_cmds_dir()
-        cmds = discover_browser_cmds(cmds_dir)
+        cmds = discover_browser_cmds_layered()
+        profile_names = {c.name for c in discover_browser_cmds(cmds_dir)}
 
         if fmt == "json":
             click.echo(json.dumps(
@@ -73,7 +80,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Browser commands directory: {cmds_dir}\n")
         for cmd in cmds:
             n_inst = len(cmd.get_instructions())
-            click.echo(f"  {cmd.name}  [{n_inst} instruction(s)]")
+            shared = "" if cmd.name in profile_names else " (shared)"
+            click.echo(f"  {cmd.name}  [{n_inst} instruction(s)]{shared}")
             if cmd.description:
                 click.echo(f"    {cmd.description}")
             if cmd.parameters:
@@ -112,7 +120,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def edit_cmd(name):
         """Edit a browser command in the default editor."""
         cmds_dir = get_browser_cmds_dir()
-        cmd_dir = cmds_dir / name
+        cmd_dir = resolve_browser_cmd_dir(name) or (cmds_dir / name)
 
         if not cmd_dir.exists():
             click.echo(f"Error: Command '{name}' not found.", err=True)
@@ -130,7 +138,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def show_cmd(name):
         """Show the content of a browser command."""
         cmds_dir = get_browser_cmds_dir()
-        cmd_dir = cmds_dir / name
+        cmd_dir = resolve_browser_cmd_dir(name) or (cmds_dir / name)
         cmd = BrowserCmd.from_path(cmd_dir)
 
         if cmd is None:

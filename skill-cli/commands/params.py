@@ -6,7 +6,7 @@ import click
 from click.shell_completion import CompletionItem
 
 from common.core.paths import get_skills_dir
-from core.skill import Skill, discover_skills
+from core.skill import Skill, discover_skills, discover_skills_layered, resolve_skill_dir
 
 
 class SkillRefType(click.ParamType):
@@ -50,7 +50,7 @@ class SkillNameType(click.ParamType):
 
     def shell_complete(self, ctx, param, incomplete):
         try:
-            skills = discover_skills(get_skills_dir())
+            skills = discover_skills_layered()
         except Exception:
             return []
 
@@ -73,7 +73,8 @@ class SkillFileType(click.ParamType):
             return []
 
         try:
-            skill_dir = (get_skills_dir() / str(skill_name)).resolve()
+            resolved = resolve_skill_dir(str(skill_name))
+            skill_dir = (resolved or get_skills_dir() / str(skill_name)).resolve()
         except Exception:
             return []
 
@@ -106,7 +107,7 @@ class SkillParamType(click.ParamType):
 
         try:
             skill_name = str(skill_ref).split("/", 1)[0]
-            skill_path = get_skills_dir() / skill_name
+            skill_path = resolve_skill_dir(skill_name) or (get_skills_dir() / skill_name)
             skill = Skill.from_path(skill_path)
         except Exception:
             return []

@@ -90,6 +90,43 @@ pip install -e './corpus-cli[ml,youtube]' \
 
 ## Configuration
 
+### Profiles (personas)
+
+All tools run under an active **profile**, so you can manage several personas
+(different YouTube/Substack/Twitter/Telegram accounts, free-service API keys,
+prompts, skills, browser sessions and corpus data) from one installation. Each
+profile is fully isolated under `~/.config|.local/share|.cache/fast-market/profiles/<name>/`.
+
+A reserved `_shared` base layer is inherited by every profile (deep-merged,
+profile wins) — put things common to all personas there (e.g. the Anthropic key,
+the working directory, shared prompts/skills/browser scripts). Resources present
+in both the profile and `_shared` resolve to the profile's copy; lists tag the
+shared-only ones `(shared)`.
+
+```bash
+toolsetup profile list                 # list profiles, '*' marks the active one
+toolsetup profile show-shared          # show the _shared base
+toolsetup profile show-path [name]     # print resolved config/data/cache paths
+toolsetup profile create <name>        # new empty profile
+toolsetup profile clone <src> <dst>    # copy a profile (config + data + cache)
+toolsetup profile use <name>           # switch the active profile
+toolsetup profile delete <name>        # remove a profile
+toolsetup profile migrate              # move a legacy (pre-profile) layout into 'joriel'
+```
+
+Select the active profile by (first match wins): the global `--profile/-P` flag
+on any command, the `FASTMARKET_PROFILE` env var, the `active_profile` pointer
+file (set by `profile use`), else `default`.
+
+```bash
+youtube --profile alice get-last       # one-off override
+export FASTMARKET_PROFILE=alice        # whole shell
+```
+
+Secrets are stored inline in each profile's `config.yaml` (resolved before any
+`api_key_env` fallback), so free-service keys differ per persona while a shared
+key can live once in `_shared`.
+
 ### First-time Setup
 
 Run the toolsetup wizard to configure LLM providers:

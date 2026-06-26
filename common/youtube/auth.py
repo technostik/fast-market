@@ -20,8 +20,10 @@ HEADLESS_AUTH_TIMEOUT = 300
 
 
 def get_youtube_auth_dir() -> Path:
-    """Get the shared YouTube auth directory (~/.config/fast-market/common/youtube/)."""
-    return Path.home() / ".config" / "fast-market" / "common" / "youtube"
+    """Get the active profile's YouTube auth directory (client_secret + token)."""
+    from common.core.paths import get_youtube_auth_dir as _dir
+
+    return _dir()
 
 
 def get_client_secret_path() -> str:

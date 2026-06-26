@@ -6,7 +6,7 @@ import click
 
 from commands.base import CommandManifest
 from common.core.paths import get_skills_dir
-from core.skill import discover_skills
+from core.skill import discover_skills_layered, is_shared_skill
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -20,9 +20,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Output format",
     )
     def list_cmd(fmt):
-        """List all available skills."""
+        """List all available skills (active profile + shared)."""
         skills_dir = get_skills_dir()
-        skills = discover_skills(skills_dir)
+        skills = discover_skills_layered()
 
         if fmt == "json":
             click.echo(
@@ -34,6 +34,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                             "mode": s.get_execution_mode(),
                             "has_scripts": s.has_scripts,
                             "health_issues": s.health_check(),
+                            "shared": is_shared_skill(s.path),
                         }
                         for s in skills
                     ],
@@ -53,8 +54,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             status = ""
             if issues:
                 status = f" ⚠ {', '.join(issues)}"
-            
-            click.echo(f"  {skill.name} [{mode}]{status}")
+            shared = " (shared)" if is_shared_skill(skill.path) else ""
+
+            click.echo(f"  {skill.name} [{mode}]{shared}{status}")
             if skill.description:
                 click.echo(f"    Description: {skill.description}")
             if skill.has_scripts:

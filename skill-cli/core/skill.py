@@ -133,3 +133,51 @@ def discover_skills(skills_dir: Path) -> list[Skill]:
             if skill:
                 skills.append(skill)
     return skills
+
+
+def discover_skills_layered(search_dirs: list[Path] | None = None) -> list[Skill]:
+    """Discover skills across the active profile then the _shared base.
+
+    A skill in the profile shadows a shared skill of the same directory name.
+    """
+    if search_dirs is None:
+        from common.core.paths import get_skills_search_dirs
+
+        search_dirs = get_skills_search_dirs()
+
+    seen: set[str] = set()
+    skills: list[Skill] = []
+    for skills_dir in search_dirs:
+        if not skills_dir.exists():
+            continue
+        for item in sorted(skills_dir.iterdir()):
+            if item.is_dir() and item.name not in seen:
+                skill = Skill.from_path(item)
+                if skill:
+                    seen.add(item.name)
+                    skills.append(skill)
+    return skills
+
+
+def resolve_skill_dir(skill_name: str, search_dirs: list[Path] | None = None) -> Path | None:
+    """Return the directory of a skill, searching the profile then _shared. None if absent."""
+    if search_dirs is None:
+        from common.core.paths import get_skills_search_dirs
+
+        search_dirs = get_skills_search_dirs()
+    for skills_dir in search_dirs:
+        candidate = skills_dir / skill_name
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def is_shared_skill(skill_path: Path) -> bool:
+    """True if skill_path resolves under the _shared base rather than the active profile."""
+    from common.core.paths import get_skills_dir
+
+    try:
+        skill_path.resolve().relative_to(get_skills_dir().resolve())
+        return False
+    except ValueError:
+        return True

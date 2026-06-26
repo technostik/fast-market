@@ -21,6 +21,13 @@ class FilePromptStore:
     def __init__(self, prompts_dir: Path | None = None):
         if prompts_dir is None:
             prompts_dir = get_prompts_dir()
+            # Search the active profile first, then the _shared base.
+            from common.core.paths import get_prompts_search_dirs
+
+            self._search_dirs = get_prompts_search_dirs()
+        else:
+            self._search_dirs = [prompts_dir]
+        # Writable dir (create/save target): the active profile's dir.
         self._prompts_dir = prompts_dir
 
     def _sanitize_name(self, name: str) -> str:
@@ -46,10 +53,18 @@ class FilePromptStore:
 
     def _find_by_name(self, name: str) -> Path | None:
         sanitized = self._sanitize_name(name)
-        file_path = self._prompts_dir / f"{sanitized}.md"
-        if file_path.exists():
-            return file_path
+        for search_dir in self._search_dirs:
+            file_path = search_dir / f"{sanitized}.md"
+            if file_path.exists():
+                return file_path
         return None
+
+    def is_shared(self, name: str) -> bool:
+        """True if the prompt resolves only from the _shared base (not the profile)."""
+        sanitized = self._sanitize_name(name)
+        if (self._prompts_dir / f"{sanitized}.md").exists():
+            return False
+        return self._find_by_name(name) is not None
 
     def _load_prompt_from_file(self, file_path: Path) -> Prompt:
         try:
@@ -116,11 +131,20 @@ class FilePromptStore:
             return None
         return self._load_prompt_from_file(file_path)
 
+    def _iter_unique_files(self):
+        """Yield (name, path) across search dirs; the first dir wins (profile shadows shared)."""
+        seen: set[str] = set()
+        for search_dir in self._search_dirs:
+            for file_path in sorted(search_dir.glob("*.md")):
+                if file_path.stem in seen:
+                    continue
+                seen.add(file_path.stem)
+                yield file_path.stem, file_path
+
     def list_prompts(self) -> list[Prompt]:
         prompts = []
-        for file_path in sorted(self._prompts_dir.glob("*.md")):
-            prompt = self._load_prompt_from_file(file_path)
-            prompts.append(prompt)
+        for _name, file_path in self._iter_unique_files():
+            prompts.append(self._load_prompt_from_file(file_path))
         return prompts
 
     def update_prompt(self, name: str, **updates) -> bool:
@@ -168,7 +192,7 @@ class FilePromptStore:
 
     def validate_all_prompts(self) -> dict:
         result = {"valid": [], "errors": []}
-        for file_path in sorted(self._prompts_dir.glob("*.md")):
+        for _name, file_path in self._iter_unique_files():
             try:
                 prompt = self._load_prompt_from_file(file_path)
                 result["valid"].append(prompt.name)

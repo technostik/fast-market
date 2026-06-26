@@ -12,7 +12,21 @@ from datetime import datetime
 from pathlib import Path
 
 from common import structlog
-from common.core.paths import get_skills_dir
+from common.core.paths import get_skills_dir, get_skills_search_dirs
+
+
+def _resolve_skill_dir_for_learn(skill_name: str):
+    """Resolve a skill dir across profile then _shared; fall back to the profile dir.
+
+    LEARN.md is written in place so learning a _shared skill keeps it loadable.
+    """
+    from pathlib import Path
+
+    for d in get_skills_search_dirs():
+        candidate = Path(d) / skill_name
+        if candidate.is_dir():
+            return candidate
+    return get_skills_dir() / skill_name
 
 logger = structlog.get_logger(__name__)
 
@@ -425,7 +439,7 @@ def update_learn_file(
         temperature: Temperature for LLM calls (defaults to 0.0)
     """
     try:
-        skill_dir = get_skills_dir() / skill_name
+        skill_dir = _resolve_skill_dir_for_learn(skill_name)
         skill_dir.mkdir(parents=True, exist_ok=True)
         learn_path = skill_dir / "LEARN.md"
 
@@ -461,7 +475,7 @@ def update_learn_file(
         import traceback
 
         logger.warning("learn_update_traceback", traceback=traceback.format_exc())
-        fallback = get_skills_dir() / skill_name / "LEARN.md"
+        fallback = _resolve_skill_dir_for_learn(skill_name) / "LEARN.md"
         fallback.parent.mkdir(parents=True, exist_ok=True)
         if not fallback.exists():
             fallback.write_text(

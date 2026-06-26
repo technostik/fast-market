@@ -35,13 +35,14 @@ class AnthropicProvider(LazyLLMProvider):
         except ImportError as exc:
             raise RuntimeError("pip install anthropic") from exc
 
+        from common.core.config import resolve_secret
+
         provider_config = (self.config.get("providers") or {}).get(self.provider_name or self.name, {})
-        api_key_env = provider_config.get("api_key_env", "ANTHROPIC_API_KEY")
-        api_key = __import__("os").environ.get(api_key_env)
+        api_key = resolve_secret(provider_config, default_env="ANTHROPIC_API_KEY")
         if not api_key:
             logger.warning(
                 "anthropic_provider_not_initialized",
-                reason=f"{api_key_env} environment variable not set",
+                reason="no inline api_key and api_key_env/ANTHROPIC_API_KEY not set",
             )
             self._provider = None
             return

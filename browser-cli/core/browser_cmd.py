@@ -98,3 +98,40 @@ def discover_browser_cmds(cmds_dir: Path) -> list[BrowserCmd]:
             if cmd:
                 cmds.append(cmd)
     return cmds
+
+
+def discover_browser_cmds_layered(search_dirs: list[Path] | None = None) -> list[BrowserCmd]:
+    """Discover browser commands across the active profile then the _shared base.
+
+    A command in the profile shadows a shared command of the same name.
+    """
+    if search_dirs is None:
+        from common.core.paths import get_browser_cmds_search_dirs
+
+        search_dirs = get_browser_cmds_search_dirs()
+
+    seen: set[str] = set()
+    cmds: list[BrowserCmd] = []
+    for cmds_dir in search_dirs:
+        if not cmds_dir.exists():
+            continue
+        for item in sorted(cmds_dir.iterdir()):
+            if item.is_dir() and item.name not in seen:
+                cmd = BrowserCmd.from_path(item)
+                if cmd:
+                    seen.add(item.name)
+                    cmds.append(cmd)
+    return cmds
+
+
+def resolve_browser_cmd_dir(name: str, search_dirs: list[Path] | None = None) -> Path | None:
+    """Return a browser command's dir, searching the profile then _shared. None if absent."""
+    if search_dirs is None:
+        from common.core.paths import get_browser_cmds_search_dirs
+
+        search_dirs = get_browser_cmds_search_dirs()
+    for cmds_dir in search_dirs:
+        candidate = cmds_dir / name
+        if candidate.is_dir():
+            return candidate
+    return None

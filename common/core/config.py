@@ -13,7 +13,9 @@ from common.core.paths import (
     get_tool_config_path,
     get_common_subconfig_path,
     get_agent_config_path,
+    _profile_config_root,
 )
+from common.core.profile import SHARED
 from common.core.yaml_utils import dump_yaml
 
 
@@ -43,24 +45,53 @@ def _get_tool_requirements(tool_name: str) -> list[str]:
     return _tool_common_requirements.get(tool_name, [])
 
 
-def _discover_common_subconfigs() -> dict[str, dict]:
-    """Discover all common sub-configs by scanning ~/.config/fast-market/common/.
+def _shared_common_dir() -> Path:
+    """~/.config/fast-market/profiles/_shared/common/ (not created)."""
+    return _profile_config_root(SHARED) / "common"
 
-    Returns {subconfig_name: config_dict} for each subdirectory containing config.yaml.
-    """
-    common_dir = get_common_config_path().parent
+
+def _scan_common_dir(common_dir: Path) -> dict[str, dict]:
+    """Return {subconfig_name: config_dict} for each subdir with a config.yaml."""
     if not common_dir.exists():
         return {}
-
-    subconfigs = {}
+    subconfigs: dict[str, dict] = {}
     for subdir in common_dir.iterdir():
         if not subdir.is_dir():
             continue
         config_file = subdir / "config.yaml"
         if config_file.exists():
             subconfigs[subdir.name] = _load_yaml(config_file)
-
     return subconfigs
+
+
+def _discover_common_subconfigs() -> dict[str, dict]:
+    """Discover common sub-configs, merging the _shared base under the active profile.
+
+    Scans both ~/.config/fast-market/profiles/_shared/common/ and the active
+    profile's common/ directory. For each subconfig present in both, the profile
+    values are deep-merged over the shared values (profile wins).
+    """
+    shared = _scan_common_dir(_shared_common_dir())
+    active = _scan_common_dir(get_common_config_path().parent)
+
+    merged: dict[str, dict] = dict(shared)
+    for name, cfg in active.items():
+        if name in merged:
+            merged[name] = _deep_merge(merged[name], cfg)
+        else:
+            merged[name] = cfg
+    return merged
+
+
+def _load_layered(rel_path: str, active_path: Path) -> dict:
+    """Deep-merge the _shared copy of a config file under the active-profile copy.
+
+    rel_path is the file path relative to a profile's config root (e.g.
+    'common/llm/config.yaml'); active_path is the already-resolved active file.
+    """
+    shared = _load_yaml(_profile_config_root(SHARED) / rel_path)
+    active = _load_yaml(active_path)
+    return _deep_merge(shared, active)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -101,11 +132,11 @@ def _save_yaml(path: Path, config: dict) -> None:
 
 
 def load_common_config() -> dict:
-    """Load ~/.config/fast-market/common/config.yaml.
+    """Load the common config, merging the _shared base under the active profile.
 
-    Returns empty dict if file does not exist.
+    Returns empty dict if neither file exists.
     """
-    return _load_yaml(get_common_config_path())
+    return _load_layered("common/config.yaml", get_common_config_path())
 
 
 def save_common_config(config: dict) -> None:
@@ -178,9 +209,10 @@ def get_lock_wait_timeout() -> int:
 def load_llm_config() -> dict:
     """Load ~/.config/fast-market/common/llm/config.yaml.
 
-    Returns empty dict if file does not exist.
+    Merges the _shared base under the active profile (profile wins). Returns
+    empty dict if neither file exists.
     """
-    return _load_yaml(get_llm_config_path())
+    return _load_layered("common/llm/config.yaml", get_llm_config_path())
 
 
 def save_llm_config(config: dict) -> None:
@@ -191,9 +223,10 @@ def save_llm_config(config: dict) -> None:
 def load_youtube_config() -> dict:
     """Load ~/.config/fast-market/common/youtube/config.yaml.
 
-    Returns empty dict if file does not exist.
+    Merges the _shared base under the active profile (profile wins). Returns
+    empty dict if neither file exists.
     """
-    return _load_yaml(get_youtube_config_path())
+    return _load_layered("common/youtube/config.yaml", get_youtube_config_path())
 
 
 def save_youtube_config(config: dict) -> None:
@@ -230,10 +263,11 @@ def save_youtube_channel_list_config(
 def load_agent_config() -> dict:
     """Load ~/.config/fast-market/common/agent/config.yaml.
 
-    Returns empty dict if file does not exist.
+    Merges the _shared base under the active profile (profile wins). Returns
+    empty dict if neither file exists.
     This is the shared agent config for skill, task, and prompt CLIs.
     """
-    return _load_yaml(get_agent_config_path())
+    return _load_layered("common/agent/config.yaml", get_agent_config_path())
 
 
 def save_agent_config(config: dict) -> None:
@@ -320,6 +354,31 @@ def save_tool_config(tool_name: str, config: dict) -> None:
         dump_yaml(safe, sort_keys=False),
         encoding="utf-8",
     )
+
+
+def resolve_secret(
+    provider_config: dict,
+    key_field: str = "api_key",
+    env_field: str = "api_key_env",
+    default_env: str | None = None,
+) -> str | None:
+    """Resolve a secret, preferring an inline value over an env-var reference.
+
+    Profiles store keys inline in config.yaml. Resolution order:
+        1. inline ``key_field`` (e.g. ``api_key``) in the provider config
+        2. env var named by ``env_field`` (e.g. ``api_key_env``)
+        3. env var named by ``default_env`` (legacy fallback)
+
+    Returns the secret string or None if nothing is set.
+    """
+    inline = provider_config.get(key_field)
+    if inline:
+        return str(inline)
+
+    env_name = provider_config.get(env_field) or default_env
+    if env_name and str(env_name).upper() not in ("", "NONE"):
+        return os.environ.get(str(env_name))
+    return None
 
 
 def resolve_llm_config(tool_name: str) -> dict:

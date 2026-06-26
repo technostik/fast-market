@@ -25,7 +25,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """List all prompts."""
         from storage.store import PromptStore
 
-        prompts = PromptStore().list_prompts()
+        store = PromptStore()
+        prompts = store.list_prompts()
 
         if with_filename:
             for p in prompts:
@@ -60,7 +61,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         if long:
             for prompt in prompts:
-                click.echo(f"\n{prompt.name}")
+                shared = " (shared)" if store.is_shared(prompt.name) else ""
+                click.echo(f"\n{prompt.name}{shared}")
                 if prompt.description:
                     click.echo(f"  Description: {prompt.description}")
                 if prompt.model_provider:
@@ -70,6 +72,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         else:
             for prompt in prompts:
                 desc = f" - {prompt.description}" if prompt.description else ""
-                click.echo(f"{prompt.name}{desc}")
+                shared = " (shared)" if store.is_shared(prompt.name) else ""
+                click.echo(f"{prompt.name}{shared}{desc}")
 
     return CommandManifest(name="list", click_command=list_cmd)

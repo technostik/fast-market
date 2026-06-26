@@ -7,7 +7,7 @@ import click
 from commands.base import CommandManifest
 from commands.params import SkillNameType
 from common.core.paths import get_skills_dir
-from core.skill import Skill
+from core.skill import Skill, resolve_skill_dir
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -32,7 +32,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("Error: --learn and --run are mutually exclusive", err=True)
             sys.exit(1)
 
-        skill_path = get_skills_dir() / name
+        skill_path = resolve_skill_dir(name) or (get_skills_dir() / name)
         if not skill_path.exists():
             click.echo(f"Error: Skill '{name}' not found", err=True)
             return

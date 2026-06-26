@@ -5,6 +5,7 @@ from commands.autocomplete.register import register as autocomplete_register
 from commands.config.register import register as config_register
 from commands.backup.register import register as backup_register
 from commands.data.register import register as data_register
+from commands.profile.register import register as profile_register
 
 main = setup_register()
 autocomplete_group = autocomplete_register()
@@ -20,3 +21,5 @@ backup_cmd = backup_register()
 main.add_command(backup_cmd, name="backup")
 data_cmd = data_register()
 main.add_command(data_cmd, name="data")
+profile_cmd = profile_register()
+main.add_command(profile_cmd, name="profile")

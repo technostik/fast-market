@@ -29,7 +29,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--cdp-port", "-p", "cdp_port", type=int, default=9222, show_default=True,
                   help="Chrome DevTools Protocol port.")
     @click.option("--user-data-dir", "-u", default=None,
-                  help="Chrome user data directory (defaults to ~/.chrome-debug-profile).")
+                  help="Chrome user data directory (defaults to the active profile's browser session dir).")
     @click.option("--extra-args", "-e", multiple=True, default=None,
                   help="Extra arguments to pass to the browser (can repeat).")
     @click.option("--silent", "-s", is_flag=True, default=False,
@@ -57,7 +57,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         browser = resolve_browser(browser)
 
         if user_data_dir is None:
-            user_data_dir = str(Path.home() / ".chrome-debug-profile")
+            from common.core.paths import get_browser_user_data_dir
+
+            user_data_dir = str(get_browser_user_data_dir())
 
         cmd = [
             browser,

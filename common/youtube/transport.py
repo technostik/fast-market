@@ -368,7 +368,9 @@ class RSSPlaylistTransport(Transport):
             import httplib2
             from google.oauth2.credentials import Credentials
 
-            token_path = Path.home() / ".config" / "fast-market" / "common" / "youtube" / "token.json"
+            from common.core.paths import get_youtube_auth_dir
+
+            token_path = get_youtube_auth_dir() / "token.json"
             if not token_path.exists():
                 logger.info("api_v3_token_not_found")
                 return None

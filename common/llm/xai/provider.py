@@ -48,17 +48,18 @@ class XAIProvider(LazyLLMProvider):
 
         provider_config = (self.config.get("providers") or {}).get(self.provider_name or self.name, {})
 
+        from common.core.config import resolve_secret
+
         api_key_env = provider_config.get("api_key_env", "XAI_API_KEY")
-        api_key = None
-        if api_key_env and api_key_env.upper() not in ("", "NONE"):
-            api_key = os.environ.get(api_key_env)
-            if not api_key:
-                logger.warning(
-                    "xai_provider_not_initialized",
-                    reason=f"{api_key_env} environment variable not set",
-                )
-                self._provider = None
-                return
+        api_key = resolve_secret(provider_config, default_env="XAI_API_KEY")
+        key_required = bool(api_key_env) and str(api_key_env).upper() not in ("", "NONE")
+        if key_required and not api_key:
+            logger.warning(
+                "xai_provider_not_initialized",
+                reason="no inline api_key and api_key_env/XAI_API_KEY not set",
+            )
+            self._provider = None
+            return
 
         model = provider_config.get("model", "")
         if not isinstance(model, str) or not model.strip():

@@ -34,8 +34,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     def edit_cmd(skill_name, file, create, learn, shell):
         """Edit a skill file in the default editor."""
+        from core.skill import resolve_skill_dir
+
         skills_dir = get_skills_dir()
-        skill_dir = skills_dir / skill_name
+        skill_dir = resolve_skill_dir(skill_name) or (skills_dir / skill_name)
 
         if not skill_dir.exists():
             click.echo(f"Error: Skill '{skill_name}' not found", err=True)

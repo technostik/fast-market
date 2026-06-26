@@ -21,7 +21,7 @@ from commands.helpers import (
     substitute_params,
 )
 from common.core.paths import get_browser_cmds_dir
-from core.browser_cmd import BrowserCmd, discover_browser_cmds
+from core.browser_cmd import BrowserCmd, discover_browser_cmds, discover_browser_cmds_layered
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +292,7 @@ def _make_completer():
             if text.startswith("/apply "):
                 word = text[len("/apply "):].lstrip()
                 try:
-                    cmds = discover_browser_cmds(get_browser_cmds_dir())
+                    cmds = discover_browser_cmds_layered()
                 except Exception:
                     cmds = []
                 for cmd in cmds:

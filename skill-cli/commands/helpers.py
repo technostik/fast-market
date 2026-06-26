@@ -12,7 +12,7 @@ from common.core.config import load_common_config, load_tool_config, save_tool_c
 from common.core.yaml_utils import dump_yaml
 from common.core.paths import get_skills_dir
 from common.llm.registry import get_default_provider_name
-from core.skill import Skill
+from core.skill import Skill, resolve_skill_dir
 
 logger = structlog.get_logger(__name__)
 
@@ -194,7 +194,7 @@ def apply_skill_impl(
         sys.exit(1)
 
     skill_name = skill_ref.split("/", 1)[0]
-    skill_path = get_skills_dir() / skill_name
+    skill_path = resolve_skill_dir(skill_name) or (get_skills_dir() / skill_name)
     skill = Skill.from_path(skill_path)
     if not skill:
         click.echo(f"Skill '{skill_name}' not found", err=True)

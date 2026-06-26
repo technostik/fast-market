@@ -21,7 +21,7 @@ import click
 from common.core.config import load_common_config
 
 # Default snapshot root directory
-DEFAULT_SNAPSHOT_ROOT = Path.home() / ".local" / "share" / "fast-market" / "snapshots"
+DEFAULT_SNAPSHOT_ROOT = Path.home() / ".local" / "share" / "fast-market-snapshots"
 
 # Source directory definitions
 SOURCE_CONFIG = "config"
@@ -118,7 +118,36 @@ def _should_skip_file(path: Path) -> bool:
     return False
 
 
-def _copy_tree_no_bak(src: Path, dst: Path) -> int:
+def _is_under_skip_path(item: Path, skip_paths: set[Path] | None) -> bool:
+    """Check if an item's resolved path is under any of the skip paths."""
+    if not skip_paths:
+        return False
+    try:
+        resolved = item.resolve()
+        for skip in skip_paths:
+            if resolved == skip or skip in resolved.parents:
+                return True
+    except (OSError, RuntimeError):
+        pass
+    return False
+
+
+def _is_snapshot_storage_dir(item: Path) -> bool:
+    """Check if a directory is a snapshot storage directory that should be skipped.
+
+    Skips directories named 'snapshots' at any nesting level, since they
+    contain snapshot management artifacts rather than user data. This prevents
+    recursive nesting when old snapshot roots existed inside the data source.
+    """
+    if not item.is_dir() or item.is_symlink():
+        return False
+    try:
+        return item.name == "snapshots"
+    except (OSError, RuntimeError):
+        return False
+
+
+def _copy_tree_no_bak(src: Path, dst: Path, skip_paths: set[Path] | None = None) -> int:
     """Recursively copy directory tree, skipping .bak* files.
 
     Returns number of items copied.
@@ -127,18 +156,22 @@ def _copy_tree_no_bak(src: Path, dst: Path) -> int:
     count = 0
 
     for item in src.iterdir():
-        if _should_skip_file(item):
+        if _should_skip_file(item) or _is_under_skip_path(item, skip_paths):
+            continue
+
+        if _is_snapshot_storage_dir(item):
+            click.echo(f"Skipping snapshot storage: {item.name}")
             continue
 
         item_dst = dst / item.name
         if item.is_dir() and not item.is_symlink():
-            count += _copy_tree_no_bak(item, item_dst)
+            count += _copy_tree_no_bak(item, item_dst, skip_paths)
         elif item.is_file() or item.is_symlink():
             if item.is_symlink():
                 # Follow symlink and copy target
                 real_src = item.resolve()
                 if real_src.is_dir():
-                    count += _copy_tree_no_bak(real_src, item_dst)
+                    count += _copy_tree_no_bak(real_src, item_dst, skip_paths)
                 else:
                     shutil.copy2(str(item), str(item_dst))
                     count += 1
@@ -154,6 +187,7 @@ def _copy_source_to_snapshot(
     snapshot_dir: Path,
     targets: list[str] | None = None,
     flat_only: bool = False,
+    skip_paths: set[Path] | None = None,
 ) -> int:
     """Copy source directory/files to snapshot directory.
 
@@ -193,10 +227,18 @@ def _copy_source_to_snapshot(
                     click.echo(f"Skipping backup: {item.name}")
                     continue
 
+                if _is_under_skip_path(item, skip_paths):
+                    click.echo(f"Skipping snapshot storage: {item.name}")
+                    continue
+
+                if _is_snapshot_storage_dir(item):
+                    click.echo(f"Skipping snapshot storage: {item.name}")
+                    continue
+
                 dst = snapshot_dir / item.name
 
                 if item.is_dir() and not item.is_symlink():
-                    count = _copy_tree_no_bak(item, dst)
+                    count = _copy_tree_no_bak(item, dst, skip_paths)
                     click.echo(f"Snapped: {item.name}/")
                     snap_count += count + 1
                 elif item.is_file() or item.is_symlink():
@@ -234,7 +276,7 @@ def _copy_source_to_snapshot(
                             click.echo(f"Snapped: {target}/{file_item.name}")
                             snap_count += 1
                 else:
-                    count = _copy_tree_no_bak(src, dst)
+                    count = _copy_tree_no_bak(src, dst, skip_paths)
                     click.echo(f"Snapped: {target}/")
                     snap_count += count + 1
             else:
@@ -242,7 +284,7 @@ def _copy_source_to_snapshot(
                     # Follow the symlink and copy the target
                     real_src = src.resolve()
                     if real_src.is_dir():
-                        count = _copy_tree_no_bak(real_src, dst)
+                        count = _copy_tree_no_bak(real_src, dst, skip_paths)
                         snap_count += count + 1
                     else:
                         shutil.copy2(str(real_src), str(dst))
@@ -375,7 +417,9 @@ def do_snapshot(
     state["snapshot_date"] = datetime.now().isoformat()
     state["source"] = str(source)
 
-    snap_count = _copy_source_to_snapshot(source, target_dir, targets, flat_only)
+    snap_count = _copy_source_to_snapshot(
+        source, target_dir, targets, flat_only, skip_paths={snapshot_root.resolve()}
+    )
 
     _save_state(snapshot_root, source_type, state)
     click.echo(

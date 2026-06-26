@@ -23,7 +23,7 @@ from common.core.paths import get_skills_dir
 from common.llm.base import LLMRequest
 from core.plan_utils import SkillPlan, SkillPlanStep
 from core.runner import make_run_root
-from core.skill import Skill, discover_skills
+from core.skill import Skill, discover_skills, discover_skills_layered
 
 logger = structlog.get_logger(__name__)
 
@@ -543,7 +543,7 @@ def _load_tools_description_simple(agent_config: dict) -> str:
 
 def _load_existing_skills_simple() -> str:
     try:
-        skills = discover_skills(get_skills_dir())
+        skills = discover_skills_layered()
         lines = []
         for skill in skills:
             lines.append(f"- {skill.name}: {skill.description or ''}")
@@ -1162,7 +1162,11 @@ def run_router(
         provider_name = getattr(provider, "name", "default")
 
     agent_cfg = init_skill_agent_config()
-    skills = discover_skills(skills_dir or get_skills_dir())
+    skills = (
+        discover_skills(skills_dir)
+        if skills_dir
+        else discover_skills_layered()
+    )
 
     workdir_path = Path(workdir).expanduser().resolve()
 

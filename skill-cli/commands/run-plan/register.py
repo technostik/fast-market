@@ -760,7 +760,7 @@ def _llm_change_step(plan_path: Path, data: dict, steps: list, step_idx: int) ->
     """Interactive LLM chat to modify a single step."""
     from common.core.config import requires_common_config, load_tool_config
     from common.llm.registry import discover_providers, get_default_provider_name
-    from core.skill import discover_skills
+    from core.skill import discover_skills, discover_skills_layered
     from common.core.paths import get_skills_dir
 
     requires_common_config("skill", ["llm"])
@@ -777,7 +777,7 @@ def _llm_change_step(plan_path: Path, data: dict, steps: list, step_idx: int) ->
         click.echo(f"Error: provider '{provider_name}' not available.", err=True)
         return
 
-    skills = discover_skills(get_skills_dir())
+    skills = discover_skills_layered()
     context = _build_llm_context(data, skills, step_idx)
 
     click.echo(f"\nLLM Chat — modifying step {step_idx + 1}: {steps[step_idx].get('action').upper()}")
@@ -797,7 +797,7 @@ def _llm_change_plan(plan_path: Path, data: dict, steps: list) -> None:
     """Interactive LLM chat to modify the entire plan."""
     from common.core.config import requires_common_config, load_tool_config
     from common.llm.registry import discover_providers, get_default_provider_name
-    from core.skill import discover_skills
+    from core.skill import discover_skills, discover_skills_layered
     from common.core.paths import get_skills_dir
 
     requires_common_config("skill", ["llm"])
@@ -814,7 +814,7 @@ def _llm_change_plan(plan_path: Path, data: dict, steps: list) -> None:
         click.echo(f"Error: provider '{provider_name}' not available.", err=True)
         return
 
-    skills = discover_skills(get_skills_dir())
+    skills = discover_skills_layered()
     # step_idx=None means whole plan
     context = _build_llm_context(data, skills, step_idx=None)
 

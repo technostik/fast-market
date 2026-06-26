@@ -170,12 +170,16 @@ def _extract_skills(data: dict) -> list[dict]:
             if skill_name and skill_name not in skill_names:
                 skill_names.append(skill_name)
 
-    skills_dir = get_skills_dir()
+    from common.core.paths import get_skills_search_dirs
+
+    search_dirs = get_skills_search_dirs()
     result = []
 
     for skill_name in skill_names:
-        skill_path = skills_dir / skill_name
-        if not skill_path.exists() or not skill_path.is_dir():
+        skill_path = next(
+            (d / skill_name for d in search_dirs if (d / skill_name).is_dir()), None
+        )
+        if skill_path is None:
             continue
 
         files = []
