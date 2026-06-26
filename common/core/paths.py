@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import shutil
 from pathlib import Path
 
 from common.core.profile import SHARED, resolve_profile
@@ -182,8 +183,18 @@ def get_browser_cmds_dir(profile: str | None = None) -> Path:
 
 
 def get_browser_user_data_dir(profile: str | None = None) -> Path:
-    """~/.cache/fast-market/profiles/<profile>/browser/chrome-profile/ (Chrome session)."""
-    p = _profile_cache_root(profile) / "browser" / "chrome-profile"
+    """~/.local/share/fast-market/profiles/<profile>/browser/chrome-profile/ (Chrome session).
+
+    Stored under the data root (not cache) so the persistent web session — cookies
+    and logins — survives any cache cleanup. A profile created before this lived
+    under the cache root; migrate it on first access so existing sessions are kept.
+    """
+    p = _profile_data_root(profile) / "browser" / "chrome-profile"
+    if not p.exists():
+        legacy = _profile_cache_root(profile) / "browser" / "chrome-profile"
+        if legacy.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(legacy), str(p))
     p.mkdir(parents=True, exist_ok=True)
     return p
 

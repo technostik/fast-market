@@ -19,8 +19,10 @@ from commands.helpers import (
     start_xvfb,
     start_xephyr,
     minimize_xephyr,
+    stop_browser,
     write_browser_state,
 )
+from common.core.profile import resolve_profile
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("start")
@@ -50,9 +52,37 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Launch a Chromium browser with CDP enabled in the background."""
         ensure_agent_browser_installed()
 
+        active_profile = resolve_profile()
+
         if is_cdp_available(cdp_port):
-            click.echo(f"Browser already running on CDP port {cdp_port}.", err=True)
-            return
+            state = read_browser_state()
+            running_profile = state.get("profile")
+            # Only auto-restart when the user relies on the active-profile session
+            # (no explicit --user-data-dir) and the live browser was started for a
+            # different profile. Browsers started before profiles were tracked have
+            # no "profile" key, so they keep the old "already running" behaviour.
+            if (
+                user_data_dir is None
+                and running_profile is not None
+                and running_profile != active_profile
+            ):
+                click.echo(
+                    f"Warning: browser on CDP port {cdp_port} belongs to profile "
+                    f"'{running_profile}', but the active profile is "
+                    f"'{active_profile}'. Restarting with '{active_profile}'...",
+                    err=True,
+                )
+                stop_browser(cdp_port)
+                xvfb_pid_old = state.get("xvfb_pid")
+                if xvfb_pid_old:
+                    try:
+                        os.kill(xvfb_pid_old, 9)
+                    except OSError:
+                        pass
+                # fall through and start a fresh browser for the active profile
+            else:
+                click.echo(f"Browser already running on CDP port {cdp_port}.", err=True)
+                return
 
         browser = resolve_browser(browser)
 
@@ -213,6 +243,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 write_browser_state({
                     "mode": mode,
                     "cdp_port": cdp_port,
+                    "profile": active_profile,
                     "xvfb_pid": xvfb_pid,
                     "xephyr_pid": xephyr_pid,
                     "display": display,
