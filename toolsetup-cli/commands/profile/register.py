@@ -212,7 +212,7 @@ def register():
             # Everything under the fast-market root except the profiles dir and pointer file.
             children = [
                 c for c in root.iterdir()
-                if c.name not in ("profiles", "active_profile")
+                if c.name not in ("profiles", "active_profile", "completions")
             ]
             if not children:
                 continue
