@@ -726,6 +726,17 @@ async def browser_start_silent():
         return {"ok": False, "error": str(e)}
 
 
+@router.post("/browser/start-visible")
+async def browser_start_visible():
+    import subprocess
+    try:
+        subprocess.run(["browser", "stop"], check=False, capture_output=True)
+        subprocess.run(["browser", "start"], check=True, capture_output=True)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.get("/browser/screenshot")
 async def browser_screenshot():
     import base64

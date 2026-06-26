@@ -177,6 +177,7 @@
       <button id="poolRedo" class="btn-sec">🔄 Redo</button>
       <button id="poolClear" class="btn-sec" style="margin-left:8px;">🧹 Clear finished</button>
       <button id="browserStartSilent" class="btn-sec" style="margin-left:8px;" onclick="browserStartSilent()">🚀 Start browser</button>
+      <button id="browserStartVisible" class="btn-sec" onclick="browserStartVisible()">🖥 Start browser (visible)</button>
       <button id="browserScreenshot" class="btn-sec" onclick="browserScreenshot()">📸 Screenshot</button>
     </div>
     <div id="browserScreenshotPreview" style="display:none; margin-bottom:8px;">
@@ -1194,6 +1195,10 @@ async function browserShow() {
 
 async function browserStartSilent() {
   await fetch('/api/short_publish/browser/start-silent', { method: 'POST' });
+}
+
+async function browserStartVisible() {
+  await fetch('/api/short_publish/browser/start-visible', { method: 'POST' });
 }
 
 async function browserScreenshot() {
