@@ -25,9 +25,10 @@ what visuals would accompany it, and what the narrator covers."
 }
 
 Rules:
-- Aim for 2–6 chapters, 2–5 scenes per chapter.
-- Each scene should be 15–45 seconds of narration.
+- Aim for {chapter_range} chapters, {scene_range} scenes per chapter.
+- Each scene should be {scene_duration} of narration.
 - Scene descriptions should be vivid enough to generate an image prompt.
+- Narration will be in {lang} — write descriptions accordingly.
 
 SCRIPT:
 """
@@ -38,6 +39,7 @@ spoken text for this scene. The text should be clear, engaging, and suitable for
 Return ONLY the narration text — no stage directions, no JSON, no headers.
 
 Narrative style: {narrative_style}
+Output language: {lang}
 
 SCENE DESCRIPTION:
 """
@@ -63,6 +65,7 @@ DEFAULT_PROMPTS = {
 def load_storyboard_config() -> dict:
     base = load_tool_config("storyboard")
     base.setdefault("tts_engine", "kokoro")
+    base.setdefault("language", "en")
     base.setdefault("image_engine", "flux2cloud")
     base.setdefault("image_size", "landscape")
     base.setdefault("image_style", "cinematic, dramatic lighting, photorealistic, hyperrealistic")
@@ -76,6 +79,9 @@ def load_storyboard_config() -> dict:
     base.setdefault("image_steps", None)   # null = engine default
     base.setdefault("draft_mode", False)   # small 512×288 images, draft_steps
     base.setdefault("draft_steps", 1)
+    base.setdefault("chapter_range", "2–5")
+    base.setdefault("scene_range", "2–5")
+    base.setdefault("scene_duration", "15–45 seconds")
     prompts = base.setdefault("prompts", {})
     for k, v in DEFAULT_PROMPTS.items():
         prompts.setdefault(k, v)
@@ -86,10 +92,11 @@ def save_storyboard_config(updates: dict) -> None:
     current = load_storyboard_config()
     # Only persist storyboard-specific keys, not inherited common/llm config
     storyboard_keys = {
-        "tts_engine", "image_engine", "image_size", "image_style",
+        "tts_engine", "language", "image_engine", "image_size", "image_style",
         "narrative_style", "animation_style", "ken_burns_zoom_from",
         "ken_burns_zoom_to", "ken_burns_motion", "fps",
-        "image_seed", "image_steps", "draft_mode", "draft_steps", "prompts",
+        "image_seed", "image_steps", "draft_mode", "draft_steps",
+        "chapter_range", "scene_range", "scene_duration", "prompts",
     }
     merged = {k: v for k, v in current.items() if k in storyboard_keys}
     for k, v in updates.items():

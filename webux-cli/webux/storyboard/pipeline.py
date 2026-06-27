@@ -272,6 +272,33 @@ async def _run_pipeline(
     # Global step re-run (all scenes from that stage, continuing to end)
     from_idx = GLOBAL_STEPS.index(from_global_step) if from_global_step else 0
 
+    # "Run from X": reset the boundary step and ALL downstream steps so they re-run.
+    # "Run remaining" (no from_global_step): no reset — only runs pending steps.
+    if from_global_step:
+        if from_idx == 0:
+            state.parse_step = StepState()
+        _scene_stages_ordered = [
+            ("transcript", "gen_transcript"), ("image_prompt", "gen_image_prompt"),
+            ("audio", "gen_audio"), ("image", "gen_image"), ("clip", "assemble_clip"),
+        ]
+        first_scene_skey = next(
+            (skey for gstep, skey in _scene_stages_ordered
+             if GLOBAL_STEPS.index(gstep) >= from_idx),
+            None,
+        )
+        if first_scene_skey is not None:
+            for ch in state.chapters:
+                for sc in ch.scenes:
+                    sc.reset_from_step(first_scene_skey)
+        if from_idx <= GLOBAL_STEPS.index("chapter"):
+            for ch in state.chapters:
+                ch.merge_step = StepState()
+                ch.chapter_file = None
+        if from_idx <= GLOBAL_STEPS.index("final"):
+            state.final_step = StepState()
+            state.final_file = None
+        state.save(state_path)
+
     # Stage 0: parse
     if from_idx <= 0:
         if state.parse_step.status != "done":
@@ -293,8 +320,6 @@ async def _run_pipeline(
             continue
         for ch in state.chapters:
             for sc in ch.scenes:
-                if from_idx == gidx:
-                    sc.steps[skey] = StepState()
                 if sc.steps[skey].status == "done":
                     continue
                 await _run_scene_step(state, state_path, config, sc, skey)
@@ -304,9 +329,6 @@ async def _run_pipeline(
     # Stage 6: chapter merges
     if from_idx <= GLOBAL_STEPS.index("chapter"):
         for ch in state.chapters:
-            if from_idx == GLOBAL_STEPS.index("chapter"):
-                ch.merge_step = StepState()
-                ch.chapter_file = None
             if ch.merge_step.status == "done":
                 continue
             await _assemble_chapter(state, state_path, config, ch)
@@ -315,9 +337,8 @@ async def _run_pipeline(
 
     # Stage 7: final merge
     if from_idx <= GLOBAL_STEPS.index("final"):
-        state.final_step = StepState()
-        state.final_file = None
-        await _assemble_final(state, state_path, config)
+        if state.final_step.status != "done":
+            await _assemble_final(state, state_path, config)
 
 
 async def _run_scene_from(
@@ -392,10 +413,8 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
     script_file = workdir / "script.txt"
     script_file.write_text(script_text, encoding="utf-8")
 
-    # Escape literal { } in the template (e.g. from JSON schema examples) so that
-    # prompt CLI's str.format() doesn't mistake them for placeholders.
-    # Then append {content} — the named parameter for the actual script file.
-    template = config["prompts"]["story_breakdown"]
+    # Resolve config placeholders first, then escape remaining { } for prompt CLI.
+    template = _resolve_prompt(config["prompts"]["story_breakdown"], config)
     prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
 
     rc = await _run(s, _prompt_cmd(), "apply", prompt_with_placeholder,
@@ -478,10 +497,8 @@ async def _gen_transcript(
     step.output = ""
     state.save(state_path)
 
-    narrative_style = config.get("narrative_style", "documentary narration")
     scene_dir = _scene_dir(state, sc)
-    # Pre-resolve real placeholder, then escape remaining { } so str.format() doesn't fail
-    template = config["prompts"]["scene_transcript"].replace("{narrative_style}", narrative_style)
+    template = _resolve_prompt(config["prompts"]["scene_transcript"], config)
     prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
 
     description_file = scene_dir / "description.txt"
@@ -513,7 +530,6 @@ async def _gen_image_prompt(
     step.output = ""
     state.save(state_path)
 
-    image_style = config.get("image_style", "cinematic, dramatic lighting")
     scene_dir = _scene_dir(state, sc)
     content = sc.raw_description
     if sc.transcript:
@@ -521,8 +537,7 @@ async def _gen_image_prompt(
     input_file = scene_dir / "image_prompt_input.txt"
     input_file.write_text(content, encoding="utf-8")
 
-    # Pre-resolve real placeholder, escape remaining { } for str.format() safety
-    template = config["prompts"]["scene_image_prompt"].replace("{image_style}", image_style)
+    template = _resolve_prompt(config["prompts"]["scene_image_prompt"], config)
     prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
 
     rc = await _run(step, _prompt_cmd(), "apply", prompt_with_placeholder,
@@ -560,12 +575,14 @@ async def _gen_audio(
 
     audio_out = scene_dir / "audio.wav"
     tts_engine = config.get("tts_engine", "kokoro")
+    lang = config.get("language", "en")
 
     rc = await _run(
         step,
         _sound(), "speak",
         "--file", str(transcript_file),
         "--engine", tts_engine,
+        "--language", lang,
         "--output", str(audio_out),
         log_to=state,
     )
@@ -613,7 +630,7 @@ async def _gen_image(
     ]
     if draft_mode:
         cmd.extend(["--width", "512", "--height", "288"])
-        cmd.extend(["--steps", str(config.get("draft_steps", 4))])
+        cmd.extend(["--steps", str(config.get("draft_steps", 1))])
     else:
         cmd.extend(["--size", image_size])
         if image_steps is not None:
@@ -705,9 +722,14 @@ async def _assemble_chapter(
     state.save(state_path)
 
     clip_files = [sc.clip_file for sc in ch.scenes if sc.clip_file and Path(sc.clip_file).exists()]
+    missing = [sc.id for sc in ch.scenes if not sc.clip_file or not Path(sc.clip_file or "").exists()]
+    step.output = f"Clips found: {len(clip_files)}/{len(ch.scenes)}"
+    if missing:
+        step.output += f"\nMissing clip for: {', '.join(missing)}"
+
     if not clip_files:
         step.status = "error"
-        step.output = "[error] No scene clips found for this chapter"
+        step.output += "\n[error] No scene clips found for this chapter"
         step.end_time = time.time()
         state.save(state_path)
         return
@@ -715,12 +737,25 @@ async def _assemble_chapter(
     ch_dir = Path(state.workdir) / "chapters" / ch.id
     ch_dir.mkdir(parents=True, exist_ok=True)
     chapter_out = ch_dir / "chapter.mp4"
+    if chapter_out.exists():
+        chapter_out.unlink()
 
-    if len(clip_files) == 1:
-        import shutil as _shutil
-        _shutil.copy2(clip_files[0], str(chapter_out))
-    else:
-        await _moviepy_concat(step, clip_files, str(chapter_out))
+    try:
+        if len(clip_files) == 1:
+            import shutil as _shutil
+            step.output += f"\nCopying {Path(clip_files[0]).name} → {chapter_out.name}"
+            _shutil.copy2(clip_files[0], str(chapter_out))
+            step.output += "\nCopy done"
+        else:
+            step.output += f"\nConcat {len(clip_files)} clips → {chapter_out.name}"
+            await _moviepy_concat(clip_files, str(chapter_out))
+            step.output += "\nConcat done"
+    except Exception as exc:
+        step.status = "error"
+        step.output += f"\n[error] {type(exc).__name__}: {exc}"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
 
     if chapter_out.exists():
         ch.chapter_file = str(chapter_out)
@@ -728,7 +763,7 @@ async def _assemble_chapter(
         step.status = "done"
     else:
         step.status = "error"
-        step.output += "\n[error] Chapter file was not created"
+        step.output += "\n[error] Chapter file was not created after write"
     step.end_time = time.time()
     state.save(state_path)
 
@@ -742,57 +777,72 @@ async def _assemble_final(
     step.output = ""
     state.save(state_path)
 
-    chapter_files = [
-        ch.chapter_file for ch in state.chapters
-        if ch.chapter_file and Path(ch.chapter_file).exists()
-    ]
+    all_ch = [(ch.id, ch.chapter_file) for ch in state.chapters]
+    step.output = f"Chapters: {len(all_ch)}"
+    for ch_id, cf in all_ch:
+        exists = Path(cf).exists() if cf else False
+        step.output += f"\n  {ch_id}: {cf or '(none)'} {'✓' if exists else '✗ MISSING'}"
+
+    chapter_files = [cf for _, cf in all_ch if cf and Path(cf).exists()]
     if not chapter_files:
         step.status = "error"
-        step.output = "[error] No chapter files found"
+        step.output += "\n[error] No chapter files found on disk"
         step.end_time = time.time()
         state.save(state_path)
         return
 
     final_out = Path(state.workdir) / "final.mp4"
+    if final_out.exists():
+        final_out.unlink()
+        step.output += "\nRemoved old final.mp4"
 
-    if len(chapter_files) == 1:
-        import shutil as _shutil
-        _shutil.copy2(chapter_files[0], str(final_out))
-    else:
-        await _moviepy_concat(step, chapter_files, str(final_out))
+    try:
+        if len(chapter_files) == 1:
+            import shutil as _shutil
+            step.output += f"\nCopying {Path(chapter_files[0]).name} → final.mp4"
+            _shutil.copy2(chapter_files[0], str(final_out))
+            step.output += "\nCopy done"
+        else:
+            step.output += f"\nConcat {len(chapter_files)} chapters → final.mp4"
+            await _moviepy_concat(chapter_files, str(final_out))
+            step.output += "\nConcat done"
+    except Exception as exc:
+        step.status = "error"
+        step.output += f"\n[error] {type(exc).__name__}: {exc}"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
 
     if final_out.exists():
         state.final_file = str(final_out)
         step.output_file = str(final_out)
         step.status = "done"
+        step.output += f"\nfinal.mp4 written ({final_out.stat().st_size // 1024} KB)"
     else:
         step.status = "error"
-        step.output += "\n[error] Final file was not created"
+        step.output += "\n[error] Final file not found after write — write silently failed"
     step.end_time = time.time()
     state.save(state_path)
 
 
-async def _moviepy_concat(step: StepState, clip_files: list[str], output: str) -> None:
+async def _moviepy_concat(clip_files: list[str], output: str) -> None:
+    """Concatenate video files with moviepy. Raises on failure — caller handles."""
     def _do_concat():
         from moviepy import VideoFileClip, concatenate_videoclips
-        import tempfile, os
+        import os
         clips = [VideoFileClip(f) for f in clip_files]
-        final = concatenate_videoclips(clips)
+        result = concatenate_videoclips(clips)
         temp_audio = os.path.join(os.path.dirname(os.path.abspath(output)), "temp-audio-concat.m4a")
-        final.write_videofile(
+        result.write_videofile(
             output, codec="libx264", audio_codec="aac",
             temp_audiofile=temp_audio, remove_temp=True,
             audio_bitrate="192k", preset="medium", logger=None,
         )
         for c in clips:
             c.close()
-        final.close()
+        result.close()
 
-    try:
-        await asyncio.to_thread(_do_concat)
-        step.output += f"\nMerged {len(clip_files)} clips → {Path(output).name}"
-    except Exception as exc:
-        step.output += f"\n[error] Concat failed: {exc}"
+    await asyncio.to_thread(_do_concat)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -827,6 +877,21 @@ def _extract_json_path(text: str) -> str | None:
         except json.JSONDecodeError:
             pass
     return None
+
+
+def _resolve_prompt(template: str, config: dict) -> str:
+    """Substitute all known config placeholders before prompt CLI escaping."""
+    subs = {
+        "lang": config.get("language", "en"),
+        "chapter_range": config.get("chapter_range", "2–5"),
+        "scene_range": config.get("scene_range", "2–5"),
+        "scene_duration": config.get("scene_duration", "15–45 seconds"),
+        "narrative_style": config.get("narrative_style", "documentary narration"),
+        "image_style": config.get("image_style", "cinematic, dramatic lighting"),
+    }
+    for k, v in subs.items():
+        template = template.replace(f"{{{k}}}", str(v))
+    return template
 
 
 def _slugify(text: str) -> str:

@@ -44,6 +44,7 @@ async def get_config():
     cfg = load_storyboard_config()
     return {
         "tts_engine": cfg.get("tts_engine", "kokoro"),
+        "language": cfg.get("language", "en"),
         "image_engine": cfg.get("image_engine", "flux2cloud"),
         "image_size": cfg.get("image_size", "landscape"),
         "image_style": cfg.get("image_style", ""),
@@ -51,13 +52,22 @@ async def get_config():
         "animation_style": cfg.get("animation_style", "ken_burns"),
         "ken_burns_zoom_from": cfg.get("ken_burns_zoom_from", 1.0),
         "ken_burns_zoom_to": cfg.get("ken_burns_zoom_to", 1.3),
+        "ken_burns_motion": cfg.get("ken_burns_motion", "random"),
         "fps": cfg.get("fps", 24),
+        "image_seed": cfg.get("image_seed"),
+        "image_steps": cfg.get("image_steps"),
+        "draft_mode": cfg.get("draft_mode", False),
+        "draft_steps": cfg.get("draft_steps", 1),
+        "chapter_range": cfg.get("chapter_range", "2–5"),
+        "scene_range": cfg.get("scene_range", "2–5"),
+        "scene_duration": cfg.get("scene_duration", "15–45 seconds"),
         "prompts": cfg.get("prompts", {}),
     }
 
 
 class ConfigSaveRequest(BaseModel):
     tts_engine: str = "kokoro"
+    language: str = "en"
     image_engine: str = "flux2cloud"
     image_size: str = "landscape"
     image_style: str = ""
@@ -65,7 +75,15 @@ class ConfigSaveRequest(BaseModel):
     animation_style: str = "ken_burns"
     ken_burns_zoom_from: float = 1.0
     ken_burns_zoom_to: float = 1.3
+    ken_burns_motion: str = "random"
     fps: int = 24
+    image_seed: int | None = None
+    image_steps: int | None = None
+    draft_mode: bool = False
+    draft_steps: int = 1
+    chapter_range: str = "2–5"
+    scene_range: str = "2–5"
+    scene_duration: str = "15–45 seconds"
     prompts: dict = {}
 
 
@@ -542,6 +560,20 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         </select>
       </div>
       <div class="cfg-field">
+        <span class="cfg-label">Narration Language</span>
+        <select id="cfgLang">
+          <option value="en">English (en)</option>
+          <option value="fr">French (fr)</option>
+          <option value="es">Spanish (es)</option>
+          <option value="de">German (de)</option>
+          <option value="it">Italian (it)</option>
+          <option value="pt">Portuguese (pt)</option>
+          <option value="nl">Dutch (nl)</option>
+          <option value="ja">Japanese (ja)</option>
+          <option value="zh">Chinese (zh)</option>
+        </select>
+      </div>
+      <div class="cfg-field">
         <span class="cfg-label">Image Engine</span>
         <select id="cfgImgEngine">
           <option value="flux2cloud">flux2cloud</option>
@@ -613,6 +645,27 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
       </div>
     </div>
     <div class="cfg-prompts">
+      <div style="margin-bottom:8px;padding:8px;background:var(--bg3);border-radius:4px;border:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Prompt Parameters <span style="font-weight:400;text-transform:none;color:var(--accent);font-size:10px">— available as placeholders in prompts below</span></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">
+          <div class="cfg-field">
+            <span class="cfg-label">Chapter Range</span>
+            <input type="text" id="cfgChapterRange" placeholder="2–5" />
+            <span style="font-size:10px;color:var(--text-dim)">{chapter_range}</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Scenes per Chapter</span>
+            <input type="text" id="cfgSceneRange" placeholder="2–5" />
+            <span style="font-size:10px;color:var(--text-dim)">{scene_range}</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Scene Duration</span>
+            <input type="text" id="cfgSceneDuration" placeholder="15–45 seconds" />
+            <span style="font-size:10px;color:var(--text-dim)">{scene_duration}</span>
+          </div>
+        </div>
+        <div style="margin-top:6px;font-size:10px;color:var(--text-dim)">Also available: <code style="color:var(--accent)">{lang}</code> <code style="color:var(--accent)">{narrative_style}</code> <code style="color:var(--accent)">{image_style}</code></div>
+      </div>
       <div class="prompt-field">
         <div class="prompt-label">Story Breakdown Prompt</div>
         <textarea class="prompt-area" id="cfgPromptStory" rows="5"></textarea>
@@ -667,6 +720,7 @@ async function loadConfig() {
     if (!r.ok) return;
     const cfg = await r.json();
     document.getElementById('cfgTts').value = cfg.tts_engine || 'kokoro';
+    document.getElementById('cfgLang').value = cfg.language || 'en';
     document.getElementById('cfgImgEngine').value = cfg.image_engine || 'flux2cloud';
     document.getElementById('cfgImgSize').value = cfg.image_size || 'landscape';
     document.getElementById('cfgImgStyle').value = cfg.image_style || '';
@@ -678,6 +732,9 @@ async function loadConfig() {
     document.getElementById('cfgImgSeed').value = cfg.image_seed != null ? cfg.image_seed : '';
     document.getElementById('cfgImgSteps').value = cfg.image_steps != null ? cfg.image_steps : '';
     document.getElementById('cfgDraftMode').checked = cfg.draft_mode || false;
+    document.getElementById('cfgChapterRange').value = cfg.chapter_range || '2–5';
+    document.getElementById('cfgSceneRange').value = cfg.scene_range || '2–5';
+    document.getElementById('cfgSceneDuration').value = cfg.scene_duration || '15–45 seconds';
     const p = cfg.prompts || {};
     document.getElementById('cfgPromptStory').value = p.story_breakdown || '';
     document.getElementById('cfgPromptTranscript').value = p.scene_transcript || '';
@@ -688,6 +745,7 @@ async function loadConfig() {
 async function saveConfig() {
   const body = {
     tts_engine: document.getElementById('cfgTts').value,
+    language: document.getElementById('cfgLang').value,
     image_engine: document.getElementById('cfgImgEngine').value,
     image_size: document.getElementById('cfgImgSize').value,
     image_style: document.getElementById('cfgImgStyle').value,
@@ -699,6 +757,9 @@ async function saveConfig() {
     image_seed: document.getElementById('cfgImgSeed').value !== '' ? parseInt(document.getElementById('cfgImgSeed').value) : null,
     image_steps: document.getElementById('cfgImgSteps').value !== '' ? parseInt(document.getElementById('cfgImgSteps').value) : null,
     draft_mode: document.getElementById('cfgDraftMode').checked,
+    chapter_range: document.getElementById('cfgChapterRange').value || '2–5',
+    scene_range: document.getElementById('cfgSceneRange').value || '2–5',
+    scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
     prompts: {
       story_breakdown: document.getElementById('cfgPromptStory').value,
       scene_transcript: document.getElementById('cfgPromptTranscript').value,
@@ -781,7 +842,11 @@ function applyState(data) {
 
   // Buttons
   const hasScenes = data.chapters && data.chapters.some(ch => ch.scenes && ch.scenes.length > 0);
-  document.getElementById('btnRunAll').disabled = data.running;
+  const allDone = overall === 'done';
+  const hasAnyDone = overall !== 'idle';
+  const btnRun = document.getElementById('btnRunAll');
+  btnRun.disabled = data.running || allDone;
+  btnRun.textContent = hasAnyDone ? '▶ Run Remaining' : '▶ Run All';
   ['btnRegenAudio','btnRegenImage','btnRegenClip','btnRegenFinal'].forEach(id => document.getElementById(id).disabled = data.running || !hasScenes);
   document.getElementById('btnStop').disabled = !data.running;
   document.getElementById('btnScript').disabled = false;
@@ -1071,18 +1136,22 @@ function renderFinalPanel(data) {
   const badge = document.getElementById('finalStatus');
   const path  = document.getElementById('finalPath');
   const finalFile = data && data.final_file;
+  // Use end_time as cache-buster: when the file is regenerated, end_time changes
+  // → new URL → browser re-fetches even if the path is identical.
+  const finalEnd = (data && data.final_step && data.final_step.end_time) || 0;
   if (finalFile) {
-    const url = '/api/storyboard/preview?file=' + encodeURIComponent(finalFile);
-    if (video.dataset.src !== finalFile) {
+    const cacheKey = finalFile + '|' + finalEnd;
+    const url = '/api/storyboard/preview?file=' + encodeURIComponent(finalFile)
+              + (finalEnd ? '&t=' + Math.floor(finalEnd) : '');
+    if (video.dataset.src !== cacheKey) {
+      video.dataset.src = cacheKey;
       video.src = url;
-      video.dataset.src = finalFile;
       dl.href = '/api/storyboard/download?file=' + encodeURIComponent(finalFile);
       dl.download = finalFile.split('/').pop();
       path.textContent = finalFile.split('/').slice(-3).join('/');
       badge.textContent = '✓ ready';
     }
-    panel.style.display = '';  // flex column (from .final-panel)
-    // Auto-expand when final video first appears
+    panel.style.display = '';
     if (panel.classList.contains('panel-collapsed') && !video.dataset.src) {
       panel.classList.remove('panel-collapsed');
       const t = panel.querySelector('.ph-toggle'); if (t) t.textContent = '▾';

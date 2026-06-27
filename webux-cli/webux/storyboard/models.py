@@ -105,17 +105,17 @@ class Scene:
         )
 
     def reset_from_step(self, from_step: str) -> None:
-        """Clear this step and all downstream scene steps."""
+        """Clear this step and all downstream scene steps and their file refs."""
         idx = list(SCENE_STEPS).index(from_step)
-        for step_name in SCENE_STEPS[idx:]:
+        affected = SCENE_STEPS[idx:]
+        for step_name in affected:
             self.steps[step_name] = StepState()
-        if from_step in ("gen_audio", "gen_image_prompt", "gen_transcript"):
-            pass
-        if from_step in ("gen_audio",):
+        if "gen_audio" in affected:
             self.audio_file = None
-        if from_step in ("gen_image",):
+            self.audio_duration = None
+        if "gen_image" in affected:
             self.image_file = None
-        if from_step in ("assemble_clip", "gen_image", "gen_audio"):
+        if "assemble_clip" in affected:
             self.clip_file = None
 
 
