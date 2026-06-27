@@ -25,6 +25,7 @@ fileviewer = "webux.fileviewer.register:register"
 yt_poster = "webux.yt_poster.register:register"
 skill_runner = "webux.skill_runner.register:register"
 short_publish = "webux.short_publish.register:register"
+storyboard = "webux.storyboard.register:register"
 
 [tool.setuptools]
 packages = [
@@ -36,6 +37,7 @@ packages = [
     "webux.yt_poster",
     "webux.skill_runner",
     "webux.short_publish",
+    "webux.storyboard",
     "commands",
     "commands.serve",
 ]

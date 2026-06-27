@@ -1,0 +1,776 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+import shutil
+import time
+import traceback
+from pathlib import Path
+
+from .models import (
+    ProjectState, Chapter, Scene, StepState,
+    SCENE_STEPS, GLOBAL_STEPS, GLOBAL_TO_SCENE_STEP,
+)
+
+# ── In-memory job tracker ─────────────────────────────────────────────────────
+
+_current_task: asyncio.Task | None = None
+_current_state: ProjectState | None = None
+
+
+def is_running() -> bool:
+    return _current_task is not None and not _current_task.done()
+
+
+def get_current_state() -> ProjectState | None:
+    return _current_state
+
+
+def stop_pipeline() -> None:
+    global _current_task
+    if _current_task and not _current_task.done():
+        _current_task.cancel()
+
+
+# ── Tool path helpers ─────────────────────────────────────────────────────────
+
+def _sound() -> str:
+    return shutil.which("sound") or "sound"
+
+
+def _image_cmd() -> str:
+    return shutil.which("image") or "image"
+
+
+def _prompt_cmd() -> str:
+    return shutil.which("prompt") or "prompt"
+
+
+def _video() -> str:
+    return shutil.which("video") or "video"
+
+
+# ── Subprocess runner ─────────────────────────────────────────────────────────
+
+async def _run(
+    step: StepState,
+    *cmd: str,
+    stdin_data: bytes | None = None,
+    log_to: "ProjectState | None" = None,
+) -> int:
+    cmd_str = " ".join(str(c) for c in cmd)
+    if log_to is not None:
+        log_to.console_log.append({"t": time.time(), "cmd": cmd_str, "output": "", "rc": None})
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    async def _stream(stream, prefix: str):
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode(errors="replace").rstrip()
+            if text:
+                if step.output:
+                    step.output += "\n"
+                step.output += f"{prefix}{text}"
+                if log_to is not None and log_to.console_log:
+                    log_to.console_log[-1]["output"] = step.output[-3000:]
+
+    if stdin_data is not None:
+        stdout_bytes, stderr_bytes = await proc.communicate(stdin_data)
+        if stdout_bytes:
+            for line in stdout_bytes.decode(errors="replace").splitlines():
+                if line.strip():
+                    if step.output:
+                        step.output += "\n"
+                    step.output += line
+        if stderr_bytes:
+            for line in stderr_bytes.decode(errors="replace").splitlines():
+                if line.strip():
+                    if step.output:
+                        step.output += "\n"
+                    step.output += f"[err] {line}"
+        rc = proc.returncode or 0
+        if log_to is not None and log_to.console_log:
+            log_to.console_log[-1].update({"output": step.output[-3000:], "rc": rc})
+        return rc
+
+    await asyncio.gather(
+        _stream(proc.stdout, ""),
+        _stream(proc.stderr, "[err] "),
+        proc.wait(),
+    )
+    rc = proc.returncode or 0
+    if log_to is not None and log_to.console_log:
+        log_to.console_log[-1].update({"output": step.output[-3000:], "rc": rc})
+    if len(getattr(log_to, "console_log", [])) > 200:
+        log_to.console_log = log_to.console_log[-200:]
+    return rc
+
+
+def _last_line(step: StepState) -> str:
+    lines = [l for l in step.output.splitlines() if l.strip()]
+    return lines[-1] if lines else ""
+
+
+# ── Pipeline safe wrapper ──────────────────────────────────────────────────────
+
+async def _run_safely(coro, state: ProjectState, state_path: Path) -> None:
+    global _current_task
+    try:
+        await coro
+    except asyncio.CancelledError:
+        # Mark any running step as cancelled
+        _mark_running_steps_cancelled(state)
+        state.save(state_path)
+    except Exception as exc:
+        traceback.print_exc()
+        err_text = f"[error] {type(exc).__name__}: {exc}"
+        _mark_running_steps_error(state, err_text)
+        state.save(state_path)
+
+
+def _mark_running_steps_cancelled(state: ProjectState) -> None:
+    for step in _all_steps(state):
+        if step.status == "running":
+            step.status = "pending"
+            step.end_time = time.time()
+
+
+def _mark_running_steps_error(state: ProjectState, msg: str) -> None:
+    for step in _all_steps(state):
+        if step.status == "running":
+            step.status = "error"
+            step.end_time = time.time()
+            step.output += f"\n{msg}" if step.output else msg
+
+
+def _all_steps(state: ProjectState):
+    yield state.parse_step
+    for ch in state.chapters:
+        for sc in ch.scenes:
+            for s in sc.steps.values():
+                yield s
+        yield ch.merge_step
+    yield state.final_step
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
+
+def start_pipeline(
+    state: ProjectState,
+    state_path: Path,
+    config: dict,
+    *,
+    from_global_step: str | None = None,
+    only_global_step: str | None = None,
+    scene_id: str | None = None,
+    from_step: str | None = None,
+    only_step: bool = False,
+) -> None:
+    global _current_task, _current_state
+    if is_running():
+        raise RuntimeError("Pipeline already running")
+    _current_state = state
+    coro = _run_pipeline(state, state_path, config,
+                         from_global_step=from_global_step,
+                         only_global_step=only_global_step,
+                         scene_id=scene_id,
+                         from_step=from_step,
+                         only_step=only_step)
+    _current_task = asyncio.create_task(_run_safely(coro, state, state_path))
+
+
+# ── Main pipeline logic ───────────────────────────────────────────────────────
+
+async def _run_pipeline(
+    state: ProjectState,
+    state_path: Path,
+    config: dict,
+    *,
+    from_global_step: str | None = None,
+    only_global_step: str | None = None,
+    scene_id: str | None = None,
+    from_step: str | None = None,
+    only_step: bool = False,
+) -> None:
+    """Run the full pipeline or a partial re-run."""
+
+    # Single-scene step (optionally only that one step, no downstream)
+    if scene_id and from_step:
+        sc = _find_scene(state, scene_id)
+        if sc is None:
+            raise ValueError(f"Scene not found: {scene_id}")
+        sc.reset_from_step(from_step)
+        state.save(state_path)
+        if only_step:
+            await _run_scene_step(state, state_path, config, sc, from_step)
+            return
+        await _run_scene_from(state, state_path, config, sc, from_step)
+        # Also re-run chapter + final merges downstream
+        ch = _find_chapter_for_scene(state, scene_id)
+        if ch:
+            ch.merge_step = StepState()
+            ch.chapter_file = None
+            state.save(state_path)
+            await _assemble_chapter(state, state_path, config, ch)
+        state.final_step = StepState()
+        state.final_file = None
+        state.save(state_path)
+        await _assemble_final(state, state_path, config)
+        return
+
+    # Run only ONE global step (step-by-step mode)
+    if only_global_step:
+        if only_global_step == "parse":
+            state.parse_step = StepState()
+            state.save(state_path)
+            await _parse_script(state, state_path, config)
+            return
+        if only_global_step in GLOBAL_TO_SCENE_STEP:
+            skey = GLOBAL_TO_SCENE_STEP[only_global_step]
+            for ch in state.chapters:
+                for sc in ch.scenes:
+                    sc.steps[skey] = StepState()
+            state.save(state_path)
+            for ch in state.chapters:
+                for sc in ch.scenes:
+                    await _run_scene_step(state, state_path, config, sc, skey)
+                    if sc.steps[skey].status != "done":
+                        return
+            return
+        if only_global_step == "chapter":
+            for ch in state.chapters:
+                ch.merge_step = StepState()
+                ch.chapter_file = None
+            state.save(state_path)
+            for ch in state.chapters:
+                await _assemble_chapter(state, state_path, config, ch)
+            return
+        if only_global_step == "final":
+            state.final_step = StepState()
+            state.final_file = None
+            state.save(state_path)
+            await _assemble_final(state, state_path, config)
+            return
+
+    # Global step re-run (all scenes from that stage, continuing to end)
+    from_idx = GLOBAL_STEPS.index(from_global_step) if from_global_step else 0
+
+    # Stage 0: parse
+    if from_idx <= 0:
+        if state.parse_step.status != "done":
+            await _parse_script(state, state_path, config)
+            if state.parse_step.status != "done":
+                return
+
+    # Stages 1-5: per-scene steps
+    scene_stages = [
+        ("transcript", "gen_transcript"),
+        ("image_prompt", "gen_image_prompt"),
+        ("audio", "gen_audio"),
+        ("image", "gen_image"),
+        ("clip", "assemble_clip"),
+    ]
+    for gstep, skey in scene_stages:
+        gidx = GLOBAL_STEPS.index(gstep)
+        if from_idx > gidx:
+            continue
+        for ch in state.chapters:
+            for sc in ch.scenes:
+                if from_idx == gidx:
+                    sc.steps[skey] = StepState()
+                if sc.steps[skey].status == "done":
+                    continue
+                await _run_scene_step(state, state_path, config, sc, skey)
+                if sc.steps[skey].status != "done":
+                    return  # stop on first error
+
+    # Stage 6: chapter merges
+    if from_idx <= GLOBAL_STEPS.index("chapter"):
+        for ch in state.chapters:
+            if from_idx == GLOBAL_STEPS.index("chapter"):
+                ch.merge_step = StepState()
+                ch.chapter_file = None
+            if ch.merge_step.status == "done":
+                continue
+            await _assemble_chapter(state, state_path, config, ch)
+            if ch.merge_step.status != "done":
+                return
+
+    # Stage 7: final merge
+    if from_idx <= GLOBAL_STEPS.index("final"):
+        state.final_step = StepState()
+        state.final_file = None
+        await _assemble_final(state, state_path, config)
+
+
+async def _run_scene_from(
+    state: ProjectState,
+    state_path: Path,
+    config: dict,
+    sc: Scene,
+    from_step: str,
+) -> None:
+    start_idx = list(SCENE_STEPS).index(from_step)
+    for skey in SCENE_STEPS[start_idx:]:
+        if sc.steps[skey].status == "done":
+            continue
+        await _run_scene_step(state, state_path, config, sc, skey)
+        if sc.steps[skey].status != "done":
+            return
+
+
+async def _run_scene_step(
+    state: ProjectState,
+    state_path: Path,
+    config: dict,
+    sc: Scene,
+    skey: str,
+) -> None:
+    if skey == "gen_transcript":
+        await _gen_transcript(state, state_path, config, sc)
+    elif skey == "gen_image_prompt":
+        await _gen_image_prompt(state, state_path, config, sc)
+    elif skey == "gen_audio":
+        await _gen_audio(state, state_path, config, sc)
+    elif skey == "gen_image":
+        await _gen_image(state, state_path, config, sc)
+    elif skey == "assemble_clip":
+        await _assemble_clip(state, state_path, config, sc)
+
+
+# ── Individual step implementations ──────────────────────────────────────────
+
+async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> None:
+    s = state.parse_step
+    s.status = "running"
+    s.start_time = time.time()
+    s.output = ""
+    state.save(state_path)
+
+    script_text = state.script_text
+    if not script_text.strip():
+        s.status = "error"
+        s.output = "[error] Script text is empty — paste your script first"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+    prompt_text = config["prompts"]["story_breakdown"] + script_text
+    rc = await _run(s, _prompt_cmd(), "apply", "-", "--format", "text",
+                    stdin_data=prompt_text.encode(), log_to=state)
+    if rc != 0:
+        s.status = "error"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+
+    # Extract JSON from LLM response (may include markdown fences)
+    raw = s.output
+    json_match = re.search(r"\{[\s\S]*\}", raw)
+    if not json_match:
+        s.status = "error"
+        s.output += "\n[error] No JSON found in LLM response"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+
+    try:
+        data = json.loads(json_match.group(0))
+    except json.JSONDecodeError as exc:
+        s.status = "error"
+        s.output += f"\n[error] Failed to parse JSON: {exc}"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+
+    chapters = data.get("chapters", [])
+    if not chapters:
+        s.status = "error"
+        s.output += "\n[error] LLM returned no chapters"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+
+    state.chapters = []
+    for ci, ch_data in enumerate(chapters):
+        ch_id = f"ch{ci:02d}"
+        ch_title = _slugify(ch_data.get("title", f"chapter_{ci}"))
+        scenes = []
+        for si, sc_data in enumerate(ch_data.get("scenes", [])):
+            sc_id = f"{ch_id}_sc{si:02d}"
+            scenes.append(Scene(
+                id=sc_id,
+                title=_slugify(sc_data.get("title", f"scene_{si}")),
+                raw_description=sc_data.get("description", ""),
+            ))
+        state.chapters.append(Chapter(id=ch_id, title=ch_title, scenes=scenes))
+
+    # Create directory structure
+    for ch in state.chapters:
+        for sc in ch.scenes:
+            scene_dir = Path(state.workdir) / "chapters" / ch.id / "scenes" / sc.id
+            scene_dir.mkdir(parents=True, exist_ok=True)
+            (scene_dir / "description.txt").write_text(sc.raw_description, encoding="utf-8")
+
+    s.status = "done"
+    s.end_time = time.time()
+    total_scenes = sum(len(ch.scenes) for ch in state.chapters)
+    s.output = (
+        f"Parsed {len(state.chapters)} chapters, {total_scenes} scenes.\n"
+        + "\n".join(
+            f"  Ch{i+1}: {ch.title} ({len(ch.scenes)} scenes)"
+            for i, ch in enumerate(state.chapters)
+        )
+    )
+    state.save(state_path)
+
+
+async def _gen_transcript(
+    state: ProjectState, state_path: Path, config: dict, sc: Scene
+) -> None:
+    step = sc.steps["gen_transcript"]
+    step.status = "running"
+    step.start_time = time.time()
+    step.output = ""
+    state.save(state_path)
+
+    narrative_style = config.get("narrative_style", "documentary narration")
+    prompt_template = config["prompts"]["scene_transcript"]
+    prompt_text = prompt_template.replace("{narrative_style}", narrative_style) + sc.raw_description
+
+    rc = await _run(step, _prompt_cmd(), "apply", "-", "--format", "text",
+                    stdin_data=prompt_text.encode(), log_to=state)
+    if rc != 0:
+        step.status = "error"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    sc.transcript = step.output.strip()
+    scene_dir = _scene_dir(state, sc)
+    transcript_file = scene_dir / "transcript.txt"
+    transcript_file.write_text(sc.transcript, encoding="utf-8")
+    step.output_file = str(transcript_file)
+    step.status = "done"
+    step.end_time = time.time()
+    state.save(state_path)
+
+
+async def _gen_image_prompt(
+    state: ProjectState, state_path: Path, config: dict, sc: Scene
+) -> None:
+    step = sc.steps["gen_image_prompt"]
+    step.status = "running"
+    step.start_time = time.time()
+    step.output = ""
+    state.save(state_path)
+
+    image_style = config.get("image_style", "cinematic, dramatic lighting")
+    prompt_template = config["prompts"]["scene_image_prompt"]
+    prompt_text = (
+        prompt_template.replace("{image_style}", image_style)
+        + sc.raw_description
+        + (f"\n\nNarration text:\n{sc.transcript}" if sc.transcript else "")
+    )
+
+    rc = await _run(step, _prompt_cmd(), "apply", "-", "--format", "text",
+                    stdin_data=prompt_text.encode(), log_to=state)
+    if rc != 0:
+        step.status = "error"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    sc.image_prompt = step.output.strip()
+    scene_dir = _scene_dir(state, sc)
+    prompt_file = scene_dir / "image_prompt.txt"
+    prompt_file.write_text(sc.image_prompt, encoding="utf-8")
+    step.output_file = str(prompt_file)
+    step.status = "done"
+    step.end_time = time.time()
+    state.save(state_path)
+
+
+async def _gen_audio(
+    state: ProjectState, state_path: Path, config: dict, sc: Scene
+) -> None:
+    step = sc.steps["gen_audio"]
+    step.status = "running"
+    step.start_time = time.time()
+    step.output = ""
+    state.save(state_path)
+
+    scene_dir = _scene_dir(state, sc)
+    transcript_file = scene_dir / "transcript.txt"
+    if not transcript_file.exists():
+        transcript_file.write_text(sc.transcript or sc.raw_description, encoding="utf-8")
+
+    audio_out = scene_dir / "audio.wav"
+    tts_engine = config.get("tts_engine", "kokoro")
+
+    rc = await _run(
+        step,
+        _sound(), "speak",
+        "--file", str(transcript_file),
+        "--engine", tts_engine,
+        "--output", str(audio_out),
+        log_to=state,
+    )
+    if rc != 0:
+        step.status = "error"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    sc.audio_file = str(audio_out)
+    step.output_file = str(audio_out)
+    step.status = "done"
+    step.end_time = time.time()
+    state.save(state_path)
+
+
+async def _gen_image(
+    state: ProjectState, state_path: Path, config: dict, sc: Scene
+) -> None:
+    step = sc.steps["gen_image"]
+    step.status = "running"
+    step.start_time = time.time()
+    step.output = ""
+    state.save(state_path)
+
+    scene_dir = _scene_dir(state, sc)
+    image_engine = config.get("image_engine", "flux2cloud")
+    image_size = config.get("image_size", "landscape")
+    prompt_text = sc.image_prompt or sc.raw_description
+
+    rc = await _run(
+        step,
+        _image_cmd(), "generate", prompt_text,
+        "--engine", image_engine,
+        "--size", image_size,
+        "--output-dir", str(scene_dir),
+        "--format", "json",
+        log_to=state,
+    )
+    if rc != 0:
+        step.status = "error"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    # Parse image path from JSON output
+    image_file = _extract_json_path(step.output)
+    if image_file and Path(image_file).exists():
+        sc.image_file = image_file
+        step.output_file = image_file
+    else:
+        # Fallback: find most recent PNG/JPEG in scene_dir
+        imgs = sorted(scene_dir.glob("*.png")) + sorted(scene_dir.glob("*.jpg"))
+        if imgs:
+            sc.image_file = str(imgs[-1])
+            step.output_file = sc.image_file
+
+    step.status = "done"
+    step.end_time = time.time()
+    state.save(state_path)
+
+
+async def _assemble_clip(
+    state: ProjectState, state_path: Path, config: dict, sc: Scene
+) -> None:
+    step = sc.steps["assemble_clip"]
+    step.status = "running"
+    step.start_time = time.time()
+    step.output = ""
+    state.save(state_path)
+
+    scene_dir = _scene_dir(state, sc)
+    clip_out = scene_dir / "clip.mp4"
+
+    if not sc.image_file or not Path(sc.image_file).exists():
+        step.status = "error"
+        step.output = "[error] No image file found — run gen_image first"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+    if not sc.audio_file or not Path(sc.audio_file).exists():
+        step.status = "error"
+        step.output = "[error] No audio file found — run gen_audio first"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    zoom_from = config.get("ken_burns_zoom_from", 1.0)
+    zoom_to = config.get("ken_burns_zoom_to", 1.3)
+    fps = config.get("fps", 24)
+
+    rc = await _run(
+        step,
+        _video(), "assemble",
+        sc.image_file, sc.audio_file,
+        "--output", str(clip_out),
+        "--zoom-from", str(zoom_from),
+        "--zoom-to", str(zoom_to),
+        "--fps", str(fps),
+        log_to=state,
+    )
+    if rc != 0:
+        step.status = "error"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    sc.clip_file = str(clip_out)
+    step.output_file = str(clip_out)
+    step.status = "done"
+    step.end_time = time.time()
+    state.save(state_path)
+
+
+async def _assemble_chapter(
+    state: ProjectState, state_path: Path, config: dict, ch: Chapter
+) -> None:
+    step = ch.merge_step
+    step.status = "running"
+    step.start_time = time.time()
+    step.output = ""
+    state.save(state_path)
+
+    clip_files = [sc.clip_file for sc in ch.scenes if sc.clip_file and Path(sc.clip_file).exists()]
+    if not clip_files:
+        step.status = "error"
+        step.output = "[error] No scene clips found for this chapter"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    ch_dir = Path(state.workdir) / "chapters" / ch.id
+    ch_dir.mkdir(parents=True, exist_ok=True)
+    chapter_out = ch_dir / "chapter.mp4"
+
+    if len(clip_files) == 1:
+        import shutil as _shutil
+        _shutil.copy2(clip_files[0], str(chapter_out))
+    else:
+        await _moviepy_concat(step, clip_files, str(chapter_out))
+
+    if chapter_out.exists():
+        ch.chapter_file = str(chapter_out)
+        step.output_file = str(chapter_out)
+        step.status = "done"
+    else:
+        step.status = "error"
+        step.output += "\n[error] Chapter file was not created"
+    step.end_time = time.time()
+    state.save(state_path)
+
+
+async def _assemble_final(
+    state: ProjectState, state_path: Path, config: dict
+) -> None:
+    step = state.final_step
+    step.status = "running"
+    step.start_time = time.time()
+    step.output = ""
+    state.save(state_path)
+
+    chapter_files = [
+        ch.chapter_file for ch in state.chapters
+        if ch.chapter_file and Path(ch.chapter_file).exists()
+    ]
+    if not chapter_files:
+        step.status = "error"
+        step.output = "[error] No chapter files found"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    final_out = Path(state.workdir) / "final.mp4"
+
+    if len(chapter_files) == 1:
+        import shutil as _shutil
+        _shutil.copy2(chapter_files[0], str(final_out))
+    else:
+        await _moviepy_concat(step, chapter_files, str(final_out))
+
+    if final_out.exists():
+        state.final_file = str(final_out)
+        step.output_file = str(final_out)
+        step.status = "done"
+    else:
+        step.status = "error"
+        step.output += "\n[error] Final file was not created"
+    step.end_time = time.time()
+    state.save(state_path)
+
+
+async def _moviepy_concat(step: StepState, clip_files: list[str], output: str) -> None:
+    def _do_concat():
+        from moviepy import VideoFileClip, concatenate_videoclips
+        import tempfile, os
+        clips = [VideoFileClip(f) for f in clip_files]
+        final = concatenate_videoclips(clips)
+        temp_audio = os.path.join(os.path.dirname(os.path.abspath(output)), "temp-audio-concat.m4a")
+        final.write_videofile(
+            output, codec="libx264", audio_codec="aac",
+            temp_audiofile=temp_audio, remove_temp=True,
+            audio_bitrate="192k", preset="medium", logger=None,
+        )
+        for c in clips:
+            c.close()
+        final.close()
+
+    try:
+        await asyncio.to_thread(_do_concat)
+        step.output += f"\nMerged {len(clip_files)} clips → {Path(output).name}"
+    except Exception as exc:
+        step.output += f"\n[error] Concat failed: {exc}"
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _scene_dir(state: ProjectState, sc: Scene) -> Path:
+    ch_id = sc.id.rsplit("_sc", 1)[0]
+    return Path(state.workdir) / "chapters" / ch_id / "scenes" / sc.id
+
+
+def _find_scene(state: ProjectState, scene_id: str) -> Scene | None:
+    for ch in state.chapters:
+        for sc in ch.scenes:
+            if sc.id == scene_id:
+                return sc
+    return None
+
+
+def _find_chapter_for_scene(state: ProjectState, scene_id: str) -> Chapter | None:
+    for ch in state.chapters:
+        for sc in ch.scenes:
+            if sc.id == scene_id:
+                return ch
+    return None
+
+
+def _extract_json_path(text: str) -> str | None:
+    json_match = re.search(r"\{[^}]*\"path\"\s*:\s*\"([^\"]+)\"[^}]*\}", text)
+    if json_match:
+        try:
+            d = json.loads(json_match.group(0))
+            return d.get("path")
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _slugify(text: str) -> str:
+    slug = re.sub(r"[^\w\s-]", "", text.lower())
+    slug = re.sub(r"[\s_-]+", "_", slug).strip("_")
+    return slug[:40] or "untitled"
