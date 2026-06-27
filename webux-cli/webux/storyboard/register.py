@@ -58,6 +58,7 @@ async def get_config():
         "image_steps": cfg.get("image_steps"),
         "draft_mode": cfg.get("draft_mode", False),
         "draft_steps": cfg.get("draft_steps", 1),
+        "chapter_transition": cfg.get("chapter_transition", "none"),
         "chapter_range": cfg.get("chapter_range", "2–5"),
         "scene_range": cfg.get("scene_range", "2–5"),
         "scene_duration": cfg.get("scene_duration", "15–45 seconds"),
@@ -81,6 +82,7 @@ class ConfigSaveRequest(BaseModel):
     image_steps: int | None = None
     draft_mode: bool = False
     draft_steps: int = 1
+    chapter_transition: str = "none"
     chapter_range: str = "2–5"
     scene_range: str = "2–5"
     scene_duration: str = "15–45 seconds"
@@ -693,6 +695,15 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
           <option value="drift_tr">drift top-right</option>
         </select>
       </div>
+      <div class="cfg-field" style="grid-column:span 2">
+        <span class="cfg-label">Chapter Transition</span>
+        <select id="cfgTransition">
+          <option value="none">none (hard cut)</option>
+          <option value="fade">fade to black (0.5 s)</option>
+          <option value="crossfade">crossfade / dissolve (0.5 s)</option>
+          <option value="random">random (fade or crossfade, chosen at render)</option>
+        </select>
+      </div>
       <div class="cfg-field">
         <span class="cfg-label">Image Seed</span>
         <input type="number" id="cfgImgSeed" placeholder="random" min="0" style="width:120px" />
@@ -802,6 +813,7 @@ async function loadConfig() {
     document.getElementById('cfgZoomFrom').value = cfg.ken_burns_zoom_from ?? 1.0;
     document.getElementById('cfgZoomTo').value = cfg.ken_burns_zoom_to ?? 1.3;
     document.getElementById('cfgMotion').value = cfg.ken_burns_motion || 'random';
+    document.getElementById('cfgTransition').value = cfg.chapter_transition || 'none';
     document.getElementById('cfgImgSeed').value = cfg.image_seed != null ? cfg.image_seed : '';
     document.getElementById('cfgImgSteps').value = cfg.image_steps != null ? cfg.image_steps : '';
     document.getElementById('cfgDraftMode').checked = cfg.draft_mode || false;
@@ -827,6 +839,7 @@ async function saveConfig() {
     ken_burns_zoom_from: parseFloat(document.getElementById('cfgZoomFrom').value) || 1.0,
     ken_burns_zoom_to: parseFloat(document.getElementById('cfgZoomTo').value) || 1.3,
     ken_burns_motion: document.getElementById('cfgMotion').value,
+    chapter_transition: document.getElementById('cfgTransition').value,
     image_seed: document.getElementById('cfgImgSeed').value !== '' ? parseInt(document.getElementById('cfgImgSeed').value) : null,
     image_steps: document.getElementById('cfgImgSteps').value !== '' ? parseInt(document.getElementById('cfgImgSteps').value) : null,
     draft_mode: document.getElementById('cfgDraftMode').checked,

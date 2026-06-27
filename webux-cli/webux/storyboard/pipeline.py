@@ -797,14 +797,15 @@ async def _assemble_final(
         step.output += "\nRemoved old final.mp4"
 
     try:
+        chapter_transition = config.get("chapter_transition", "none")
         if len(chapter_files) == 1:
             import shutil as _shutil
             step.output += f"\nCopying {Path(chapter_files[0]).name} → final.mp4"
             _shutil.copy2(chapter_files[0], str(final_out))
             step.output += "\nCopy done"
         else:
-            step.output += f"\nConcat {len(chapter_files)} chapters → final.mp4"
-            await _moviepy_concat(chapter_files, str(final_out))
+            step.output += f"\nConcat {len(chapter_files)} chapters → final.mp4 (transition: {chapter_transition})"
+            await _moviepy_concat(chapter_files, str(final_out), transition=chapter_transition)
             step.output += "\nConcat done"
     except Exception as exc:
         step.status = "error"
@@ -825,13 +826,47 @@ async def _assemble_final(
     state.save(state_path)
 
 
-async def _moviepy_concat(clip_files: list[str], output: str) -> None:
+_TRANSITION_DURATION = 0.5  # seconds
+
+_TRANSITION_CHOICES = ("fade", "crossfade")
+
+
+async def _moviepy_concat(clip_files: list[str], output: str, transition: str = "none") -> None:
     """Concatenate video files with moviepy. Raises on failure — caller handles."""
     def _do_concat():
-        from moviepy import VideoFileClip, concatenate_videoclips
         import os
+        import random as _random
+        from moviepy import VideoFileClip, concatenate_videoclips
+        from moviepy.video.fx import FadeIn, FadeOut, CrossFadeIn, CrossFadeOut
+
+        resolved = transition if transition != "random" else _random.choice(_TRANSITION_CHOICES)
         clips = [VideoFileClip(f) for f in clip_files]
-        result = concatenate_videoclips(clips)
+
+        if resolved == "crossfade" and len(clips) > 1:
+            d = _TRANSITION_DURATION
+            processed = []
+            for i, c in enumerate(clips):
+                if i > 0:
+                    c = c.with_effects([CrossFadeIn(d)])
+                if i < len(clips) - 1:
+                    c = c.with_effects([CrossFadeOut(d)])
+                processed.append(c)
+            result = concatenate_videoclips(processed, method="compose", padding=-d)
+
+        elif resolved == "fade" and len(clips) > 1:
+            d = _TRANSITION_DURATION
+            processed = []
+            for i, c in enumerate(clips):
+                if i > 0:
+                    c = c.with_effects([FadeIn(d)])
+                if i < len(clips) - 1:
+                    c = c.with_effects([FadeOut(d)])
+                processed.append(c)
+            result = concatenate_videoclips(processed)
+
+        else:
+            result = concatenate_videoclips(clips)
+
         temp_audio = os.path.join(os.path.dirname(os.path.abspath(output)), "temp-audio-concat.m4a")
         result.write_videofile(
             output, codec="libx264", audio_codec="aac",

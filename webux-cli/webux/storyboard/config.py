@@ -79,6 +79,7 @@ def load_storyboard_config() -> dict:
     base.setdefault("image_steps", None)   # null = engine default
     base.setdefault("draft_mode", False)   # small 512×288 images, draft_steps
     base.setdefault("draft_steps", 1)
+    base.setdefault("chapter_transition", "none")
     base.setdefault("chapter_range", "2–5")
     base.setdefault("scene_range", "2–5")
     base.setdefault("scene_duration", "15–45 seconds")
@@ -96,6 +97,7 @@ def save_storyboard_config(updates: dict) -> None:
         "narrative_style", "animation_style", "ken_burns_zoom_from",
         "ken_burns_zoom_to", "ken_burns_motion", "fps",
         "image_seed", "image_steps", "draft_mode", "draft_steps",
+        "chapter_transition",
         "chapter_range", "scene_range", "scene_duration", "prompts",
     }
     merged = {k: v for k, v in current.items() if k in storyboard_keys}
