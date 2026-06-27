@@ -55,8 +55,8 @@ StepState fields:
 | audio | gen_audio | `sound speak --file transcript.txt --engine <tts_engine> --language <lang> --output audio.wav` |
 | image | gen_image | `image generate <prompt> --engine <image_engine> --output-dir <scene_dir> --format json [--size / --width/height] [--steps] [--seed]` |
 | clip | assemble_clip | `video assemble <image> <audio> --output clip.mp4 --motion <ken_burns_motion> --fps <fps>` |
-| chapter | merge_step | moviepy `concatenate_videoclips` (or copy if single scene) |
-| final | final_step | moviepy `concatenate_videoclips` (or copy if single chapter) |
+| chapter | merge_step | moviepy `concatenate_videoclips` (or copy if single scene) — no transition, hard cut |
+| final | final_step | moviepy `_moviepy_concat` with configurable transition + silence gap between chapters |
 
 Prompt templates support placeholders: `{lang}`, `{chapter_range}`, `{scene_range}`, `{scene_duration}`, `{narrative_style}`, `{image_style}`. These are resolved by `_resolve_prompt()` before the prompt CLI escaping step.
 
@@ -110,6 +110,8 @@ image_seed: null             # null = random each time
 image_steps: null            # null = engine default
 draft_mode: false            # true → 512×288 images at draft_steps (fastest preview)
 draft_steps: 1
+chapter_transition: none     # none | fade | crossfade | random — applied between chapters in final merge
+chapter_transition_duration: 1.0   # seconds — controls both the silence gap and the visual effect duration
 chapter_range: "2–5"         # injected as {chapter_range} into story_breakdown prompt
 scene_range: "2–5"           # injected as {scene_range}
 scene_duration: "15–45 seconds"   # injected as {scene_duration}
@@ -173,8 +175,9 @@ The detail panel (`_detailIsBusy`, `_pendingDetailUpdate`, `_lastRenderedSceneJs
 
 - **parse_script prompt**: Uses `prompt apply <template> content=@<file>` (named file param, not `--stdin`). Config placeholders (`{lang}`, etc.) are substituted by `_resolve_prompt()` before the template is escaped. Then remaining `{` `}` are doubled to neutralize them for the prompt CLI, and `{content}` is appended as the named placeholder for the script file.
 - **image path detection**: `image generate --format json` outputs a JSON line with `path`. `_extract_json_path` parses it. If it fails, falls back to glob for the newest PNG/JPG in the scene dir.
-- **chapter/final merge**: Uses `asyncio.to_thread` so moviepy does not block the event loop. A single-scene chapter (or single-chapter final) copies the file instead of invoking moviepy.
+- **chapter/final merge**: Chapter merges use a plain hard-cut `concatenate_videoclips`. Only the final merge (`_assemble_final`) applies the configured `chapter_transition`. Both use `asyncio.to_thread` so moviepy does not block the event loop. A single-scene chapter (or single-chapter final) copies the file directly.
+- **chapter transitions**: `none` inserts a `d`-second black+silent `ColorClip` between chapters (hard video cut). `fade` inserts the same silence clip and applies `FadeOut(d/2)` / `FadeIn(d/2)` at each chapter boundary. `crossfade` overlaps chapters by `d` seconds using `CrossFadeIn`/`CrossFadeOut` with `method="compose"` and `padding=-d` (no silence clip). `random` picks `fade` or `crossfade` at render time. `AudioClip` silence uses `frame_function=lambda t: np.zeros(2)` (stereo scalar); do **not** use the old moviepy v1 `make_frame` kwarg.
 - **workdir requirement**: If `workdir` is not set in common config, all endpoints return 400. Run `toolsetup` to configure it.
 - **Ken Burns temp audio**: moviepy writes a temp audio file (`temp-audio-concat.m4a`) next to the output file (not in `/tmp`) to avoid CWD issues.
-- **Console log cap**: `console_log` keeps at most 200 entries per `_MAX_CONSOLE_ENTRIES`; the UI trims entries from the display start via `_consoleClear` (Clear button).
+- **Console log cap**: `console_log` keeps at most 200 entries; the UI trims entries from the display start via `_consoleClear` (Clear button). Pipeline errors (from `_run_safely`, `_assemble_chapter`, `_assemble_final`) are always appended to `console_log` via `_log_error_to_console()` with full traceback, regardless of which step they occur in.
 - **draft_mode dimensions**: When `draft_mode=true`, image generate receives `--width 512 --height 288` and `--steps <draft_steps>` instead of `--size`. The `--size` flag is skipped entirely.
