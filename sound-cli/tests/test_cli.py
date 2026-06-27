@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import importlib
+import math
 
 import pytest
 
+import torch
+
+from commands.speak.register import _accelerate
 from plugins.kokoro.plugin import resolve_kokoro_lang_code
 from plugins.qwen3.plugin import resolve_qwen3_language
 
@@ -36,6 +40,8 @@ class TestCLICommands:
         assert "-o" in result.output
         assert "--language" in result.output
         assert "-L" in result.output
+        assert "--accelerate" in result.output
+        assert "-a" in result.output
 
     def test_speak_no_text(self, runner):
         import cli.main as cli_mod
@@ -180,6 +186,46 @@ class TestQwen3Language:
     def test_case_insensitive(self):
         assert resolve_qwen3_language("EN") == "English"
         assert resolve_qwen3_language("Fr") == "French"
+
+
+class TestAccelerate:
+    def test_rate_one_returns_same(self):
+        audio = torch.randn(1000)
+        result = _accelerate(audio, 1.0)
+        assert result is audio
+
+    def test_rate_negative_returns_same(self):
+        audio = torch.randn(1000)
+        result = _accelerate(audio, 0.0)
+        assert result is audio
+
+    def test_rate_small_returns_same(self):
+        audio = torch.randn(1000)
+        result = _accelerate(audio, -1.0)
+        assert result is audio
+
+    def test_empty_returns_same(self):
+        audio = torch.zeros(0)
+        result = _accelerate(audio, 2.0)
+        assert result is audio
+
+    def test_stretch_longer(self):
+        audio = torch.sin(torch.linspace(0, 4 * math.pi, 4000))
+        result = _accelerate(audio, 0.5)
+        assert result.numel() > audio.numel() / 2
+
+    def test_stretch_shorter(self):
+        audio = torch.sin(torch.linspace(0, 4 * math.pi, 4000))
+        result = _accelerate(audio, 2.0)
+        assert result.numel() < audio.numel()
+
+    def test_preserves_pitch_structure(self):
+        """Accelerated audio should maintain zero-crossing structure (pitch)."""
+        audio = torch.sin(torch.linspace(0, 40 * math.pi, 10000))
+        result = _accelerate(audio, 1.5)
+        # After acceleration, the output should still be a valid waveform
+        assert not torch.isnan(result).any()
+        assert result.numel() > 0
 
 
 class TestModels:

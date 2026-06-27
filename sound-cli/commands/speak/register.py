@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 import sys
 import time
 from pathlib import Path
 
 import click
 import soundfile as sf
+import torch
 
 from commands.base import CommandManifest
 from commands.helpers import build_engine
@@ -13,6 +15,59 @@ from common.cli.helpers import out
 from core.config import load_sound_config
 from core.models import TTSResult
 from plugins.base import TTSPlugin
+
+
+def _accelerate(audio: torch.Tensor, rate: float) -> torch.Tensor:
+    """Pitch-preserving time-stretch via phase vocoder.
+
+    Works on any 1D mono tensor after TTS generation.
+    rate > 1 speeds up, rate < 1 slows down.
+    """
+    if rate == 1.0 or rate <= 0 or audio.numel() == 0:
+        return audio
+
+    n_fft = 2048
+    hop = 512
+
+    win = torch.hann_window(n_fft, device=audio.device)
+
+    X = torch.stft(
+        audio, n_fft, hop, window=win, return_complex=True
+    )
+    n_freq, n_frames = X.shape
+
+    phase_advance = (
+        2.0 * math.pi * hop * torch.arange(n_freq, device=audio.device) / n_fft
+    )
+    n_out = max(1, int(n_frames / rate))
+
+    phase_acc = torch.zeros(n_freq, device=audio.device)
+    out_frames: list[torch.Tensor] = []
+
+    for i in range(n_out):
+        src = i * rate
+        s = int(src)
+        frac = src - s
+
+        if s >= n_frames - 1:
+            break
+
+        mag = (1.0 - frac) * X[:, s].abs() + frac * X[:, s + 1].abs()
+
+        if s > 0:
+            delta = X[:, s].angle() - X[:, s - 1].angle() - phase_advance
+            delta = torch.atan2(torch.sin(delta), torch.cos(delta))
+        else:
+            delta = torch.zeros(n_freq, device=audio.device)
+
+        phase_acc += delta
+        out_frames.append(mag * torch.exp(1j * phase_acc))
+
+    if not out_frames:
+        return audio
+
+    Y = torch.stack(out_frames, dim=-1)
+    return torch.istft(Y, n_fft, hop, window=win)
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -68,13 +123,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         ),
     )
     @click.option(
+        "--accelerate", "-a",
+        type=click.FloatRange(min=0.25, max=4.0),
+        default=None,
+        help="Post-processing time-stretch factor (0.25-4.0, e.g. 1.5 = 50%% faster, pitch-preserved). Works with any engine.",
+    )
+    @click.option(
         "--format", "-F", "fmt",
         type=click.Choice(["json", "text"]),
         default="text",
         help="Output format",
     )
     @click.pass_context
-    def speak_cmd(ctx, text, file, engine, voice, speed, output, language, fmt):
+    def speak_cmd(ctx, text, file, engine, voice, speed, output, language, accelerate, fmt):
         """Synthesize speech from TEXT.
 
         TEXT can be provided as a positional argument, read from a file
@@ -113,9 +174,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
             ctx.exit(1)
 
         engine_config = config.get(actual_engine, {})
-        actual_voice = voice or engine_config.get("voice", "")
-        actual_speed = speed if speed is not None else engine_config.get("speed", 1.0)
         actual_language = language or engine_config.get("language", "en")
+
+        lang_overrides = engine_config.get("languages", {}).get(actual_language, {})
+        actual_voice = (
+            voice
+            or lang_overrides.get("voice")
+            or engine_config.get("voice", "")
+        )
+        actual_speed = (
+            speed
+            if speed is not None
+            else lang_overrides.get("speed")
+            or engine_config.get("speed", 1.0)
+        )
 
         plugin = plugins[actual_engine]
 
@@ -128,6 +200,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 clone=engine_config.get("clone"),
                 ref_text=engine_config.get("ref_text"),
             )
+
+            actual_accelerate = (
+                accelerate
+                if accelerate is not None
+                else engine_config.get("accelerate", 1.0)
+            )
+            if actual_accelerate != 1.0:
+                audio = _accelerate(audio, actual_accelerate)
 
             workdir = config.get("workdir") or "."
             output_dir = Path(workdir)

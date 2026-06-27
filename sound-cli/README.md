@@ -115,6 +115,7 @@ Synthesize speech from text using a TTS engine. Text can come from three sources
 | `--speed` | `-s` | Playback speed, default 1.0 (kokoro only) |
 | `--output` | `-o` | Output path (default: workdir/speak\_\<timestamp\>.wav) |
 | `--language` | `-L` | Language (ISO 639-1 shorthand like `en`, `fr`, `es`, `ja`, `zh`) |
+| `--accelerate` | `-a` | Post-processing time-stretch factor (0.25–4.0, e.g. 1.5 = 50% faster). Pitch-preserved phase vocoder, works with any engine. |
 | `--format` | `-F` | Output format: `json` or `text` |
 
 **Voice semantics by engine:**
