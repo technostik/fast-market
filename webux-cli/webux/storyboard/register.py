@@ -554,7 +554,9 @@ let selectedSceneId = null;
 let pollTimer = null;
 let configOpen = true;
 let _consoleClear = 0;
-let _waitingForInit = false; // true after resetProject(), suppresses applyState until new project created
+let _waitingForInit = false;
+let _lastRenderedSceneJson = null;  // last scene data that was rendered in detail panel
+let _pendingDetailUpdate = false;   // data changed while panel was busy — flush when free
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 async function boot() {
@@ -688,11 +690,30 @@ function applyState(data) {
   // Console
   renderConsole(data.console_log || []);
 
-  // Detail panel (re-render if a scene is selected)
+  // Detail panel — only re-render when data changed, and never while the panel is busy
   if (selectedSceneId) {
     const sc = findScene(data.chapters || [], selectedSceneId);
-    if (sc) renderDetail(sc, findChapterForScene(data.chapters || [], selectedSceneId));
+    if (sc) {
+      const scJson = JSON.stringify(sc);
+      if (scJson !== _lastRenderedSceneJson) _pendingDetailUpdate = true;
+      if (_pendingDetailUpdate && !_detailIsBusy()) {
+        _lastRenderedSceneJson = scJson;
+        _pendingDetailUpdate = false;
+        renderDetail(sc, findChapterForScene(data.chapters || [], selectedSceneId));
+      }
+    }
   }
+}
+
+function _detailIsBusy() {
+  const detail = document.getElementById('detailPanel');
+  if (!detail) return false;
+  // Typing / focus in a form element
+  const active = document.activeElement;
+  if (active && detail.contains(active) &&
+      (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) return true;
+  // Audio or video is playing
+  return [...detail.querySelectorAll('audio,video')].some(m => !m.paused);
 }
 
 function overallStatus(data) {
@@ -764,11 +785,12 @@ function toggleChapter(el) {
 
 function selectScene(sceneId, chapterId) {
   selectedSceneId = sceneId;
-  // Re-render tree to update selection highlight
+  _lastRenderedSceneJson = null;  // force re-render for the newly selected scene
+  _pendingDetailUpdate = false;
   if (state) renderTree(state.chapters || []);
   const ch = findChapterForScene(state ? state.chapters : [], sceneId);
   const sc = findScene(state ? state.chapters : [], sceneId);
-  if (sc) renderDetail(sc, ch);
+  if (sc) { _lastRenderedSceneJson = JSON.stringify(sc); renderDetail(sc, ch); }
 }
 
 function renderDetail(sc, ch) {
@@ -952,7 +974,10 @@ function renderConsole(entries) {
       ${out}
     </div>`;
   }).join('');
-  body.scrollTop = body.scrollHeight;
+  // Only auto-scroll if user is already near the bottom (within 60px)
+  if (body.scrollHeight - body.scrollTop - body.clientHeight < 60) {
+    body.scrollTop = body.scrollHeight;
+  }
 }
 
 function clearConsoleDisplay() {
