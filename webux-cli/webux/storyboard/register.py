@@ -476,7 +476,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
     <button class="btn-sm" id="btnRegenAudio" onclick="regenStep('audio')" disabled title="Re-generate all audio (only_step)">🔊 Audio</button>
     <button class="btn-sm" id="btnRegenImage" onclick="regenStep('image')" disabled title="Re-generate all images (only_step)">🖼 Image</button>
     <button class="btn-sm" id="btnRegenClip"  onclick="regenStep('clip')"  disabled title="Re-assemble all clips (only_step)">🎬 Clips</button>
-    <button class="btn-sm" id="btnRegenFinal" onclick="regenStep('final')" disabled title="Re-build final video (only_step)">📽 Final</button>
+    <button class="btn-sm" id="btnRegenFinal" onclick="regenMerge()" disabled title="Re-run chapter merges then rebuild final video">📽 Merge</button>
   </span>
   <button class="btn btn-neutral" id="btnStop" onclick="stopPipeline()" disabled>⏹ Stop</button>
   <span class="status-badge s-idle" id="statusBadge">idle</span>
@@ -1127,6 +1127,11 @@ async function testOneImage(sceneId) {
 async function regenStep(step) {
   if (state && state.running) return;
   await postRun({ only_global_step: step });
+}
+
+async function regenMerge() {
+  if (state && state.running) return;
+  await postRun({ from_global_step: 'chapter' });
 }
 
 function renderFinalPanel(data) {
