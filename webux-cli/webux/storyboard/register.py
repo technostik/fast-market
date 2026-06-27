@@ -354,6 +354,42 @@ body { background: var(--bg3); color: var(--text); font-family: system-ui, sans-
 .dtab.active { background: var(--accent); color: #fff; font-weight: 600; }
 .dtab-content { display: none; }
 .dtab-content.active { display: flex; flex-direction: column; gap: 6px; }
+/* ── View mode toggle ── */
+.view-toggle { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+.vtab { padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; background: var(--surface); color: var(--text-muted); border: none; }
+.vtab.active { background: var(--accent); color: #fff; font-weight: 600; }
+/* ── Format view panel ── */
+.format-panel { display: none; flex: 1; overflow: hidden; flex-direction: column; min-height: 0; }
+.format-panel.visible { display: flex; }
+.format-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.format-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 16px; }
+.format-scene-block { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.format-scene-title { font-size: 12px; font-weight: 700; color: var(--accent); }
+.format-scene-chapter { font-size: 10px; color: var(--text-dim); }
+audio.fmt-audio { width: 100%; max-width: 600px; }
+img.fmt-img { max-width: 480px; max-height: 270px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; }
+video.fmt-vid { max-width: 480px; max-height: 270px; border-radius: 4px; border: 1px solid var(--border); }
+/* ── Matrix view panel ── */
+.matrix-panel { display: none; flex: 1; overflow: hidden; flex-direction: column; min-height: 0; }
+.matrix-panel.visible { display: flex; }
+.matrix-body { flex: 1; overflow: auto; padding: 12px; }
+.matrix-tbl { width: 100%; border-collapse: collapse; }
+.matrix-tbl th { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; padding: 6px 10px; border-bottom: 2px solid var(--border); text-align: left; background: var(--bg2); position: sticky; top: 0; z-index: 1; }
+.matrix-tbl td { vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.matrix-tbl tr:hover td { background: var(--bg2); }
+.matrix-col-scene { width: 140px; }
+.matrix-col-image { width: 210px; }
+.matrix-col-audio { width: 200px; }
+.matrix-col-video { width: 210px; }
+.matrix-scene-chapter { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; }
+.matrix-scene-title { font-size: 12px; font-weight: 700; color: var(--accent); cursor: pointer; }
+.matrix-scene-title:hover { text-decoration: underline; }
+.matrix-scene-dots { display: flex; gap: 3px; margin-top: 6px; }
+.matrix-full-text { font-size: 11px; color: var(--text-muted); font-family: monospace; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.matrix-empty { font-size: 11px; color: var(--text-dim); font-style: italic; }
+img.matrix-img { max-width: 190px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; display: block; }
+audio.matrix-audio { width: 100%; }
+video.matrix-video { max-width: 190px; border-radius: 4px; border: 1px solid var(--border); display: block; }
 .detail-row { display: flex; align-items: center; gap: 6px; }
 .detail-label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; }
 textarea.edit-area { width: 100%; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; color: var(--text); font-size: 12px; font-family: monospace; resize: vertical; min-height: 80px; }
@@ -500,6 +536,32 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 
   <!-- Content: tree + detail + console -->
   <div class="content">
+
+    <!-- View mode toggle -->
+    <div class="view-toggle">
+      <button class="vtab active" id="vtabChapter" onclick="setViewMode('chapter')">📋 Chapter</button>
+      <button class="vtab" id="vtabFormat" onclick="setViewMode('format')">📄 Format</button>
+      <button class="vtab" id="vtabMatrix" onclick="setViewMode('matrix')">🔲 Matrix</button>
+    </div>
+
+    <!-- Matrix view panel (hidden by default) -->
+    <div class="matrix-panel" id="matrixPanel">
+      <div class="matrix-body">
+        <div id="matrixTable"></div>
+      </div>
+    </div>
+
+    <!-- Format view panel (hidden by default) -->
+    <div class="format-panel" id="formatPanel">
+      <div class="format-tabs">
+        <button class="dtab active" id="ftabTranscript" onclick="setFormatTab('transcript')">📝 Transcripts</button>
+        <button class="dtab" id="ftabAudio"      onclick="setFormatTab('audio')">🔊 Audio</button>
+        <button class="dtab" id="ftabImage"      onclick="setFormatTab('image')">🖼 Images</button>
+        <button class="dtab" id="ftabClip"       onclick="setFormatTab('clip')">🎬 Clips</button>
+      </div>
+      <div class="format-body" id="formatBody"></div>
+    </div>
+
     <div class="tree-panel" id="treePanel">
       <div class="panel-hdr" onclick="togglePanel('treePanel')">
         📋 Chapters
@@ -709,10 +771,14 @@ let _consoleClear = 0;
 let _waitingForInit = false;
 let _lastRenderedSceneJson = null;  // last scene data that was rendered in detail panel
 let _pendingDetailUpdate = false;   // data changed while panel was busy — flush when free
+let viewMode = localStorage.getItem('sb-view-mode') || 'chapter';
+let formatTab = localStorage.getItem('sb-format-tab') || 'transcript';
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 async function boot() {
   restorePanels();
+  setViewMode(viewMode);
+  setFormatTab(formatTab);
   await loadConfig();
   await pollJob();
 }
@@ -803,6 +869,130 @@ function resetProject() {
   document.getElementById('errorBanner').className = 'error-banner';
 }
 
+// ── View mode ────────────────────────────────────────────────────────────────
+function setViewMode(mode) {
+  viewMode = mode;
+  localStorage.setItem('sb-view-mode', mode);
+  const isChapter = mode === 'chapter';
+  const isFormat  = mode === 'format';
+  const isMatrix  = mode === 'matrix';
+  ['treePanel','detailPanel','consolePanel'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isChapter ? '' : 'none';
+  });
+  document.getElementById('formatPanel').classList.toggle('visible', isFormat);
+  document.getElementById('matrixPanel').classList.toggle('visible', isMatrix);
+  document.getElementById('vtabChapter').classList.toggle('active', isChapter);
+  document.getElementById('vtabFormat').classList.toggle('active', isFormat);
+  document.getElementById('vtabMatrix').classList.toggle('active', isMatrix);
+  if (isFormat && state) renderFormatView(state.chapters || []);
+  if (isMatrix && state) renderMatrixView(state.chapters || []);
+}
+
+function setFormatTab(tab) {
+  formatTab = tab;
+  localStorage.setItem('sb-format-tab', tab);
+  ['transcript','audio','image','clip'].forEach(t => {
+    const el = document.getElementById('ftab' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (el) el.classList.toggle('active', t === tab);
+  });
+  if (state) renderFormatView(state.chapters || []);
+}
+
+function _formatIsBusy() {
+  const fp = document.getElementById('formatPanel');
+  if (!fp) return false;
+  const active = document.activeElement;
+  if (active && fp.contains(active) && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) return true;
+  return [...fp.querySelectorAll('audio,video')].some(m => !m.paused);
+}
+
+function renderFormatView(chapters) {
+  const body = document.getElementById('formatBody');
+  if (!body) return;
+  const canEdit = state && !state.running;
+  const blocks = [];
+  for (const ch of chapters) {
+    for (const sc of (ch.scenes || [])) {
+      let inner = '';
+      if (formatTab === 'transcript') {
+        inner = `<textarea class="edit-area" id="fmtTx_${sc.id}" ${canEdit ? '' : 'readonly'}>${esc(sc.transcript || '')}</textarea>
+          ${canEdit ? `<div><button class="btn-sm btn-primary" onclick="saveTranscript('${sc.id}')">Save</button></div>` : ''}`;
+      } else if (formatTab === 'audio') {
+        inner = sc.audio_file
+          ? `<audio class="fmt-audio" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.audio_file)}"></audio>`
+          : `<span style="color:var(--text-dim);font-size:11px">Not yet generated</span>`;
+      } else if (formatTab === 'image') {
+        inner = sc.image_file
+          ? `<img class="fmt-img" src="/api/storyboard/preview?file=${encodeURIComponent(sc.image_file)}" onclick="window.open(this.src)" />`
+          : `<span style="color:var(--text-dim);font-size:11px">Not yet generated</span>`;
+      } else if (formatTab === 'clip') {
+        inner = sc.clip_file
+          ? `<video class="fmt-vid" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.clip_file)}"></video>`
+          : `<span style="color:var(--text-dim);font-size:11px">Not yet generated</span>`;
+      }
+      blocks.push(`<div class="format-scene-block">
+        <div class="format-scene-chapter">${esc(ch.title || ch.id)}</div>
+        <div class="format-scene-title">${esc(sc.title || sc.id)}</div>
+        ${inner}
+      </div>`);
+    }
+  }
+  body.innerHTML = blocks.length ? blocks.join('') : '<div class="no-state">No scenes yet.</div>';
+}
+
+function renderMatrixView(chapters) {
+  const wrap = document.getElementById('matrixTable');
+  if (!wrap) return;
+  const stepOrder = ['gen_transcript','gen_image_prompt','gen_audio','gen_image','assemble_clip'];
+  const rows = [];
+  for (const ch of chapters) {
+    for (const sc of (ch.scenes || [])) {
+      const dots = stepOrder.map(k => {
+        const st = (sc.steps && sc.steps[k]) ? sc.steps[k].status : 'pending';
+        return `<span class="dot ${st === 'done' ? 'done' : st === 'running' ? 'running' : st === 'error' ? 'error' : st === 'skipped' ? 'skipped' : ''}" title="${STEP_LABELS[k]||k}: ${st}"></span>`;
+      }).join('');
+      const imgCell = sc.image_file
+        ? `<img class="matrix-img" src="/api/storyboard/preview?file=${encodeURIComponent(sc.image_file)}" onclick="window.open(this.src)" loading="lazy" />`
+        : `<span class="matrix-empty">—</span>`;
+      const audioCell = sc.audio_file
+        ? `<audio class="matrix-audio" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.audio_file)}"></audio>`
+        : `<span class="matrix-empty">—</span>`;
+      const videoCell = sc.clip_file
+        ? `<video class="matrix-video" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.clip_file)}"></video>`
+        : `<span class="matrix-empty">—</span>`;
+      const textCell = sc.transcript
+        ? `<div class="matrix-full-text">${esc(sc.transcript)}</div>`
+        : `<span class="matrix-empty">Not yet generated</span>`;
+      rows.push(`<tr>
+        <td class="matrix-col-scene">
+          <div class="matrix-scene-chapter">${esc(ch.title || ch.id)}</div>
+          <div class="matrix-scene-title" onclick="setViewMode('chapter');selectScene('${sc.id}','${ch.id}')">${esc(sc.title || sc.id)}</div>
+          <div class="matrix-scene-dots">${dots}</div>
+        </td>
+        <td>${textCell}</td>
+        <td class="matrix-col-image">${imgCell}</td>
+        <td class="matrix-col-audio">${audioCell}</td>
+        <td class="matrix-col-video">${videoCell}</td>
+      </tr>`);
+    }
+  }
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="no-state">No scenes yet.</div>';
+    return;
+  }
+  wrap.innerHTML = `<table class="matrix-tbl">
+    <thead><tr>
+      <th class="matrix-col-scene">Scene</th>
+      <th>Text</th>
+      <th class="matrix-col-image">Image</th>
+      <th class="matrix-col-audio">Audio</th>
+      <th class="matrix-col-video">Video</th>
+    </tr></thead>
+    <tbody>${rows.join('')}</tbody>
+  </table>`;
+}
+
 // ── Polling ───────────────────────────────────────────────────────────────────
 async function pollJob() {
   try {
@@ -863,6 +1053,10 @@ function applyState(data) {
 
   // Scene tree
   renderTree(data.chapters || []);
+
+  // Format / matrix view (when active)
+  if (viewMode === 'format' && !_formatIsBusy()) renderFormatView(data.chapters || []);
+  if (viewMode === 'matrix') renderMatrixView(data.chapters || []);
 
   // Console
   renderConsole(data.console_log || []);
