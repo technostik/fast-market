@@ -110,6 +110,7 @@ class RunRequest(BaseModel):
     scene_id: str | None = None
     from_step: str | None = None
     only_step: bool = False
+    only_scene: bool = False  # run within scene only, don't cascade to chapter/final
 
 
 @router.post("/run")
@@ -126,7 +127,8 @@ async def run_pipeline(req: RunRequest):
                    only_global_step=req.only_global_step,
                    scene_id=req.scene_id,
                    from_step=req.from_step,
-                   only_step=req.only_step)
+                   only_step=req.only_step,
+                   only_scene=req.only_scene)
     return {"ok": True, "running": True}
 
 
@@ -425,6 +427,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
   <span class="topbar-sep">|</span>
   <button class="btn btn-neutral" id="btnScript" onclick="showScriptModal()" disabled>📄 Script</button>
   <button class="btn btn-primary" id="btnRunAll" onclick="runAll()" disabled>▶ Run All</button>
+  <button class="btn btn-neutral" id="btnRegenMedia" onclick="regenMedia()" disabled title="Re-generate audio + images with current config, then re-clip/merge">🖼 Regen Media</button>
   <button class="btn btn-neutral" id="btnStop" onclick="stopPipeline()" disabled>⏹ Stop</button>
   <span class="status-badge s-idle" id="statusBadge">idle</span>
   <span style="flex:1"></span>
@@ -515,6 +518,39 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <span class="cfg-label">Ken Burns Zoom To</span>
         <input type="number" id="cfgZoomTo" min="0.5" max="2.0" step="0.05" value="1.3" />
       </div>
+      <div class="cfg-field" style="grid-column:span 2">
+        <span class="cfg-label">Ken Burns Motion</span>
+        <select id="cfgMotion">
+          <option value="random">random (variety per clip)</option>
+          <option value="zoom_in">zoom in — centre</option>
+          <option value="zoom_out">zoom out — centre</option>
+          <option value="zoom_in_tl">zoom in → top-left</option>
+          <option value="zoom_in_tr">zoom in → top-right</option>
+          <option value="zoom_in_bl">zoom in → bottom-left</option>
+          <option value="zoom_in_br">zoom in → bottom-right</option>
+          <option value="pan_right">pan right</option>
+          <option value="pan_left">pan left</option>
+          <option value="pan_up">pan up</option>
+          <option value="pan_down">pan down</option>
+          <option value="drift_tl">drift top-left</option>
+          <option value="drift_tr">drift top-right</option>
+        </select>
+      </div>
+      <div class="cfg-field">
+        <span class="cfg-label">Image Seed</span>
+        <input type="number" id="cfgImgSeed" placeholder="random" min="0" style="width:120px" />
+      </div>
+      <div class="cfg-field">
+        <span class="cfg-label">Image Steps</span>
+        <input type="number" id="cfgImgSteps" placeholder="default" min="1" max="150" style="width:100px" />
+      </div>
+      <div class="cfg-field" style="grid-column:span 2">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+          <input type="checkbox" id="cfgDraftMode" />
+          <span>Draft Mode</span>
+          <span style="color:var(--text-dim);font-size:11px">(512×288 images, 1 step — fastest draft preview)</span>
+        </label>
+      </div>
     </div>
     <div class="cfg-prompts">
       <div class="prompt-field">
@@ -577,6 +613,10 @@ async function loadConfig() {
     document.getElementById('cfgFps').value = cfg.fps || 24;
     document.getElementById('cfgZoomFrom').value = cfg.ken_burns_zoom_from ?? 1.0;
     document.getElementById('cfgZoomTo').value = cfg.ken_burns_zoom_to ?? 1.3;
+    document.getElementById('cfgMotion').value = cfg.ken_burns_motion || 'random';
+    document.getElementById('cfgImgSeed').value = cfg.image_seed != null ? cfg.image_seed : '';
+    document.getElementById('cfgImgSteps').value = cfg.image_steps != null ? cfg.image_steps : '';
+    document.getElementById('cfgDraftMode').checked = cfg.draft_mode || false;
     const p = cfg.prompts || {};
     document.getElementById('cfgPromptStory').value = p.story_breakdown || '';
     document.getElementById('cfgPromptTranscript').value = p.scene_transcript || '';
@@ -594,6 +634,10 @@ async function saveConfig() {
     fps: parseInt(document.getElementById('cfgFps').value) || 24,
     ken_burns_zoom_from: parseFloat(document.getElementById('cfgZoomFrom').value) || 1.0,
     ken_burns_zoom_to: parseFloat(document.getElementById('cfgZoomTo').value) || 1.3,
+    ken_burns_motion: document.getElementById('cfgMotion').value,
+    image_seed: document.getElementById('cfgImgSeed').value !== '' ? parseInt(document.getElementById('cfgImgSeed').value) : null,
+    image_steps: document.getElementById('cfgImgSteps').value !== '' ? parseInt(document.getElementById('cfgImgSteps').value) : null,
+    draft_mode: document.getElementById('cfgDraftMode').checked,
     prompts: {
       story_breakdown: document.getElementById('cfgPromptStory').value,
       scene_transcript: document.getElementById('cfgPromptTranscript').value,
@@ -656,6 +700,7 @@ function applyState(data) {
   if (!data.initialized || _waitingForInit) {
     document.getElementById('initOverlay').style.display = 'flex';
     document.getElementById('btnRunAll').disabled = true;
+    document.getElementById('btnRegenMedia').disabled = true;
     document.getElementById('btnStop').disabled = true;
     document.getElementById('btnScript').disabled = true;
     return;
@@ -674,7 +719,9 @@ function applyState(data) {
   badge.className = 'status-badge s-' + (data.running ? 'running' : overall);
 
   // Buttons
+  const hasScenes = data.chapters && data.chapters.some(ch => ch.scenes && ch.scenes.length > 0);
   document.getElementById('btnRunAll').disabled = data.running;
+  document.getElementById('btnRegenMedia').disabled = data.running || !hasScenes;
   document.getElementById('btnStop').disabled = !data.running;
   document.getElementById('btnScript').disabled = false;
 
@@ -866,25 +913,37 @@ async function runAll() {
 
 async function runOnly(step) {
   if (state && state.running) return;
+  if (step === 'parse' && state && state.chapters && state.chapters.length > 0) {
+    if (!confirm('Re-running "Parse Script" will DELETE all generated chapters, scenes, audio, images, clips, and the final video.\n\nContinue?')) return;
+  }
   await postRun({ only_global_step: step });
 }
 
 async function runFromGlobal(step) {
   if (state && state.running) return;
-  if (!confirm(`Re-run pipeline from step "${GLOBAL_STEP_LABELS[step]}"?`)) return;
+  if (step === 'parse' && state && state.chapters && state.chapters.length > 0) {
+    if (!confirm('Re-running from "Parse Script" will DELETE all generated chapters, scenes, audio, images, clips, and the final video.\n\nContinue?')) return;
+  } else {
+    if (!confirm(`Re-run pipeline from step "${GLOBAL_STEP_LABELS[step]}"?`)) return;
+  }
   await postRun({ from_global_step: step });
 }
 
 async function rerunStep(sceneId, stepName) {
-  await postRun({ scene_id: sceneId, from_step: stepName });
+  await postRun({ scene_id: sceneId, from_step: stepName, only_step: true });
 }
 
 async function rerunScene(sceneId, fromStep) {
-  await postRun({ scene_id: sceneId, from_step: fromStep });
+  await postRun({ scene_id: sceneId, from_step: fromStep, only_scene: true });
 }
 
 async function testOneImage(sceneId) {
   await postRun({ scene_id: sceneId, from_step: 'gen_image', only_step: true });
+}
+
+async function regenMedia() {
+  if (state && state.running) return;
+  await postRun({ from_global_step: 'audio' });
 }
 
 async function postRun(body) {
@@ -897,6 +956,7 @@ async function postRun(body) {
     if (r.status === 409) { alert('Pipeline already running'); return; }
     if (!r.ok) { const e = await r.json(); alert(e.detail || 'Error'); return; }
     document.getElementById('btnRunAll').disabled = true;
+    document.getElementById('btnRegenMedia').disabled = true;
     document.getElementById('btnStop').disabled = false;
     schedulePoll(500);
   } catch(e) { alert(String(e)); }

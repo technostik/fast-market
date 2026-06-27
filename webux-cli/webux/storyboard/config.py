@@ -70,7 +70,12 @@ def load_storyboard_config() -> dict:
     base.setdefault("animation_style", "ken_burns")
     base.setdefault("ken_burns_zoom_from", 1.0)
     base.setdefault("ken_burns_zoom_to", 1.3)
+    base.setdefault("ken_burns_motion", "random")
     base.setdefault("fps", 24)
+    base.setdefault("image_seed", None)    # null = random each time
+    base.setdefault("image_steps", None)   # null = engine default
+    base.setdefault("draft_mode", False)   # small 512×288 images, draft_steps
+    base.setdefault("draft_steps", 1)
     prompts = base.setdefault("prompts", {})
     for k, v in DEFAULT_PROMPTS.items():
         prompts.setdefault(k, v)
@@ -83,7 +88,8 @@ def save_storyboard_config(updates: dict) -> None:
     storyboard_keys = {
         "tts_engine", "image_engine", "image_size", "image_style",
         "narrative_style", "animation_style", "ken_burns_zoom_from",
-        "ken_burns_zoom_to", "fps", "prompts",
+        "ken_burns_zoom_to", "ken_burns_motion", "fps",
+        "image_seed", "image_steps", "draft_mode", "draft_steps", "prompts",
     }
     merged = {k: v for k, v in current.items() if k in storyboard_keys}
     for k, v in updates.items():

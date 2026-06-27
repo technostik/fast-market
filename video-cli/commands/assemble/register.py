@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 
+from commands.assemble.assembler import MOTION_CHOICES
 from commands.base import CommandManifest
 
 
@@ -14,20 +15,24 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.argument("audio_file", type=click.Path(exists=True))
     @click.option("--output", "-o", type=click.Path(), default=None,
                   help="Output MP4 path (default: <audio_stem>_clip.mp4 next to audio file)")
+    @click.option("--motion", "-m",
+                  type=click.Choice(["random"] + MOTION_CHOICES),
+                  default="random", show_default=True,
+                  help="Ken Burns motion type; 'random' picks one per clip")
     @click.option("--zoom-from", type=float, default=1.0, show_default=True,
-                  help="Ken Burns start zoom level")
+                  help="Start zoom (only used when --motion is not a named profile)")
     @click.option("--zoom-to", type=float, default=1.3, show_default=True,
-                  help="Ken Burns end zoom level")
+                  help="End zoom (only used when --motion is not a named profile)")
     @click.option("--fps", type=int, default=24, show_default=True,
                   help="Output frame rate")
     @click.option("--format", "-F", "fmt", type=click.Choice(["text", "json"]), default="text",
                   show_default=True, help="Output format")
     def assemble_cmd(image_file: str, audio_file: str, output: str | None,
-                     zoom_from: float, zoom_to: float, fps: int, fmt: str):
+                     motion: str, zoom_from: float, zoom_to: float, fps: int, fmt: str):
         """Assemble a still image and audio into an animated Ken Burns MP4 clip.
 
-        The clip duration matches the audio file length. The image is zoomed
-        slowly from ZOOM_FROM to ZOOM_TO (Ken Burns effect). Output is 1280×720.
+        The clip duration matches the audio file length. Motion type controls
+        zoom/pan direction; "random" varies each clip. Output is 1280×720.
         """
         from commands.assemble.assembler import ken_burns_clip
         from moviepy import AudioFileClip
@@ -38,7 +43,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         else:
             output_path = Path(output).resolve()
 
-        click.echo(f"Assembling {Path(image_file).name} + {audio_path.name} …", err=True)
+        click.echo(f"Assembling {Path(image_file).name} + {audio_path.name} [{motion}] …", err=True)
         result_path = ken_burns_clip(
             image_path=str(Path(image_file).resolve()),
             audio_path=str(audio_path),
@@ -46,6 +51,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             zoom_from=zoom_from,
             zoom_to=zoom_to,
             fps=fps,
+            motion=motion,
         )
 
         audio = AudioFileClip(str(audio_path))
