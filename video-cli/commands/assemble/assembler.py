@@ -21,7 +21,28 @@ _PROFILES: dict[str, tuple[float, float, float, float, float, float]] = {
     "drift_tl":   (1.1, 1.3, 0.6, 0.6, 0.35, 0.35),
     "drift_tr":   (1.1, 1.3, 0.4, 0.6, 0.65, 0.35),
 }
-MOTION_CHOICES = list(_PROFILES.keys())
+
+# Dynamic motions: focal point chosen randomly per clip, kept away from edges.
+_RAND_MARGIN = 0.25
+_DYNAMIC_MOTIONS = ("zoom_in_random", "zoom_out_random", "zoom_random")
+
+MOTION_CHOICES = list(_PROFILES.keys()) + list(_DYNAMIC_MOTIONS)
+
+
+def _make_profile(motion: str, zoom_from: float, zoom_to: float) -> tuple:
+    if motion in _PROFILES:
+        return _PROFILES[motion]
+    rx = _rnd.uniform(_RAND_MARGIN, 1.0 - _RAND_MARGIN)
+    ry = _rnd.uniform(_RAND_MARGIN, 1.0 - _RAND_MARGIN)
+    if motion == "zoom_in_random":
+        return (1.0, 1.3, 0.5, 0.5, rx, ry)
+    if motion == "zoom_out_random":
+        return (1.3, 1.0, rx, ry, 0.5, 0.5)
+    if motion == "zoom_random":
+        if _rnd.random() < 0.5:
+            return (1.0, 1.3, 0.5, 0.5, rx, ry)
+        return (1.3, 1.0, rx, ry, 0.5, 0.5)
+    return (zoom_from, zoom_to, 0.5, 0.5, 0.5, 0.5)  # unknown fallback
 
 
 def ken_burns_clip(
@@ -35,8 +56,8 @@ def ken_burns_clip(
 ) -> str:
     """Render a Ken Burns animated clip from a still image + audio.
 
-    motion: "random" picks a profile at random; named profiles control direction.
-    zoom_from/zoom_to are only used as a fallback when motion is not a named profile.
+    motion: "random" picks any profile at random (including dynamic ones);
+    named profiles control direction; unknown values fall back to zoom_from/zoom_to.
     Output is always 1280×720 H.264/AAC MP4.
     """
     from moviepy import VideoClip, AudioFileClip
@@ -45,11 +66,9 @@ def ken_burns_clip(
     TARGET_W, TARGET_H = 1280, 720
 
     if motion == "random":
-        profile = _PROFILES[_rnd.choice(MOTION_CHOICES)]
-    elif motion in _PROFILES:
-        profile = _PROFILES[motion]
+        profile = _make_profile(_rnd.choice(MOTION_CHOICES), zoom_from, zoom_to)
     else:
-        profile = (zoom_from, zoom_to, 0.5, 0.5, 0.5, 0.5)
+        profile = _make_profile(motion, zoom_from, zoom_to)
 
     z_start, z_end, ax_s, ay_s, ax_e, ay_e = profile
     max_zoom = max(z_start, z_end)

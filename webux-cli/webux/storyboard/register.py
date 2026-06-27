@@ -616,6 +616,9 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
           <option value="random">random (variety per clip)</option>
           <option value="zoom_in">zoom in — centre</option>
           <option value="zoom_out">zoom out — centre</option>
+          <option value="zoom_in_random">zoom in → random point</option>
+          <option value="zoom_out_random">zoom out ← random point</option>
+          <option value="zoom_random">zoom random (in or out, random point)</option>
           <option value="zoom_in_tl">zoom in → top-left</option>
           <option value="zoom_in_tr">zoom in → top-right</option>
           <option value="zoom_in_bl">zoom in → bottom-left</option>
