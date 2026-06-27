@@ -294,8 +294,19 @@ body { background: var(--bg3); color: var(--text); font-family: system-ui, sans-
 /* ── Right content ── */
 .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
+/* ── Collapsible panels ── */
+.panel-hdr { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 600; color: var(--text-dim); flex-shrink: 0; cursor: pointer; user-select: none; }
+.panel-hdr:hover { background: var(--surface); }
+.ph-toggle { margin-left: auto; font-size: 10px; }
+.panel-collapsed > .panel-bdy { display: none !important; }
+.panel-collapsed { flex: 0 0 28px !important; max-height: 28px !important; overflow: hidden !important; }
+.dur-badge { font-size: 10px; color: var(--accent); margin-left: 4px; opacity: .8; }
+.stats-bar { font-size: 10px; color: var(--text-dim); padding: 4px 8px; border-bottom: 1px solid var(--border); display: flex; gap: 12px; flex-shrink: 0; }
+.stats-bar b { color: var(--text); }
+
 /* ── Scene tree ── */
-.tree-panel { flex: 0 0 auto; max-height: 40%; overflow-y: auto; padding: 8px; border-bottom: 1px solid var(--border); }
+.tree-panel { flex: 2 1 180px; overflow: hidden; display: flex; flex-direction: column; border-bottom: 1px solid var(--border); }
+.tree-panel > .panel-bdy { flex: 1; overflow-y: auto; padding: 8px; }
 .no-state { padding: 24px; text-align: center; color: var(--text-dim); }
 .chapter-node { margin-bottom: 4px; }
 .chapter-header { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--surface); border-radius: 4px; cursor: pointer; user-select: none; }
@@ -317,7 +328,8 @@ body { background: var(--bg3); color: var(--text); font-family: system-ui, sans-
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
 /* ── Detail panel ── */
-.detail-panel { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.detail-panel { flex: 3 1 200px; overflow: hidden; display: flex; flex-direction: column; }
+.detail-panel > .panel-bdy { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .detail-title { font-size: 14px; font-weight: 700; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
 .detail-tabs { display: flex; gap: 4px; }
 .dtab { padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; background: var(--surface); color: var(--text-muted); }
@@ -353,8 +365,22 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 
 /* ── Console panel ── */
 .console-panel { flex: 0 0 180px; background: var(--bg3); border-top: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
-.console-header { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 600; color: var(--text-dim); flex-shrink: 0; }
+.console-panel.panel-collapsed { flex: 0 0 28px !important; }
+.console-panel.panel-collapsed .console-body { display: none !important; }
+.console-header { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 600; color: var(--text-dim); flex-shrink: 0; cursor: pointer; user-select: none; }
+.console-header:hover { background: var(--surface); }
 .console-body { flex: 1; overflow-y: auto; font-family: monospace; font-size: 10px; padding: 4px 8px; }
+/* ── Final panel ── */
+.final-panel { flex-shrink: 0; overflow: hidden; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+.final-panel.panel-collapsed { flex: 0 0 28px !important; max-height: 28px !important; }
+.final-panel.panel-collapsed > .panel-bdy { display: none !important; }
+.final-panel > .panel-bdy { padding: 10px; overflow-y: auto; }
+.regen-group { display: flex; gap: 3px; align-items: center; padding: 0 4px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); margin: 0 2px; }
+.regen-group .btn-sm { padding: 3px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.regen-group .btn-sm:disabled { opacity: .35; cursor: default; }
+.regen-group .btn-sm:not(:disabled):hover { background: var(--bg2); }
+.final-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+.final-header { font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .console-entry { margin-bottom: 4px; border-bottom: 1px solid var(--bg2); padding-bottom: 3px; }
 .console-cmd { color: var(--accent2); }
 .console-ok { color: var(--text-muted); white-space: pre-wrap; word-break: break-all; }
@@ -427,7 +453,13 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
   <span class="topbar-sep">|</span>
   <button class="btn btn-neutral" id="btnScript" onclick="showScriptModal()" disabled>📄 Script</button>
   <button class="btn btn-primary" id="btnRunAll" onclick="runAll()" disabled>▶ Run All</button>
-  <button class="btn btn-neutral" id="btnRegenMedia" onclick="regenMedia()" disabled title="Re-generate audio + images with current config, then re-clip/merge">🖼 Regen Media</button>
+  <span class="regen-group">
+    <span style="font-size:10px;color:var(--text-dim)">Regen:</span>
+    <button class="btn-sm" id="btnRegenAudio" onclick="regenStep('audio')" disabled title="Re-generate all audio (only_step)">🔊 Audio</button>
+    <button class="btn-sm" id="btnRegenImage" onclick="regenStep('image')" disabled title="Re-generate all images (only_step)">🖼 Image</button>
+    <button class="btn-sm" id="btnRegenClip"  onclick="regenStep('clip')"  disabled title="Re-assemble all clips (only_step)">🎬 Clips</button>
+    <button class="btn-sm" id="btnRegenFinal" onclick="regenStep('final')" disabled title="Re-build final video (only_step)">📽 Final</button>
+  </span>
   <button class="btn btn-neutral" id="btnStop" onclick="stopPipeline()" disabled>⏹ Stop</button>
   <span class="status-badge s-idle" id="statusBadge">idle</span>
   <span style="flex:1"></span>
@@ -451,17 +483,45 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
   <!-- Content: tree + detail + console -->
   <div class="content">
     <div class="tree-panel" id="treePanel">
-      <div class="no-state" id="noState">Loading…</div>
+      <div class="panel-hdr" onclick="togglePanel('treePanel')">
+        📋 Chapters
+        <span id="statsBar" style="flex:1;font-weight:400;color:var(--text-dim);font-size:10px;margin-left:6px"></span>
+        <span class="ph-toggle" id="treeToggle">▾</span>
+      </div>
+      <div class="panel-bdy" id="treeBody">
+        <div class="no-state">Loading…</div>
+      </div>
     </div>
     <div class="detail-panel" id="detailPanel">
-      <div class="no-state" style="color:var(--text-dim)">Select a scene to view details.</div>
+      <div class="panel-hdr" onclick="togglePanel('detailPanel')">
+        🔍 Scene Detail
+        <span class="ph-toggle" id="detailToggle">▾</span>
+      </div>
+      <div class="panel-bdy" id="detailBody">
+        <div class="no-state" style="color:var(--text-dim)">Select a scene to view details.</div>
+      </div>
     </div>
-    <div class="console-panel">
-      <div class="console-header">
+    <div class="console-panel" id="consolePanel">
+      <div class="console-header" onclick="togglePanel('consolePanel')">
         ⌨ Console
-        <button class="btn-sm" onclick="clearConsoleDisplay()" style="margin-left:auto;background:var(--surface);color:var(--text)">Clear</button>
+        <button class="btn-sm" onclick="event.stopPropagation();clearConsoleDisplay()" style="background:var(--surface);color:var(--text)">Clear</button>
+        <span class="ph-toggle" id="consolePanelToggle">▾</span>
       </div>
       <div class="console-body" id="consoleBody"><span style="color:var(--text-dim)">Commands will appear here...</span></div>
+    </div>
+    <div class="final-panel" id="finalPanel" style="display:none">
+      <div class="panel-hdr" onclick="togglePanel('finalPanel')">
+        📽 Final Video
+        <span id="finalStatus" style="font-size:10px;color:var(--green);font-weight:400"></span>
+        <span class="ph-toggle" id="finalToggle">▾</span>
+      </div>
+      <div class="panel-bdy" id="finalBody">
+        <video id="finalVideo" controls style="width:100%;max-height:280px;border-radius:4px;background:#000;display:block"></video>
+        <div style="margin-top:6px;display:flex;gap:8px;align-items:center">
+          <a id="finalDownloadLink" class="btn-sm" style="background:var(--surface);color:var(--text);border:1px solid var(--border);text-decoration:none;padding:3px 8px;border-radius:3px;font-size:11px" download>⬇ Download</a>
+          <span id="finalPath" style="font-size:10px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -596,6 +656,7 @@ let _pendingDetailUpdate = false;   // data changed while panel was busy — flu
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 async function boot() {
+  restorePanels();
   await loadConfig();
   await pollJob();
 }
@@ -700,7 +761,7 @@ function applyState(data) {
   if (!data.initialized || _waitingForInit) {
     document.getElementById('initOverlay').style.display = 'flex';
     document.getElementById('btnRunAll').disabled = true;
-    document.getElementById('btnRegenMedia').disabled = true;
+    ['btnRegenAudio','btnRegenImage','btnRegenClip','btnRegenFinal'].forEach(id => document.getElementById(id).disabled = true);
     document.getElementById('btnStop').disabled = true;
     document.getElementById('btnScript').disabled = true;
     return;
@@ -721,12 +782,13 @@ function applyState(data) {
   // Buttons
   const hasScenes = data.chapters && data.chapters.some(ch => ch.scenes && ch.scenes.length > 0);
   document.getElementById('btnRunAll').disabled = data.running;
-  document.getElementById('btnRegenMedia').disabled = data.running || !hasScenes;
+  ['btnRegenAudio','btnRegenImage','btnRegenClip','btnRegenFinal'].forEach(id => document.getElementById(id).disabled = data.running || !hasScenes);
   document.getElementById('btnStop').disabled = !data.running;
   document.getElementById('btnScript').disabled = false;
 
   // Error banner
   updateErrorBanner(data);
+  renderFinalPanel(data);
 
   // Global steps sidebar
   renderGlobalSteps(data.global_steps || {});
@@ -794,20 +856,54 @@ function renderGlobalSteps(gsteps) {
   }).join('');
 }
 
+function fmtDur(secs) {
+  if (!secs || secs <= 0) return '';
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function computeStats(chapters) {
+  let words = 0, durTotal = 0;
+  const chDurs = {};
+  for (const ch of chapters) {
+    let chDur = 0;
+    for (const sc of ch.scenes || []) {
+      if (sc.transcript) words += sc.transcript.trim().split(/\s+/).filter(Boolean).length;
+      if (sc.audio_duration) { chDur += sc.audio_duration; durTotal += sc.audio_duration; }
+    }
+    chDurs[ch.id] = chDur;
+  }
+  return { words, durTotal, chDurs };
+}
+
 function renderTree(chapters) {
-  const panel = document.getElementById('treePanel');
+  const body = document.getElementById('treeBody');
+  const statsBar = document.getElementById('statsBar');
   if (!chapters.length) {
-    panel.innerHTML = '<div class="no-state">No chapters yet. Click ▶ Run All to parse the script.</div>';
+    body.innerHTML = '<div class="no-state">No chapters yet. Click ▶ Run All to parse the script.</div>';
+    if (statsBar) statsBar.textContent = '';
     return;
   }
-  panel.innerHTML = chapters.map((ch, ci) => {
+  const { words, durTotal, chDurs } = computeStats(chapters);
+  if (statsBar) {
+    const parts = [];
+    if (words > 0) parts.push(`<b>${words.toLocaleString()}</b> words`);
+    if (durTotal > 0) parts.push(`<b>${fmtDur(durTotal)}</b> total audio`);
+    statsBar.innerHTML = parts.join(' · ');
+  }
+  body.innerHTML = chapters.map((ch, ci) => {
     const chSt = ch.merge_step ? ch.merge_step.status : 'pending';
+    const chDur = chDurs[ch.id] || 0;
+    const chDurBadge = chDur > 0 ? `<span class="dur-badge">${fmtDur(chDur)}</span>` : '';
     const scenesHtml = (ch.scenes || []).map(sc => {
       const dots = Object.entries(sc.steps || {}).map(([k, s]) =>
         `<div class="dot ${s.status}" title="${k}: ${s.status}"></div>`).join('');
       const sel = sc.id === selectedSceneId ? ' selected' : '';
+      const durBadge = sc.audio_duration ? `<span class="dur-badge">${fmtDur(sc.audio_duration)}</span>` : '';
       return `<div class="scene-row${sel}" onclick="selectScene('${sc.id}','${ch.id}')">
         <span class="scene-title">${sc.title || sc.id}</span>
+        ${durBadge}
         <div class="step-dots">${dots}</div>
       </div>`;
     }).join('');
@@ -815,6 +911,7 @@ function renderTree(chapters) {
       <div class="chapter-header" onclick="toggleChapter(this)">
         <span class="chapter-toggle">▾</span>
         <span class="chapter-title">${ch.title || ch.id}</span>
+        ${chDurBadge}
         <span class="chapter-status">${stepIcon(chSt)}</span>
         ${ch.chapter_file ? `<button class="btn-sm btn-neutral" onclick="event.stopPropagation();previewFile('${ch.chapter_file}','video')">▶</button>` : ''}
       </div>
@@ -840,8 +937,29 @@ function selectScene(sceneId, chapterId) {
   if (sc) { _lastRenderedSceneJson = JSON.stringify(sc); renderDetail(sc, ch); }
 }
 
+function togglePanel(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const collapsed = el.classList.toggle('panel-collapsed');
+  // update the ▾/▸ arrow inside this panel's header
+  const toggle = el.querySelector('.ph-toggle');
+  if (toggle) toggle.textContent = collapsed ? '▸' : '▾';
+  try { localStorage.setItem('sb-panel-' + id, collapsed ? '1' : '0'); } catch(e) {}
+}
+
+function restorePanels() {
+  ['treePanel','detailPanel','consolePanel','finalPanel'].forEach(id => {
+    try {
+      if (localStorage.getItem('sb-panel-' + id) === '1') {
+        const el = document.getElementById(id);
+        if (el) { el.classList.add('panel-collapsed'); const t = el.querySelector('.ph-toggle'); if (t) t.textContent = '▸'; }
+      }
+    } catch(e) {}
+  });
+}
+
 function renderDetail(sc, ch) {
-  const panel = document.getElementById('detailPanel');
+  const panel = document.getElementById('detailBody');
   const stepsHtml = Object.entries(sc.steps || {}).map(([k, s]) => {
     const elapsed = s.elapsed_seconds != null ? ` (${s.elapsed_seconds}s)` : '';
     const rerunBtn = state && !state.running
@@ -941,9 +1059,41 @@ async function testOneImage(sceneId) {
   await postRun({ scene_id: sceneId, from_step: 'gen_image', only_step: true });
 }
 
-async function regenMedia() {
+async function regenStep(step) {
   if (state && state.running) return;
-  await postRun({ from_global_step: 'audio' });
+  await postRun({ only_global_step: step });
+}
+
+function renderFinalPanel(data) {
+  const panel = document.getElementById('finalPanel');
+  const video = document.getElementById('finalVideo');
+  const dl    = document.getElementById('finalDownloadLink');
+  const badge = document.getElementById('finalStatus');
+  const path  = document.getElementById('finalPath');
+  const finalFile = data && data.final_file;
+  if (finalFile) {
+    const url = '/api/storyboard/preview?file=' + encodeURIComponent(finalFile);
+    if (video.dataset.src !== finalFile) {
+      video.src = url;
+      video.dataset.src = finalFile;
+      dl.href = '/api/storyboard/download?file=' + encodeURIComponent(finalFile);
+      dl.download = finalFile.split('/').pop();
+      path.textContent = finalFile.split('/').slice(-3).join('/');
+      badge.textContent = '✓ ready';
+    }
+    panel.style.display = '';  // flex column (from .final-panel)
+    // Auto-expand when final video first appears
+    if (panel.classList.contains('panel-collapsed') && !video.dataset.src) {
+      panel.classList.remove('panel-collapsed');
+      const t = panel.querySelector('.ph-toggle'); if (t) t.textContent = '▾';
+    }
+  } else {
+    if (panel.style.display !== 'none') {
+      panel.style.display = 'none';
+      video.src = '';
+      video.dataset.src = '';
+    }
+  }
 }
 
 async function postRun(body) {
@@ -956,7 +1106,7 @@ async function postRun(body) {
     if (r.status === 409) { alert('Pipeline already running'); return; }
     if (!r.ok) { const e = await r.json(); alert(e.detail || 'Error'); return; }
     document.getElementById('btnRunAll').disabled = true;
-    document.getElementById('btnRegenMedia').disabled = true;
+    ['btnRegenAudio','btnRegenImage','btnRegenClip','btnRegenFinal'].forEach(id => document.getElementById(id).disabled = true);
     document.getElementById('btnStop').disabled = false;
     schedulePoll(500);
   } catch(e) { alert(String(e)); }

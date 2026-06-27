@@ -66,6 +66,7 @@ class Scene:
         default_factory=lambda: {k: StepState() for k in SCENE_STEPS}
     )
     audio_file: str | None = None
+    audio_duration: float | None = None  # seconds
     image_file: str | None = None
     clip_file: str | None = None
 
@@ -78,6 +79,7 @@ class Scene:
             "image_prompt": self.image_prompt,
             "steps": {k: v.to_dict() for k, v in self.steps.items()},
             "audio_file": self.audio_file,
+            "audio_duration": self.audio_duration,
             "image_file": self.image_file,
             "clip_file": self.clip_file,
         }
@@ -97,6 +99,7 @@ class Scene:
             image_prompt=d.get("image_prompt", ""),
             steps=steps,
             audio_file=d.get("audio_file"),
+            audio_duration=d.get("audio_duration"),
             image_file=d.get("image_file"),
             clip_file=d.get("clip_file"),
         )

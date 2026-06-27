@@ -577,6 +577,12 @@ async def _gen_audio(
 
     sc.audio_file = str(audio_out)
     step.output_file = str(audio_out)
+    try:
+        import wave as _wave
+        with _wave.open(str(audio_out), "rb") as wf:
+            sc.audio_duration = round(wf.getnframes() / wf.getframerate(), 1)
+    except Exception:
+        pass
     step.status = "done"
     step.end_time = time.time()
     state.save(state_path)
