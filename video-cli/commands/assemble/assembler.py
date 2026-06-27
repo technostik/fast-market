@@ -76,18 +76,22 @@ def ken_burns_clip(
     audio = AudioFileClip(audio_path)
     duration = audio.duration
 
-    # Canvas: 2× max-zoom size gives room for off-centre pans without clamping
-    canvas_scale = max_zoom * 2.0
+    # Canvas sized to max_zoom × target: at z=max_zoom the crop is exactly TARGET, at z=1.0 the full canvas is visible.
+    canvas_scale = max_zoom
     src_w = int(TARGET_W * canvas_scale) + 8
     src_h = int(TARGET_H * canvas_scale) + 8
 
     pil_img = Image.open(image_path).convert("RGB")
-    pil_img.thumbnail((src_w, src_h), Image.LANCZOS)
-    canvas = Image.new("RGB", (src_w, src_h), (0, 0, 0))
-    ox = (src_w - pil_img.width) // 2
-    oy = (src_h - pil_img.height) // 2
-    canvas.paste(pil_img, (ox, oy))
-    img_arr = np.array(canvas)
+    orig_w, orig_h = pil_img.size
+    # Cover scale: fill canvas on the constraining dimension (no black bars).
+    # If image is narrower than canvas (relative to height), fill by height; otherwise fill by width.
+    cover = max(src_w / orig_w, src_h / orig_h)
+    scaled_w = max(src_w, round(orig_w * cover))
+    scaled_h = max(src_h, round(orig_h * cover))
+    pil_img = pil_img.resize((scaled_w, scaled_h), Image.LANCZOS)
+    left = (scaled_w - src_w) // 2
+    top = (scaled_h - src_h) // 2
+    img_arr = np.array(pil_img.crop((left, top, left + src_w, top + src_h)))
     ih, iw = img_arr.shape[:2]
 
     def make_frame(t: float):

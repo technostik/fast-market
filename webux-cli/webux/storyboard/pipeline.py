@@ -761,7 +761,7 @@ async def _assemble_chapter(
             step.output += "\nCopy done"
         else:
             step.output += f"\nConcat {len(clip_files)} clips → {chapter_out.name}"
-            await _moviepy_concat(clip_files, str(chapter_out))
+            await _moviepy_concat(clip_files, str(chapter_out), transition="none", duration=0)
             step.output += "\nConcat done"
     except Exception as exc:
         tb = traceback.format_exc()
@@ -861,7 +861,7 @@ async def _moviepy_concat(
         import os
         import random as _random
         import numpy as np
-        from moviepy import VideoFileClip, ColorClip, AudioClip, concatenate_videoclips
+        from moviepy import VideoFileClip, ColorClip, concatenate_videoclips
         from moviepy.video.fx import FadeIn, FadeOut, CrossFadeIn, CrossFadeOut
 
         resolved = transition if transition != "random" else _random.choice(_TRANSITION_CHOICES)
@@ -870,13 +870,14 @@ async def _moviepy_concat(
         size = clips[0].size
 
         def _silence_clip():
-            # Black video with explicit stereo silence so concatenation audio is consistent
+            # Black video with explicit stereo silence so concatenation audio is consistent.
+            # AudioArrayClip is used instead of AudioClip because moviepy renders audio in
+            # chunk-sized arrays; a scalar lambda returns shape (2,) for any input which
+            # produces ~0 audio samples and drops the silence from the output.
+            from moviepy.audio.AudioClip import AudioArrayClip
+            n_samples = max(1, round(duration * 44100))
+            audio = AudioArrayClip(np.zeros((n_samples, 2), dtype=np.float32), fps=44100)
             video = ColorClip(size=size, color=(0, 0, 0), duration=duration)
-            audio = AudioClip(
-                frame_function=lambda t: np.zeros(2),  # stereo silence, called per sample
-                duration=duration,
-                fps=44100,
-            )
             return video.with_audio(audio)
 
         if resolved == "crossfade" and n > 1:
