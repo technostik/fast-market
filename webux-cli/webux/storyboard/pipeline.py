@@ -132,10 +132,23 @@ async def _run_safely(coro, state: ProjectState, state_path: Path) -> None:
         _mark_running_steps_cancelled(state)
         state.save(state_path)
     except Exception as exc:
+        tb = traceback.format_exc()
         traceback.print_exc()
         err_text = f"[error] {type(exc).__name__}: {exc}"
         _mark_running_steps_error(state, err_text)
+        _log_error_to_console(state, err_text, tb)
         state.save(state_path)
+
+
+def _log_error_to_console(state: ProjectState, summary: str, tb: str = "") -> None:
+    state.console_log.append({
+        "t": time.time(),
+        "cmd": "pipeline-error",
+        "output": f"{summary}\n{tb}".strip(),
+        "rc": 1,
+    })
+    if len(state.console_log) > 200:
+        state.console_log = state.console_log[-200:]
 
 
 def _mark_running_steps_cancelled(state: ProjectState) -> None:
@@ -751,9 +764,11 @@ async def _assemble_chapter(
             await _moviepy_concat(clip_files, str(chapter_out))
             step.output += "\nConcat done"
     except Exception as exc:
+        tb = traceback.format_exc()
         step.status = "error"
         step.output += f"\n[error] {type(exc).__name__}: {exc}"
         step.end_time = time.time()
+        _log_error_to_console(state, f"[chapter merge {ch.id}] {type(exc).__name__}: {exc}", tb)
         state.save(state_path)
         return
 
@@ -798,19 +813,28 @@ async def _assemble_final(
 
     try:
         chapter_transition = config.get("chapter_transition", "none")
+        transition_duration = float(config.get("chapter_transition_duration", 1.0))
         if len(chapter_files) == 1:
             import shutil as _shutil
             step.output += f"\nCopying {Path(chapter_files[0]).name} → final.mp4"
             _shutil.copy2(chapter_files[0], str(final_out))
             step.output += "\nCopy done"
         else:
-            step.output += f"\nConcat {len(chapter_files)} chapters → final.mp4 (transition: {chapter_transition})"
-            await _moviepy_concat(chapter_files, str(final_out), transition=chapter_transition)
+            step.output += (
+                f"\nConcat {len(chapter_files)} chapters → final.mp4"
+                f" (transition: {chapter_transition}, silence: {transition_duration}s)"
+            )
+            await _moviepy_concat(
+                chapter_files, str(final_out),
+                transition=chapter_transition, duration=transition_duration,
+            )
             step.output += "\nConcat done"
     except Exception as exc:
+        tb = traceback.format_exc()
         step.status = "error"
         step.output += f"\n[error] {type(exc).__name__}: {exc}"
         step.end_time = time.time()
+        _log_error_to_console(state, f"[final merge] {type(exc).__name__}: {exc}", tb)
         state.save(state_path)
         return
 
@@ -826,43 +850,71 @@ async def _assemble_final(
     state.save(state_path)
 
 
-_TRANSITION_DURATION = 0.5  # seconds
-
 _TRANSITION_CHOICES = ("fade", "crossfade")
 
 
-async def _moviepy_concat(clip_files: list[str], output: str, transition: str = "none") -> None:
+async def _moviepy_concat(
+    clip_files: list[str], output: str, transition: str = "none", duration: float = 1.0
+) -> None:
     """Concatenate video files with moviepy. Raises on failure — caller handles."""
     def _do_concat():
         import os
         import random as _random
-        from moviepy import VideoFileClip, concatenate_videoclips
+        import numpy as np
+        from moviepy import VideoFileClip, ColorClip, AudioClip, concatenate_videoclips
         from moviepy.video.fx import FadeIn, FadeOut, CrossFadeIn, CrossFadeOut
 
         resolved = transition if transition != "random" else _random.choice(_TRANSITION_CHOICES)
         clips = [VideoFileClip(f) for f in clip_files]
+        n = len(clips)
+        size = clips[0].size
 
-        if resolved == "crossfade" and len(clips) > 1:
-            d = _TRANSITION_DURATION
+        def _silence_clip():
+            # Black video with explicit stereo silence so concatenation audio is consistent
+            video = ColorClip(size=size, color=(0, 0, 0), duration=duration)
+            audio = AudioClip(
+                frame_function=lambda t: np.zeros(2),  # stereo silence, called per sample
+                duration=duration,
+                fps=44100,
+            )
+            return video.with_audio(audio)
+
+        if resolved == "crossfade" and n > 1:
+            # Visual dissolve (clips overlap); CrossFadeIn/Out only work with method="compose"
+            d = duration
             processed = []
             for i, c in enumerate(clips):
+                fx = []
                 if i > 0:
-                    c = c.with_effects([CrossFadeIn(d)])
-                if i < len(clips) - 1:
-                    c = c.with_effects([CrossFadeOut(d)])
-                processed.append(c)
-            result = concatenate_videoclips(processed, method="compose", padding=-d)
+                    fx.append(CrossFadeIn(d))
+                if i < n - 1:
+                    fx.append(CrossFadeOut(d))
+                processed.append(c.with_effects(fx) if fx else c)
+            result = concatenate_videoclips(processed, method="compose", padding=-duration)
 
-        elif resolved == "fade" and len(clips) > 1:
-            d = _TRANSITION_DURATION
-            processed = []
+        elif resolved == "fade" and n > 1:
+            # Fade to black + silence gap + fade from black
+            half = duration / 2
+            parts = []
             for i, c in enumerate(clips):
                 if i > 0:
-                    c = c.with_effects([FadeIn(d)])
-                if i < len(clips) - 1:
-                    c = c.with_effects([FadeOut(d)])
-                processed.append(c)
-            result = concatenate_videoclips(processed)
+                    parts.append(_silence_clip())
+                fx = []
+                if i > 0:
+                    fx.append(FadeIn(half))
+                if i < n - 1:
+                    fx.append(FadeOut(half))
+                parts.append(c.with_effects(fx) if fx else c)
+            result = concatenate_videoclips(parts)
+
+        elif n > 1 and duration > 0:
+            # "none" — silent gap between chapters, hard video cuts
+            parts = []
+            for i, c in enumerate(clips):
+                if i > 0:
+                    parts.append(_silence_clip())
+                parts.append(c)
+            result = concatenate_videoclips(parts)
 
         else:
             result = concatenate_videoclips(clips)
