@@ -14,6 +14,50 @@ from plugins.base import TTSPlugin
 REFERENCE_TEXT = "This is a reference voice sample for voice cloning."
 REF_VOICES_SUBDIR = "ref_voices"
 
+_QWEN3_LANG_MAP: dict[str, str] = {
+    "en": "English",
+    "english": "English",
+    "zh": "Chinese",
+    "chinese": "Chinese",
+    "mandarin chinese": "Chinese",
+    "ja": "Japanese",
+    "japanese": "Japanese",
+    "ko": "Korean",
+    "korean": "Korean",
+    "de": "German",
+    "german": "German",
+    "fr": "French",
+    "french": "French",
+    "ru": "Russian",
+    "russian": "Russian",
+    "pt": "Portuguese",
+    "portuguese": "Portuguese",
+    "es": "Spanish",
+    "spanish": "Spanish",
+    "it": "Italian",
+    "italian": "Italian",
+}
+
+
+def resolve_qwen3_language(language: str | None) -> str:
+    """Normalise a language value to the full name Qwen3 expects.
+
+    Accepts ISO 639-1 shorthands (``en``, ``fr``, …) and
+    human-readable names (``"English"``, ``"French"``, …).
+    Returns ``"English"`` on unknown input.
+    """
+    if not language:
+        return "English"
+    key = language.strip().lower().replace("_", "-").replace("-", " ")
+    # Direct hit on a human-readable name
+    for k, v in _QWEN3_LANG_MAP.items():
+        if key == k:
+            return v
+        # Also match on the value itself (already a full name)
+        if key == v.lower():
+            return v
+    return "English"
+
 
 class Qwen3TTSPlugin(TTSPlugin):
     """TTS engine using Qwen3-TTS with dual-model architecture.
@@ -160,7 +204,9 @@ class Qwen3TTSPlugin(TTSPlugin):
     def synthesize(
         self, text: str, voice: str, speed: float, **kwargs
     ) -> tuple[torch.Tensor, int]:
-        language = kwargs.get("language", self.config.get("language", "English"))
+        language = resolve_qwen3_language(
+            kwargs.get("language") or self.config.get("language", "en")
+        )
         clone = kwargs.get("clone") or self.config.get("clone")
         ref_text = kwargs.get("ref_text") or self.config.get("ref_text")
 

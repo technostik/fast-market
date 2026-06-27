@@ -4,6 +4,9 @@ import importlib
 
 import pytest
 
+from plugins.kokoro.plugin import resolve_kokoro_lang_code
+from plugins.qwen3.plugin import resolve_qwen3_language
+
 
 class TestCLICommands:
     def test_main_help(self, runner):
@@ -31,6 +34,8 @@ class TestCLICommands:
         assert "-v" in result.output
         assert "-s" in result.output
         assert "-o" in result.output
+        assert "--language" in result.output
+        assert "-L" in result.output
 
     def test_speak_no_text(self, runner):
         import cli.main as cli_mod
@@ -98,6 +103,83 @@ class TestKokoroPlugin:
 
         with pytest.raises(ValueError, match="Empty voice"):
             _parse_voice_string("")
+
+
+class TestKokoroLangCode:
+    def test_shorthand_en(self):
+        assert resolve_kokoro_lang_code("en") == "a"
+
+    def test_shorthand_en_gb(self):
+        assert resolve_kokoro_lang_code("en-gb") == "b"
+
+    def test_shorthand_fr(self):
+        assert resolve_kokoro_lang_code("fr") == "f"
+
+    def test_shorthand_ja(self):
+        assert resolve_kokoro_lang_code("ja") == "j"
+
+    def test_shorthand_zh(self):
+        assert resolve_kokoro_lang_code("zh") == "z"
+
+    def test_human_readable_french(self):
+        assert resolve_kokoro_lang_code("French") == "f"
+
+    def test_human_readable_mandarin(self):
+        assert resolve_kokoro_lang_code("Mandarin Chinese") == "z"
+
+    def test_raw_code_f(self):
+        assert resolve_kokoro_lang_code("f") == "f"
+
+    def test_raw_code_b(self):
+        assert resolve_kokoro_lang_code("b") == "b"
+
+    def test_none_returns_default(self):
+        assert resolve_kokoro_lang_code(None) == "a"
+
+    def test_unknown_returns_default(self):
+        assert resolve_kokoro_lang_code("xyz") == "a"
+
+    def test_empty_returns_default(self):
+        assert resolve_kokoro_lang_code("") == "a"
+
+    def test_case_insensitive(self):
+        assert resolve_kokoro_lang_code("EN") == "a"
+        assert resolve_kokoro_lang_code("Fr") == "f"
+
+    def test_underscore_normalised(self):
+        assert resolve_kokoro_lang_code("en_gb") == "b"
+        assert resolve_kokoro_lang_code("pt_br") == "p"
+
+
+class TestQwen3Language:
+    def test_shorthand_en(self):
+        assert resolve_qwen3_language("en") == "English"
+
+    def test_shorthand_zh(self):
+        assert resolve_qwen3_language("zh") == "Chinese"
+
+    def test_shorthand_ja(self):
+        assert resolve_qwen3_language("ja") == "Japanese"
+
+    def test_shorthand_ko(self):
+        assert resolve_qwen3_language("ko") == "Korean"
+
+    def test_shorthand_fr(self):
+        assert resolve_qwen3_language("fr") == "French"
+
+    def test_human_readable(self):
+        assert resolve_qwen3_language("German") == "German"
+        assert resolve_qwen3_language("russian") == "Russian"
+
+    def test_none_returns_english(self):
+        assert resolve_qwen3_language(None) == "English"
+
+    def test_unknown_returns_english(self):
+        assert resolve_qwen3_language("xyz") == "English"
+
+    def test_case_insensitive(self):
+        assert resolve_qwen3_language("EN") == "English"
+        assert resolve_qwen3_language("Fr") == "French"
 
 
 class TestModels:

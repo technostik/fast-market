@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 import torch
@@ -41,6 +42,55 @@ def _parse_voice_string(voice: str) -> tuple[list[str], list[float]]:
     return names, weights
 
 
+_KOKORO_LANG_MAP: dict[str, str] = {
+    # shorthands — ISO 639-1 / BCP-47
+    "en": "a",
+    "en-us": "a",
+    "en-gb": "b",
+    "gb": "b",
+    "es": "e",
+    "fr": "f",
+    "fr-fr": "f",
+    "hi": "h",
+    "it": "i",
+    "pt": "p",
+    "pt-br": "p",
+    "ja": "j",
+    "zh": "z",
+    # human-readable fallbacks (backward compat)
+    "american english": "a",
+    "british english": "b",
+    "english": "a",
+    "spanish": "e",
+    "french": "f",
+    "hindi": "h",
+    "italian": "i",
+    "portuguese": "p",
+    "japanese": "j",
+    "mandarin chinese": "z",
+    "chinese": "z",
+}
+
+_KOKORO_VALID_CODES = frozenset({"a", "b", "e", "f", "h", "i", "j", "p", "z"})
+
+
+def resolve_kokoro_lang_code(language: str | None) -> str:
+    """Map a language value to a Kokoro ``lang_code``.
+
+    Accepts ISO 639-1 shorthands (``en``, ``fr``, …), BCP-47 tags
+    (``en-gb``, ``pt-br``, …), human-readable names (``"english"``),
+    and the raw single-letter codes Kokoro itself uses (``a``, ``b``, …).
+
+    Returns ``"a"`` (American English) on unknown input.
+    """
+    if not language:
+        return "a"
+    key = language.strip().lower().replace("_", "-")
+    if key in _KOKORO_VALID_CODES:
+        return key
+    return _KOKORO_LANG_MAP.get(key, "a")
+
+
 class KokoroPlugin(TTSPlugin):
     """TTS engine using Kokoro (lightweight, fast)."""
 
@@ -48,22 +98,21 @@ class KokoroPlugin(TTSPlugin):
 
     def __init__(self, config: dict):
         self.config = config
-        self._pipeline = None
+        self._pipelines: dict[str, Any] = {}
 
-    def _get_pipeline(self):
-        if self._pipeline is None:
+    def _get_pipeline(self, lang_code: str):
+        if lang_code not in self._pipelines:
             from kokoro import KPipeline
 
-            self._pipeline = KPipeline(lang_code="a")
-        return self._pipeline
+            self._pipelines[lang_code] = KPipeline(lang_code=lang_code)
+        return self._pipelines[lang_code]
 
-    def _build_voice_tensor(self, voice_str: str):
+    def _build_voice_tensor(self, voice_str: str, pipeline):
         """Build a weighted voice embedding tensor.
 
         Supports format like 'am_michael*0.7,am_fenrir*0.3'.
         Each voice name with *weight; weights normalized to sum 1.0.
         """
-        pipeline = self._get_pipeline()
         names, weights = _parse_voice_string(voice_str)
         if len(names) == 1:
             return pipeline.load_single_voice(names[0])
@@ -76,11 +125,14 @@ class KokoroPlugin(TTSPlugin):
     def synthesize(
         self, text: str, voice: str, speed: float, **kwargs
     ) -> tuple[torch.Tensor, int]:
-        import soundfile as sf
         import io
 
-        pipeline = self._get_pipeline()
-        voice_tensor = self._build_voice_tensor(voice)
+        import soundfile as sf
+
+        language = kwargs.get("language") or self.config.get("language", "en")
+        lang_code = resolve_kokoro_lang_code(language)
+        pipeline = self._get_pipeline(lang_code)
+        voice_tensor = self._build_voice_tensor(voice, pipeline)
 
         audio_chunks: list[torch.Tensor] = []
         sample_rate = 24000

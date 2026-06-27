@@ -61,7 +61,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--language", "-L",
         default=None,
-        help="Language for qwen3 engine (e.g. English, Chinese, French)",
+        help=(
+            "Language for TTS (ISO 639-1 shorthand, e.g. en, fr, es, ja, zh). "
+            "Supported: en, en-gb, es, fr, hi, it, pt, ja, zh (kokoro); "
+            "en, zh, ja, ko, de, fr, ru, pt, es, it (qwen3)"
+        ),
     )
     @click.option(
         "--format", "-F", "fmt",
@@ -111,7 +115,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         engine_config = config.get(actual_engine, {})
         actual_voice = voice or engine_config.get("voice", "")
         actual_speed = speed if speed is not None else engine_config.get("speed", 1.0)
-        actual_language = language or engine_config.get("language", "English")
+        actual_language = language or engine_config.get("language", "en")
 
         plugin = plugins[actual_engine]
 

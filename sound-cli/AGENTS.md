@@ -84,10 +84,11 @@ default_engine: kokoro
 kokoro:
   voice: am_michael*0.7,am_fenrir*0.3
   speed: 1.0
+  language: en
 
 qwen3:
   voice: "A warm, friendly male voice with a professional tone"
-  language: English
+  language: en
   voice_design_model: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
   base_model:          Qwen/Qwen3-TTS-12Hz-1.7B-Base
   clone: null            # path to reference .wav for voice cloning

@@ -41,10 +41,11 @@ default_engine: kokoro
 kokoro:
   voice: am_michael*0.7,am_fenrir*0.3   # weighted voice mix
   speed: 1.0
+  language: en                          # ISO 639-1: en, en-gb, es, fr, hi, it, pt, ja, zh
 
 qwen3:
   voice: "A warm, friendly male voice with a professional tone"
-  language: English
+  language: en                          # ISO 639-1: en, zh, ja, ko, de, fr, ru, pt, es, it
   voice_design_model: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign   # creates reference
   base_model:          Qwen/Qwen3-TTS-12Hz-1.7B-Base          # stable TTS
   clone: null            # path to reference audio for voice cloning
@@ -113,12 +114,12 @@ Synthesize speech from text using a TTS engine. Text can come from three sources
 | `--voice` | `-v` | Voice spec (semantics depend on engine) |
 | `--speed` | `-s` | Playback speed, default 1.0 (kokoro only) |
 | `--output` | `-o` | Output path (default: workdir/speak\_\<timestamp\>.wav) |
-| `--language` | `-L` | Language for qwen3 (English, Chinese, etc.) |
+| `--language` | `-L` | Language (ISO 639-1 shorthand like `en`, `fr`, `es`, `ja`, `zh`) |
 | `--format` | `-F` | Output format: `json` or `text` |
 
 **Voice semantics by engine:**
-- **kokoro**: Weighted voice mix. Format: `name[*weight,...]`. Example: `am_michael*0.7,am_fenrir*0.3`. Weights are normalized to sum to 1.0. A single name like `am_michael` uses that voice directly.
-- **qwen3**: Natural language voice description. Example: `"A soft, elegant French female voice"`. Pairs with `--language` for multilingual generation.
+- **kokoro**: Weighted voice mix. Format: `name[*weight,...]`. Example: `am_michael*0.7,am_fenrir*0.3`. Weights are normalized to sum to 1.0. A single name like `am_michael` uses that voice directly. Use `--language` for multilingual TTS: `en`, `en-gb`, `es`, `fr`, `hi`, `it`, `pt`, `ja`, `zh`.
+- **qwen3**: Natural language voice description. Example: `"A soft, elegant French female voice"`. Use `--language` for multilingual generation: `en`, `zh`, `ja`, `ko`, `de`, `fr`, `ru`, `pt`, `es`, `it`.
 
 **Examples:**
 ```bash
@@ -149,8 +150,9 @@ Generate music from a text prompt.
 ### Kokoro (TTS)
 - **Package**: `kokoro>=0.9`
 - **Model**: `hexgrad/Kokoro-82M` (auto-downloaded on first use)
-- **Voices**: American English voices (`am_*`) with weighted mixing
+- **Voices**: Weighted mixing across 9 languages (voice prefix = lang code: `am_*`, `bf_*`, `ef_*`, `ff_*`, …)
 - **Default voice**: `am_michael*0.7 + am_fenrir*0.3`
+- **Languages**: American English (`en`), British English (`en-gb`), Spanish (`es`), French (`fr`), Hindi (`hi`), Italian (`it`), Portuguese (`pt`), Japanese (`ja`), Mandarin Chinese (`zh`)
 - **Hardware**: Works on CPU, faster on GPU
 - **Install**: `pip install sound-agent[kokoro]`
 

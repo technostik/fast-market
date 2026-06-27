@@ -14,10 +14,11 @@ def load_sound_config(path: str | None = None) -> dict:
         "kokoro": {
             "voice": "am_michael*0.7,am_fenrir*0.3",
             "speed": 1.0,
+            "language": "en",
         },
         "qwen3": {
             "voice": "A warm, friendly male voice with a professional tone",
-            "language": "English",
+            "language": "en",
             "voice_design_model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
             "base_model": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
             "clone": None,
@@ -42,10 +43,11 @@ def get_default_config() -> dict:
         "kokoro": {
             "voice": "am_michael*0.7,am_fenrir*0.3",
             "speed": 1.0,
+            "language": "en",
         },
         "qwen3": {
             "voice": "A warm, friendly male voice with a professional tone",
-            "language": "English",
+            "language": "en",
             "voice_design_model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
             "base_model": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
             "clone": None,
