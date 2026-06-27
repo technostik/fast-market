@@ -135,6 +135,40 @@ All prompts are editable live in the WebUX Config panel.
 - `GET  /api/storyboard/preview?file=` — serve media with correct MIME
 - `GET  /api/storyboard/download?file=` — download any output file
 
+## ⚠️ Polling vs. media playback — mandatory pattern
+
+The UI polls `GET /api/storyboard/job` every 1.5 s. Any panel that calls `innerHTML = ...` on every poll will destroy `<audio>` and `<video>` elements mid-playback.
+
+**Never** write an unconditional render in `applyState`. Always use the three-part guard:
+
+```js
+// 1. Compute a JSON fingerprint of the data slice this view cares about
+const j = JSON.stringify(data.chapters || []);
+// 2. Mark pending when the data actually changed
+if (j !== _lastXJson) _pendingXUpdate = true;
+// 3. Flush only when the panel is free (no media playing, no textarea focused)
+if (_pendingXUpdate && !_xIsBusy()) {
+  _lastXJson = j; _pendingXUpdate = false;
+  renderX(data.chapters || []);
+}
+```
+
+The `_xIsBusy()` helper must check both focused inputs and playing media:
+
+```js
+function _xIsBusy() {
+  const el = document.getElementById('xPanel');
+  if (!el) return false;
+  const a = document.activeElement;
+  if (a && el.contains(a) && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) return true;
+  return [...el.querySelectorAll('audio,video')].some(m => !m.paused);
+}
+```
+
+State variables needed per view: `_lastXJson = null`, `_pendingXUpdate = false`.
+
+The detail panel (`_detailIsBusy`, `_pendingDetailUpdate`, `_lastRenderedSceneJson`), format view (`_formatIsBusy`, `_pendingFormatUpdate`, `_lastFormatJson`), and matrix view (`_matrixIsBusy`, `_pendingMatrixUpdate`, `_lastMatrixJson`) all follow this pattern. Any new panel that renders media must do the same.
+
 ## ⚠️ Pitfalls
 
 - **parse_script prompt**: Uses `prompt apply <template> content=@<file>` (named file param, not `--stdin`). Config placeholders (`{lang}`, etc.) are substituted by `_resolve_prompt()` before the template is escaped. Then remaining `{` `}` are doubled to neutralize them for the prompt CLI, and `{content}` is appended as the named placeholder for the script file.

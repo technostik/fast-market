@@ -373,7 +373,7 @@ video.fmt-vid { max-width: 480px; max-height: 270px; border-radius: 4px; border:
 .matrix-panel { display: none; flex: 1; overflow: hidden; flex-direction: column; min-height: 0; }
 .matrix-panel.visible { display: flex; }
 .matrix-body { flex: 1; overflow: auto; padding: 12px; }
-.matrix-tbl { width: 100%; border-collapse: collapse; }
+.matrix-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .matrix-tbl th { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; padding: 6px 10px; border-bottom: 2px solid var(--border); text-align: left; background: var(--bg2); position: sticky; top: 0; z-index: 1; }
 .matrix-tbl td { vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .matrix-tbl tr:hover td { background: var(--bg2); }
@@ -771,6 +771,10 @@ let _consoleClear = 0;
 let _waitingForInit = false;
 let _lastRenderedSceneJson = null;  // last scene data that was rendered in detail panel
 let _pendingDetailUpdate = false;   // data changed while panel was busy — flush when free
+let _lastFormatJson = null;
+let _pendingFormatUpdate = false;
+let _lastMatrixJson = null;
+let _pendingMatrixUpdate = false;
 let viewMode = localStorage.getItem('sb-view-mode') || 'chapter';
 let formatTab = localStorage.getItem('sb-format-tab') || 'transcript';
 
@@ -905,6 +909,12 @@ function _formatIsBusy() {
   const active = document.activeElement;
   if (active && fp.contains(active) && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) return true;
   return [...fp.querySelectorAll('audio,video')].some(m => !m.paused);
+}
+
+function _matrixIsBusy() {
+  const mp = document.getElementById('matrixPanel');
+  if (!mp) return false;
+  return [...mp.querySelectorAll('audio,video')].some(m => !m.paused);
 }
 
 function renderFormatView(chapters) {
@@ -1054,9 +1064,22 @@ function applyState(data) {
   // Scene tree
   renderTree(data.chapters || []);
 
-  // Format / matrix view (when active)
-  if (viewMode === 'format' && !_formatIsBusy()) renderFormatView(data.chapters || []);
-  if (viewMode === 'matrix') renderMatrixView(data.chapters || []);
+  // Format / matrix views: skip re-render when data is unchanged or media is playing
+  const _chapJson = JSON.stringify(data.chapters || []);
+  if (viewMode === 'format') {
+    if (_chapJson !== _lastFormatJson) _pendingFormatUpdate = true;
+    if (_pendingFormatUpdate && !_formatIsBusy()) {
+      _lastFormatJson = _chapJson; _pendingFormatUpdate = false;
+      renderFormatView(data.chapters || []);
+    }
+  }
+  if (viewMode === 'matrix') {
+    if (_chapJson !== _lastMatrixJson) _pendingMatrixUpdate = true;
+    if (_pendingMatrixUpdate && !_matrixIsBusy()) {
+      _lastMatrixJson = _chapJson; _pendingMatrixUpdate = false;
+      renderMatrixView(data.chapters || []);
+    }
+  }
 
   // Console
   renderConsole(data.console_log || []);
