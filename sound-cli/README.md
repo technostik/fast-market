@@ -89,6 +89,47 @@ The workflow:
 
 **Log messages** on stderr indicate whether a new reference is being generated or a cached one is used.
 
+### Per-Language Overrides
+
+You can define engine-specific settings for individual languages under a `languages` key. When `--language` matches a key, its values override the top-level engine config. Fields not specified fall back to the parent block.
+
+```yaml
+kokoro:
+  voice: am_michael*0.7,am_fenrir*0.3     # fallback for unspecified languages
+  speed: 1.0
+  language: en
+  languages:
+    fr:
+      voice: ff_siwis
+    ja:
+      voice: jf_alpha,jf_gongitsune*0.5
+      speed: 1.2
+    zh:
+      voice: zf_xiaobei
+
+qwen3:
+  voice: "A warm, friendly male voice"
+  language: en
+  languages:
+    fr:
+      voice: "Une voix féminine douce et élégante"
+      language: fr
+    zh:
+      voice: "A warm female Chinese voice"
+```
+
+Usage:
+```bash
+# picks am_michael*0.7,am_fenrir*0.3 (top-level)
+sound speak "Hello"
+
+# picks ff_siwis from languages.fr
+sound speak "Bonjour" -L fr
+
+# picks jf_alpha,jf_gongitsune*0.5 with speed 1.2 from languages.ja
+sound speak "こんにちは" -L ja
+```
+
 ## Commands
 
 | Command | Description |

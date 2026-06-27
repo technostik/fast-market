@@ -101,6 +101,32 @@ musicgen:
 output_format: wav
 ```
 
+### Per-Language Overrides
+
+Engine sections can include a `languages` map. When `--language` / `-L` matches a key, its values merge on top of the parent config — useful for assigning different voices per language.
+
+```yaml
+kokoro:
+  voice: am_michael*0.7,am_fenrir*0.3
+  speed: 1.0
+  language: en
+  languages:
+    fr:
+      voice: ff_siwis
+    ja:
+      voice: jf_alpha,jf_gongitsune*0.5
+      speed: 1.2
+
+qwen3:
+  voice: "A warm, friendly male voice"
+  language: en
+  languages:
+    fr:
+      voice: "Une voix féminine douce"
+    zh:
+      voice: "A warm female Chinese voice"
+```
+
 ## Stable Voice System (Qwen3)
 
 The Qwen3 plugin uses two HuggingFace models:
