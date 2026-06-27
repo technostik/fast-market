@@ -21,10 +21,11 @@ Shared utilities live at the workspace root and are imported by all tools:
 
 | Path | Purpose |
 |------|---------|
-| `common/cli/base.py` | `create_cli_group()` — standard Click group factory |
+| `common/cli/base.py` | `create_cli_group()` — standard Click group factory (adds `--profile` automatically) |
 | `common/cli/helpers.py` | `out()` — standard output formatting (JSON/text) |
-| `common/core/config.py` | `load_tool_config()` — merges common + tool config |
-| `common/core/paths.py` | XDG-compliant paths (config, data, cache) |
+| `common/core/config.py` | `load_tool_config()` — merges `_shared` + active-profile + tool config |
+| `common/core/paths.py` | XDG-compliant paths scoped to the active profile |
+| `common/core/profile.py` | Profile resolution (`resolve_profile`), validation, active-profile pointer |
 | `common/core/registry.py` | Plugin/command discovery engine |
 | `common/storage/base.py` | SQLAlchemy engine/session helpers |
 
@@ -116,20 +117,26 @@ if __name__ == "__main__":
 
 ### 2.3 Configuration (core/config.py)
 
-fast-market uses a two-level XDG config layout under `~/.config/fast-market/`:
+fast-market uses a **profile-scoped** XDG config layout. All config lives under
+`~/.config/fast-market/profiles/<profile>/`. A `_shared` base profile provides
+inheritable defaults; the active profile's values are deep-merged on top.
 
-**The config hierarchy**:
+**The config hierarchy** (later wins):
 ```
-~/.config/fast-market/common/config.yaml           # workdir (truly global)
-~/.config/fast-market/common/llm/config.yaml       # LLM providers
-~/.config/fast-market/common/youtube/config.yaml  # YouTube OAuth
-~/.config/fast-market/{tool}/config.yaml          # tool-specific
+~/.config/fast-market/profiles/_shared/common/config.yaml      # shared workdir base
+~/.config/fast-market/profiles/_shared/common/llm/config.yaml  # shared LLM providers
+~/.config/fast-market/profiles/_shared/{tool}/config.yaml      # shared tool defaults
+~/.config/fast-market/profiles/<profile>/common/config.yaml    # per-profile common
+~/.config/fast-market/profiles/<profile>/common/llm/config.yaml # per-profile LLM
+~/.config/fast-market/profiles/<profile>/{tool}/config.yaml    # per-profile tool
 ```
 
 **Resolution order** (later wins):
-1. Common config (`~/.config/fast-market/common/config.yaml`)
-2. Discovered common sub-configs (`~/.config/fast-market/common/*/config.yaml`)
-3. Tool config (`~/.config/fast-market/{tool}/config.yaml`)
+1. `_shared` common config
+2. `_shared` common sub-configs (`_shared/common/*/config.yaml`)
+3. Active-profile common config
+4. Active-profile common sub-configs (`<profile>/common/*/config.yaml`)
+5. Active-profile tool config (`<profile>/{tool}/config.yaml`)
 
 **How to load config in a new agent:**
 
@@ -161,7 +168,56 @@ except ConfigError as exc:
 Run: toolsetup    # configure LLM providers, workdir, etc.
 ```
 
-### 2.4 Registry (core/registry.py)
+### 2.4 Multi-Profile Architecture
+
+The multi-profile system isolates config, data, cache, and browser sessions per
+persona. It is **automatic** once you use `create_cli_group()` — no extra code needed.
+
+**Active profile resolution order** (first match wins):
+1. `FASTMARKET_PROFILE` environment variable — set by `--profile` flag or `export`
+2. `~/.config/fast-market/active_profile` pointer file — written by `toolsetup profile use <name>`
+3. Fallback: `"default"`
+
+**`--profile` flag** — `create_cli_group()` adds `--profile / -P` to every CLI
+automatically. Passing it sets `FASTMARKET_PROFILE` for that invocation:
+```bash
+your-agent --profile work list   # uses the 'work' profile for this call only
+toolsetup profile use work       # permanently switches the active profile
+```
+
+**`_shared` base** — config and resources in `_shared/` are merged under every
+profile. The active profile wins on conflict. Never set `_shared` as the active
+profile; use it only for shared defaults managed by `toolsetup`.
+
+**Path functions** — all `get_*` helpers in `common/core/paths.py` accept
+`profile: str | None = None` and resolve the active profile when `None` is passed.
+Always pass `profile=None` (the default) in normal code so paths follow the
+active profile. Only pass an explicit name when deliberately addressing `_shared`
+or migrating data.
+
+Key path functions for new CLIs:
+```python
+from common.core.paths import (
+    get_tool_config_path,   # ~/.../profiles/<profile>/{tool}/config.yaml
+    get_tool_data_dir,      # ~/.../profiles/<profile>/{tool}/
+    get_tool_cache_dir,     # ~/.cache/fast-market/profiles/<profile>/{tool}/
+    get_profile_data_root,  # ~/.local/share/fast-market/profiles/<profile>/
+)
+```
+
+**Resource collections** (prompts, skills, browser-commands) support shadowing:
+the active profile's dir takes precedence over `_shared`. Use the search-dir
+helpers when reading; write only to the active-profile path.
+```python
+from common.core.paths import get_skills_search_dirs, get_prompts_search_dirs
+
+for d in get_skills_search_dirs():   # [active_profile_dir, _shared_dir]
+    skill_file = d / "my-skill"
+    if skill_file.exists():
+        break  # first match wins (profile shadows shared)
+```
+
+### 2.5 Registry (core/registry.py)
 
 Import from `common.core.registry`:
 
@@ -179,7 +235,7 @@ Functions from `common.core.registry`:
 | `discover_commands(plugin_manifests, tool_root=...)` | Scan `commands/*/register.py` |
 | `build_plugins(config, tool_root=...)` | Instantiate plugin classes from manifests |
 
-### 2.5 Helper Utilities (commands/helpers.py)
+### 2.6 Helper Utilities (commands/helpers.py)
 
 ```python
 from __future__ import annotations
@@ -211,35 +267,52 @@ Functions from `common.storage.base`:
 
 ## Config Layout Reference
 
-fast-market uses a two-level XDG config layout under `~/.config/fast-market/`:
+All config lives under `~/.config/fast-market/profiles/`. There are two layers:
+`_shared/` (shared defaults) and `<profile>/` (active-profile overrides). The
+active profile is resolved at runtime by `resolve_profile()`.
 
-### Common config (shared across tools)
-Managed by `toolsetup`. Lives under `~/.config/fast-market/common/`.
+### Shared base (`_shared/`)
+Managed by `toolsetup`. Values here are inherited by every profile unless overridden.
 
-| File | Contains | Used by |
-|------|----------|---------|
+| File (under `profiles/_shared/`) | Contains | Used by |
+|----------------------------------|----------|---------|
 | `common/config.yaml` | workdir | all tools |
 | `common/llm/config.yaml` | LLM providers, default model | prompt, task, corpus, ... |
 | `common/youtube/config.yaml` | YouTube OAuth credentials | youtube, corpus |
 
+### Active-profile layer (`<profile>/`)
+Per-profile overrides. Same layout as `_shared/`. Values here win on conflict.
+
+| File (under `profiles/<profile>/`) | Contains | Overrides |
+|------------------------------------|----------|-----------|
+| `common/config.yaml` | workdir (if different) | `_shared` common |
+| `common/llm/config.yaml` | profile-specific LLM settings | `_shared` LLM |
+| `{tool}/config.yaml` | tool-specific keys | `_shared` tool defaults |
+
 ### Tool config (private to one tool)
-Lives under `~/.config/fast-market/{tool}/config.yaml`.
+Lives under `profiles/<profile>/{tool}/config.yaml`.
 Contains only keys specific to that tool (allowed commands, templates, etc.).
 
-### Resolution order
-1. Common config (`~/.config/fast-market/common/config.yaml`) - workdir
-2. Discovered common sub-configs (`~/.config/fast-market/common/*/config.yaml`)
-3. Tool config (`~/.config/fast-market/{tool}/config.yaml`)
+### Resolution order (later wins)
+1. `_shared` common config (workdir base)
+2. `_shared` common sub-configs (`_shared/common/*/config.yaml`)
+3. Active-profile common config
+4. Active-profile common sub-configs (`<profile>/common/*/config.yaml`)
+5. Active-profile tool config (`<profile>/{tool}/config.yaml`)
 
-All common sub-configs are auto-discovered by scanning the `common/` directory.
-Tools declare which sub-configs they require via `requires_common_config()`.
-If a required subconfig is missing, `load_tool_config()` raises `ConfigError`.
+All common sub-configs are auto-discovered by scanning both `_shared/common/` and
+`<profile>/common/`. Tools declare which sub-configs they require via
+`requires_common_config()`. If a required subconfig is missing in both layers,
+`load_tool_config()` raises `ConfigError`.
 
-### Setting up
+### Managing profiles
 ```bash
-toolsetup          # interactive wizard
-toolsetup --show   # show current common config
-toolsetup --show-path   # show config file paths
+toolsetup profile use <name>    # switch active profile
+toolsetup profile list          # list available profiles
+toolsetup profile create <name> # create a new profile
+toolsetup                       # configure common settings for the active profile
+toolsetup --show                # show current config
+toolsetup --show-path           # show config file paths
 ```
 
 ### In your agent code
@@ -249,7 +322,7 @@ from common.core.config import load_tool_config, requires_common_config
 # Declare required common sub-configs
 requires_common_config("your-tool", ["llm"])  # or ["llm", "youtube"]
 
-# Load config (merges common + tool-specific)
+# Load config (merges _shared + active-profile + tool-specific)
 config = load_tool_config("your-tool")
 
 # Access LLM config:
@@ -777,9 +850,14 @@ your-agent/
 
 ### conftest.py Pattern
 
+Tests must redirect XDG dirs **and** pin the active profile so they never touch
+the user's real config, data, or profile sessions.
+
 ```python
 from __future__ import annotations
 
+import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -787,6 +865,37 @@ import pytest
 from click.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+TESTS_DIR = Path(__file__).parent
+FIXTURE_CONFIG = TESTS_DIR / "fixtures" / "config"
+FIXTURE_DATA = TESTS_DIR / "fixtures" / "data"
+
+
+@pytest.fixture(autouse=True, scope="session")
+def isolate_xdg(tmp_path_factory):
+    """Redirect XDG dirs to fixture paths and pin profile to 'test'."""
+    tmp_cache = tmp_path_factory.mktemp("cache")
+    env_overrides = {
+        "XDG_CONFIG_HOME": str(FIXTURE_CONFIG),
+        "XDG_DATA_HOME": str(FIXTURE_DATA),
+        "XDG_CACHE_HOME": str(tmp_cache),
+        "FASTMARKET_PROFILE": "test",   # pin profile so tests are isolated
+    }
+    original = {k: os.environ.get(k) for k in env_overrides}
+    for k, v in env_overrides.items():
+        os.environ[k] = v
+
+    import common.core.paths as paths_mod
+    importlib.reload(paths_mod)
+
+    yield {"config": FIXTURE_CONFIG, "data": FIXTURE_DATA, "cache": tmp_cache}
+
+    for k, v in original.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    importlib.reload(paths_mod)
 
 
 @pytest.fixture
@@ -921,10 +1030,11 @@ for cmd in discover_commands().values():
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| CLI Group | `common/cli/base.py` | `create_cli_group()` — Click group factory |
+| CLI Group | `common/cli/base.py` | `create_cli_group()` — Click group factory; auto-adds `--profile` |
 | Output | `common/cli/helpers.py` | `out()` — JSON/text formatting |
-| Config | `common/core/config.py` | `load_tool_config()` — merges common/ + tool config |
-| Paths | `common/core/paths.py` | XDG paths under ~/.config/fast-market/ |
+| Config | `common/core/config.py` | `load_tool_config()` — merges `_shared` + active-profile + tool config |
+| Paths | `common/core/paths.py` | XDG paths scoped to the active profile |
+| Profile | `common/core/profile.py` | `resolve_profile()`, `validate_profile_name()`, active-profile pointer |
 | Discovery | `common/core/registry.py` | `discover_plugins/commands()` |
 | Storage | `common/storage/base.py` | SQLAlchemy engine/session helpers |
 
@@ -948,3 +1058,6 @@ for cmd in discover_commands().values():
 - Use `**kwargs` to absorb plugin-injected options
 - Build `--source` choices dynamically from manifests
 - Import shared utilities from `common/`, not local copies
+- Never pass an explicit `profile=` to path functions in normal code — let them resolve the active profile automatically
+- For resource collections (skills, prompts), read via `get_*_search_dirs()` (profile shadows `_shared`); write only to the active-profile path
+- In tests: set `FASTMARKET_PROFILE="test"` and redirect XDG dirs so tests never touch the user's real profile
