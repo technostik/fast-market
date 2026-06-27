@@ -337,6 +337,14 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 .step-card-log { font-size: 10px; color: var(--text-muted); font-family: monospace; max-height: 60px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 .step-rerun { font-size: 10px; }
 
+/* ── Script modal ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(17,17,27,.85); display: none; align-items: center; justify-content: center; z-index: 20; }
+.modal-overlay.open { display: flex; }
+.modal-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; width: min(680px, 95vw); max-height: 85vh; display: flex; flex-direction: column; gap: 10px; }
+.modal-title { font-size: 14px; font-weight: 700; color: var(--accent); }
+.modal-card textarea { flex: 1; min-height: 300px; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 8px; color: var(--text); font-size: 12px; font-family: monospace; resize: none; }
+.modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+
 /* ── Error banner ── */
 .error-banner { display: none; background: var(--red); color: #fff; padding: 6px 12px; font-size: 12px; font-weight: 600; flex-shrink: 0; }
 .error-banner.visible { display: block; }
@@ -385,6 +393,18 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 </head>
 <body>
 
+<!-- Script edit modal -->
+<div class="modal-overlay" id="scriptModal" onclick="if(event.target===this)closeScriptModal()">
+  <div class="modal-card">
+    <div class="modal-title">📄 Script</div>
+    <textarea id="scriptModalText" placeholder="Paste your script here..."></textarea>
+    <div class="modal-footer">
+      <button class="btn btn-neutral" onclick="closeScriptModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveScript()">Save &amp; Reset Parse</button>
+    </div>
+  </div>
+</div>
+
 <!-- Init overlay (shown when no project) -->
 <div class="init-overlay" id="initOverlay">
   <div class="init-card">
@@ -403,6 +423,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
   <span class="topbar-sep">|</span>
   <span class="workdir-label" id="workdirLabel">…</span>
   <span class="topbar-sep">|</span>
+  <button class="btn btn-neutral" id="btnScript" onclick="showScriptModal()" disabled>📄 Script</button>
   <button class="btn btn-primary" id="btnRunAll" onclick="runAll()" disabled>▶ Run All</button>
   <button class="btn btn-neutral" id="btnStop" onclick="stopPipeline()" disabled>⏹ Stop</button>
   <span class="status-badge s-idle" id="statusBadge">idle</span>
@@ -634,6 +655,7 @@ function applyState(data) {
     document.getElementById('initOverlay').style.display = 'flex';
     document.getElementById('btnRunAll').disabled = true;
     document.getElementById('btnStop').disabled = true;
+    document.getElementById('btnScript').disabled = true;
     return;
   }
   document.getElementById('initOverlay').style.display = 'none';
@@ -652,6 +674,7 @@ function applyState(data) {
   // Buttons
   document.getElementById('btnRunAll').disabled = data.running;
   document.getElementById('btnStop').disabled = !data.running;
+  document.getElementById('btnScript').disabled = false;
 
   // Error banner
   updateErrorBanner(data);
@@ -883,6 +906,32 @@ async function saveImagePrompt(sceneId) {
 
 function previewFile(path, type) {
   window.open('/api/storyboard/preview?file=' + encodeURIComponent(path));
+}
+
+// ── Script modal ─────────────────────────────────────────────────────────────
+function showScriptModal() {
+  const text = state && state.script_text ? state.script_text : '';
+  document.getElementById('scriptModalText').value = text;
+  document.getElementById('scriptModal').className = 'modal-overlay open';
+}
+
+function closeScriptModal() {
+  document.getElementById('scriptModal').className = 'modal-overlay';
+}
+
+async function saveScript() {
+  const text = document.getElementById('scriptModalText').value.trim();
+  if (!text) { alert('Script text is empty'); return; }
+  try {
+    const r = await fetch('/api/storyboard/script', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ script_text: text }),
+    });
+    if (!r.ok) { const e = await r.json(); alert(e.detail || 'Error saving script'); return; }
+    closeScriptModal();
+    schedulePoll(300);
+  } catch(e) { alert(String(e)); }
 }
 
 // ── Console ───────────────────────────────────────────────────────────────────

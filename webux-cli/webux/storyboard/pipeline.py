@@ -364,9 +364,22 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
         s.end_time = time.time()
         state.save(state_path)
         return
-    prompt_text = config["prompts"]["story_breakdown"] + script_text
-    rc = await _run(s, _prompt_cmd(), "apply", "-", "--format", "text",
-                    stdin_data=prompt_text.encode(), log_to=state)
+
+    # Write script to file so prompt CLI can reference it as a named parameter
+    workdir = Path(state.workdir)
+    script_file = workdir / "script.txt"
+    script_file.write_text(script_text, encoding="utf-8")
+
+    # Escape literal { } in the template (e.g. from JSON schema examples) so that
+    # prompt CLI's str.format() doesn't mistake them for placeholders.
+    # Then append {content} — the named parameter for the actual script file.
+    template = config["prompts"]["story_breakdown"]
+    prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
+
+    rc = await _run(s, _prompt_cmd(), "apply", prompt_with_placeholder,
+                    "--format", "text",
+                    f"content=@{script_file}",
+                    log_to=state)
     if rc != 0:
         s.status = "error"
         s.end_time = time.time()
@@ -444,11 +457,16 @@ async def _gen_transcript(
     state.save(state_path)
 
     narrative_style = config.get("narrative_style", "documentary narration")
-    prompt_template = config["prompts"]["scene_transcript"]
-    prompt_text = prompt_template.replace("{narrative_style}", narrative_style) + sc.raw_description
+    scene_dir = _scene_dir(state, sc)
+    # Pre-resolve real placeholder, then escape remaining { } so str.format() doesn't fail
+    template = config["prompts"]["scene_transcript"].replace("{narrative_style}", narrative_style)
+    prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
 
-    rc = await _run(step, _prompt_cmd(), "apply", "-", "--format", "text",
-                    stdin_data=prompt_text.encode(), log_to=state)
+    description_file = scene_dir / "description.txt"
+    rc = await _run(step, _prompt_cmd(), "apply", prompt_with_placeholder,
+                    "--format", "text",
+                    f"content=@{description_file}",
+                    log_to=state)
     if rc != 0:
         step.status = "error"
         step.end_time = time.time()
@@ -456,7 +474,6 @@ async def _gen_transcript(
         return
 
     sc.transcript = step.output.strip()
-    scene_dir = _scene_dir(state, sc)
     transcript_file = scene_dir / "transcript.txt"
     transcript_file.write_text(sc.transcript, encoding="utf-8")
     step.output_file = str(transcript_file)
@@ -475,15 +492,21 @@ async def _gen_image_prompt(
     state.save(state_path)
 
     image_style = config.get("image_style", "cinematic, dramatic lighting")
-    prompt_template = config["prompts"]["scene_image_prompt"]
-    prompt_text = (
-        prompt_template.replace("{image_style}", image_style)
-        + sc.raw_description
-        + (f"\n\nNarration text:\n{sc.transcript}" if sc.transcript else "")
-    )
+    scene_dir = _scene_dir(state, sc)
+    content = sc.raw_description
+    if sc.transcript:
+        content += f"\n\nNarration text:\n{sc.transcript}"
+    input_file = scene_dir / "image_prompt_input.txt"
+    input_file.write_text(content, encoding="utf-8")
 
-    rc = await _run(step, _prompt_cmd(), "apply", "-", "--format", "text",
-                    stdin_data=prompt_text.encode(), log_to=state)
+    # Pre-resolve real placeholder, escape remaining { } for str.format() safety
+    template = config["prompts"]["scene_image_prompt"].replace("{image_style}", image_style)
+    prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
+
+    rc = await _run(step, _prompt_cmd(), "apply", prompt_with_placeholder,
+                    "--format", "text",
+                    f"content=@{input_file}",
+                    log_to=state)
     if rc != 0:
         step.status = "error"
         step.end_time = time.time()
@@ -491,7 +514,6 @@ async def _gen_image_prompt(
         return
 
     sc.image_prompt = step.output.strip()
-    scene_dir = _scene_dir(state, sc)
     prompt_file = scene_dir / "image_prompt.txt"
     prompt_file.write_text(sc.image_prompt, encoding="utf-8")
     step.output_file = str(prompt_file)
