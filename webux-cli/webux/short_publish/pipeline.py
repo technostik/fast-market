@@ -203,6 +203,20 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         job.title = title_out.strip()
         job.description = "\n\n".join(parts)
 
+        # Optional content check — non-blocking, just a warning
+        if job.prompt_check:
+            try:
+                chk_proc = await asyncio.create_subprocess_exec(
+                    _pr(), "apply", job.prompt_check, f"transcript=@{transcript_path}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                chk_stdout, _ = await chk_proc.communicate()
+                if chk_proc.returncode == 0:
+                    job.check_result = chk_stdout.decode(errors="replace").strip()
+            except Exception:
+                pass
+
         safe_name = _sanitize_filename(job.title)
         ext = Path(final_video).suffix or ".mp4"
         renamed_path = str(Path(final_video).parent / f"{safe_name}{ext}")
@@ -221,10 +235,18 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         elif not transcript_text:
             transcript_text = "(transcript unavailable)"
 
+        check_line = ""
+        if job.check_result is not None:
+            if job.check_result.strip().rstrip(".!").strip().upper() == "OK":
+                check_line = "\n\n✅ Check: OK"
+            else:
+                check_line = f"\n\n⚠ Check: {job.check_result}"
+
         s3.output = (
             f"Title: {job.title}\n\n"
             f"Description:\n{job.description}\n\n"
             f"Transcript:\n{transcript_text}"
+            + check_line
         )
         s3.end_time = time.time(); s3.status = "done"
         _save_meta(job)

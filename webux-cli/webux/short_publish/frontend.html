@@ -150,6 +150,10 @@
       <input type="text" id="cfgDescPrompt">
     </div>
     <div class="row">
+      <label>Default check prompt</label>
+      <input type="text" id="cfgCheckPrompt" placeholder="leave empty to disable">
+    </div>
+    <div class="row">
       <label>Signature (appended to descriptions)</label>
       <textarea id="cfgSignature" rows="4" style="width:100%; min-height:80px; font-family:inherit; font-size:13px;"></textarea>
     </div>
@@ -327,6 +331,10 @@
       <strong>Description:</strong>
       <div id="reviewDescription" class="review-content"></div>
     </div>
+    <div id="reviewCheckSection" class="review-section" style="display:none;">
+      <strong>Content check:</strong>
+      <div id="reviewCheckResult" style="font-size:13px;"></div>
+    </div>
     <div id="reviewDescPrefixSection" class="review-section" style="display:none;">
       <strong>Description Prefix:</strong>
       <div id="reviewDescPrefix" class="review-content"></div>
@@ -409,6 +417,8 @@
 <script>
 let currentJob = null;
 let pollTimer = null;
+
+function _isCheckOk(s) { return s.trim().replace(/[.!]+$/, '').toUpperCase() === 'OK'; }
 
 async function loadVideos() {
   const sel = document.getElementById('fileSelect');
@@ -635,6 +645,18 @@ function updateReviewBox(job, source) {
   }
   document.getElementById('reviewTitle').textContent = job.title;
   document.getElementById('reviewDescription').textContent = job.description || '';
+
+  // Check result
+  const checkSection = document.getElementById('reviewCheckSection');
+  if (job.check_result !== null && job.check_result !== undefined) {
+    const isOk = _isCheckOk(job.check_result);
+    document.getElementById('reviewCheckResult').innerHTML = isOk
+      ? '<span style="color:var(--ok,#98c379);">✅ OK</span>'
+      : `<span style="color:var(--warn,#e5c07b);">⚠️ ${job.check_result}</span>`;
+    checkSection.style.display = '';
+  } else {
+    checkSection.style.display = 'none';
+  }
   document.getElementById('reviewTranscript').textContent = job.transcript_text || '(transcript not available)';
 
   // Description prefix
@@ -851,6 +873,7 @@ async function showConfig() {
       document.getElementById('cfgExts').value = c.video_extensions || '';
       document.getElementById('cfgTitlePrompt').value = c.default_title_prompt || 'youtube-title';
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
+      document.getElementById('cfgCheckPrompt').value = c.default_check_prompt || '';
       document.getElementById('cfgSignature').value = c.signature || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
@@ -865,6 +888,7 @@ async function saveConfig() {
     video_extensions: document.getElementById('cfgExts').value,
     default_title_prompt: document.getElementById('cfgTitlePrompt').value || 'youtube-title',
     default_description_prompt: document.getElementById('cfgDescPrompt').value || 'youtube-summary',
+    default_check_prompt: document.getElementById('cfgCheckPrompt').value,
     signature: document.getElementById('cfgSignature').value,
     post_publish_script: document.getElementById('cfgPostScript').value,
     transcript_script: document.getElementById('cfgTranscriptScript').value,
@@ -886,6 +910,7 @@ async function toggleConfig() {
       document.getElementById('cfgExts').value = c.video_extensions || '';
       document.getElementById('cfgTitlePrompt').value = c.default_title_prompt || 'youtube-title';
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
+      document.getElementById('cfgCheckPrompt').value = c.default_check_prompt || '';
       document.getElementById('cfgSignature').value = c.signature || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
@@ -967,6 +992,11 @@ async function refreshPool() {
     const name = item.source.split('/').pop();
     const st = item.status;
     let html = `<span>${name} <small style="color:var(--dim)">(${st})</small></span>`;
+    if (item.check_result !== null && item.check_result !== undefined) {
+      const isOk = _isCheckOk(item.check_result);
+      const detail = isOk ? 'Content check: OK' : `Content check: ${item.check_result}`;
+      html += ` <span title="${detail.replace(/"/g, '&quot;')}" style="cursor:help;">${isOk ? '✅' : '⚠️'}</span>`;
+    }
 
     // Show steps + live timer if we have job progress
     if (item.job && item.job.steps) {
@@ -988,7 +1018,12 @@ async function refreshPool() {
     // Finished / error item: time + logs (use existing name line above)
     if (item.status === 'finished' || item.status === 'error') {
       if (item.video_url) {
-        html += `<div><a href="${item.video_url}" target="_blank" style="color:var(--link);font-size:12px;">▶ Watch</a></div>`;
+        if (item.title) {
+          const label = item.title.length > 40 ? item.title.slice(0, 40) + '…' : item.title;
+          html += `<div><a href="${item.video_url}" target="_blank" style="color:var(--link);font-size:12px;" title="${item.title.replace(/"/g, '&quot;')}">▶ ${label}</a></div>`;
+        } else {
+          html += `<div><a href="${item.video_url}" target="_blank" style="color:var(--link);font-size:12px;">▶ Watch</a></div>`;
+        }
       }
       if (item.studio_url) {
         html += `<div><a href="${item.studio_url}" target="_blank" style="color:var(--link);font-size:12px;">✏️ Edit in Studio</a></div>`;
@@ -1012,10 +1047,14 @@ async function refreshPool() {
     const transcriptBtn = (item.status === 'finished' || item.status === 'error')
       ? `<button title="Run transcript script" onclick="poolRunTranscriptScript('${item.source}')">📜</button>`
       : '';
+    const rerunCheckBtn = (item.status === 'finished' || item.status === 'error')
+      ? `<button title="Rerun content check" onclick="poolRerunCheck('${item.source}')">🔍</button>`
+      : '';
     const actions = `<span class="pool-actions">` +
       redoPostPublishBtn +
       infoBtn +
       transcriptBtn +
+      rerunCheckBtn +
       `<button title="Redo" onclick="poolRedoItem('${item.source}')">🔄</button>` +
       `<button title="Remove" onclick="poolRemove('${item.source}')">✕</button>` +
       `</span>`;
@@ -1043,6 +1082,20 @@ async function poolRedoItem(source) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })
   });
+  refreshPool();
+}
+
+async function poolRerunCheck(source) {
+  const r = await fetch('/api/short_publish/pool/rerun-check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source })
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    alert(data.detail || 'Rerun check failed');
+    return;
+  }
   refreshPool();
 }
 

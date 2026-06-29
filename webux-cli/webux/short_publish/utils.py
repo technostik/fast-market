@@ -55,6 +55,8 @@ def _save_meta(job) -> None:
         meta["video_url"] = job.video_url
     if job.studio_url:
         meta["studio_url"] = job.studio_url
+    if job.check_result is not None:
+        meta["check_result"] = job.check_result
     try:
         with open(_meta_path(job.source), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)

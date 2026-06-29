@@ -54,6 +54,7 @@ class Job:
     language: str
     model: str
     privacy: str
+    prompt_check: str = ""
     description_prefix: str = ""
     skip_upload: bool = False
     use_modal: bool = True
@@ -64,6 +65,7 @@ class Job:
     title: str = ""
     description: str = ""
     transcript_text: str = ""
+    check_result: str | None = None
     status: str = "running"
     video_url: str = ""
     studio_url: str = ""
@@ -84,6 +86,7 @@ class Job:
             "title": self.title,
             "description": self.description,
             "transcript_text": self.transcript_text,
+            "check_result": self.check_result,
             "files": self.files,
             "start_time": self.start_time,
             "elapsed_seconds": round(job_elapsed, 1),

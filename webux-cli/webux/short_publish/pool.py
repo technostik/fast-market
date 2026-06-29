@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import DEFAULT_VIDEO_SOURCE_PATH
-from .utils import _load_publish_cfg
+from .utils import _load_publish_cfg, _load_meta
 
 
 @dataclass
@@ -26,6 +26,8 @@ class PoolItem:
     studio_url: str = ""
     elapsed_seconds: Optional[float] = None
     error_message: str = ""
+    title: str = ""
+    check_result: Optional[str] = None
 
 
 _pool: list[PoolItem] = []
@@ -59,6 +61,8 @@ def _load_pool_from_disk():
                 finished_at=item.get("finished_at"),
                 video_url=item.get("video_url", ""),
                 studio_url=item.get("studio_url", ""),
+                title=item.get("title", "") or _load_meta(item["source"]).get("title", ""),
+                check_result=item.get("check_result"),
             )
             for item in data.get("items", [])
         ]
@@ -81,6 +85,8 @@ def _save_pool_to_disk():
                 "finished_at": it.finished_at,
                 "video_url": it.video_url,
                 "studio_url": it.studio_url,
+                "title": it.title,
+                "check_result": it.check_result,
             }
             for it in _pool
         ]
@@ -181,6 +187,8 @@ def get_pool_state() -> dict:
             "studio_url": it.studio_url,
             "elapsed_seconds": it.elapsed_seconds,
             "error_message": it.error_message,
+            "title": it.title,
+            "check_result": it.check_result,
         }
         # If processing and we have a job_id, attach live job status
         if it.job_id and it.status == "processing":
@@ -243,6 +251,8 @@ async def _pool_worker():
                 next_item.finished_at = time.time()
                 next_item.video_url = job.video_url or ""
                 next_item.studio_url = job.studio_url or ""
+                next_item.title = job.title or ""
+                next_item.check_result = job.check_result
                 if job.end_time and job.start_time:
                     next_item.elapsed_seconds = round(job.end_time - job.start_time, 1)
                 elif job.start_time:
@@ -317,6 +327,33 @@ def clear_finished():
     global _pool
     _pool = [it for it in _pool if it.status != "finished"]
     _save_pool_to_disk()
+
+
+async def rerun_check(source: str) -> str | None:
+    from .utils import _pr, _stem
+    src = str(Path(source).expanduser().resolve())
+    item = next((it for it in _pool if it.source == src), None)
+    if not item:
+        return None
+    pub = _load_publish_cfg()
+    check_prompt = pub.get("default_check_prompt", "").strip()
+    if not check_prompt:
+        return None
+    d = Path(pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH)).expanduser().resolve()
+    txt_path = d / f"{_stem(src)}_transcript.txt"
+    if not txt_path.exists():
+        return None
+    proc = await asyncio.create_subprocess_exec(
+        _pr(), "apply", check_prompt, f"transcript=@{txt_path}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    result = stdout.decode(errors="replace").strip() if proc.returncode == 0 else None
+    if result is not None:
+        item.check_result = result
+        _save_pool_to_disk()
+    return result
 
 
 def find_pool_item(source: str) -> dict | None:

@@ -41,6 +41,7 @@ from .pool import (
     redo_current,
     _load_pool_from_disk,
     clear_finished,
+    rerun_check,
 )
 
 router = APIRouter()
@@ -66,6 +67,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         source=source,
         prompt_title=pub.get("default_title_prompt", "youtube-title"),
         prompt_summary=pub.get("default_description_prompt", "youtube-summary"),
+        prompt_check=pub.get("default_check_prompt", ""),
         do_remove_silence=True,
         do_burn_subtitles=True,
         simple_transcript=True,
@@ -101,6 +103,7 @@ async def get_config():
         "transcript_script": pub.get("transcript_script", ""),
         "default_title_prompt": pub.get("default_title_prompt", "youtube-title"),
         "default_description_prompt": pub.get("default_description_prompt", "youtube-summary"),
+        "default_check_prompt": pub.get("default_check_prompt", ""),
         "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings/usage"),
     }
 
@@ -113,6 +116,7 @@ class ConfigSaveRequest(BaseModel):
     transcript_script: str = ""
     default_title_prompt: str = "youtube-title"
     default_description_prompt: str = "youtube-summary"
+    default_check_prompt: str = ""
     modal_usage_url: str = "https://modal.com/settings/usage"
 
 
@@ -126,6 +130,7 @@ async def save_config(req: ConfigSaveRequest):
     pub["transcript_script"] = req.transcript_script
     pub["default_title_prompt"] = req.default_title_prompt
     pub["default_description_prompt"] = req.default_description_prompt
+    pub["default_check_prompt"] = req.default_check_prompt
     pub["modal_usage_url"] = req.modal_usage_url
     _save_publish_cfg(pub)
     return {"ok": True}
@@ -291,6 +296,7 @@ class StartRequest(BaseModel):
     source: str
     prompt_title: str
     prompt_summary: str
+    prompt_check: str = ""
     do_remove_silence: bool = True
     do_burn_subtitles: bool = True
     simple_transcript: bool = True
@@ -308,6 +314,7 @@ class ResumeRequest(BaseModel):
     source: str
     prompt_title: str
     prompt_summary: str
+    prompt_check: str = ""
     from_step: int = 3
     do_burn_subtitles: bool = True
     simple_transcript: bool = True
@@ -327,12 +334,14 @@ async def start(req: StartRequest):
     if not Path(source).exists():
         raise HTTPException(status_code=400, detail=f"File not found: {source}")
 
+    pub = _load_publish_cfg()
     job_id = str(uuid.uuid4())
     job = Job(
         job_id=job_id,
         source=source,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
+        prompt_check=req.prompt_check or pub.get("default_check_prompt", ""),
         do_remove_silence=req.do_remove_silence,
         do_burn_subtitles=req.do_burn_subtitles,
         simple_transcript=req.simple_transcript,
@@ -397,12 +406,14 @@ async def resume(req: ResumeRequest):
     completed_before = set(meta.get("completed_steps", []))
     skipped_before = set(meta.get("skipped_steps", []))
 
+    pub_cfg = _load_publish_cfg()
     job_id = str(uuid.uuid4())
     job = Job(
         job_id=job_id,
         source=source,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
+        prompt_check=req.prompt_check or pub_cfg.get("default_check_prompt", ""),
         do_remove_silence=False,
         do_burn_subtitles=req.do_burn_subtitles,
         simple_transcript=req.simple_transcript,
@@ -691,6 +702,18 @@ async def pool_redo():
 async def pool_clear_finished():
     clear_finished()
     return {"ok": True}
+
+
+class RerunCheckRequest(BaseModel):
+    source: str
+
+
+@router.post("/pool/rerun-check")
+async def pool_rerun_check(req: RerunCheckRequest):
+    result = await rerun_check(req.source)
+    if result is None:
+        raise HTTPException(status_code=400, detail="Check failed or no transcript/prompt configured")
+    return {"check_result": result}
 
 
 # ── Browser visibility control ────────────────────────────────────────────────
