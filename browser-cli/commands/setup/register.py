@@ -8,7 +8,6 @@ from common.core.paths import get_tool_config_path
 _DEFAULT_CONFIG = {
     "browser": "google-chrome",
     "cdp_port": 9222,
-    "user_data_dir": "~/.chrome-debug-profile",
     "extra_args": [],
 }
 

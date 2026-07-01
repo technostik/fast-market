@@ -189,7 +189,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--user-data-dir",
         "-u",
         default=None,
-        help="Chrome user data directory (default: ~/.chrome-debug-profile).",
+        help="Chrome user data directory (defaults to the active profile's browser session dir).",
     )
     @click.option(
         "--no-auto-browser",

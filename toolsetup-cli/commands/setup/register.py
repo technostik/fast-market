@@ -668,7 +668,6 @@ def _get_tool_default_config(tool: str) -> dict | None:
         "browser": {
             "browser": "google-chrome",
             "cdp_port": 9222,
-            "user_data_dir": "~/.chrome-debug-profile",
             "extra_args": [],
         },
         "image": {
