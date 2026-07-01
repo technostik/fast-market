@@ -475,12 +475,13 @@ def register():
         help="LLM provider to test (overrides default)",
     )
     def diagnose_cmd(fmt, provider):
-        """Run diagnostic tests on workdir, LLM, and YouTube configuration.
+        """Run diagnostic tests on workdir, LLM, YouTube, and Groq transcription.
 
         Performs health checks on:
         - Workdir configuration and existence
         - LLM provider connectivity
         - YouTube API setup and credentials
+        - Groq API transcription via test fixture clip
         """
         from commands.setup.diagnose import (
             run_all_diagnostics,
