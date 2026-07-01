@@ -105,9 +105,15 @@ td.notes-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; col
       <label>Extensions</label>
       <input id="extInput" type="text" placeholder="mp4,wav,mp3,..." />
     </div>
+    <div class="field">
+      <label>&nbsp;</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);padding:7px 0;">
+        <input type="checkbox" id="forceRecomputeInput" style="width:auto;" /> Force recompute all
+      </label>
+    </div>
     <button id="scanBtn" onclick="startScan()">▶ Scan &amp; Analyze</button>
   </div>
-  <div class="hint">Scans the top level of the folder only (no subfolders). Runs 3 files concurrently through <code>sound charisma</code>.</div>
+  <div class="hint">Scans the top level of the folder only (no subfolders). Runs 3 files concurrently through <code>sound charisma</code>. Scores are cached in <code>.charisma-scores.json</code> inside the scanned folder — already-scored files are reused unless "Force recompute all" is checked or the file changed.</div>
 
   <div class="error-banner" id="errorBanner"></div>
 
@@ -162,6 +168,7 @@ let currentFiles = [];
 let sortState = { key: 'charisma_score', dir: 'desc' };
 let pollTimer = null;
 let currentJobId = null;
+let lastCachedCount = 0;
 
 function buildHeader() {
   const row = document.getElementById('headerRow');
@@ -259,7 +266,7 @@ function renderTable() {
     tr.innerHTML = `
       <td>${done ? `<button class="btn-sec" onclick="playFile('${escapeHtml(f.path).replace(/'/g, "\\'")}', '${f.kind}', '${escapeHtml(f.name).replace(/'/g, "\\'")}')">▶</button>` : ''}</td>
       <td class="name-cell" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</td>
-      <td>${f.kind === 'video' ? '🎬' : '🎵'}</td>
+      <td title="${f.cached ? 'From cache (.charisma-scores.json)' : done ? 'Freshly analyzed' : ''}">${f.kind === 'video' ? '🎬' : '🎵'}${f.cached ? ' 📦' : ''}</td>
       <td>${done ? scoreCell(f.charisma_score, true) : statusBadge(f)}</td>
       <td>${done ? scoreCell(f.prosody_features_score, true) : ''}</td>
       <td>${done ? scoreCell(f.voice_quality_score, true) : ''}</td>
@@ -336,6 +343,7 @@ async function startScan() {
   showError(null);
   const folder = document.getElementById('folderInput').value.trim();
   const extensions = document.getElementById('extInput').value.trim();
+  const forceRecompute = document.getElementById('forceRecomputeInput').checked;
   if (!folder) { showError('Enter a folder path.'); return; }
 
   const scanBtn = document.getElementById('scanBtn');
@@ -347,7 +355,7 @@ async function startScan() {
     const r = await fetch('/api/charisma/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder, extensions }),
+      body: JSON.stringify({ folder, extensions, force_recompute: forceRecompute }),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -362,6 +370,7 @@ async function startScan() {
       scanBtn.disabled = false;
       return;
     }
+    lastCachedCount = data.cached || 0;
     document.getElementById('progressWrap').style.display = '';
     pollStatus();
   } catch (e) {
@@ -382,7 +391,8 @@ async function pollStatus() {
   const bar = document.getElementById('progressBar');
   bar.value = job.progress;
   const label = document.getElementById('progressLabel');
-  label.textContent = `${job.completed} / ${job.total} analyzed` +
+  const cacheNote = lastCachedCount ? ` (${lastCachedCount} 📦 from cache)` : '';
+  label.textContent = `${job.completed} / ${job.total} analyzed${cacheNote}` +
     (job.status === 'running' ? ` — eta ~${Math.round(job.eta_seconds)}s` : ` — done in ${job.elapsed_seconds}s`);
 
   if (job.status === 'done') {

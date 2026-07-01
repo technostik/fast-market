@@ -23,6 +23,7 @@ class FileResult:
     status: str = "pending"  # pending | running | done | error
     error: str | None = None
     scores: dict[str, Any] | None = None  # full `sound charisma --format json` output
+    cached: bool = False  # scores came from the folder's .charisma-scores.json, not a fresh run
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -31,6 +32,7 @@ class FileResult:
             "kind": self.kind,
             "status": self.status,
             "error": self.error,
+            "cached": self.cached,
         }
         if self.scores:
             d.update(self.scores)

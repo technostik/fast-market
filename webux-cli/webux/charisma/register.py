@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from common.webux.base import WebuxPluginManifest
 
+from .cache import get_cached_entry, load_cache, save_cache_entry
 from .models import DEFAULT_EXTENSIONS, DEFAULT_FOLDER, FileResult, ScanJob, file_kind
 from .utils import _sound, default_extensions, default_folder, save_charisma_cfg
 
@@ -52,7 +53,9 @@ def _scan_folder(folder: str, extensions: str) -> list[Path]:
     )
 
 
-async def _analyze_file(fr: FileResult) -> None:
+async def _analyze_file(fr: FileResult, folder: Path) -> None:
+    """Run a fresh `sound charisma` analysis and persist it to the folder's cache.
+    Only called for files that were NOT resolved from cache in `start()`."""
     fr.status = "running"
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -67,19 +70,23 @@ async def _analyze_file(fr: FileResult) -> None:
             return
         fr.scores = json.loads(stdout.decode(errors="replace"))
         fr.status = "done"
+        fr.cached = False
+        await save_cache_entry(folder, Path(fr.path), fr.scores)
     except Exception as e:
         fr.status = "error"
         fr.error = str(e)
 
 
-async def _run_scan_job(job: ScanJob) -> None:
+async def _run_scan_job(job: ScanJob, to_analyze: list[FileResult], folder: Path) -> None:
+    """Analyze only `to_analyze` (files that missed the cache) with bounded concurrency.
+    Cache hits are already resolved synchronously in start() and never enter this queue."""
     sem = asyncio.Semaphore(_CONCURRENCY)
 
     async def _worker(fr: FileResult) -> None:
         async with sem:
-            await _analyze_file(fr)
+            await _analyze_file(fr, folder)
 
-    await asyncio.gather(*(_worker(fr) for fr in job.files))
+    await asyncio.gather(*(_worker(fr) for fr in to_analyze))
     job.status = "done"
     job.end_time = time.time()
 
@@ -100,9 +107,16 @@ async def scan(
 ):
     files = _scan_folder(path, extensions)
     save_charisma_cfg(path, extensions)
+    folder_path = Path(path).expanduser()
+    cache = load_cache(folder_path)
     return {
         "files": [
-            {"name": f.name, "path": str(f), "kind": file_kind(f.suffix)}
+            {
+                "name": f.name,
+                "path": str(f),
+                "kind": file_kind(f.suffix),
+                "cached": get_cached_entry(cache, f) is not None,
+            }
             for f in files
         ]
     }
@@ -111,28 +125,43 @@ async def scan(
 class StartRequest(BaseModel):
     folder: str
     extensions: str = DEFAULT_EXTENSIONS
+    force_recompute: bool = False
 
 
 @router.post("/start")
 async def start(req: StartRequest):
     files = _scan_folder(req.folder, req.extensions)
     save_charisma_cfg(req.folder, req.extensions)
+    folder_path = Path(req.folder).expanduser()
+
+    # Resolve cache hits synchronously and up front, so they never touch the
+    # analysis queue — only files missing from (or invalidated in) the folder's
+    # .charisma-scores.json get queued for a fresh `sound charisma` run.
+    cache = {"files": {}} if req.force_recompute else load_cache(folder_path)
+    file_results: list[FileResult] = []
+    to_analyze: list[FileResult] = []
+    for f in files:
+        fr = FileResult(path=str(f), name=f.name, kind=file_kind(f.suffix))
+        cached_entry = get_cached_entry(cache, f)
+        if cached_entry:
+            fr.scores = cached_entry["scores"]
+            fr.cached = True
+            fr.status = "done"
+        else:
+            to_analyze.append(fr)
+        file_results.append(fr)
 
     job_id = str(uuid.uuid4())
-    job = ScanJob(
-        job_id=job_id,
-        folder=req.folder,
-        files=[FileResult(path=str(f), name=f.name, kind=file_kind(f.suffix)) for f in files],
-    )
+    job = ScanJob(job_id=job_id, folder=str(folder_path), files=file_results)
     _jobs[job_id] = job
 
-    if not files:
+    if not to_analyze:
         job.status = "done"
         job.end_time = time.time()
     else:
-        asyncio.create_task(_run_scan_job(job))
+        asyncio.create_task(_run_scan_job(job, to_analyze, folder_path))
 
-    return {"job_id": job_id, "total": len(files)}
+    return {"job_id": job_id, "total": len(files), "cached": len(files) - len(to_analyze)}
 
 
 @router.get("/status/{job_id}")
