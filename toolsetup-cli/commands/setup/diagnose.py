@@ -425,6 +425,166 @@ def check_groq_transcription_health() -> DiagnosticResult:
         )
 
 
+def check_modal_connectivity_health() -> DiagnosticResult:
+    """Check Modal installation, credentials, and basic connectivity."""
+    try:
+        import modal  # noqa: F401
+    except ImportError:
+        return DiagnosticResult(
+            "modal_connectivity",
+            "error",
+            "modal Python package not installed",
+            {},
+            ["Install modal: pip install modal"],
+        )
+
+    modal_config = Path.home() / ".modal.toml"
+    if not modal_config.exists():
+        return DiagnosticResult(
+            "modal_connectivity",
+            "error",
+            "Modal credentials not found",
+            {"config_path": str(modal_config)},
+            ["Run 'modal token new' to authenticate with Modal"],
+        )
+
+    try:
+        from modal_client.app import app
+        from modal_client.diagnose import run_diagnose
+
+        with app.run():
+            result = run_diagnose.remote()
+    except Exception as e:
+        return DiagnosticResult(
+            "modal_connectivity",
+            "error",
+            f"Modal connection failed: {e}",
+            {"error": str(e)},
+            [
+                "Check internet connectivity",
+                "Verify Modal token is valid: modal token new",
+            ],
+        )
+
+    return DiagnosticResult(
+        "modal_connectivity",
+        "ok",
+        f"Modal connected (Python {result.get('python', '?')}, {result.get('ffmpeg', '?')})",
+        result,
+    )
+
+
+def check_modal_groq_transcription_health() -> DiagnosticResult:
+    """Check Groq API transcription via Modal, using the test fixture clip."""
+    import os
+
+    repo_root = Path(__file__).parent.parent.parent.parent
+    fixture = repo_root / "video-cli" / "tests" / "fixtures" / "publish" / "test_clip.mkv"
+
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(repo_root / ".env")
+    except ImportError:
+        pass
+
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return DiagnosticResult(
+            "modal_groq_transcription",
+            "error",
+            "GROQ_API_KEY environment variable not set",
+            {},
+            ["Set GROQ_API_KEY in your environment or .env file"],
+        )
+
+    if not fixture.exists():
+        return DiagnosticResult(
+            "modal_groq_transcription",
+            "error",
+            f"Test fixture not found: {fixture}",
+            {"fixture": str(fixture)},
+            ["Run from the repo root"],
+        )
+
+    try:
+        import modal  # noqa: F401
+    except ImportError:
+        return DiagnosticResult(
+            "modal_groq_transcription",
+            "error",
+            "modal Python package not installed",
+            {},
+            ["Install modal: pip install modal"],
+        )
+
+    modal_config = Path.home() / ".modal.toml"
+    if not modal_config.exists():
+        return DiagnosticResult(
+            "modal_groq_transcription",
+            "error",
+            "Modal credentials not found",
+            {},
+            ["Run 'modal token new' to authenticate with Modal"],
+        )
+
+    video_bytes = fixture.read_bytes()
+
+    try:
+        from modal_client.app import app
+        from modal_client.remote_steps import remote_extract_transcript
+
+        with app.run():
+            result = remote_extract_transcript.remote(
+                video_bytes,
+                fixture.name,
+                language="fr",
+                model_size="medium",
+                subtitle_size=96,
+                use_groq=True,
+                output_format="ass",
+            )
+    except Exception as e:
+        error_str = str(e)
+        recommendations = ["Check GROQ_API_KEY is set in .env file (used by Modal)"]
+        if "401" in error_str or "Unauthorized" in error_str:
+            recommendations.append(
+                "Verify GROQ_API_KEY is valid at console.groq.com"
+            )
+        elif "timeout" in error_str.lower():
+            recommendations.append("Modal cold start may be slow — try again")
+        else:
+            recommendations.append("Check Modal logs for details")
+        return DiagnosticResult(
+            "modal_groq_transcription",
+            "error",
+            f"Modal Groq transcription failed: {error_str[:200]}",
+            {"error": error_str[:500]},
+            recommendations,
+        )
+
+    ass_text = result.get("ass_txt", "")
+    ass_bytes_len = len(result.get("ass_bytes", b""))
+    details = {"ass_bytes": ass_bytes_len, "transcript_length": len(ass_text)}
+    if ass_text:
+        details["transcript_preview"] = ass_text[:120]
+
+    if ass_text:
+        return DiagnosticResult(
+            "modal_groq_transcription",
+            "ok",
+            f"Modal Groq transcription successful ({ass_bytes_len} bytes ASS, {len(ass_text)} chars)",
+            details,
+        )
+    else:
+        return DiagnosticResult(
+            "modal_groq_transcription",
+            "warning",
+            "Modal Groq returned empty transcript",
+            details,
+            ["Check that the test clip contains audible speech"],
+        )
+
+
 def run_all_diagnostics(provider: str | None = None) -> list[DiagnosticResult]:
     """Run all diagnostic checks."""
     results = []
@@ -438,8 +598,14 @@ def run_all_diagnostics(provider: str | None = None) -> list[DiagnosticResult]:
     # YouTube checks
     results.extend(check_youtube_health())
 
-    # Groq transcription check
+    # Groq transcription check (local)
     results.append(check_groq_transcription_health())
+
+    # Modal connectivity check
+    results.append(check_modal_connectivity_health())
+
+    # Modal Groq transcription check
+    results.append(check_modal_groq_transcription_health())
 
     return results
 
