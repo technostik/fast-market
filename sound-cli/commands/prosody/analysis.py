@@ -9,6 +9,8 @@ import click
 import librosa
 import numpy as np
 
+from commands.scoring import target_band_score as _target_band_score
+
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 TARGET_SR = 22050
 
@@ -58,13 +60,20 @@ def load_audio(path: Path) -> tuple[np.ndarray, int]:
     return y, sr
 
 
-def analyze_pitch(y: np.ndarray, sr: int) -> dict:
+def compute_f0_contour(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
+    """Shared pitch tracker: returns (f0, voiced_flag) from librosa.pyin, reused by
+    both prosody and charisma analysis so pyin only runs once per concern."""
     f0, voiced_flag, _ = librosa.pyin(
         y,
         fmin=librosa.note_to_hz("C2"),
         fmax=librosa.note_to_hz("C6"),
         sr=sr,
     )
+    return f0, voiced_flag
+
+
+def analyze_pitch(y: np.ndarray, sr: int) -> dict:
+    f0, voiced_flag = compute_f0_contour(y, sr)
     voiced = f0[voiced_flag & ~np.isnan(f0)] if f0 is not None else np.array([])
 
     if voiced.size == 0:
@@ -121,16 +130,6 @@ def analyze_rate(y: np.ndarray, sr: int, intervals: np.ndarray) -> dict:
     onset_times = librosa.onset.onset_detect(y=speech_y, sr=sr, units="time")
     rate_per_sec = float(len(onset_times) / speech_secs)
     return {"rate_per_sec": rate_per_sec}
-
-
-def _target_band_score(value: float, low: float, ideal_low: float, ideal_high: float, high: float) -> float:
-    if value <= low or value >= high:
-        return 0.0
-    if ideal_low <= value <= ideal_high:
-        return 100.0
-    if value < ideal_low:
-        return 100.0 * (value - low) / max(1e-9, ideal_low - low)
-    return 100.0 * (high - value) / max(1e-9, high - ideal_high)
 
 
 def score_prosody(y: np.ndarray, sr: int) -> dict:

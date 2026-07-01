@@ -11,7 +11,7 @@ sound-cli/
 │   └── __init__.py        # Imports main from cli.main
 ├── core/                  # Core logic (models, config)
 ├── plugins/               # Engine plugins (kokoro, qwen3, musicgen)
-├── commands/              # CLI commands (speak, music, prosody)
+├── commands/              # CLI commands (speak, music, prosody, charisma)
 └── common/                # Symlink to shared utilities
 ```
 
@@ -21,7 +21,7 @@ sound-cli/
 
 | File | Purpose |
 |------|---------|
-| `models.py` | `TTSRequest`, `TTSResult`, `MusicGenResult`, `ProsodyResult` dataclasses |
+| `models.py` | `TTSRequest`, `TTSResult`, `MusicGenResult`, `ProsodyResult`, `CharismaResult` dataclasses |
 | `config.py` | Config loading and default values |
 
 ### Plugins (`plugins/`)
@@ -45,6 +45,8 @@ sound-cli/
 | `speak/` | `sound speak` command |
 | `music/` | `sound music` command |
 | `prosody/` | `sound prosody` command - `analysis.py` (signal processing/scoring) + `register.py` (CLI wiring) |
+| `charisma/` | `sound charisma` command - reuses `prosody.analysis` + adds intonation/voice-quality proxies |
+| `scoring.py` | Shared `target_band_score()` / `inverse_band_score()` curves used by both `prosody` and `charisma` |
 
 ## Core Responsibilities
 
@@ -68,6 +70,12 @@ sound-cli/
 - Score pitch/intonation, loudness dynamics, pausing/rhythm, and speaking rate via `librosa` (pyin, RMS, silence splitting, onset detection) — no ML model, fully offline
 - Each dimension is scored 0-100 against a heuristic "ideal band" (see `commands/prosody/analysis.py` constants), then combined into a weighted `global_score`
 - Plugin-free: this is a pure analysis command, not a swappable engine — see Extension Points below
+
+### Charisma Analysis
+- Builds on `sound prosody`: calls `score_prosody()` directly for pitch/energy/rhythm/rate, then adds intonation dynamism (rate of F0 direction reversals) and voice-quality proxies (spectral centroid resonance, harmonic-vs-percussive clarity via HPSS, F0/RMS frame-to-frame perturbation as jitter/shimmer proxies)
+- Combines into `charisma_score` with 70% prosody / 20% voice quality / 10% derived "other" weighting (see `commands/charisma/analysis.py` constants)
+- `percentile_estimate` and the `notes` strengths/weaknesses summary are explicitly labeled approximations, not validated against real normative or population data — do not present them as more precise than that when extending this feature
+- Voice-quality proxies are **not** clinical Praat-style jitter/shimmer/HNR (that needs `parselmouth`, not installed) — if true clinical-grade measurement is ever needed, that's a deliberate new dependency decision, not a silent swap
 
 ### Plugin System
 - Auto-discover plugins from `plugins/*/register.py`
@@ -181,6 +189,8 @@ base_model.generate_voice_clone(text=user_text, ref_audio=ref_path, ref_text=REF
 | `sound music "jazz" -d 10` | Music with custom duration |
 | `sound prosody speech.wav` | Prosody analysis with global 0-100 score |
 | `sound prosody talk.mp4 --format json` | Prosody analysis of a video's audio track |
+| `sound charisma speech.wav` | Charisma analysis with global 0-100 score |
+| `sound charisma talk.mp4 --format json` | Charisma analysis of a video's audio track |
 | `sound --show-completion` | Print shell completion script |
 | `sound --install-completion` | Install shell completion |
 
@@ -226,8 +236,8 @@ If weights are omitted, they are normalized equally. If only some have weights, 
 - `click` - CLI framework
 - `pyyaml` - config loading
 - `soundfile` - audio file I/O
-- `librosa` - prosody analysis (pitch, energy, rhythm)
-- `ffmpeg` (system binary) - audio extraction from video for `prosody`
+- `librosa` - prosody/charisma analysis (pitch, energy, rhythm, voice quality)
+- `ffmpeg` (system binary) - audio extraction from video for `prosody`/`charisma`
 - `kokoro` - Kokoro TTS engine (optional)
 - `qwen-tts` - Qwen3-TTS engine (optional)
 - `transformers` - MusicGen model (core dep)

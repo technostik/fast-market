@@ -30,6 +30,6 @@ where = ["."]
 include = [
     "common*", "cli*", "core*",
     "plugins*", "plugins.kokoro*", "plugins.qwen3*", "plugins.musicgen*",
-    "commands*", "commands.speak*", "commands.music*", "commands.setup*", "commands.prosody*",
+    "commands*", "commands.speak*", "commands.music*", "commands.setup*", "commands.prosody*", "commands.charisma*",
     "sound_entry*",
 ]

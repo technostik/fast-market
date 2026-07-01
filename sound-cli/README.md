@@ -141,6 +141,8 @@ sound speak "こんにちは" -L ja
 | `sound music "upbeat electronic" -d 10` | Music with custom duration |
 | `sound prosody speech.wav` | Analyze prosody, print a global 0-100 score |
 | `sound prosody clip.mp4 --format json` | Prosody analysis of a video's audio track |
+| `sound charisma speech.wav` | Estimate vocal charisma, print a global 0-100 score |
+| `sound charisma clip.mp4 --format json` | Charisma analysis of a video's audio track |
 
 ### `sound speak [TEXT]`
 
@@ -212,6 +214,38 @@ Analyze the prosody of a speech audio or video file — pitch/intonation, loudne
 ```bash
 sound prosody interview.wav
 sound prosody talk.mp4 --format json -o report.json
+```
+
+### `sound charisma <FILE>`
+
+Estimate the vocal charisma of a speech audio or video file: a 0-100 score combining prosody & acoustic dynamism (70%), voice quality (20%), and expressiveness/engagement (10%), per the weighting used in vocal-charisma research (Niebuhr, Signorello, Rodero et al.). Reuses the same `sound prosody` signal analysis for pitch/energy/rhythm/rate, and adds intonation dynamism (rate of pitch direction reversals) and voice-quality proxies (spectral resonance, harmonic-vs-percussive clarity, F0/RMS perturbation as jitter/shimmer proxies). Fully offline, no new dependency beyond `librosa`.
+
+**Important limitation:** the voice-quality subscores (`hnr_score`, `stability_score`) are *proxies* computed from frame-level signal analysis, not clinical Praat-style pitch-period jitter/shimmer/HNR measurements (that would require the `parselmouth` library, not installed here). `percentile_estimate` is a rough illustrative figure assuming charisma scores are normally distributed (mean 50, sd 15) across speakers in general — it is **not** derived from a validated normative dataset or research on media professionals, so treat it as a rough compass, not a citation.
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--output` | `-o` | Also write the full JSON report to this path |
+| `--format` | `-F` | Output format: `json`, `text`, or `yaml` |
+
+**Score breakdown:**
+
+| Field | Meaning |
+|-------|---------|
+| `charisma_score` | Weighted overall score: 70% prosody, 20% voice quality, 10% other |
+| `prosody_features_score` | Mean of pitch, energy, rhythm, rate, and intonation subscores |
+| `voice_quality_score` | Mean of resonance, harmonic-clarity, and stability subscores |
+| `other_score` | Derived expressiveness/engagement composite (intonation + energy + rate) |
+| `intonation_score` | Dynamism of pitch contour — rate of rise/fall direction changes |
+| `resonance_score` | Spectral centroid as a rough timbre/resonance proxy |
+| `hnr_score` | Harmonic-vs-percussive energy ratio as a rough clarity proxy |
+| `stability_score` | Mean of jitter and shimmer proxies (frame-level F0/RMS perturbation) |
+| `percentile_estimate` | Illustrative percentile only — see limitation note above |
+| `notes` | Rule-based strengths/weaknesses derived from the subscores above |
+
+**Examples:**
+```bash
+sound charisma interview.wav
+sound charisma keynote.mp4 --format json -o report.json
 ```
 
 ## Engines
@@ -306,7 +340,9 @@ sound-cli/
 │   ├── helpers.py         # build_engine()
 │   ├── speak/             # sound speak command
 │   ├── music/             # sound music command
-│   └── prosody/           # sound prosody command (analysis.py + register.py)
+│   ├── prosody/           # sound prosody command (analysis.py + register.py)
+│   ├── charisma/          # sound charisma command (analysis.py + register.py)
+│   └── scoring.py         # shared target_band_score()/inverse_band_score() curves
 └── common/                # Symlink to shared utilities
 ```
 
@@ -317,8 +353,8 @@ sound-cli/
 - `pyyaml>=6.0` - config loading
 - `soundfile>=0.12` - audio file I/O
 - `torch>=2.0` - tensor operations
-- `librosa>=0.10` - prosody analysis (pitch, energy, rhythm)
-- `ffmpeg` (system binary) - audio extraction from video for `sound prosody`
+- `librosa>=0.10` - prosody/charisma analysis (pitch, energy, rhythm, voice quality)
+- `ffmpeg` (system binary) - audio extraction from video for `sound prosody` / `sound charisma`
 
 ### Optional Engines
 - `kokoro>=0.9` - Kokoro TTS (lightweight)

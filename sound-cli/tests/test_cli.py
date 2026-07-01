@@ -91,6 +91,26 @@ class TestCLICommands:
         assert result.exit_code != 0
         assert "Error" in result.output or "Usage" in result.output
 
+    def test_charisma_help(self, runner):
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["charisma", "--help"])
+        assert result.exit_code == 0
+        assert "FILE" in result.output
+        assert "--output" in result.output
+        assert "-o" in result.output
+        assert "--format" in result.output
+        assert "-F" in result.output
+
+    def test_charisma_missing_file(self, runner):
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["charisma", "/tmp/does_not_exist_charisma.wav"])
+        assert result.exit_code != 0
+        assert "Error" in result.output or "Usage" in result.output
+
 
 class TestKokoroPlugin:
     def test_parse_voice_string_single(self):
@@ -311,6 +331,70 @@ class TestModels:
         assert data["global_score"] == 72.5
         assert data["median_f0_hz"] == 180.0
 
+    def test_charisma_result_to_dict(self):
+        from core.models import CharismaResult
+        from pathlib import Path
+
+        result = CharismaResult(
+            path=Path("/tmp/clip.wav"),
+            charisma_score=60.8,
+            prosody_features_score=61.1,
+            voice_quality_score=51.7,
+            other_score=77.0,
+            pitch_score=74.5,
+            energy_score=68.2,
+            rhythm_score=0.0,
+            rate_score=100.0,
+            intonation_score=62.8,
+            resonance_score=45.9,
+            hnr_score=14.3,
+            stability_score=94.9,
+            duration_secs=7.88,
+            percentile_estimate=76.4,
+            notes="strengths: speaking rate; weaknesses: pausing/rhythm",
+        )
+        data = result.to_dict()
+        assert data["path"] == "/tmp/clip.wav"
+        assert data["charisma_score"] == 60.8
+        assert "speaking rate" in data["notes"]
+
+
+class TestSharedScoring:
+    def test_target_band_score_ideal(self):
+        from commands.scoring import target_band_score
+
+        assert target_band_score(6.0, 1.0, 4.0, 12.0, 20.0) == 100.0
+
+    def test_target_band_score_at_extremes(self):
+        from commands.scoring import target_band_score
+
+        assert target_band_score(1.0, 1.0, 4.0, 12.0, 20.0) == 0.0
+        assert target_band_score(20.0, 1.0, 4.0, 12.0, 20.0) == 0.0
+        assert target_band_score(0.0, 1.0, 4.0, 12.0, 20.0) == 0.0
+        assert target_band_score(30.0, 1.0, 4.0, 12.0, 20.0) == 0.0
+
+    def test_target_band_score_monotonic_ramp(self):
+        from commands.scoring import target_band_score
+
+        low_side = target_band_score(2.0, 1.0, 4.0, 12.0, 20.0)
+        high_side = target_band_score(3.0, 1.0, 4.0, 12.0, 20.0)
+        assert 0.0 < low_side < high_side <= 100.0
+
+    def test_inverse_band_score_good_and_bad(self):
+        from commands.scoring import inverse_band_score
+
+        assert inverse_band_score(0.0, 0.02, 0.12) == 100.0
+        assert inverse_band_score(0.02, 0.02, 0.12) == 100.0
+        assert inverse_band_score(0.12, 0.02, 0.12) == 0.0
+        assert inverse_band_score(0.20, 0.02, 0.12) == 0.0
+
+    def test_inverse_band_score_monotonic_decrease(self):
+        from commands.scoring import inverse_band_score
+
+        low = inverse_band_score(0.04, 0.02, 0.12)
+        high = inverse_band_score(0.08, 0.02, 0.12)
+        assert 100.0 > low > high > 0.0
+
 
 class TestProsodyScoring:
     def test_target_band_score_ideal(self):
@@ -369,3 +453,68 @@ class TestProsodyScoring:
         scores = score_prosody(y, sr)
         assert scores["pitch_score"] == 0.0
         assert scores["semitone_range"] == 0.0
+
+
+class TestCharismaScoring:
+    def test_score_charisma_synthetic_sine(self, tmp_path):
+        import numpy as np
+        import soundfile as sf
+
+        from commands.charisma.analysis import score_charisma
+
+        sr = 22050
+        t = np.linspace(0, 2, sr * 2, endpoint=False)
+        y = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+
+        wav_path = tmp_path / "tone.wav"
+        sf.write(str(wav_path), y, sr)
+
+        scores = score_charisma(y, sr)
+
+        expected_keys = {
+            "charisma_score", "prosody_features_score", "voice_quality_score",
+            "other_score", "pitch_score", "energy_score", "rhythm_score",
+            "rate_score", "intonation_score", "resonance_score", "hnr_score",
+            "stability_score", "duration_secs", "percentile_estimate", "notes",
+        }
+        assert expected_keys.issubset(scores.keys())
+        for key in (
+            "charisma_score", "prosody_features_score", "voice_quality_score",
+            "other_score", "intonation_score", "resonance_score", "hnr_score",
+            "stability_score",
+        ):
+            assert 0.0 <= scores[key] <= 100.0
+        assert isinstance(scores["notes"], str)
+
+    def test_score_charisma_flat_tone_scores_low(self):
+        import numpy as np
+
+        from commands.charisma.analysis import score_charisma
+
+        sr = 22050
+        t = np.linspace(0, 3, sr * 3, endpoint=False)
+        y = (0.1 * np.sin(2 * np.pi * 150 * t)).astype(np.float32)
+
+        scores = score_charisma(y, sr)
+        assert scores["intonation_score"] == 0.0
+        assert scores["charisma_score"] < 30.0
+
+    def test_score_charisma_expressive_beats_flat(self):
+        import numpy as np
+
+        from commands.charisma.analysis import score_charisma
+
+        sr = 22050
+
+        t_flat = np.linspace(0, 3, sr * 3, endpoint=False)
+        flat = (0.1 * np.sin(2 * np.pi * 150 * t_flat)).astype(np.float32)
+
+        # Frequency-modulated tone: sweeps up and down to simulate pitch movement.
+        t_exp = np.linspace(0, 3, sr * 3, endpoint=False)
+        f0_contour = 150 + 40 * np.sin(2 * np.pi * 0.5 * t_exp)
+        phase = 2 * np.pi * np.cumsum(f0_contour) / sr
+        expressive = (0.3 * np.sin(phase)).astype(np.float32)
+
+        flat_scores = score_charisma(flat, sr)
+        expressive_scores = score_charisma(expressive, sr)
+        assert expressive_scores["charisma_score"] > flat_scores["charisma_score"]

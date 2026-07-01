@@ -81,3 +81,43 @@ class ProsodyResult:
             "pause_count_per_min": self.pause_count_per_min,
             "estimated_rate_per_sec": self.estimated_rate_per_sec,
         }
+
+
+@dataclass
+class CharismaResult:
+    path: Path
+    charisma_score: float
+    prosody_features_score: float
+    voice_quality_score: float
+    other_score: float
+    pitch_score: float
+    energy_score: float
+    rhythm_score: float
+    rate_score: float
+    intonation_score: float
+    resonance_score: float
+    hnr_score: float
+    stability_score: float
+    duration_secs: float
+    percentile_estimate: float
+    notes: str
+
+    def to_dict(self) -> dict:
+        return {
+            "path": str(self.path),
+            "charisma_score": self.charisma_score,
+            "prosody_features_score": self.prosody_features_score,
+            "voice_quality_score": self.voice_quality_score,
+            "other_score": self.other_score,
+            "pitch_score": self.pitch_score,
+            "energy_score": self.energy_score,
+            "rhythm_score": self.rhythm_score,
+            "rate_score": self.rate_score,
+            "intonation_score": self.intonation_score,
+            "resonance_score": self.resonance_score,
+            "hnr_score": self.hnr_score,
+            "stability_score": self.stability_score,
+            "duration_secs": self.duration_secs,
+            "percentile_estimate": self.percentile_estimate,
+            "notes": self.notes,
+        }
