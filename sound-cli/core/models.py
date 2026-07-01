@@ -101,6 +101,16 @@ class CharismaResult:
     duration_secs: float
     percentile_estimate: float
     notes: str
+    median_f0_hz: float | None
+    semitone_range: float
+    rms_cv: float
+    pause_count_per_min: float
+    estimated_rate_per_sec: float
+    reversals_per_sec: float
+    spectral_centroid_hz: float
+    hnr_proxy_db: float
+    jitter_proxy: float
+    shimmer_proxy: float
 
     def to_dict(self) -> dict:
         return {
@@ -120,4 +130,14 @@ class CharismaResult:
             "duration_secs": self.duration_secs,
             "percentile_estimate": self.percentile_estimate,
             "notes": self.notes,
+            "median_f0_hz": self.median_f0_hz,
+            "semitone_range": self.semitone_range,
+            "rms_cv": self.rms_cv,
+            "pause_count_per_min": self.pause_count_per_min,
+            "estimated_rate_per_sec": self.estimated_rate_per_sec,
+            "reversals_per_sec": self.reversals_per_sec,
+            "spectral_centroid_hz": self.spectral_centroid_hz,
+            "hnr_proxy_db": self.hnr_proxy_db,
+            "jitter_proxy": self.jitter_proxy,
+            "shimmer_proxy": self.shimmer_proxy,
         }

@@ -1,0 +1,401 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Webux Charisma</title>
+<style>
+:root {
+  --bg: #1a1a2e;
+  --bg2: #16213e;
+  --text: #eee;
+  --dim: #888;
+  --accent: #0f3460;
+  --ok: #4ade80;
+  --err: #f87171;
+  --warn: #fbbf24;
+  --border: #333;
+  --link: #7dd3fc;
+}
+body {
+  margin: 0;
+  font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+.wrap { max-width: 1400px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 16px; margin: 0 0 12px; }
+.row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 11px; color: var(--dim); }
+.field input {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+#folderInput { width: 380px; }
+#extInput { width: 320px; }
+button {
+  background: var(--accent);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+button:hover { filter: brightness(1.2); }
+button:disabled { opacity: 0.5; cursor: default; }
+.btn-sec { background: transparent; padding: 4px 8px; font-size: 12px; }
+.hint { color: var(--dim); font-size: 11px; margin: -6px 0 12px; }
+.error-banner {
+  background: #3a1a1a; border: 1px solid var(--err); color: var(--err);
+  padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; display: none;
+}
+
+.progress-wrap { display: none; margin-bottom: 14px; }
+.progress-wrap progress { width: 100%; height: 10px; }
+.progress-label { color: var(--dim); font-size: 12px; margin-top: 4px; }
+
+.player-wrap {
+  display: none;
+  position: sticky; top: 0; z-index: 5;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px; margin-bottom: 14px;
+}
+.player-wrap .name { font-size: 12px; color: var(--dim); margin-top: 6px; }
+.player-wrap audio, .player-wrap video { width: 100%; max-height: 260px; }
+
+.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+thead th {
+  position: sticky; top: 0; background: var(--bg2); color: var(--text);
+  text-align: left; padding: 8px 10px; font-size: 11px; cursor: pointer; user-select: none;
+  border-bottom: 1px solid var(--border);
+}
+thead th:hover { color: var(--link); }
+thead th.sorted { color: var(--link); }
+tbody td { padding: 6px 10px; border-bottom: 1px solid #262636; font-size: 12px; }
+tbody tr:hover { background: #202038; }
+td.name-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+td.notes-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
+.score-bar-wrap { display: flex; align-items: center; gap: 6px; }
+.score-bar { width: 60px; height: 6px; background: #262636; border-radius: 3px; overflow: hidden; }
+.score-bar > div { height: 100%; }
+.status-pending { color: var(--dim); }
+.status-running { color: var(--warn); }
+.status-error { color: var(--err); cursor: help; }
+.dash { color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎤 Charisma Analyzer</h1>
+
+  <div class="row">
+    <div class="field">
+      <label>Folder</label>
+      <input id="folderInput" type="text" placeholder="/path/to/videos" />
+    </div>
+    <div class="field">
+      <label>Extensions</label>
+      <input id="extInput" type="text" placeholder="mp4,wav,mp3,..." />
+    </div>
+    <button id="scanBtn" onclick="startScan()">▶ Scan &amp; Analyze</button>
+  </div>
+  <div class="hint">Scans the top level of the folder only (no subfolders). Runs 3 files concurrently through <code>sound charisma</code>.</div>
+
+  <div class="error-banner" id="errorBanner"></div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <progress id="progressBar" value="0" max="100"></progress>
+    <div class="progress-label" id="progressLabel"></div>
+  </div>
+
+  <div class="player-wrap" id="playerWrap">
+    <video id="videoPlayer" controls></video>
+    <audio id="audioPlayer" controls></audio>
+    <div class="name" id="playerName"></div>
+  </div>
+
+  <div class="table-scroll">
+    <table id="resultsTable">
+      <thead>
+        <tr id="headerRow"></tr>
+      </thead>
+      <tbody id="resultsBody">
+        <tr><td colspan="20" style="padding:16px;color:var(--dim);">Scan a folder to see results.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const COLUMNS = [
+  { key: '_play', label: '', sortable: false },
+  { key: 'name', label: 'File', sortable: true },
+  { key: 'kind', label: 'Kind', sortable: true },
+  { key: 'charisma_score', label: 'Charisma', sortable: true, bar: true },
+  { key: 'prosody_features_score', label: 'Prosody', sortable: true, bar: true },
+  { key: 'voice_quality_score', label: 'Voice Qlty', sortable: true, bar: true },
+  { key: 'other_score', label: 'Other', sortable: true, bar: true },
+  { key: 'pitch_score', label: 'Pitch', sortable: true },
+  { key: 'energy_score', label: 'Energy', sortable: true },
+  { key: 'rhythm_score', label: 'Rhythm', sortable: true },
+  { key: 'rate_score', label: 'Rate', sortable: true },
+  { key: 'intonation_score', label: 'Intonation', sortable: true },
+  { key: 'resonance_score', label: 'Resonance', sortable: true },
+  { key: 'hnr_score', label: 'HNR', sortable: true },
+  { key: 'stability_score', label: 'Stability', sortable: true },
+  { key: 'median_f0_hz', label: 'Median F0 (Hz)', sortable: true },
+  { key: 'duration_secs', label: 'Dur (s)', sortable: true },
+  { key: 'percentile_estimate', label: 'Percentile*', sortable: true },
+  { key: '_notes', label: 'Notes', sortable: false },
+  { key: '_copy', label: '', sortable: false },
+];
+
+let currentFiles = [];
+let sortState = { key: 'charisma_score', dir: 'desc' };
+let pollTimer = null;
+let currentJobId = null;
+
+function buildHeader() {
+  const row = document.getElementById('headerRow');
+  row.innerHTML = '';
+  for (const col of COLUMNS) {
+    const th = document.createElement('th');
+    th.textContent = col.label;
+    if (col.sortable) {
+      th.onclick = () => setSort(col.key);
+      if (sortState.key === col.key) {
+        th.classList.add('sorted');
+        th.textContent += sortState.dir === 'desc' ? ' ▼' : ' ▲';
+      }
+    }
+    row.appendChild(th);
+  }
+}
+
+function setSort(key) {
+  if (sortState.key === key) {
+    sortState.dir = sortState.dir === 'desc' ? 'asc' : 'desc';
+  } else {
+    sortState = { key, dir: 'desc' };
+  }
+  renderTable();
+}
+
+function sortValue(file, key) {
+  const v = file[key];
+  if (v === null || v === undefined) return sortState.dir === 'desc' ? -Infinity : Infinity;
+  if (typeof v === 'string') return v.toLowerCase();
+  return v;
+}
+
+function sortedFiles() {
+  const arr = [...currentFiles];
+  arr.sort((a, b) => {
+    const av = sortValue(a, sortState.key);
+    const bv = sortValue(b, sortState.key);
+    let cmp;
+    if (typeof av === 'string' || typeof bv === 'string') {
+      cmp = String(av).localeCompare(String(bv));
+    } else {
+      cmp = av - bv;
+    }
+    return sortState.dir === 'desc' ? -cmp : cmp;
+  });
+  return arr;
+}
+
+function scoreColor(score) {
+  if (score >= 70) return 'var(--ok)';
+  if (score >= 40) return 'var(--warn)';
+  return 'var(--err)';
+}
+
+function fmt(v, decimals) {
+  if (v === null || v === undefined) return '<span class="dash">–</span>';
+  if (typeof v === 'number') return v.toFixed(decimals === undefined ? 1 : decimals);
+  return v;
+}
+
+function scoreCell(v, bar) {
+  if (v === null || v === undefined) return '<span class="dash">–</span>';
+  if (!bar) return fmt(v);
+  return `<div class="score-bar-wrap">
+    <div class="score-bar"><div style="width:${Math.max(0, Math.min(100, v))}%;background:${scoreColor(v)}"></div></div>
+    <span>${fmt(v)}</span>
+  </div>`;
+}
+
+function statusBadge(file) {
+  if (file.status === 'pending') return '<span class="status-pending">queued</span>';
+  if (file.status === 'running') return '<span class="status-running">analyzing…</span>';
+  if (file.status === 'error') return `<span class="status-error" title="${escapeHtml(file.error || '')}">⚠ error</span>`;
+  return '';
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderTable() {
+  buildHeader();
+  const body = document.getElementById('resultsBody');
+  const files = sortedFiles();
+  if (!files.length) {
+    body.innerHTML = '<tr><td colspan="20" style="padding:16px;color:var(--dim);">Scan a folder to see results.</td></tr>';
+    return;
+  }
+  body.innerHTML = '';
+  for (const f of files) {
+    const tr = document.createElement('tr');
+    const done = f.status === 'done';
+    tr.innerHTML = `
+      <td>${done ? `<button class="btn-sec" onclick="playFile('${escapeHtml(f.path).replace(/'/g, "\\'")}', '${f.kind}', '${escapeHtml(f.name).replace(/'/g, "\\'")}')">▶</button>` : ''}</td>
+      <td class="name-cell" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</td>
+      <td>${f.kind === 'video' ? '🎬' : '🎵'}</td>
+      <td>${done ? scoreCell(f.charisma_score, true) : statusBadge(f)}</td>
+      <td>${done ? scoreCell(f.prosody_features_score, true) : ''}</td>
+      <td>${done ? scoreCell(f.voice_quality_score, true) : ''}</td>
+      <td>${done ? scoreCell(f.other_score, true) : ''}</td>
+      <td>${done ? fmt(f.pitch_score) : ''}</td>
+      <td>${done ? fmt(f.energy_score) : ''}</td>
+      <td>${done ? fmt(f.rhythm_score) : ''}</td>
+      <td>${done ? fmt(f.rate_score) : ''}</td>
+      <td>${done ? fmt(f.intonation_score) : ''}</td>
+      <td>${done ? fmt(f.resonance_score) : ''}</td>
+      <td>${done ? fmt(f.hnr_score) : ''}</td>
+      <td>${done ? fmt(f.stability_score) : ''}</td>
+      <td>${done ? fmt(f.median_f0_hz) : ''}</td>
+      <td>${done ? fmt(f.duration_secs, 1) : ''}</td>
+      <td>${done ? fmt(f.percentile_estimate) : ''}</td>
+      <td class="notes-cell" title="${escapeHtml(f.notes || '')}">${escapeHtml(f.notes || '')}</td>
+      <td>${done ? `<button class="btn-sec" onclick="copyPath('${escapeHtml(f.path).replace(/'/g, "\\'")}')">📋</button>` : ''}</td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function playFile(path, kind, name) {
+  const video = document.getElementById('videoPlayer');
+  const audio = document.getElementById('audioPlayer');
+  video.pause();
+  audio.pause();
+  const url = '/api/charisma/preview?file=' + encodeURIComponent(path);
+  if (kind === 'video') {
+    audio.style.display = 'none';
+    video.style.display = '';
+    video.src = url;
+    video.play();
+  } else {
+    video.style.display = 'none';
+    audio.style.display = '';
+    audio.src = url;
+    audio.play();
+  }
+  document.getElementById('playerName').textContent = name;
+  document.getElementById('playerWrap').style.display = '';
+}
+
+function copyPath(path) {
+  navigator.clipboard.writeText(path).then(() => {
+    setStatus('Path copied: ' + path);
+  });
+}
+
+function setStatus(msg) {
+  const label = document.getElementById('progressLabel');
+  const prev = label.textContent;
+  label.textContent = msg;
+  setTimeout(() => { if (label.textContent === msg) label.textContent = prev; }, 2000);
+}
+
+function showError(msg) {
+  const banner = document.getElementById('errorBanner');
+  if (!msg) { banner.style.display = 'none'; return; }
+  banner.textContent = msg;
+  banner.style.display = '';
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/charisma/config');
+    const cfg = await r.json();
+    document.getElementById('folderInput').value = cfg.folder || '';
+    document.getElementById('extInput').value = cfg.extensions || '';
+  } catch (e) { /* ignore */ }
+}
+
+async function startScan() {
+  showError(null);
+  const folder = document.getElementById('folderInput').value.trim();
+  const extensions = document.getElementById('extInput').value.trim();
+  if (!folder) { showError('Enter a folder path.'); return; }
+
+  const scanBtn = document.getElementById('scanBtn');
+  scanBtn.disabled = true;
+  currentFiles = [];
+  renderTable();
+
+  try {
+    const r = await fetch('/api/charisma/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder, extensions }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      showError(err.detail || 'Failed to start scan.');
+      scanBtn.disabled = false;
+      return;
+    }
+    const data = await r.json();
+    currentJobId = data.job_id;
+    if (data.total === 0) {
+      showError('No matching files found in that folder.');
+      scanBtn.disabled = false;
+      return;
+    }
+    document.getElementById('progressWrap').style.display = '';
+    pollStatus();
+  } catch (e) {
+    showError('Failed to start scan: ' + e);
+    scanBtn.disabled = false;
+  }
+}
+
+async function pollStatus() {
+  if (!currentJobId) return;
+  const r = await fetch('/api/charisma/status/' + currentJobId);
+  if (!r.ok) return;
+  const job = await r.json();
+
+  currentFiles = job.files;
+  renderTable();
+
+  const bar = document.getElementById('progressBar');
+  bar.value = job.progress;
+  const label = document.getElementById('progressLabel');
+  label.textContent = `${job.completed} / ${job.total} analyzed` +
+    (job.status === 'running' ? ` — eta ~${Math.round(job.eta_seconds)}s` : ` — done in ${job.elapsed_seconds}s`);
+
+  if (job.status === 'done') {
+    document.getElementById('scanBtn').disabled = false;
+    return;
+  }
+  pollTimer = setTimeout(pollStatus, 1200);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  buildHeader();
+  loadConfig();
+});
+</script>
+</body>
+</html>

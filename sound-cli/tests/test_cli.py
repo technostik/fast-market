@@ -352,10 +352,21 @@ class TestModels:
             duration_secs=7.88,
             percentile_estimate=76.4,
             notes="strengths: speaking rate; weaknesses: pausing/rhythm",
+            median_f0_hz=200.6,
+            semitone_range=14.04,
+            rms_cv=0.859,
+            pause_count_per_min=0.0,
+            estimated_rate_per_sec=4.69,
+            reversals_per_sec=1.8,
+            spectral_centroid_hz=1800.0,
+            hnr_proxy_db=14.3,
+            jitter_proxy=0.03,
+            shimmer_proxy=0.2,
         )
         data = result.to_dict()
         assert data["path"] == "/tmp/clip.wav"
         assert data["charisma_score"] == 60.8
+        assert data["median_f0_hz"] == 200.6
         assert "speaking rate" in data["notes"]
 
 
@@ -476,6 +487,9 @@ class TestCharismaScoring:
             "other_score", "pitch_score", "energy_score", "rhythm_score",
             "rate_score", "intonation_score", "resonance_score", "hnr_score",
             "stability_score", "duration_secs", "percentile_estimate", "notes",
+            "median_f0_hz", "semitone_range", "rms_cv", "pause_count_per_min",
+            "estimated_rate_per_sec", "reversals_per_sec", "spectral_centroid_hz",
+            "hnr_proxy_db", "jitter_proxy", "shimmer_proxy",
         }
         assert expected_keys.issubset(scores.keys())
         for key in (

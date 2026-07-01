@@ -26,6 +26,7 @@ yt_poster = "webux.yt_poster.register:register"
 skill_runner = "webux.skill_runner.register:register"
 short_publish = "webux.short_publish.register:register"
 storyboard = "webux.storyboard.register:register"
+charisma = "webux.charisma.register:register"
 
 [tool.setuptools]
 packages = [
@@ -38,6 +39,7 @@ packages = [
     "webux.skill_runner",
     "webux.short_publish",
     "webux.storyboard",
+    "webux.charisma",
     "commands",
     "commands.serve",
 ]

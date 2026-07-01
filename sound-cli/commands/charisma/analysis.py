@@ -167,4 +167,17 @@ def score_charisma(y: np.ndarray, sr: int) -> dict:
         "duration_secs": prosody["duration_secs"],
         "percentile_estimate": percentile_estimate,
         "notes": notes,
+        # Raw underlying metrics behind the subscores above — useful for direct
+        # comparison between recordings (e.g. "my median pitch vs. theirs in Hz"),
+        # not just the normalized 0-100 scores.
+        "median_f0_hz": prosody["median_f0_hz"],
+        "semitone_range": prosody["semitone_range"],
+        "rms_cv": prosody["rms_cv"],
+        "pause_count_per_min": prosody["pause_count_per_min"],
+        "estimated_rate_per_sec": prosody["estimated_rate_per_sec"],
+        "reversals_per_sec": round(intonation["reversals_per_sec"], 2),
+        "spectral_centroid_hz": round(voice["spectral_centroid_hz"], 1),
+        "hnr_proxy_db": round(voice["hnr_proxy_db"], 1),
+        "jitter_proxy": round(voice["jitter_proxy"], 4),
+        "shimmer_proxy": round(voice["shimmer_proxy"], 4),
     }

@@ -242,6 +242,8 @@ Estimate the vocal charisma of a speech audio or video file: a 0-100 score combi
 | `percentile_estimate` | Illustrative percentile only — see limitation note above |
 | `notes` | Rule-based strengths/weaknesses derived from the subscores above |
 
+The JSON output also includes the **raw metrics** behind each subscore, useful for direct comparison between recordings rather than just the normalized 0-100 scores: `median_f0_hz`, `semitone_range`, `rms_cv`, `pause_count_per_min`, `estimated_rate_per_sec`, `reversals_per_sec`, `spectral_centroid_hz`, `hnr_proxy_db`, `jitter_proxy`, `shimmer_proxy`.
+
 **Examples:**
 ```bash
 sound charisma interview.wav
