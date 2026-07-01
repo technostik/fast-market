@@ -139,6 +139,8 @@ sound speak "こんにちは" -L ja
 | `sound speak "text" -e kokoro -v "am_michael" --speed 1.5` | Kokoro with options |
 | `sound music "lofi piano track"` | Generate music from prompt |
 | `sound music "upbeat electronic" -d 10` | Music with custom duration |
+| `sound prosody speech.wav` | Analyze prosody, print a global 0-100 score |
+| `sound prosody clip.mp4 --format json` | Prosody analysis of a video's audio track |
 
 ### `sound speak [TEXT]`
 
@@ -186,6 +188,31 @@ Generate music from a text prompt.
 | `--duration` | `-d` | Duration in seconds, default 5.0 |
 | `--output` | `-o` | Output path (default: workdir/music\_\<timestamp\>.wav) |
 | `--format` | `-F` | Output format: `json` or `text` |
+
+### `sound prosody <FILE>`
+
+Analyze the prosody of a speech audio or video file — pitch/intonation, loudness dynamics, pausing/rhythm, and speaking rate — and report a global 0-100 score plus a per-dimension breakdown. Runs fully offline via `librosa` signal analysis (pitch tracking, RMS energy, silence splitting, onset detection); video files have their audio track extracted with `ffmpeg` automatically.
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--output` | `-o` | Also write the full JSON report to this path |
+| `--format` | `-F` | Output format: `json`, `text`, or `yaml` |
+
+**Score breakdown:**
+
+| Field | Meaning |
+|-------|---------|
+| `global_score` | Weighted overall prosody score (0-100) |
+| `pitch_score` | Intonation variety, from F0 semitone range (too flat = monotone, too wide = erratic) |
+| `energy_score` | Loudness dynamics, from RMS coefficient of variation |
+| `rhythm_score` | Pausing pattern, from ratio of silence to total duration |
+| `rate_score` | Speaking pace, from an onset-rate proxy for syllable rate |
+
+**Examples:**
+```bash
+sound prosody interview.wav
+sound prosody talk.mp4 --format json -o report.json
+```
 
 ## Engines
 
@@ -278,7 +305,8 @@ sound-cli/
 │   ├── base.py            # CommandManifest
 │   ├── helpers.py         # build_engine()
 │   ├── speak/             # sound speak command
-│   └── music/             # sound music command
+│   ├── music/             # sound music command
+│   └── prosody/           # sound prosody command (analysis.py + register.py)
 └── common/                # Symlink to shared utilities
 ```
 
@@ -289,6 +317,8 @@ sound-cli/
 - `pyyaml>=6.0` - config loading
 - `soundfile>=0.12` - audio file I/O
 - `torch>=2.0` - tensor operations
+- `librosa>=0.10` - prosody analysis (pitch, energy, rhythm)
+- `ffmpeg` (system binary) - audio extraction from video for `sound prosody`
 
 ### Optional Engines
 - `kokoro>=0.9` - Kokoro TTS (lightweight)

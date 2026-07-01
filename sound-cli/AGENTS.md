@@ -11,7 +11,7 @@ sound-cli/
 │   └── __init__.py        # Imports main from cli.main
 ├── core/                  # Core logic (models, config)
 ├── plugins/               # Engine plugins (kokoro, qwen3, musicgen)
-├── commands/              # CLI commands (speak, music)
+├── commands/              # CLI commands (speak, music, prosody)
 └── common/                # Symlink to shared utilities
 ```
 
@@ -21,7 +21,7 @@ sound-cli/
 
 | File | Purpose |
 |------|---------|
-| `models.py` | `TTSRequest`, `TTSResult`, `MusicGenResult` dataclasses |
+| `models.py` | `TTSRequest`, `TTSResult`, `MusicGenResult`, `ProsodyResult` dataclasses |
 | `config.py` | Config loading and default values |
 
 ### Plugins (`plugins/`)
@@ -44,6 +44,7 @@ sound-cli/
 | `helpers.py` | `build_engine()` - instantiates plugins from config |
 | `speak/` | `sound speak` command |
 | `music/` | `sound music` command |
+| `prosody/` | `sound prosody` command - `analysis.py` (signal processing/scoring) + `register.py` (CLI wiring) |
 
 ## Core Responsibilities
 
@@ -61,6 +62,12 @@ sound-cli/
 - Accept text prompts with duration control
 - Generate music using MusicGen models
 - Save WAV output to workdir
+
+### Prosody Analysis
+- Accept an audio or video file (video audio is extracted via `ffmpeg` subprocess)
+- Score pitch/intonation, loudness dynamics, pausing/rhythm, and speaking rate via `librosa` (pyin, RMS, silence splitting, onset detection) — no ML model, fully offline
+- Each dimension is scored 0-100 against a heuristic "ideal band" (see `commands/prosody/analysis.py` constants), then combined into a weighted `global_score`
+- Plugin-free: this is a pure analysis command, not a swappable engine — see Extension Points below
 
 ### Plugin System
 - Auto-discover plugins from `plugins/*/register.py`
@@ -172,6 +179,8 @@ base_model.generate_voice_clone(text=user_text, ref_audio=ref_path, ref_text=REF
 | `sound speak "hi" --voice "am_michael" --speed 1.5` | Kokoro with options |
 | `sound music "lofi beat"` | Generate music from prompt |
 | `sound music "jazz" -d 10` | Music with custom duration |
+| `sound prosody speech.wav` | Prosody analysis with global 0-100 score |
+| `sound prosody talk.mp4 --format json` | Prosody analysis of a video's audio track |
 | `sound --show-completion` | Print shell completion script |
 | `sound --install-completion` | Install shell completion |
 
@@ -217,6 +226,8 @@ If weights are omitted, they are normalized equally. If only some have weights, 
 - `click` - CLI framework
 - `pyyaml` - config loading
 - `soundfile` - audio file I/O
+- `librosa` - prosody analysis (pitch, energy, rhythm)
+- `ffmpeg` (system binary) - audio extraction from video for `prosody`
 - `kokoro` - Kokoro TTS engine (optional)
 - `qwen-tts` - Qwen3-TTS engine (optional)
 - `transformers` - MusicGen model (core dep)
@@ -264,6 +275,11 @@ If weights are omitted, they are normalized equally. If only some have weights, 
 1. Create `commands/your_command/` with `__init__.py` and `register.py`
 2. Implement `register(plugin_manifests) -> CommandManifest`
 3. Registry auto-discovers and registers
+
+Not every command needs the plugin/engine system — `prosody` is a plain analysis
+command with no swappable engines, so its `register()` simply ignores
+`plugin_manifests` (matches the `music`/`speak` signature for consistency, but
+ignores unused arg instead of wiring an engine).
 
 ## Related Documentation
 

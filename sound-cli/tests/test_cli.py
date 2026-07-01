@@ -71,6 +71,26 @@ class TestCLICommands:
         assert result.exit_code != 0
         assert "Error" in result.output or "Usage" in result.output
 
+    def test_prosody_help(self, runner):
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["prosody", "--help"])
+        assert result.exit_code == 0
+        assert "FILE" in result.output
+        assert "--output" in result.output
+        assert "-o" in result.output
+        assert "--format" in result.output
+        assert "-F" in result.output
+
+    def test_prosody_missing_file(self, runner):
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["prosody", "/tmp/does_not_exist_prosody.wav"])
+        assert result.exit_code != 0
+        assert "Error" in result.output or "Usage" in result.output
+
 
 class TestKokoroPlugin:
     def test_parse_voice_string_single(self):
@@ -267,3 +287,85 @@ class TestModels:
         assert data["path"] == "/tmp/music.wav"
         assert data["prompt"] == "lofi piano"
         assert data["duration_secs"] == 5.0
+
+    def test_prosody_result_to_dict(self):
+        from core.models import ProsodyResult
+        from pathlib import Path
+
+        result = ProsodyResult(
+            path=Path("/tmp/clip.wav"),
+            global_score=72.5,
+            pitch_score=80.0,
+            energy_score=65.0,
+            rhythm_score=70.0,
+            rate_score=75.0,
+            duration_secs=10.0,
+            median_f0_hz=180.0,
+            semitone_range=6.5,
+            rms_cv=0.4,
+            pause_count_per_min=8.0,
+            estimated_rate_per_sec=4.2,
+        )
+        data = result.to_dict()
+        assert data["path"] == "/tmp/clip.wav"
+        assert data["global_score"] == 72.5
+        assert data["median_f0_hz"] == 180.0
+
+
+class TestProsodyScoring:
+    def test_target_band_score_ideal(self):
+        from commands.prosody.analysis import _target_band_score
+
+        assert _target_band_score(6.0, 1.0, 4.0, 12.0, 20.0) == 100.0
+
+    def test_target_band_score_at_extremes(self):
+        from commands.prosody.analysis import _target_band_score
+
+        assert _target_band_score(1.0, 1.0, 4.0, 12.0, 20.0) == 0.0
+        assert _target_band_score(20.0, 1.0, 4.0, 12.0, 20.0) == 0.0
+        assert _target_band_score(0.0, 1.0, 4.0, 12.0, 20.0) == 0.0
+        assert _target_band_score(30.0, 1.0, 4.0, 12.0, 20.0) == 0.0
+
+    def test_target_band_score_monotonic_ramp(self):
+        from commands.prosody.analysis import _target_band_score
+
+        low_side = _target_band_score(2.0, 1.0, 4.0, 12.0, 20.0)
+        high_side = _target_band_score(3.0, 1.0, 4.0, 12.0, 20.0)
+        assert 0.0 < low_side < high_side <= 100.0
+
+    def test_score_prosody_synthetic_sine(self, tmp_path):
+        import numpy as np
+        import soundfile as sf
+
+        from commands.prosody.analysis import score_prosody
+
+        sr = 22050
+        t = np.linspace(0, 2, sr * 2, endpoint=False)
+        y = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+
+        wav_path = tmp_path / "tone.wav"
+        sf.write(str(wav_path), y, sr)
+
+        scores = score_prosody(y, sr)
+
+        expected_keys = {
+            "global_score", "pitch_score", "energy_score", "rhythm_score",
+            "rate_score", "duration_secs", "median_f0_hz", "semitone_range",
+            "rms_cv", "pause_count_per_min", "estimated_rate_per_sec",
+        }
+        assert expected_keys.issubset(scores.keys())
+        for key in ("global_score", "pitch_score", "energy_score", "rhythm_score", "rate_score"):
+            assert 0.0 <= scores[key] <= 100.0
+
+    def test_score_prosody_monotone_has_low_pitch_score(self):
+        import numpy as np
+
+        from commands.prosody.analysis import score_prosody
+
+        sr = 22050
+        t = np.linspace(0, 3, sr * 3, endpoint=False)
+        y = (0.3 * np.sin(2 * np.pi * 150 * t)).astype(np.float32)
+
+        scores = score_prosody(y, sr)
+        assert scores["pitch_score"] == 0.0
+        assert scores["semitone_range"] == 0.0
