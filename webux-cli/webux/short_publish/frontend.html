@@ -1003,6 +1003,10 @@ async function refreshPool() {
       const detail = isOk ? 'Content check: OK' : `Content check: ${item.check_result}`;
       html += ` <span title="${detail.replace(/"/g, '&quot;')}" style="cursor:help;">${isOk ? '✅' : '⚠️'}</span>`;
     }
+    if (item.charisma_score) {
+      const tip = (item.charisma_notes || 'Charisma score').replace(/"/g, '&quot;');
+      html += ` <span title="${tip}" style="cursor:help;font-size:12px;">🎙${item.charisma_score}</span>`;
+    }
 
     // Show steps + live timer if we have job progress
     if (item.job && item.job.steps) {

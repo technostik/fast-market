@@ -29,6 +29,8 @@ class PoolItem:
     error_message: str = ""
     title: str = ""
     check_result: Optional[str] = None
+    charisma_score: str = ""
+    charisma_notes: str = ""
 
 
 _pool: list[PoolItem] = []
@@ -65,6 +67,8 @@ def _load_pool_from_disk():
                 studio_url=item.get("studio_url", ""),
                 title=item.get("title", "") or _load_meta(item["source"]).get("title", ""),
                 check_result=item.get("check_result"),
+                charisma_score=item.get("charisma_score", ""),
+                charisma_notes=item.get("charisma_notes", ""),
             )
             for item in data.get("items", [])
         ]
@@ -90,6 +94,8 @@ def _save_pool_to_disk():
                 "studio_url": it.studio_url,
                 "title": it.title,
                 "check_result": it.check_result,
+                "charisma_score": it.charisma_score,
+                "charisma_notes": it.charisma_notes,
             }
             for it in _pool
         ]
@@ -192,6 +198,8 @@ def get_pool_state() -> dict:
             "error_message": it.error_message,
             "title": it.title,
             "check_result": it.check_result,
+            "charisma_score": it.charisma_score,
+            "charisma_notes": it.charisma_notes,
         }
         # If processing and we have a job_id, attach live job status
         if it.job_id and it.status == "processing":
@@ -257,6 +265,8 @@ async def _pool_worker():
                 next_item.studio_url = job.studio_url or ""
                 next_item.title = job.title or ""
                 next_item.check_result = job.check_result
+                next_item.charisma_score = job.files.get("charisma_score", "")
+                next_item.charisma_notes = job.files.get("charisma_notes", "")
                 if job.end_time and job.start_time:
                     next_item.elapsed_seconds = round(job.end_time - job.start_time, 1)
                 elif job.start_time:
