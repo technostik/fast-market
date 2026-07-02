@@ -247,6 +247,10 @@
         <input type="checkbox" id="useGroq" checked>
         <label for="useGroq" style="display:inline; margin:0;">Use Groq API for transcription (whisper-large-v3, fast)</label>
       </div>
+      <div class="checkrow">
+        <input type="checkbox" id="normalizeVolume">
+        <label for="normalizeVolume" style="display:inline; margin:0;">Normalize volume</label>
+      </div>
 
       <div class="cols2">
         <div class="row">
@@ -561,6 +565,7 @@ async function startJob() {
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
     use_groq: document.getElementById('useGroq').checked,
+    do_normalize_volume: document.getElementById('normalizeVolume').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -821,6 +826,7 @@ async function doResume() {
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
     use_groq: document.getElementById('useGroq').checked,
+    do_normalize_volume: document.getElementById('normalizeVolume').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -1355,7 +1361,8 @@ async function addToPool() {
       description_prefix: document.getElementById('descPrefix').value,
       source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
       skip_upload: document.getElementById('skipUpload').checked,
-      use_groq: document.getElementById('useGroq').checked
+      use_groq: document.getElementById('useGroq').checked,
+      do_normalize_volume: document.getElementById('normalizeVolume').checked
     })
   });
   refreshPool();

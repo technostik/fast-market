@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from pathlib import Path
@@ -12,6 +13,7 @@ from .utils import (
     _yt,
     _pr,
     _video,
+    _sound,
     _stem,
     _ass_to_plain_text,
     _get_video_duration,
@@ -55,10 +57,12 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
     # ── Video CLI path for steps 0-2 ──────────────────────────────────────────
     if from_step <= 0:
         s0 = job.steps[0]
+        s0.start_time = time.time()
+        s0.status = "running"
+        s0.progress = 0.0
+
+        # ── Remove silence (optional) ──
         if job.do_remove_silence:
-            s0.start_time = time.time()
-            s0.status = "running"
-            s0.progress = 0.0
             out_path = str(d / f"{stem}_nosilence.mp4")
             cmd = [_video(), "remove-silence", job.source, "-o", out_path]
             if job.use_modal:
@@ -71,12 +75,43 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
                 s0.end_time = time.time(); s0.status = "error"
                 s0.output += "\nvideo too long"
                 job.status = "error"; _save_meta(job); return
-            s0.end_time = time.time(); s0.status = "done"; s0.progress = 100
             s0.output += f"\n⏱ Duration: {duration:.0f}s"
             current_video = out_path
             job.files["no_silence"] = out_path
-        else:
-            s0.status = "skipped"
+
+        # ── Volume measurement & normalization ──
+        if Path(current_video).exists():
+            measure_proc = await asyncio.create_subprocess_exec(
+                _sound(), "normalize-volume", "measure", current_video, "--format", "json",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            measure_stdout, _ = await measure_proc.communicate()
+            if measure_proc.returncode == 0:
+                try:
+                    vol_data = json.loads(measure_stdout)
+                    mean_vol = vol_data.get("mean_volume", "?")
+                    s0.output += f"\n🔊 Mean volume: {mean_vol} dB"
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    s0.output += "\n🔊 Volume measurement: failed"
+            else:
+                s0.output += "\n🔊 Volume measurement: failed"
+
+            if job.do_normalize_volume:
+                audio_out = str(d / f"{stem}_volume_normalized.mp4")
+                norm_proc = await asyncio.create_subprocess_exec(
+                    _sound(), "normalize-volume", "apply", current_video, "--output", audio_out,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                await norm_proc.communicate()
+                if norm_proc.returncode == 0:
+                    current_video = audio_out
+                    job.files["audio"] = audio_out
+                    s0.output += "\n🔊 Volume normalized"
+                else:
+                    s0.output += "\n🔊 Volume normalization: failed"
+
+        # If we got here without error, step is done (even if volume ops had issues)
+        s0.end_time = time.time(); s0.status = "done"; s0.progress = 100
         _save_meta(job)
     else:
         nv = job.files.get("no_silence", "")

@@ -87,6 +87,10 @@ def _video() -> str:
     return shutil.which("video") or "video"
 
 
+def _sound() -> str:
+    return shutil.which("sound") or "sound"
+
+
 def _stem(p: str) -> str:
     return Path(p).stem
 

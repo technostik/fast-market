@@ -22,7 +22,7 @@ DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv"
 _INTERMEDIATE_RE = re.compile(r"_(nosilence|subtitled)$", re.IGNORECASE)
 
 _STEP_FILE_KEYS: list[list[str]] = [
-    ["no_silence"],
+    ["no_silence", "audio"],
     ["transcript", "transcript_txt"],
     ["subtitled"],
     ["final_video"],
@@ -59,6 +59,7 @@ class Job:
     skip_upload: bool = False
     use_modal: bool = True
     use_groq: bool = False
+    do_normalize_volume: bool = False
     source_urls: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)
