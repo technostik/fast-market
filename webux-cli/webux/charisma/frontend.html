@@ -274,7 +274,7 @@ function renderTable() {
     const tr = document.createElement('tr');
     const done = f.status === 'done';
     tr.innerHTML = `
-      <td style="white-space:nowrap;">${done ? `<button class="btn-sec" onclick="togglePlay('${escapeHtml(f.path).replace(/'/g, "\\'")}', '${f.kind}', '${escapeHtml(f.name).replace(/'/g, "\\'")}', this)">▶</button>${f.has_clone ? `<button class="btn-sec" onclick="togglePlay('${escapeHtml(f.path).replace(/\.[^.]+$/, '.mp3').replace(/'/g, "\\'")}', 'audio', 'Clone: ${escapeHtml(f.name).replace(/'/g, "\\'")}', this)" title="Play clone">🎧</button>` : ''}<button class="btn-sec btn-clone" onclick="cloneVoice('${escapeHtml(f.path).replace(/'/g, "\\'")}', this)">🧬</button>` : ''}</td>
+      <td style="white-space:nowrap;">${done ? `<button class="btn-sec" onclick="togglePlay('${escapeHtml(f.path).replace(/'/g, "\\'")}', '${f.kind}', '${escapeHtml(f.name).replace(/'/g, "\\'")}', this)">▶</button>${f.has_clone ? `<button class="btn-sec" onclick="togglePlay('${escapeHtml(f.path).replace(/\.[^.]+$/, '.mp3').replace(/'/g, "\\'")}', 'audio', 'Clone: ${escapeHtml(f.name).replace(/'/g, "\\'")}', this)" title="Play clone">🎧</button>` : ''}<button class="btn-sec btn-clone" onclick="cloneVoice('${escapeHtml(f.path).replace(/'/g, "\\'")}', this)">🧬</button><button class="btn-sec" onclick="reanalyzeFile('${escapeHtml(f.path).replace(/'/g, "\\'")}', this)" title="Re-analyze">⟳</button>` : ''}</td>
       <td class="name-cell" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</td>
       <td title="${f.cached ? 'From cache (.charisma-scores.json)' : done ? 'Freshly analyzed' : ''}">${f.kind === 'video' ? '🎬' : '🎵'}${f.cached ? ' 📦' : ''}</td>
       <td>${done ? scoreCell(f.charisma_score, true) : statusBadge(f)}</td>
@@ -399,6 +399,42 @@ async function cloneVoice(path, btn) {
     _play(data.output_path, 'audio', 'Cloned: ' + name);
   } catch (e) {
     setStatus('Clone error: ' + e);
+  }
+  btn.disabled = false;
+  btn.textContent = origText;
+}
+
+async function reanalyzeFile(path, btn) {
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = '⟳…';
+  try {
+    const r = await fetch('/api/charisma/reanalyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_path: path }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      setStatus('Re-analysis failed: ' + (err.detail || r.statusText));
+      btn.disabled = false;
+      btn.textContent = origText;
+      return;
+    }
+    const scores = await r.json();
+    // Merge scores into the matching file entry and re-render
+    for (const f of currentFiles) {
+      if (f.path === path) {
+        f.status = 'done';
+        f.cached = false;
+        Object.assign(f, scores);
+        break;
+      }
+    }
+    renderTable();
+    setStatus('Re-analyzed');
+  } catch (e) {
+    setStatus('Re-analysis error: ' + e);
   }
   btn.disabled = false;
   btn.textContent = origText;

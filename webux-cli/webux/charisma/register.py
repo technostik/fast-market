@@ -135,6 +135,36 @@ class CloneRequest(BaseModel):
     text: str
 
 
+class ReanalyzeRequest(BaseModel):
+    file_path: str
+
+
+# ── Reanalyze API ───────────────────────────────────────────────────────────────
+
+
+@router.post("/reanalyze")
+async def reanalyze(req: ReanalyzeRequest):
+    p = Path(req.file_path).expanduser().resolve()
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    proc = await asyncio.create_subprocess_exec(
+        _sound(), "charisma", str(p), "--format", "json",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {stderr.decode(errors='replace')[-500:]}",
+        )
+
+    scores = json.loads(stdout.decode(errors="replace"))
+    await save_cache_entry(p.parent, p, scores)
+    return scores
+
+
 # ── Clone API ──────────────────────────────────────────────────────────────────
 
 
