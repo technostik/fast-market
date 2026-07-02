@@ -110,6 +110,25 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
                 else:
                     s0.output += "\n🔊 Volume normalization: failed"
 
+        # ── Charisma measurement ──
+        if Path(current_video).exists():
+            charisma_proc = await asyncio.create_subprocess_exec(
+                _sound(), "charisma", current_video, "--format", "json",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            charisma_stdout, _ = await charisma_proc.communicate()
+            if charisma_proc.returncode == 0:
+                try:
+                    char_data = json.loads(charisma_stdout)
+                    score = char_data.get("charisma_score", "?")
+                    notes = char_data.get("notes", "")
+                    tip = notes.replace('"', '&quot;')
+                    s0.output += f'\n🎙 Charisma: <span title="{tip}" style="cursor:help;border-bottom:1px dotted var(--dim);">{score}</span>'
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    s0.output += "\n🎙 Charisma measurement: failed"
+            else:
+                s0.output += "\n🎙 Charisma measurement: failed"
+
         # If we got here without error, step is done (even if volume ops had issues)
         s0.end_time = time.time(); s0.status = "done"; s0.progress = 100
         _save_meta(job)
