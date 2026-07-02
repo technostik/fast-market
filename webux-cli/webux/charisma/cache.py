@@ -60,3 +60,27 @@ async def save_cache_entry(folder: Path, file: Path, scores: dict[str, Any]) -> 
             "scores": scores,
         }
         cache_path(folder).write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+async def update_cache_scores(folder: Path, file: Path, extra: dict[str, Any]) -> dict[str, Any]:
+    """Merge `extra` into the file's cached scores (creating the entry if needed),
+    refreshing mtime/size/analyzed_at to the file's current stat. Unlike
+    save_cache_entry (which replaces the whole scores dict), this preserves
+    scores contributed by other workflows for the same file - e.g. `sound charisma`
+    scores and `sound normalize-volume measure`'s mean_volume_db coexist in one entry.
+    Returns the merged scores dict.
+    """
+    async with lock_for(folder):
+        cache = load_cache(folder)
+        stat = file.stat()
+        existing = cache["files"].get(file.name, {})
+        scores = dict(existing.get("scores", {}))
+        scores.update(extra)
+        cache["files"][file.name] = {
+            "mtime": stat.st_mtime,
+            "size": stat.st_size,
+            "analyzed_at": time.time(),
+            "scores": scores,
+        }
+        cache_path(folder).write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+        return scores

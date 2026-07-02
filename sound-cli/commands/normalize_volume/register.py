@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import click
@@ -7,10 +8,16 @@ import yaml
 
 from commands.base import CommandManifest
 from commands.normalize_volume.analysis import (
+    DEFAULT_REFERENCE_CLIP_SECS,
     apply_dynamic_normalization,
+    apply_flat_gain,
     compute_makeup_gain,
+    download_youtube_clip,
+    is_youtube_url,
     measure_mean_volume,
+    residual_correction_gain,
 )
+from common.cli.helpers import out
 from common.core.config import save_tool_config
 from common.core.paths import get_tool_config
 from core.config import load_sound_config
@@ -42,19 +49,65 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Reference mean volume: {config['reference_mean_volume_db']:.1f} dB")
 
     @normalize_volume_cmd.command("set-reference")
-    @click.argument("FILE", type=click.Path(exists=True, dir_okay=False))
-    def set_reference_cmd(file):
-        """Analyze FILE once and store its mean volume as the normalization target."""
-        ref_path = Path(file).resolve()
-        mean_db = measure_mean_volume(ref_path)
+    @click.argument("SOURCE")
+    @click.option(
+        "--duration", "-d",
+        type=int,
+        default=DEFAULT_REFERENCE_CLIP_SECS,
+        help=f"When SOURCE is a YouTube URL, only download this many seconds from the "
+             f"start (default: {DEFAULT_REFERENCE_CLIP_SECS}s) instead of the whole video.",
+    )
+    @click.option(
+        "--cookies",
+        type=click.Path(exists=True),
+        default=None,
+        help="Path to a cookies file for authenticated YouTube requests.",
+    )
+    def set_reference_cmd(source, duration, cookies):
+        """Analyze SOURCE once and store its mean volume as the normalization target.
 
-        data = _load_raw_tool_config()
-        data["normalize_volume"] = {
-            "reference_path": str(ref_path),
-            "reference_mean_volume_db": mean_db,
-        }
-        save_tool_config("sound", data)
-        click.echo(f"Reference volume set: {mean_db:.1f} dB (from {ref_path})")
+        SOURCE can be a local audio/video file, or a YouTube URL - in which case
+        only the first --duration seconds are downloaded, not the whole video.
+        """
+        is_url = is_youtube_url(source)
+        clip_path = None
+
+        try:
+            if is_url:
+                click.echo(f"Downloading first {duration}s from {source} ...")
+                clip_path = download_youtube_clip(source, duration_secs=duration, cookies=cookies)
+                ref_path = clip_path
+            else:
+                ref_path = Path(source).resolve()
+                if not ref_path.exists():
+                    raise click.ClickException(f"File not found: {ref_path}")
+
+            mean_db = measure_mean_volume(ref_path)
+
+            data = _load_raw_tool_config()
+            data["normalize_volume"] = {
+                "reference_path": source if is_url else str(ref_path),
+                "reference_mean_volume_db": mean_db,
+            }
+            save_tool_config("sound", data)
+            click.echo(f"Reference volume set: {mean_db:.1f} dB (from {source})")
+        finally:
+            if clip_path is not None:
+                shutil.rmtree(clip_path.parent, ignore_errors=True)
+
+    @normalize_volume_cmd.command("measure")
+    @click.argument("FILE", type=click.Path(exists=True, dir_okay=False))
+    @click.option(
+        "--format", "-F", "fmt",
+        type=click.Choice(["json", "text", "yaml"]),
+        default="text",
+        help="Output format",
+    )
+    def measure_cmd(file, fmt):
+        """Measure FILE's current mean volume (dBFS) without changing anything."""
+        path = Path(file).resolve()
+        mean_db = measure_mean_volume(path)
+        out({"path": str(path), "mean_volume_db": mean_db}, fmt)
 
     @normalize_volume_cmd.command("apply")
     @click.argument("FILE", type=click.Path(exists=True, dir_okay=False))
@@ -86,10 +139,26 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 output_path = input_path.with_name(f"{input_path.stem}_normalized{input_path.suffix}")
 
             apply_dynamic_normalization(input_path, output_path, makeup_gain)
+            output_db = measure_mean_volume(output_path)
+
+            # The compressor's ratio-based attenuation on content above THRESHOLD_DB
+            # can outweigh the makeup gain in ways the open-loop math can't predict
+            # (e.g. files with loud passages well above -30dB) - measure what was
+            # actually produced and, if it's off-target, correct it precisely with
+            # a second flat-gain pass rather than trusting the makeup gain alone.
+            correction_db = residual_correction_gain(target_db, output_db)
+            if correction_db is not None:
+                corrected_path = output_path.with_name(f".{output_path.stem}.correcting{output_path.suffix}")
+                apply_flat_gain(output_path, corrected_path, correction_db)
+                corrected_path.replace(output_path)
+                output_db = measure_mean_volume(output_path)
 
             click.echo(f"Input volume:   {current_db:.1f} dB")
             click.echo(f"Reference:      {target_db:.1f} dB")
             click.echo(f"Makeup gain:    {makeup_gain:.2f}x")
+            if correction_db is not None:
+                click.echo(f"Correction:     {correction_db:+.1f} dB (compressor overshoot correction)")
+            click.echo(f"Output volume:  {output_db:.1f} dB")
             click.echo(f"Output written: {output_path}")
 
         except click.ClickException:

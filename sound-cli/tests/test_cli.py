@@ -119,6 +119,15 @@ class TestCLICommands:
         assert result.exit_code == 0
         assert "set-reference" in result.output
         assert "apply" in result.output
+        assert "measure" in result.output
+
+    def test_normalize_volume_measure_missing_file(self, runner):
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["normalize-volume", "measure", "/tmp/does_not_exist_measure.wav"])
+        assert result.exit_code != 0
+        assert "Error" in result.output or "Usage" in result.output
 
     def test_normalize_volume_apply_missing_file(self, runner):
         import cli.main as cli_mod
@@ -517,6 +526,43 @@ class TestNormalizeVolumeAnalysis:
         from commands.normalize_volume.analysis import compute_makeup_gain
 
         assert compute_makeup_gain(target_dbfs=-20.0, input_dbfs=-20.0) == 1.0
+
+    def test_is_youtube_url_watch(self):
+        from commands.normalize_volume.analysis import is_youtube_url
+
+        assert is_youtube_url("https://www.youtube.com/watch?v=ybuhqtDVO_A") is True
+
+    def test_is_youtube_url_short_and_youtu_be(self):
+        from commands.normalize_volume.analysis import is_youtube_url
+
+        assert is_youtube_url("https://youtu.be/ybuhqtDVO_A") is True
+        assert is_youtube_url("https://www.youtube.com/shorts/ybuhqtDVO_A") is True
+
+    def test_is_youtube_url_rejects_local_path(self):
+        from commands.normalize_volume.analysis import is_youtube_url
+
+        assert is_youtube_url("/home/joriel/videos/clip.mp4") is False
+        assert is_youtube_url("clip.mp4") is False
+
+    def test_residual_correction_gain_none_within_tolerance(self):
+        from commands.normalize_volume.analysis import residual_correction_gain
+
+        assert residual_correction_gain(target_dbfs=-16.0, actual_dbfs=-16.3) is None
+        assert residual_correction_gain(target_dbfs=-16.0, actual_dbfs=-16.0) is None
+
+    def test_residual_correction_gain_returns_gap_beyond_tolerance(self):
+        from commands.normalize_volume.analysis import residual_correction_gain
+
+        # Real case: compressor overshoot left the file quieter than target.
+        gain = residual_correction_gain(target_dbfs=-16.0, actual_dbfs=-23.3)
+        assert abs(gain - 7.3) < 1e-9
+
+    def test_residual_correction_gain_handles_overshoot_past_target(self):
+        from commands.normalize_volume.analysis import residual_correction_gain
+
+        # Compressor pushed the file louder than target -> negative correction.
+        gain = residual_correction_gain(target_dbfs=-20.0, actual_dbfs=-14.0)
+        assert abs(gain - (-6.0)) < 1e-9
 
 
 class TestCharismaScoring:
