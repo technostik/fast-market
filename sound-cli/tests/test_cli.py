@@ -111,6 +111,31 @@ class TestCLICommands:
         assert result.exit_code != 0
         assert "Error" in result.output or "Usage" in result.output
 
+    def test_normalize_volume_help(self, runner):
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["normalize-volume", "--help"])
+        assert result.exit_code == 0
+        assert "set-reference" in result.output
+        assert "apply" in result.output
+
+    def test_normalize_volume_apply_missing_file(self, runner):
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["normalize-volume", "apply", "/tmp/does_not_exist_normvol.mp4"])
+        assert result.exit_code != 0
+        assert "Error" in result.output or "Usage" in result.output
+
+    def test_normalize_volume_set_reference_missing_file(self, runner):
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["normalize-volume", "set-reference", "/tmp/does_not_exist_ref.wav"])
+        assert result.exit_code != 0
+        assert "Error" in result.output or "Usage" in result.output
+
 
 class TestKokoroPlugin:
     def test_parse_voice_string_single(self):
@@ -464,6 +489,34 @@ class TestProsodyScoring:
         scores = score_prosody(y, sr)
         assert scores["pitch_score"] == 0.0
         assert scores["semitone_range"] == 0.0
+
+
+class TestNormalizeVolumeAnalysis:
+    def test_compute_makeup_gain_converts_db_to_linear(self):
+        from commands.normalize_volume.analysis import compute_makeup_gain
+
+        # 15 dB gap -> ~5.62x linear, NOT 15 clamped into [1, 64] (the old bug).
+        gain = compute_makeup_gain(target_dbfs=-10.0, input_dbfs=-25.0)
+        assert abs(gain - 10 ** (15 / 20)) < 1e-9
+        assert gain != 15.0
+
+    def test_compute_makeup_gain_clamps_to_min(self):
+        from commands.normalize_volume.analysis import compute_makeup_gain
+
+        # Input already louder than target -> no negative makeup, clamp to 1.0.
+        gain = compute_makeup_gain(target_dbfs=-30.0, input_dbfs=-10.0)
+        assert gain == 1.0
+
+    def test_compute_makeup_gain_clamps_to_max(self):
+        from commands.normalize_volume.analysis import compute_makeup_gain
+
+        gain = compute_makeup_gain(target_dbfs=0.0, input_dbfs=-100.0)
+        assert gain == 64.0
+
+    def test_compute_makeup_gain_no_gap_is_unity(self):
+        from commands.normalize_volume.analysis import compute_makeup_gain
+
+        assert compute_makeup_gain(target_dbfs=-20.0, input_dbfs=-20.0) == 1.0
 
 
 class TestCharismaScoring:

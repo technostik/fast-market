@@ -11,7 +11,7 @@ sound-cli/
 │   └── __init__.py        # Imports main from cli.main
 ├── core/                  # Core logic (models, config)
 ├── plugins/               # Engine plugins (kokoro, qwen3, musicgen)
-├── commands/              # CLI commands (speak, music, prosody, charisma)
+├── commands/              # CLI commands (speak, music, prosody, charisma, normalize-volume)
 └── common/                # Symlink to shared utilities
 ```
 
@@ -46,6 +46,7 @@ sound-cli/
 | `music/` | `sound music` command |
 | `prosody/` | `sound prosody` command - `analysis.py` (signal processing/scoring) + `register.py` (CLI wiring) |
 | `charisma/` | `sound charisma` command - reuses `prosody.analysis` + adds intonation/voice-quality proxies |
+| `normalize_volume/` | `sound normalize-volume` command - dynamic (compressor-based) volume normalization against a cached reference level |
 | `scoring.py` | Shared `target_band_score()` / `inverse_band_score()` curves used by both `prosody` and `charisma` |
 
 ## Core Responsibilities
@@ -76,6 +77,12 @@ sound-cli/
 - Combines into `charisma_score` with 70% prosody / 20% voice quality / 10% derived "other" weighting (see `commands/charisma/analysis.py` constants)
 - `percentile_estimate` and the `notes` strengths/weaknesses summary are explicitly labeled approximations, not validated against real normative or population data — do not present them as more precise than that when extending this feature
 - Voice-quality proxies are **not** clinical Praat-style jitter/shimmer/HNR (that needs `parselmouth`, not installed) — if true clinical-grade measurement is ever needed, that's a deliberate new dependency decision, not a silent swap
+
+### Volume Normalization
+- `sound normalize-volume set-reference <file>` measures a reference file's mean volume (`ffmpeg -af volumedetect`, dBFS) **once** and caches it in `~/.config/fast-market/sound/config.yaml` under `normalize_volume: {reference_path, reference_mean_volume_db}` — later `apply` runs never re-analyze the reference
+- `sound normalize-volume apply <video> [-o output]` measures the target video's current mean volume, then applies dynamic-range compression + makeup gain (`ffmpeg`'s `acompressor` filter, threshold=-30dB, ratio=4, attack=20ms, release=200ms) sized to close the gap to the reference, writing a new file by default (`<name>_normalized<ext>`) with the video stream copied untouched
+- Ported from YouTools' `normalize_full_audio()` (`lib/video_utils.py`, used by its `directpublish` plugin) because a flat mean-based gain shift is wrong when a video mixes sections of very different loudness (e.g. voice narration + a louder commented clip) — compression reacts within the file instead of shifting everything by one flat number
+- **Bug fixed while porting**: the original computed `makeup_gain` in dB but passed it directly into `acompressor`'s `makeup=` parameter, which is a **linear** multiplier (range 1-64), not dB — `commands/normalize_volume/analysis.py:compute_makeup_gain()` converts `10 ** (gain_db / 20)` before clamping. Threshold/ratio/attack/release and the overall algorithm are otherwise unchanged from the reference implementation
 
 ### Plugin System
 - Auto-discover plugins from `plugins/*/register.py`
@@ -191,6 +198,9 @@ base_model.generate_voice_clone(text=user_text, ref_audio=ref_path, ref_text=REF
 | `sound prosody talk.mp4 --format json` | Prosody analysis of a video's audio track |
 | `sound charisma speech.wav` | Charisma analysis with global 0-100 score |
 | `sound charisma talk.mp4 --format json` | Charisma analysis of a video's audio track |
+| `sound normalize-volume set-reference good_take.mp4` | Analyze and cache the reference volume level once |
+| `sound normalize-volume apply quiet.mp4` | Dynamically normalize a video's volume against the cached reference → `quiet_normalized.mp4` |
+| `sound normalize-volume apply quiet.mp4 -o out.mp4` | Normalize to an explicit output path |
 | `sound --show-completion` | Print shell completion script |
 | `sound --install-completion` | Install shell completion |
 
@@ -237,7 +247,7 @@ If weights are omitted, they are normalized equally. If only some have weights, 
 - `pyyaml` - config loading
 - `soundfile` - audio file I/O
 - `librosa` - prosody/charisma analysis (pitch, energy, rhythm, voice quality)
-- `ffmpeg` (system binary) - audio extraction from video for `prosody`/`charisma`
+- `ffmpeg` (system binary) - audio extraction from video for `prosody`/`charisma`; `volumedetect`/`acompressor` audio filters for `normalize-volume`
 - `kokoro` - Kokoro TTS engine (optional)
 - `qwen-tts` - Qwen3-TTS engine (optional)
 - `transformers` - MusicGen model (core dep)
