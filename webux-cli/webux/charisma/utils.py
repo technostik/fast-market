@@ -11,6 +11,10 @@ def _sound() -> str:
     return shutil.which("sound") or "sound"
 
 
+def _video() -> str:
+    return shutil.which("video") or "video"
+
+
 def load_charisma_cfg() -> dict:
     try:
         cfg = load_tool_config("charisma")

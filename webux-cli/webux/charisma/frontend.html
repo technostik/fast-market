@@ -128,6 +128,13 @@ td.notes-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; col
     <div class="name" id="playerName"></div>
   </div>
 
+  <div class="row">
+    <div class="field">
+      <label>Clone TTS text</label>
+      <input id="cloneTextInput" type="text" placeholder="Enter text to speak in the cloned voice…" style="width:520px;" />
+    </div>
+  </div>
+
   <div class="table-scroll">
     <table id="resultsTable">
       <thead>
@@ -143,6 +150,7 @@ td.notes-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; col
 <script>
 const COLUMNS = [
   { key: '_play', label: '', sortable: false },
+  { key: '_clone', label: 'Clone', sortable: false },
   { key: 'name', label: 'File', sortable: true },
   { key: 'kind', label: 'Kind', sortable: true },
   { key: 'charisma_score', label: 'Charisma', sortable: true, bar: true },
@@ -169,6 +177,7 @@ let sortState = { key: 'charisma_score', dir: 'desc' };
 let pollTimer = null;
 let currentJobId = null;
 let lastCachedCount = 0;
+let currentPlayingPath = null;
 
 function buildHeader() {
   const row = document.getElementById('headerRow');
@@ -260,11 +269,12 @@ function renderTable() {
     return;
   }
   body.innerHTML = '';
-  for (const f of files) {
+  for (let idx = 0; idx < files.length; idx++) {
+    const f = files[idx];
     const tr = document.createElement('tr');
     const done = f.status === 'done';
     tr.innerHTML = `
-      <td>${done ? `<button class="btn-sec" onclick="playFile('${escapeHtml(f.path).replace(/'/g, "\\'")}', '${f.kind}', '${escapeHtml(f.name).replace(/'/g, "\\'")}')">▶</button>` : ''}</td>
+      <td style="white-space:nowrap;">${done ? `<button class="btn-sec" onclick="togglePlay('${escapeHtml(f.path).replace(/'/g, "\\'")}', '${f.kind}', '${escapeHtml(f.name).replace(/'/g, "\\'")}', this)">▶</button>${f.has_clone ? `<button class="btn-sec" onclick="togglePlay('${escapeHtml(f.path).replace(/\.[^.]+$/, '.mp3').replace(/'/g, "\\'")}', 'audio', 'Clone: ${escapeHtml(f.name).replace(/'/g, "\\'")}', this)" title="Play clone">🎧</button>` : ''}<button class="btn-sec btn-clone" onclick="cloneVoice('${escapeHtml(f.path).replace(/'/g, "\\'")}', this)">🧬</button>` : ''}</td>
       <td class="name-cell" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</td>
       <td title="${f.cached ? 'From cache (.charisma-scores.json)' : done ? 'Freshly analyzed' : ''}">${f.kind === 'video' ? '🎬' : '🎵'}${f.cached ? ' 📦' : ''}</td>
       <td>${done ? scoreCell(f.charisma_score, true) : statusBadge(f)}</td>
@@ -289,11 +299,32 @@ function renderTable() {
   }
 }
 
-function playFile(path, kind, name) {
+function stopPlayback() {
   const video = document.getElementById('videoPlayer');
   const audio = document.getElementById('audioPlayer');
+  const playerWrap = document.getElementById('playerWrap');
   video.pause();
   audio.pause();
+  video.removeAttribute('src');
+  audio.removeAttribute('src');
+  video.load();
+  audio.load();
+  playerWrap.style.display = 'none';
+  currentPlayingPath = null;
+}
+
+function _play(path, kind, name) {
+  const video = document.getElementById('videoPlayer');
+  const audio = document.getElementById('audioPlayer');
+  const playerWrap = document.getElementById('playerWrap');
+  const playerName = document.getElementById('playerName');
+
+  // Stop any previous playback
+  video.pause();
+  audio.pause();
+  video.removeAttribute('src');
+  audio.removeAttribute('src');
+
   const url = '/api/charisma/preview?file=' + encodeURIComponent(path);
   if (kind === 'video') {
     audio.style.display = 'none';
@@ -306,14 +337,71 @@ function playFile(path, kind, name) {
     audio.src = url;
     audio.play();
   }
-  document.getElementById('playerName').textContent = name;
-  document.getElementById('playerWrap').style.display = '';
+  playerName.textContent = name;
+  playerWrap.style.display = '';
+  currentPlayingPath = path;
+}
+
+function togglePlay(path, kind, name, btn) {
+  // If this file is already playing, stop it
+  if (currentPlayingPath === path) {
+    stopPlayback();
+    btn.textContent = btn._origText || '▶';
+    return;
+  }
+
+  if (!btn._origText) btn._origText = btn.textContent;
+  _play(path, kind, name);
+
+  // Reset button when playback ends naturally
+  const video = document.getElementById('videoPlayer');
+  const audio = document.getElementById('audioPlayer');
+  const media = kind === 'video' ? video : audio;
+  media.onended = () => {
+    btn.textContent = btn._origText || '▶';
+    currentPlayingPath = null;
+    document.getElementById('playerWrap').style.display = 'none';
+  };
+  btn.textContent = '■';
 }
 
 function copyPath(path) {
   navigator.clipboard.writeText(path).then(() => {
     setStatus('Path copied: ' + path);
   });
+}
+
+async function cloneVoice(path, btn) {
+  const input = document.getElementById('cloneTextInput');
+  const text = input ? input.value.trim() : '';
+  if (!text) { setStatus('Enter TTS text first.'); return; }
+
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = '🧬…';
+
+  try {
+    const r = await fetch('/api/charisma/clone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_path: path, text }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      setStatus('Clone failed: ' + (err.detail || r.statusText));
+      btn.disabled = false;
+      btn.textContent = origText;
+      return;
+    }
+    const data = await r.json();
+    setStatus('Clone done — playing…');
+    const name = data.output_path.split('/').pop() || data.output_path;
+    _play(data.output_path, 'audio', 'Cloned: ' + name);
+  } catch (e) {
+    setStatus('Clone error: ' + e);
+  }
+  btn.disabled = false;
+  btn.textContent = origText;
 }
 
 function setStatus(msg) {

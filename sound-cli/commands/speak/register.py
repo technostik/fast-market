@@ -129,13 +129,24 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Post-processing time-stretch factor (0.25-4.0, e.g. 1.5 = 50%% faster, pitch-preserved). Works with any engine.",
     )
     @click.option(
+        "--clone",
+        type=click.Path(exists=True, dir_okay=False),
+        default=None,
+        help="Path to reference audio for voice cloning (qwen3 only, overrides config)",
+    )
+    @click.option(
+        "--ref-text",
+        default=None,
+        help="Transcript of the reference audio (qwen3 only, overrides config)",
+    )
+    @click.option(
         "--format", "-F", "fmt",
         type=click.Choice(["json", "text"]),
         default="text",
         help="Output format",
     )
     @click.pass_context
-    def speak_cmd(ctx, text, file, engine, voice, speed, output, language, accelerate, fmt):
+    def speak_cmd(ctx, text, file, engine, voice, speed, output, language, accelerate, clone, ref_text, fmt):
         """Synthesize speech from TEXT.
 
         TEXT can be provided as a positional argument, read from a file
@@ -197,8 +208,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 voice=actual_voice,
                 speed=actual_speed,
                 language=actual_language,
-                clone=engine_config.get("clone"),
-                ref_text=engine_config.get("ref_text"),
+                clone=clone if clone is not None else engine_config.get("clone"),
+                ref_text=ref_text if ref_text is not None else engine_config.get("ref_text"),
             )
 
             actual_accelerate = (

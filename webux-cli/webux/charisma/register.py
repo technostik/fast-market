@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -14,7 +16,7 @@ from common.webux.base import WebuxPluginManifest
 
 from .cache import get_cached_entry, load_cache, save_cache_entry
 from .models import DEFAULT_EXTENSIONS, DEFAULT_FOLDER, FileResult, ScanJob, file_kind
-from .utils import _sound, default_extensions, default_folder, save_charisma_cfg
+from .utils import _sound, _video, default_extensions, default_folder, save_charisma_cfg
 
 router = APIRouter()
 
@@ -109,23 +111,89 @@ async def scan(
     save_charisma_cfg(path, extensions)
     folder_path = Path(path).expanduser()
     cache = load_cache(folder_path)
-    return {
-        "files": [
-            {
-                "name": f.name,
-                "path": str(f),
-                "kind": file_kind(f.suffix),
-                "cached": get_cached_entry(cache, f) is not None,
-            }
-            for f in files
-        ]
-    }
+    results = []
+    for f in files:
+        clone_path = folder_path / f"{f.stem}.mp3"
+        results.append({
+            "name": f.name,
+            "path": str(f),
+            "kind": file_kind(f.suffix),
+            "cached": get_cached_entry(cache, f) is not None,
+            "has_clone": clone_path.exists(),
+        })
+    return {"files": results}
 
 
 class StartRequest(BaseModel):
     folder: str
     extensions: str = DEFAULT_EXTENSIONS
     force_recompute: bool = False
+
+
+class CloneRequest(BaseModel):
+    file_path: str
+    text: str
+
+
+# ── Clone API ──────────────────────────────────────────────────────────────────
+
+
+@router.post("/clone")
+async def clone(req: CloneRequest):
+    p = Path(req.file_path).expanduser().resolve()
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    output_path = p.parent / f"{p.stem}.mp3"
+
+    tmp = Path(tempfile.mkdtemp(prefix="charisma_clone_"))
+    try:
+        transcript_path = tmp / "transcript.txt"
+
+        # 1. Transcribe the video to get reference text for voice cloning
+        proc = await asyncio.create_subprocess_exec(
+            _video(), "extract-transcript", req.file_path,
+            "--format", "txt", "--output", str(transcript_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Transcription failed: {stderr.decode(errors='replace')[-1000:]}",
+            )
+
+        if not transcript_path.exists():
+            raise HTTPException(status_code=500, detail="Transcription produced no output file")
+
+        transcript = transcript_path.read_text(encoding="utf-8").strip()
+        if not transcript:
+            raise HTTPException(status_code=500, detail="Transcription is empty")
+
+        # 2. Generate TTS with voice cloning using the video's audio + transcript
+        proc = await asyncio.create_subprocess_exec(
+            _sound(), "speak", req.text,
+            "--engine", "qwen3",
+            "--clone", req.file_path,
+            "--ref-text", transcript,
+            "--format", "json",
+            "--output", str(output_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0 or not output_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"TTS cloning failed: {stderr.decode(errors='replace')[-1000:]}",
+            )
+
+        return {"output_path": str(output_path), "transcript": transcript}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @router.post("/start")

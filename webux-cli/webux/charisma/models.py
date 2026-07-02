@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 DEFAULT_FOLDER = "/home/joriel/Vidéos/Shorts"
@@ -26,6 +27,7 @@ class FileResult:
     cached: bool = False  # scores came from the folder's .charisma-scores.json, not a fresh run
 
     def to_dict(self) -> dict[str, Any]:
+        p = Path(self.path)
         d: dict[str, Any] = {
             "path": self.path,
             "name": self.name,
@@ -33,6 +35,7 @@ class FileResult:
             "status": self.status,
             "error": self.error,
             "cached": self.cached,
+            "has_clone": (p.parent / f"{p.stem}.mp3").exists(),
         }
         if self.scores:
             d.update(self.scores)
