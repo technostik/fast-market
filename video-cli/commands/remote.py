@@ -57,3 +57,18 @@ def run_remote_burn_subtitles(video_path: Path, ass_path: Path, output_path: Pat
         )
     output_path.write_bytes(result["video_bytes"])
     return result
+
+
+def run_remote_concat_videos(input_paths: list[Path], output_path: Path) -> dict:
+    try:
+        from modal_client.app import app
+        from modal_client.remote_steps import remote_concat_videos
+    except ImportError as exc:
+        raise click.ClickException(f"modal not installed: {exc}") from exc
+    click.echo("Running concat on Modal...", err=True)
+    video_bytes_list = [p.read_bytes() for p in input_paths]
+    video_names = [p.name for p in input_paths]
+    with app.run():
+        result = remote_concat_videos.remote(video_bytes_list, video_names)
+    output_path.write_bytes(result["video_bytes"])
+    return result

@@ -56,7 +56,7 @@ def _is_intermediate(path: Path) -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, use_groq: bool = False, do_normalize_volume: bool = False, do_charisma: bool = True) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, use_groq: bool = False, do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
@@ -80,6 +80,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         use_groq=use_groq,
         do_normalize_volume=do_normalize_volume,
         do_charisma=do_charisma,
+        do_add_signature=do_add_signature,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -101,6 +102,7 @@ async def get_config():
         "video_source_path": pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH),
         "video_extensions": pub.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
         "signature": pub.get("signature", ""),
+        "signature_video_path": pub.get("signature_video_path", ""),
         "post_publish_script": pub.get("post_publish_script", ""),
         "transcript_script": pub.get("transcript_script", ""),
         "default_title_prompt": pub.get("default_title_prompt", "youtube-title"),
@@ -114,6 +116,7 @@ class ConfigSaveRequest(BaseModel):
     video_source_path: str = DEFAULT_VIDEO_SOURCE_PATH
     video_extensions: str = DEFAULT_VIDEO_EXTENSIONS
     signature: str = ""
+    signature_video_path: str = ""
     post_publish_script: str = ""
     transcript_script: str = ""
     default_title_prompt: str = "youtube-title"
@@ -128,6 +131,7 @@ async def save_config(req: ConfigSaveRequest):
     pub["video_source_path"] = req.video_source_path
     pub["video_extensions"] = req.video_extensions
     pub["signature"] = req.signature
+    pub["signature_video_path"] = req.signature_video_path
     pub["post_publish_script"] = req.post_publish_script
     pub["transcript_script"] = req.transcript_script
     pub["default_title_prompt"] = req.default_title_prompt
@@ -312,6 +316,7 @@ class StartRequest(BaseModel):
     use_groq: bool = False
     do_normalize_volume: bool = False
     do_charisma: bool = True
+    do_add_signature: bool = True
 
 
 class ResumeRequest(BaseModel):
@@ -327,6 +332,7 @@ class ResumeRequest(BaseModel):
     use_groq: bool = False
     do_normalize_volume: bool = False
     do_charisma: bool = True
+    do_add_signature: bool = True
     language: str = "fr"
     model: str = "medium"
     privacy: str = "unlisted"
@@ -361,6 +367,7 @@ async def start(req: StartRequest):
         use_groq=req.use_groq,
         do_normalize_volume=req.do_normalize_volume,
         do_charisma=req.do_charisma,
+        do_add_signature=req.do_add_signature,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -435,6 +442,7 @@ async def resume(req: ResumeRequest):
         use_groq=req.use_groq,
         do_normalize_volume=req.do_normalize_volume,
         do_charisma=req.do_charisma,
+        do_add_signature=req.do_add_signature,
         steps=[Step(name=n) for n in STEP_NAMES],
         files=files,
         title=meta.get("title", ""),
@@ -664,11 +672,12 @@ class PoolAddRequest(BaseModel):
     use_groq: bool = False
     do_normalize_volume: bool = False
     do_charisma: bool = True
+    do_add_signature: bool = True
 
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.use_groq, req.do_normalize_volume, req.do_charisma)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.use_groq, req.do_normalize_volume, req.do_charisma, req.do_add_signature)
     return {"ok": ok}
 
 

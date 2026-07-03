@@ -199,6 +199,26 @@ def remote_burn_subtitles(
     )
 
 
+@app.function(image=base_image, timeout=1800, secrets=[modal.Secret.from_dotenv()])
+def remote_concat_videos(video_bytes_list: list[bytes], video_names: list[str]) -> dict:
+    import os
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = []
+        for vb, name in zip(video_bytes_list, video_names):
+            p = os.path.join(tmpdir, name)
+            with open(p, "wb") as f:
+                f.write(vb)
+            paths.append(p)
+        out_path = os.path.join(tmpdir, f"{Path(video_names[0]).stem}_concat.mp4")
+        _concat_videos(paths, out_path)
+        with open(out_path, "rb") as f:
+            out_bytes = f.read()
+        return {"video_bytes": out_bytes, "video_name": Path(out_path).name}
+
+
 # ── Helpers (run on the Modal worker) ────────────────────────────────────────
 
 def _remove_silence(
@@ -240,6 +260,31 @@ def _remove_silence(
     for c in clips:
         c.close()
     return output_path, original_duration, final_duration
+
+
+def _concat_videos(clip_paths: list[str], output_path: str) -> str:
+    from moviepy import VideoFileClip, concatenate_videoclips
+
+    clips = [VideoFileClip(p) for p in clip_paths]
+    same_size = len({tuple(c.size) for c in clips}) == 1
+    method = "chain" if same_size else "compose"
+    final = concatenate_videoclips(clips, method=method)
+
+    import os
+    temp_audio = os.path.join(os.path.dirname(os.path.abspath(output_path)), "temp-audio-concat.m4a")
+    final.write_videofile(
+        output_path,
+        codec="libx264",
+        audio_codec="aac",
+        temp_audiofile=temp_audio,
+        remove_temp=True,
+        audio_bitrate="192k",
+        preset="medium",
+    )
+    final.close()
+    for c in clips:
+        c.close()
+    return output_path
 
 
 def _detect_silence_segments(

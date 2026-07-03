@@ -289,6 +289,30 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             final_video = renamed_path
             job.files["final_video"] = final_video
 
+        # ── Append signature video (optional, modal-aware) ──
+        if job.do_add_signature:
+            sig_path = pub_cfg.get("signature_video_path", "").strip()
+            if sig_path:
+                sig_path_obj = Path(sig_path).expanduser()
+                if not sig_path_obj.exists():
+                    # FAIL LOUDLY: a signature path is configured but missing
+                    s3.end_time = time.time(); s3.status = "error"
+                    s3.output += f"\n[error] Signature video not found: {sig_path_obj}"
+                    job.status = "error"; _save_meta(job); return
+                if job.files.get("signature_appended") != "1":
+                    concat_out = str(Path(final_video).parent / f"{safe_name}_with_signature{ext}")
+                    concat_cmd = [_video(), "concat", final_video, str(sig_path_obj), "-o", concat_out]
+                    if job.use_modal:
+                        concat_cmd.append("--modal")
+                    rc, _ = await _run(s3, *concat_cmd)
+                    if rc != 0:
+                        s3.end_time = time.time(); s3.status = "error"; job.status = "error"; _save_meta(job); return
+                    final_video = concat_out
+                    job.files["final_video"] = final_video
+                    job.files["signature_appended"] = "1"
+                    s3.output += "\n✅ Signature video appended"
+            # else: do_add_signature=True but no path configured → nothing to append, silent no-op
+
         transcript_text = job.transcript_text
         if not transcript_text and transcript_path and Path(transcript_path).exists():
             try:

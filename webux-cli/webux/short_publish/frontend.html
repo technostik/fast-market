@@ -158,6 +158,10 @@
       <textarea id="cfgSignature" rows="4" style="width:100%; min-height:80px; font-family:inherit; font-size:13px;"></textarea>
     </div>
     <div class="row">
+      <label>Signature video (appended to end of published video, optional)</label>
+      <input type="text" id="cfgSignatureVideoPath" placeholder="absolute path, leave empty to disable">
+    </div>
+    <div class="row">
       <label>Post-publish script (absolute path)</label>
       <input type="text" id="cfgPostScript">
     </div>
@@ -254,6 +258,10 @@
       <div class="checkrow">
         <input type="checkbox" id="doCharisma" checked>
         <label for="doCharisma" style="display:inline; margin:0;">Charisma score</label>
+      </div>
+      <div class="checkrow">
+        <input type="checkbox" id="addSignature" checked>
+        <label for="addSignature" style="display:inline; margin:0;">Append signature video</label>
       </div>
 
       <div class="cols2">
@@ -571,6 +579,7 @@ async function startJob() {
     use_groq: document.getElementById('useGroq').checked,
     do_normalize_volume: document.getElementById('normalizeVolume').checked,
     do_charisma: document.getElementById('doCharisma').checked,
+    do_add_signature: document.getElementById('addSignature').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -833,6 +842,7 @@ async function doResume() {
     use_groq: document.getElementById('useGroq').checked,
     do_normalize_volume: document.getElementById('normalizeVolume').checked,
     do_charisma: document.getElementById('doCharisma').checked,
+    do_add_signature: document.getElementById('addSignature').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -887,6 +897,7 @@ async function showConfig() {
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
       document.getElementById('cfgCheckPrompt').value = c.default_check_prompt || '';
       document.getElementById('cfgSignature').value = c.signature || '';
+      document.getElementById('cfgSignatureVideoPath').value = c.signature_video_path || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
@@ -902,6 +913,7 @@ async function saveConfig() {
     default_description_prompt: document.getElementById('cfgDescPrompt').value || 'youtube-summary',
     default_check_prompt: document.getElementById('cfgCheckPrompt').value,
     signature: document.getElementById('cfgSignature').value,
+    signature_video_path: document.getElementById('cfgSignatureVideoPath').value,
     post_publish_script: document.getElementById('cfgPostScript').value,
     transcript_script: document.getElementById('cfgTranscriptScript').value,
     modal_usage_url: document.getElementById('cfgModalUsageUrl').value
@@ -924,6 +936,7 @@ async function toggleConfig() {
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
       document.getElementById('cfgCheckPrompt').value = c.default_check_prompt || '';
       document.getElementById('cfgSignature').value = c.signature || '';
+      document.getElementById('cfgSignatureVideoPath').value = c.signature_video_path || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
@@ -1373,7 +1386,8 @@ async function addToPool() {
       skip_upload: document.getElementById('skipUpload').checked,
       use_groq: document.getElementById('useGroq').checked,
       do_normalize_volume: document.getElementById('normalizeVolume').checked,
-      do_charisma: document.getElementById('doCharisma').checked
+      do_charisma: document.getElementById('doCharisma').checked,
+      do_add_signature: document.getElementById('addSignature').checked
     })
   });
   refreshPool();
