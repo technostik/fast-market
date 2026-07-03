@@ -313,6 +313,15 @@ MAKEUP_MAX = 64.0
 CORRECTION_TOLERANCE_DB = 0.5
 
 
+# WAV's native format is PCM, not AAC - muxing AAC into a .wav container is
+# non-standard and its behavior (silent corruption vs. error) varies across
+# ffmpeg builds, so pick a codec the output container actually supports.
+def _audio_codec_args(output_path: Path) -> list[str]:
+    if output_path.suffix.lower() == ".wav":
+        return ["-c:a", "pcm_s16le"]
+    return ["-c:a", "aac", "-b:a", "192k"]
+
+
 def _measure_mean_volume(path: Path) -> float:
     result = subprocess.run(
         ["ffmpeg", "-i", str(path), "-af", "volumedetect", "-vn", "-sn", "-dn", "-f", "null", "-"],
@@ -345,7 +354,7 @@ def _apply_dynamic_normalization(input_path: Path, output_path: Path, makeup_gai
         [
             "ffmpeg", "-y", "-i", str(input_path),
             "-af", compressor,
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-c:v", "copy", *_audio_codec_args(output_path),
             str(output_path),
         ],
         capture_output=True, text=True,
@@ -360,7 +369,7 @@ def _apply_flat_gain(input_path: Path, output_path: Path, gain_db: float) -> Non
         [
             "ffmpeg", "-y", "-i", str(input_path),
             "-af", f"volume={gain_db}dB,alimiter=limit=0.891:level=false",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-c:v", "copy", *_audio_codec_args(output_path),
             str(output_path),
         ],
         capture_output=True, text=True,

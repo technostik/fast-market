@@ -41,6 +41,15 @@ def _require_ffmpeg() -> None:
         raise click.ClickException("ffmpeg not found on PATH (required for volume analysis/normalization).")
 
 
+# WAV's native format is PCM, not AAC - muxing AAC into a .wav container is
+# non-standard and its behavior (silent corruption vs. error) varies across
+# ffmpeg builds, so pick a codec the output container actually supports.
+def _audio_codec_args(output_path: Path) -> list[str]:
+    if output_path.suffix.lower() == ".wav":
+        return ["-c:a", "pcm_s16le"]
+    return ["-c:a", "aac", "-b:a", "192k"]
+
+
 def is_youtube_url(source: str) -> bool:
     """True if SOURCE looks like a YouTube URL (watch/youtu.be/shorts), not a local path."""
     return extract_video_id(source) is not None
@@ -145,7 +154,7 @@ def apply_dynamic_normalization(
         [
             "ffmpeg", "-y", "-i", str(input_path),
             "-af", compressor,
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-c:v", "copy", *_audio_codec_args(output_path),
             str(output_path),
         ],
         capture_output=True, text=True,
@@ -180,7 +189,7 @@ def apply_flat_gain(input_path: Path, output_path: Path, gain_db: float) -> None
             # gain back up toward full scale regardless of `limit`, defeating the
             # point of a headroom ceiling - level=false makes `limit` a hard cap.
             "-af", f"volume={gain_db}dB,alimiter=limit=0.891:level=false",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-c:v", "copy", *_audio_codec_args(output_path),
             str(output_path),
         ],
         capture_output=True, text=True,
