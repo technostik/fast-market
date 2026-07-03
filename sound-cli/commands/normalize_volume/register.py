@@ -103,11 +103,22 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="text",
         help="Output format",
     )
-    def measure_cmd(file, fmt):
+    @click.option(
+        "--modal",
+        is_flag=True,
+        default=False,
+        help="Run on Modal remote infrastructure.",
+    )
+    def measure_cmd(file, fmt, modal):
         """Measure FILE's current mean volume (dBFS) without changing anything."""
         path = Path(file).resolve()
-        mean_db = measure_mean_volume(path)
-        out({"path": str(path), "mean_volume_db": mean_db}, fmt)
+        if modal:
+            from commands.remote import run_remote_normalize_volume_measure
+            data = run_remote_normalize_volume_measure(path)
+        else:
+            mean_db = measure_mean_volume(path)
+            data = {"path": str(path), "mean_volume_db": mean_db}
+        out(data, fmt)
 
     @normalize_volume_cmd.command("apply")
     @click.argument("FILE", type=click.Path(exists=True, dir_okay=False))
@@ -117,8 +128,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Output path (default: <name>_normalized<ext> next to the input).",
     )
+    @click.option(
+        "--modal",
+        is_flag=True,
+        default=False,
+        help="Run on Modal remote infrastructure.",
+    )
     @click.pass_context
-    def apply_cmd(ctx, file, output):
+    def apply_cmd(ctx, file, output, modal):
         """Normalize FILE's audio volume to match the configured reference level."""
         input_path = Path(file).resolve()
 
@@ -130,28 +147,30 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     "No reference volume configured. Run: sound normalize-volume set-reference <file>"
                 )
 
-            current_db = measure_mean_volume(input_path)
-            makeup_gain = compute_makeup_gain(target_db, current_db)
-
             if output:
                 output_path = Path(output).resolve()
             else:
                 output_path = input_path.with_name(f"{input_path.stem}_normalized{input_path.suffix}")
 
-            apply_dynamic_normalization(input_path, output_path, makeup_gain)
-            output_db = measure_mean_volume(output_path)
-
-            # The compressor's ratio-based attenuation on content above THRESHOLD_DB
-            # can outweigh the makeup gain in ways the open-loop math can't predict
-            # (e.g. files with loud passages well above -30dB) - measure what was
-            # actually produced and, if it's off-target, correct it precisely with
-            # a second flat-gain pass rather than trusting the makeup gain alone.
-            correction_db = residual_correction_gain(target_db, output_db)
-            if correction_db is not None:
-                corrected_path = output_path.with_name(f".{output_path.stem}.correcting{output_path.suffix}")
-                apply_flat_gain(output_path, corrected_path, correction_db)
-                corrected_path.replace(output_path)
+            if modal:
+                from commands.remote import run_remote_normalize_volume_apply
+                result = run_remote_normalize_volume_apply(input_path, output_path, target_db)
+                current_db = result["input_volume_db"]
+                makeup_gain = result["makeup_gain"]
+                output_db = result["output_volume_db"]
+                correction_db = result.get("correction_db")
+            else:
+                current_db = measure_mean_volume(input_path)
+                makeup_gain = compute_makeup_gain(target_db, current_db)
+                apply_dynamic_normalization(input_path, output_path, makeup_gain)
                 output_db = measure_mean_volume(output_path)
+
+                correction_db = residual_correction_gain(target_db, output_db)
+                if correction_db is not None:
+                    corrected_path = output_path.with_name(f".{output_path.stem}.correcting{output_path.suffix}")
+                    apply_flat_gain(output_path, corrected_path, correction_db)
+                    corrected_path.replace(output_path)
+                    output_db = measure_mean_volume(output_path)
 
             click.echo(f"Input volume:   {current_db:.1f} dB")
             click.echo(f"Reference:      {target_db:.1f} dB")

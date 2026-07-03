@@ -33,5 +33,6 @@ include = [
     "plugins*", "plugins.kokoro*", "plugins.qwen3*", "plugins.musicgen*",
     "commands*", "commands.speak*", "commands.music*", "commands.setup*", "commands.prosody*", "commands.charisma*",
     "commands.normalize_volume*",
+    "modal_client*",
     "sound_entry*",
 ]

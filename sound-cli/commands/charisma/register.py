@@ -27,8 +27,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="text",
         help="Output format",
     )
+    @click.option(
+        "--modal",
+        is_flag=True,
+        default=False,
+        help="Run on Modal remote infrastructure.",
+    )
     @click.pass_context
-    def charisma_cmd(ctx, file, output, fmt):
+    def charisma_cmd(ctx, file, output, fmt, modal):
         """Estimate the vocal charisma of an audio or video FILE.
 
         Combines prosody (70%), voice quality (20%), and expressiveness (10%)
@@ -38,11 +44,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
         input_path = Path(file).resolve()
 
         try:
-            y, sr = load_audio(input_path)
-            scores = score_charisma(y, sr)
-
-            result = CharismaResult(path=input_path, **scores)
-            data = result.to_dict()
+            if modal:
+                from commands.remote import run_remote_charisma
+                data = run_remote_charisma(input_path)
+            else:
+                y, sr = load_audio(input_path)
+                scores = score_charisma(y, sr)
+                result = CharismaResult(path=input_path, **scores)
+                data = result.to_dict()
 
             if output:
                 output_path = Path(output)

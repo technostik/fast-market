@@ -79,11 +79,14 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
             current_video = out_path
             job.files["no_silence"] = out_path
 
-        # ── Volume normalization (optional, local, before silence removal becomes unavailable in modal) ──
-        if job.do_normalize_volume and not job.use_modal:
+        # ── Volume normalization (optional, modal-aware) ──
+        if job.do_normalize_volume:
             audio_out = str(d / f"{stem}_volume_normalized.mp4")
+            norm_cmd = [_sound(), "normalize-volume", "apply", current_video, "--output", audio_out]
+            if job.use_modal:
+                norm_cmd.append("--modal")
             norm_proc = await asyncio.create_subprocess_exec(
-                _sound(), "normalize-volume", "apply", current_video, "--output", audio_out,
+                *norm_cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             await norm_proc.communicate()
@@ -92,36 +95,44 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
                 job.files["audio"] = audio_out
                 s0.output += "\n🔊 Normalized"
 
-        # ── Local audio analysis (only when file is available locally) ──
-        if not job.use_modal and Path(current_video).exists():
-            charisma_proc = await asyncio.create_subprocess_exec(
-                _sound(), "charisma", current_video, "--format", "json",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
-            charisma_stdout, _ = await charisma_proc.communicate()
-            if charisma_proc.returncode == 0:
-                try:
-                    char_data = json.loads(charisma_stdout)
-                    score = char_data.get("charisma_score", "?")
-                    notes = char_data.get("notes", "")
-                    tip = notes.replace('"', '&quot;')
-                    job.files["charisma_score"] = str(score)
-                    job.files["charisma_notes"] = notes
-                    s0.output += f'🎙 Charisma: <span title="{tip}" style="cursor:help;border-bottom:1px dotted var(--dim);">{score}</span>'
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    s0.output += "🎙 Charisma: failed"
-            else:
-                s0.output += "🎙 Charisma: failed"
+        # ── Audio analysis (modal-aware) ──
+        if Path(current_video).exists():
 
+            if job.do_charisma:
+                charisma_cmd = [_sound(), "charisma", current_video, "--format", "json"]
+                if job.use_modal:
+                    charisma_cmd.append("--modal")
+                charisma_proc = await asyncio.create_subprocess_exec(
+                    *charisma_cmd,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                charisma_stdout, _ = await charisma_proc.communicate()
+                if charisma_proc.returncode == 0:
+                    try:
+                        char_data = json.loads(charisma_stdout)
+                        score = char_data.get("charisma_score", "?")
+                        notes = char_data.get("notes", "")
+                        tip = notes.replace('"', '&quot;')
+                        job.files["charisma_score"] = str(score)
+                        job.files["charisma_notes"] = notes
+                        s0.output += f'🎙 Charisma: <span title="{tip}" style="cursor:help;border-bottom:1px dotted var(--dim);">{score}</span>'
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        s0.output += "🎙 Charisma: failed"
+                else:
+                    s0.output += "🎙 Charisma: failed"
+
+            measure_cmd = [_sound(), "normalize-volume", "measure", current_video, "--format", "json"]
+            if job.use_modal:
+                measure_cmd.append("--modal")
             measure_proc = await asyncio.create_subprocess_exec(
-                _sound(), "normalize-volume", "measure", current_video, "--format", "json",
+                *measure_cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             measure_stdout, _ = await measure_proc.communicate()
             if measure_proc.returncode == 0:
                 try:
                     vol_data = json.loads(measure_stdout)
-                    mean_vol = vol_data.get("mean_volume", "?")
+                    mean_vol = vol_data.get("mean_volume_db", "?")
                     s0.output += f"\n🔊 Volume: {mean_vol} dB"
                 except (json.JSONDecodeError, ValueError, TypeError):
                     s0.output += "\n🔊 Volume: failed"
