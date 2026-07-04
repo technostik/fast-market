@@ -371,11 +371,24 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             job.studio_url = ""
         _save_meta(job)
 
-    await _run_post_publish_step(job, final_video)
+    if not job.do_ignore_post_publish:
+        await _run_post_publish_step(job, final_video)
+    else:
+        job.steps[5].status = "skipped"
+        job.steps[6].status = "skipped"
+        job.status = "done"
+        job.end_time = time.time()
+        _save_meta(job)
 
 
 async def _run_post_publish_step(job: Job, final_video: str) -> None:
     """Run step 5 (post-publish script). Sets job.status='error' on failure."""
+    if job.do_ignore_post_publish:
+        job.steps[5].status = "skipped"
+        job.status = "done"
+        job.end_time = time.time()
+        _save_meta(job)
+        return
     pub_cfg = _load_publish_cfg()
     s5 = job.steps[5]
     s5.start_time = time.time()
@@ -445,6 +458,12 @@ async def _run_post_publish_step(job: Job, final_video: str) -> None:
 
 async def _run_transcript_script(job: Job, transcript_path: str) -> None:
     """Run step 6 (transcript script). Only triggered manually — never auto-started."""
+    if job.do_ignore_post_publish:
+        job.steps[6].status = "skipped"
+        job.status = "done"
+        job.end_time = time.time()
+        _save_meta(job)
+        return
     pub_cfg = _load_publish_cfg()
     s6 = job.steps[6]
     s6.start_time = time.time()

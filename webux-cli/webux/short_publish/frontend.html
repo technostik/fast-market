@@ -263,6 +263,10 @@
         <input type="checkbox" id="addSignature" checked>
         <label for="addSignature" style="display:inline; margin:0;">Append signature video</label>
       </div>
+      <div class="checkrow">
+        <input type="checkbox" id="ignorePostPublish">
+        <label for="ignorePostPublish" style="display:inline; margin:0;">Ignore post publishing scripts</label>
+      </div>
 
       <div class="cols2">
         <div class="row">
@@ -580,6 +584,7 @@ async function startJob() {
     do_normalize_volume: document.getElementById('normalizeVolume').checked,
     do_charisma: document.getElementById('doCharisma').checked,
     do_add_signature: document.getElementById('addSignature').checked,
+    ignore_post_publish: document.getElementById('ignorePostPublish').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -843,6 +848,7 @@ async function doResume() {
     do_normalize_volume: document.getElementById('normalizeVolume').checked,
     do_charisma: document.getElementById('doCharisma').checked,
     do_add_signature: document.getElementById('addSignature').checked,
+    ignore_post_publish: document.getElementById('ignorePostPublish').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
@@ -1387,7 +1393,8 @@ async function addToPool() {
       use_groq: document.getElementById('useGroq').checked,
       do_normalize_volume: document.getElementById('normalizeVolume').checked,
       do_charisma: document.getElementById('doCharisma').checked,
-      do_add_signature: document.getElementById('addSignature').checked
+      do_add_signature: document.getElementById('addSignature').checked,
+      ignore_post_publish: document.getElementById('ignorePostPublish').checked
     })
   });
   refreshPool();
