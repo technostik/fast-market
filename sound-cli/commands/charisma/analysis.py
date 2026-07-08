@@ -6,7 +6,7 @@ import librosa
 import numpy as np
 
 from commands.prosody.analysis import compute_f0_contour, score_prosody
-from commands.scoring import inverse_band_score, target_band_score
+from commands.scoring import ceiling_band_score, inverse_band_score, target_band_score
 
 # Charisma-specific bands, heuristic targets informed by the general shape of
 # findings in charismatic-speech research (Niebuhr, Signorello, Rodero et al.:
@@ -14,17 +14,24 @@ from commands.scoring import inverse_band_score, target_band_score
 # more charismatic) — not literal thresholds lifted from any single paper.
 
 # Direction reversals per voiced second in the F0 contour (dynamic rises/falls,
-# distinct from PITCH_BAND's overall range in prosody/analysis.py).
-MIN_REVERSAL_SEMITONES = 0.5
-INTONATION_BAND = (0.3, 1.0, 3.0, 5.0)
+# distinct from PITCH_BAND's overall range in prosody/analysis.py). More modulations
+# read as more charismatic (Niebuhr "Winning Over an Audience"), so this is a
+# "more is better, capped" band: ceiling at ideal, not a mid-range peak. The
+# threshold below is an absolute semitone movement (a clear pitch move), not a
+# speaker-relative one — a relative threshold cancelled out the real difference
+# between a narrower- and wider-range speaker.
+MIN_REVERSAL_SEMITONES = 0.75
+INTONATION_BAND = (0.3, 3.0)
 
 # Spectral centroid (Hz) as a rough resonance/timbre proxy: too low reads dull/muffled,
-# too high reads thin/harsh.
+# too high reads thin/harsh — a genuine mid-range optimum, so keep target_band_score.
 RESONANCE_BAND = (300.0, 800.0, 2500.0, 4000.0)
 
 # Harmonic-vs-percussive energy ratio (dB-like) from HPSS, as a rough clarity proxy —
-# NOT a clinical Praat harmonics-to-noise ratio.
-HNR_BAND = (0.0, 6.0, 20.0, 30.0)
+# NOT a clinical Praat harmonics-to-noise ratio. For normal speech this proxy lands
+# around 0 or slightly negative (percussive energy rivals harmonic), so the band must
+# span negative values; higher (more harmonic) = clearer = more charismatic, capped.
+HNR_BAND = (-15.0, 0.0)
 
 # Relative frame-to-frame perturbation of F0 / RMS, as rough jitter/shimmer proxies —
 # NOT pitch-period-synchronous clinical jitter/shimmer percentages.
@@ -45,7 +52,17 @@ def analyze_intonation(y: np.ndarray, sr: int) -> dict:
     if voiced_f0.size < 3:
         return {"reversals_per_sec": 0.0}
 
-    semitone_diffs = 12 * np.log2(voiced_f0[1:] / voiced_f0[:-1])
+    # Smooth the contour to suppress per-frame pyin jitter, which otherwise reads as
+    # ~6 fake direction reversals/sec even in a monotone voice. After smoothing we
+    # count meaningful modulations against an absolute semitone threshold, not noise flips.
+    win = max(3, int(round(0.05 * sr / 512)))  # ~50 ms window (librosa.pyin hop = 512)
+    smoothed = (
+        np.convolve(voiced_f0, np.ones(win) / win, mode="same")
+        if voiced_f0.size >= win
+        else voiced_f0
+    )
+
+    semitone_diffs = 12 * np.log2(smoothed[1:] / smoothed[:-1])
     direction = np.sign(np.where(np.abs(semitone_diffs) >= MIN_REVERSAL_SEMITONES, semitone_diffs, 0.0))
     direction = direction[direction != 0]
     if direction.size < 2:
@@ -108,9 +125,9 @@ def score_charisma(y: np.ndarray, sr: int) -> dict:
     intonation = analyze_intonation(y, sr)
     voice = analyze_voice_quality(y, sr)
 
-    intonation_score = target_band_score(intonation["reversals_per_sec"], *INTONATION_BAND)
+    intonation_score = ceiling_band_score(intonation["reversals_per_sec"], *INTONATION_BAND)
     resonance_score = target_band_score(voice["spectral_centroid_hz"], *RESONANCE_BAND)
-    hnr_score = target_band_score(voice["hnr_proxy_db"], *HNR_BAND)
+    hnr_score = ceiling_band_score(voice["hnr_proxy_db"], *HNR_BAND)
     jitter_score = inverse_band_score(voice["jitter_proxy"], JITTER_GOOD_MAX, JITTER_BAD_MIN)
     shimmer_score = inverse_band_score(voice["shimmer_proxy"], SHIMMER_GOOD_MAX, SHIMMER_BAD_MIN)
     stability_score = (jitter_score + shimmer_score) / 2

@@ -9,6 +9,7 @@ import click
 import librosa
 import numpy as np
 
+from commands.scoring import ceiling_band_score as _ceiling_band_score
 from commands.scoring import target_band_score as _target_band_score
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
@@ -19,11 +20,16 @@ TARGET_SR = 22050
 MIN_PAUSE_SECS = 0.15
 SILENCE_TOP_DB = 30
 
-# Each band is (low, ideal_low, ideal_high, high): score is 100 inside
-# [ideal_low, ideal_high], 0 at/beyond low or high, linear in between.
-# Bands are heuristic targets for expressive human speech, not hard science.
-PITCH_BAND = (1.0, 4.0, 12.0, 20.0)          # semitone range (5th-95th pct F0)
-ENERGY_BAND = (0.10, 0.30, 0.70, 1.20)       # RMS coefficient of variation
+# Bands for "mid-range is best" metrics are (low, ideal_low, ideal_high, high):
+# score is 100 inside [ideal_low, ideal_high], 0 at/beyond low or high. These are
+# heuristic targets for expressive human speech, anchored to typical "ordinary
+# speaker" reference values from the phonetics literature, not hard science.
+# Bands for "more is better, capped" metrics are (low, ideal) and use
+# ceiling_band_score — see commands/scoring.py. Charisma (and good prosody) rises
+# with pitch range and loudness variation per Signorello, the cross-gender f0/SPL
+# charisma study, and the 2009 YouTube charisma study.
+PITCH_BAND = (4.0, 14.0)                     # semitone range (5th-95th pct F0): wider = more expressive
+ENERGY_BAND = (0.20, 1.00)                   # RMS coefficient of variation: more dynamics = more expressive
 RHYTHM_BAND = (0.02, 0.10, 0.30, 0.55)       # silence ratio of total duration
 RATE_BAND = (1.0, 3.0, 6.0, 9.0)             # onsets/sec (syllable-rate proxy)
 
@@ -138,8 +144,8 @@ def score_prosody(y: np.ndarray, sr: int) -> dict:
     rhythm = analyze_rhythm(y, sr)
     rate = analyze_rate(y, sr, rhythm["intervals"])
 
-    pitch_score = _target_band_score(pitch["semitone_range"], *PITCH_BAND)
-    energy_score = _target_band_score(energy["rms_cv"], *ENERGY_BAND)
+    pitch_score = _ceiling_band_score(pitch["semitone_range"], *PITCH_BAND)
+    energy_score = _ceiling_band_score(energy["rms_cv"], *ENERGY_BAND)
     rhythm_score = _target_band_score(rhythm["pause_ratio"], *RHYTHM_BAND)
     rate_score = _target_band_score(rate["rate_per_sec"], *RATE_BAND)
 
