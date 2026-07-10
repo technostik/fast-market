@@ -38,7 +38,7 @@ from .pool import (
     start_pool,
     stop_pool,
     skip_current,
-    redo_current,
+    redo_unfinished,
     _load_pool_from_disk,
     clear_finished,
     rerun_check,
@@ -56,7 +56,7 @@ def _is_intermediate(path: Path) -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, use_groq: bool = False, do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
@@ -70,14 +70,13 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         prompt_check=pub.get("default_check_prompt", ""),
         do_remove_silence=True,
         do_burn_subtitles=True,
-        simple_transcript=True,
+        transcript_mode=transcript_mode,
         language=pub.get("language", "fr"),
         model=pub.get("model", "medium"),
         privacy=pub.get("privacy", "unlisted"),
         description_prefix=description_prefix,
         source_urls=source_urls or [],
         skip_upload=skip_upload,
-        use_groq=use_groq,
         do_normalize_volume=do_normalize_volume,
         do_charisma=do_charisma,
         do_add_signature=do_add_signature,
@@ -306,7 +305,7 @@ class StartRequest(BaseModel):
     prompt_check: str = ""
     do_remove_silence: bool = True
     do_burn_subtitles: bool = True
-    simple_transcript: bool = True
+    transcript_mode: str = "normal"
     language: str = "fr"
     model: str = "medium"
     privacy: str = "unlisted"
@@ -314,7 +313,6 @@ class StartRequest(BaseModel):
     source_urls: list[str] = []
     skip_upload: bool = False
     use_modal: bool = True
-    use_groq: bool = False
     do_normalize_volume: bool = False
     do_charisma: bool = True
     do_add_signature: bool = True
@@ -328,10 +326,9 @@ class ResumeRequest(BaseModel):
     prompt_check: str = ""
     from_step: int = 3
     do_burn_subtitles: bool = True
-    simple_transcript: bool = True
+    transcript_mode: str = "normal"
     skip_upload: bool = False
     use_modal: bool = True
-    use_groq: bool = False
     do_normalize_volume: bool = False
     do_charisma: bool = True
     do_add_signature: bool = True
@@ -359,7 +356,7 @@ async def start(req: StartRequest):
         prompt_check=req.prompt_check or pub.get("default_check_prompt", ""),
         do_remove_silence=req.do_remove_silence,
         do_burn_subtitles=req.do_burn_subtitles,
-        simple_transcript=req.simple_transcript,
+        transcript_mode=req.transcript_mode,
         language=req.language,
         model=req.model,
         privacy=req.privacy,
@@ -367,7 +364,6 @@ async def start(req: StartRequest):
         source_urls=_validate_urls(req.source_urls),
         skip_upload=req.skip_upload,
         use_modal=req.use_modal,
-        use_groq=req.use_groq,
         do_normalize_volume=req.do_normalize_volume,
         do_charisma=req.do_charisma,
         do_add_signature=req.do_add_signature,
@@ -435,7 +431,7 @@ async def resume(req: ResumeRequest):
         prompt_check=req.prompt_check or pub_cfg.get("default_check_prompt", ""),
         do_remove_silence=False,
         do_burn_subtitles=req.do_burn_subtitles,
-        simple_transcript=req.simple_transcript,
+        transcript_mode=req.transcript_mode,
         language=req.language,
         model=req.model,
         privacy=req.privacy,
@@ -443,7 +439,6 @@ async def resume(req: ResumeRequest):
         source_urls=_validate_urls(req.source_urls),
         skip_upload=req.skip_upload,
         use_modal=req.use_modal,
-        use_groq=req.use_groq,
         do_normalize_volume=req.do_normalize_volume,
         do_charisma=req.do_charisma,
         do_add_signature=req.do_add_signature,
@@ -543,7 +538,7 @@ async def redo_post_publish(body: dict):
         prompt_summary=pub.get("default_description_prompt", ""),
         do_remove_silence=False,
         do_burn_subtitles=False,
-        simple_transcript=True,
+        transcript_mode="normal",
         language=pub.get("language", "fr"),
         model=pub.get("model", "medium"),
         privacy=pub.get("privacy", "unlisted"),
@@ -636,7 +631,7 @@ async def run_transcript_script(body: dict):
         prompt_summary=pub.get("default_description_prompt", ""),
         do_remove_silence=False,
         do_burn_subtitles=False,
-        simple_transcript=True,
+        transcript_mode="normal",
         language=pub.get("language", "fr"),
         model=pub.get("model", "medium"),
         privacy=pub.get("privacy", "unlisted"),
@@ -674,7 +669,7 @@ class PoolAddRequest(BaseModel):
     description_prefix: str = ""
     source_urls: list[str] = []
     skip_upload: bool = False
-    use_groq: bool = False
+    transcript_mode: str = "normal"
     do_normalize_volume: bool = False
     do_charisma: bool = True
     do_add_signature: bool = True
@@ -683,7 +678,7 @@ class PoolAddRequest(BaseModel):
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.use_groq, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish)
     return {"ok": ok}
 
 
@@ -710,6 +705,8 @@ async def pool_start():
 @router.post("/pool/stop")
 async def pool_stop():
     stop_pool()
+    from .state import request_stop
+    request_stop()
     return {"ok": True}
 
 
@@ -721,7 +718,7 @@ async def pool_skip():
 
 @router.post("/pool/redo")
 async def pool_redo():
-    redo_current()
+    redo_unfinished()
     return {"ok": True}
 
 

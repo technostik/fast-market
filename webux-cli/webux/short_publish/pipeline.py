@@ -21,6 +21,7 @@ from .utils import (
     _run,
     _extract_video_id,
 )
+from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
 
 
 async def _run_job_safely(coro, job: Job) -> None:
@@ -43,7 +44,65 @@ async def _run_job_safely(coro, job: Job) -> None:
         _save_meta(job)
 
 
+def _stop_requested(job: Job) -> bool:
+    return getattr(job, "stop_requested", False)
+
+
+def _finish_step(job: Job, step, rc: int) -> bool:
+    """Finalize a step after its subprocess returns. Honors a stop request
+    (marks the step skipped + 'stopped') before falling back to error on a
+    non-zero exit. Returns True when the pipeline must abort."""
+    if _stop_requested(job):
+        step.status = "skipped"
+        step.end_time = time.time()
+        step.output = f"{step.output}\n⏹ Stopped by user" if step.output else "⏹ Stopped by user"
+        job.status = "stopped"
+        job.end_time = time.time()
+        _save_meta(job)
+        return True
+    if rc != 0:
+        step.end_time = time.time()
+        step.status = "error"
+        job.status = "error"
+        _save_meta(job)
+        return True
+    return False
+
+
+def _abort_if_stopped(job: Job, step) -> bool:
+    """If a stop was requested, finalize the step + job as stopped and return
+    True so the caller can abort the pipeline. Use after a tracked subprocess
+    whose own exit code does not decide success/failure (e.g. analysis steps)."""
+    if _stop_requested(job):
+        step.status = "skipped"
+        step.end_time = time.time()
+        step.output = (step.output + "\n⏹ Stopped by user") if step.output else "⏹ Stopped by user"
+        job.status = "stopped"
+        job.end_time = time.time()
+        _save_meta(job)
+        return True
+    return False
+
+
+async def _run_tracked(job: Job, step, *cmd: str):
+    """Run a subprocess as a tracked, interruptible pipeline step.
+
+    Streams stdout/stderr into the step output, registers the process so a
+    stop request can terminate it, then finalizes the step. Returns True when
+    the pipeline must abort (error or stop)."""
+    rc, _ = await _run(step, *cmd)
+    return _finish_step(job, step, rc)
+
+
 async def _run_pipeline_from(job: Job, from_step: int) -> None:
+    set_active_job(job)
+    try:
+        await _run_pipeline_core(job, from_step)
+    finally:
+        clear_active_job()
+
+
+async def _run_pipeline_core(job: Job, from_step: int) -> None:
     stem = _stem(job.source)
     pub_cfg = _load_publish_cfg()
     d = Path(pub_cfg.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH)).expanduser().resolve()
@@ -67,9 +126,8 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
             cmd = [_video(), "remove-silence", job.source, "-o", out_path]
             if job.use_modal:
                 cmd.append("--modal")
-            rc, _ = await _run(s0, *cmd)
-            if rc != 0:
-                s0.end_time = time.time(); s0.status = "error"; job.status = "error"; _save_meta(job); return
+            if await _run_tracked(job, s0, *cmd):
+                return
             duration = await _get_video_duration(out_path)
             if duration > 180:
                 s0.end_time = time.time(); s0.status = "error"
@@ -89,7 +147,13 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
                 *norm_cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
-            await norm_proc.communicate()
+            set_active_proc(norm_proc)
+            try:
+                await norm_proc.communicate()
+            finally:
+                clear_active_proc()
+            if _abort_if_stopped(job, s0):
+                return
             if norm_proc.returncode == 0:
                 current_video = audio_out
                 job.files["audio"] = audio_out
@@ -106,7 +170,13 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
                     *charisma_cmd,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
-                charisma_stdout, _ = await charisma_proc.communicate()
+                set_active_proc(charisma_proc)
+                try:
+                    charisma_stdout, _ = await charisma_proc.communicate()
+                finally:
+                    clear_active_proc()
+                if _abort_if_stopped(job, s0):
+                    return
                 if charisma_proc.returncode == 0:
                     try:
                         char_data = json.loads(charisma_stdout)
@@ -128,7 +198,13 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
                 *measure_cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
-            measure_stdout, _ = await measure_proc.communicate()
+            set_active_proc(measure_proc)
+            try:
+                measure_stdout, _ = await measure_proc.communicate()
+            finally:
+                clear_active_proc()
+            if _abort_if_stopped(job, s0):
+                return
             if measure_proc.returncode == 0:
                 try:
                     vol_data = json.loads(measure_stdout)
@@ -149,7 +225,9 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
     ass_path = str(d / f"{stem}.ass")
     txt_path = str(d / f"{stem}_transcript.txt")
 
-    if from_step <= 1:
+    skip_transcript = job.transcript_mode == "none"
+
+    if from_step <= 1 and not skip_transcript:
         s1 = job.steps[1]
         s1.start_time = time.time()
         s1.status = "running"
@@ -161,11 +239,10 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
         ]
         if job.use_modal:
             cmd.append("--modal")
-        if job.use_groq:
+        if job.transcript_mode == "groq":
             cmd.append("--use-groq")
-        rc, _ = await _run(s1, *cmd)
-        if rc != 0:
-            s1.end_time = time.time(); s1.status = "error"; job.status = "error"; _save_meta(job); return
+        if await _run_tracked(job, s1, *cmd):
+            return
         s1.end_time = time.time()
         elapsed_s = round(s1.end_time - s1.start_time, 1)
         mode_label = "modal" if job.use_modal else "local"
@@ -179,6 +256,11 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
         job.transcript_text = plain
         _save_meta(job)
     else:
+        if skip_transcript and from_step <= 1:
+            s1 = job.steps[1]
+            s1.status = "skipped"
+            s1.output = "Skipped (no transcript selected)"
+            _save_meta(job)
         ass_path = job.files.get("transcript") or ass_path
         txt_path = job.files.get("transcript_txt") or txt_path
         if not Path(txt_path).exists() and Path(ass_path).exists():
@@ -188,20 +270,21 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
 
     if from_step <= 2:
         s2 = job.steps[2]
-        if job.do_burn_subtitles:
+        if job.do_burn_subtitles and not skip_transcript:
             s2.start_time = time.time()
             s2.status = "running"
             out_path = str(d / f"{stem}_subtitled.mp4")
             cmd = [_video(), "burn-subtitles", current_video, ass_path, "-o", out_path]
             if job.use_modal:
                 cmd.append("--modal")
-            rc, _ = await _run(s2, *cmd)
-            if rc != 0:
-                s2.end_time = time.time(); s2.status = "error"; job.status = "error"; _save_meta(job); return
+            if await _run_tracked(job, s2, *cmd):
+                return
             s2.end_time = time.time(); s2.status = "done"; s2.progress = 100
             current_video = out_path
             job.files["subtitled"] = out_path
         else:
+            if skip_transcript:
+                s2.output = "Skipped (no transcript selected)"
             s2.status = "skipped"
         _save_meta(job)
     else:
@@ -225,30 +308,35 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         s3.start_time = time.time()
         s3.status = "running"
 
-        rc, title_out = await _run(s3, _pr(), "apply", job.prompt_title, f"transcript=@{transcript_path}")
-        if rc != 0:
-            s3.end_time = time.time(); s3.status = "error"; job.status = "error"; _save_meta(job); return
+        if await _run_tracked(job, s3, _pr(), "apply", job.prompt_title, f"transcript=@{transcript_path}"):
+            return
+        title_out = (s3.output or "").strip()
 
         proc = await asyncio.create_subprocess_exec(
             _pr(), "apply", job.prompt_summary, f"transcript=@{transcript_path}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        set_active_proc(proc)
+        try:
+            async def _stream(stream, prefix):
+                while True:
+                    line = await stream.readline()
+                    if not line: break
+                    text = line.decode(errors="replace").rstrip()
+                    if text:
+                        if s3.output: s3.output += "\n"
+                        s3.output += f"{prefix}{text}"
 
-        async def _stream(stream, prefix):
-            while True:
-                line = await stream.readline()
-                if not line: break
-                text = line.decode(errors="replace").rstrip()
-                if text:
-                    if s3.output: s3.output += "\n"
-                    s3.output += f"{prefix}{text}"
-
-        await asyncio.gather(
-            _stream(proc.stdout, ""),
-            _stream(proc.stderr, "[err] "),
-            proc.wait(),
-        )
+            await asyncio.gather(
+                _stream(proc.stdout, ""),
+                _stream(proc.stderr, "[err] "),
+                proc.wait(),
+            )
+        finally:
+            clear_active_proc()
+        if _abort_if_stopped(job, s3):
+            return
         if proc.returncode:
             s3.end_time = time.time(); s3.status = "error"; job.status = "error"; _save_meta(job); return
 
@@ -274,7 +362,13 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                chk_stdout, _ = await chk_proc.communicate()
+                set_active_proc(chk_proc)
+                try:
+                    chk_stdout, _ = await chk_proc.communicate()
+                finally:
+                    clear_active_proc()
+                if _abort_if_stopped(job, s3):
+                    return
                 if chk_proc.returncode == 0:
                     job.check_result = chk_stdout.decode(errors="replace").strip()
             except Exception:
@@ -300,13 +394,12 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
                     s3.output += f"\n[error] Signature video not found: {sig_path_obj}"
                     job.status = "error"; _save_meta(job); return
                 if job.files.get("signature_appended") != "1":
-                    concat_out = str(Path(final_video).parent / f"{safe_name}_with_signature{ext}")
+                    concat_out = str(Path(final_video).parent / f"with_signature_{safe_name}{ext}")
                     concat_cmd = [_video(), "concat", final_video, str(sig_path_obj), "-o", concat_out]
                     if job.use_modal:
                         concat_cmd.append("--modal")
-                    rc, _ = await _run(s3, *concat_cmd)
-                    if rc != 0:
-                        s3.end_time = time.time(); s3.status = "error"; job.status = "error"; _save_meta(job); return
+                    if await _run_tracked(job, s3, *concat_cmd):
+                        return
                     final_video = concat_out
                     job.files["final_video"] = final_video
                     job.files["signature_appended"] = "1"
@@ -357,8 +450,8 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             "--description", job.description,
             "--privacy", job.privacy,
         )
-        if rc != 0:
-            s4.end_time = time.time(); s4.status = "error"; job.status = "error"; _save_meta(job); return
+        if _finish_step(job, s4, rc):
+            return
 
         s4.end_time = time.time(); s4.status = "done"
         watch_url = url_out.strip()
@@ -408,6 +501,7 @@ async def _run_post_publish_step(job: Job, final_video: str) -> None:
                     stderr=asyncio.subprocess.PIPE,
                     env=os.environ.copy(),
                 )
+                set_active_proc(proc)
 
                 async def _stream(stream, prefix):
                     while True:
@@ -424,6 +518,9 @@ async def _run_post_publish_step(job: Job, final_video: str) -> None:
                     _stream(proc.stderr, "[err]"),
                     proc.wait(),
                 )
+                clear_active_proc()
+                if _abort_if_stopped(job, s5):
+                    return
                 rc = proc.returncode
                 s5.status = "done" if rc == 0 else "error"
                 if rc != 0:
@@ -482,6 +579,7 @@ async def _run_transcript_script(job: Job, transcript_path: str) -> None:
                     stderr=asyncio.subprocess.PIPE,
                     env=os.environ.copy(),
                 )
+                set_active_proc(proc)
 
                 async def _stream(stream, prefix):
                     while True:
@@ -500,6 +598,9 @@ async def _run_transcript_script(job: Job, transcript_path: str) -> None:
                     _stream(proc.stderr, "[err]"),
                     proc.wait(),
                 )
+                clear_active_proc()
+                if _abort_if_stopped(job, s6):
+                    return
                 rc = proc.returncode
                 s6.status = "done" if rc == 0 else "error"
                 if rc != 0:

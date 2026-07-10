@@ -17,7 +17,7 @@ class PoolItem:
     description_prefix: str = ""
     source_urls: list[str] = field(default_factory=list)
     skip_upload: bool = False
-    use_groq: bool = False
+    transcript_mode: str = "normal"
     do_normalize_volume: bool = False
     do_charisma: bool = True
     do_add_signature: bool = True
@@ -38,6 +38,9 @@ class PoolItem:
 
 _pool: list[PoolItem] = []
 _pool_state = {"running": False, "current": None}
+# When False, get_pool_state() must NOT auto-restart the worker (e.g. after an
+# explicit Stop). Set back to True by start_pool()/add_to_pool().
+_pool_auto_start = True
 _worker_task: Optional[asyncio.Task] = None
 
 
@@ -60,7 +63,7 @@ def _load_pool_from_disk():
                 description_prefix=item.get("description_prefix", ""),
                 source_urls=item.get("source_urls", []),
                 skip_upload=item.get("skip_upload", False),
-                use_groq=item.get("use_groq", False),
+                transcript_mode=item.get("transcript_mode") or ("groq" if item.get("use_groq") else "normal"),
                 do_normalize_volume=item.get("do_normalize_volume", False),
                 do_charisma=item.get("do_charisma", True),
                 do_add_signature=item.get("do_add_signature", True),
@@ -91,7 +94,7 @@ def _save_pool_to_disk():
                 "description_prefix": it.description_prefix,
                 "source_urls": it.source_urls,
                 "skip_upload": it.skip_upload,
-                "use_groq": it.use_groq,
+                "transcript_mode": it.transcript_mode,
                 "do_normalize_volume": it.do_normalize_volume,
                 "do_charisma": it.do_charisma,
                 "do_add_signature": it.do_add_signature,
@@ -144,15 +147,16 @@ def _update_meta_status(source: str, status: str):
         pass
 
 
-def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, use_groq: bool = False, do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False) -> bool:
+def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False) -> bool:
     src = str(Path(source).expanduser().resolve())
     if any(item.source == src for item in _pool):
         return False
     source_urls = source_urls or []
-    item = PoolItem(source=src, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, use_groq=use_groq, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish)
+    item = PoolItem(source=src, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish)
     _pool.append(item)
     _create_meta(src, description_prefix, source_urls)
     _save_pool_to_disk()
+    start_pool()  # begin processing immediately (preserves add → run UX)
     return True
 
 
@@ -182,8 +186,10 @@ def remove_from_pool(source: str) -> bool:
 
 
 def get_pool_state() -> dict:
-    # Auto-start the pool worker if there are items to process
-    if not _pool_state["running"]:
+    # Auto-start the pool worker only if it is not explicitly stopped and
+    # there is work to do. After an explicit Stop, _pool_auto_start is False so
+    # status polls never silently restart the pool.
+    if not _pool_state["running"] and _pool_auto_start:
         has_pending = any(
             it.status == "queued" or it.status == "processing"
             for it in _pool
@@ -247,7 +253,7 @@ async def _pool_worker():
                 description_prefix=next_item.description_prefix,
                 source_urls=next_item.source_urls,
                 skip_upload=next_item.skip_upload,
-                use_groq=next_item.use_groq,
+                transcript_mode=next_item.transcript_mode,
                 do_normalize_volume=next_item.do_normalize_volume,
                 do_charisma=next_item.do_charisma,
                 do_add_signature=next_item.do_add_signature,
@@ -270,6 +276,13 @@ async def _pool_worker():
                         next_item.error_message = f"[{s.name}] {s.output}"
                         break
                 _update_meta_status(next_item.source, "error")
+            elif job.status == "stopped":
+                next_item.status = "stopped"
+                next_item.finished_at = time.time()
+                if job.start_time:
+                    next_item.elapsed_seconds = round(time.time() - job.start_time, 1)
+                next_item.error_message = "Stopped by user"
+                _update_meta_status(next_item.source, "stopped")
             else:
                 next_item.status = "finished"
                 next_item.finished_at = time.time()
@@ -302,17 +315,19 @@ async def _pool_worker():
 
 
 def start_pool():
-    global _worker_task, _pool_state
+    global _worker_task, _pool_state, _pool_auto_start
     if _pool_state["running"]:
         return
     _pool_state["running"] = True
+    _pool_auto_start = True
     if _worker_task is None or _worker_task.done():
         _worker_task = asyncio.create_task(_pool_worker())
 
 
 def stop_pool():
-    global _pool_state
+    global _pool_state, _pool_auto_start
     _pool_state["running"] = False
+    _pool_auto_start = False
 
 
 def skip_current():
@@ -329,24 +344,24 @@ def skip_current():
     _pool_state["current"] = None
 
 
-def redo_current():
-    cur = _pool_state.get("current")
-    target = None
-    if cur:
-        target = next((it for it in _pool if it.source == cur), None)
-    if not target:
-        # No current processing item — redo the most recent error item
-        target = next((it for it in reversed(_pool) if it.status == "error"), None)
-    if not target:
-        return
-    target.status = "queued"
-    target.finished_at = None
-    target.elapsed_seconds = None
-    target.error_message = ""
-    target.job_id = None
-    _update_meta_status(target.source, "queued")
+_UNFINISHED = {"queued", "processing", "error", "stopped", "skipped"}
+
+
+def redo_unfinished():
+    """Requeue every unfinished pool item and start processing them all."""
+    requeued = False
+    for it in _pool:
+        if it.status in _UNFINISHED:
+            it.status = "queued"
+            it.finished_at = None
+            it.elapsed_seconds = None
+            it.error_message = ""
+            it.job_id = None
+            _update_meta_status(it.source, "queued")
+            requeued = True
     _save_pool_to_disk()
-    start_pool()
+    if requeued:
+        start_pool()
 
 
 def clear_finished():

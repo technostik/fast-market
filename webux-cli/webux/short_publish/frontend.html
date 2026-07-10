@@ -24,6 +24,9 @@
     .cols2 { display:flex; gap:12px; }
     .cols2 .row { flex:1; }
     .checkrow { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px; }
+    .options-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; margin-bottom:10px; }
+    .options-grid .opt { min-width:0; }
+    .options-grid .opt:has(input:disabled) { opacity:.45; }
     button { padding:7px 14px; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
     .btn-go     { background:var(--ok); color:#000; }
     .btn-go:hover { opacity:.88; }
@@ -226,46 +229,65 @@
         </div>
       </div>
 
-      <div class="checkrow">
-        <input type="checkbox" id="removeSilence" checked>
-        <label for="removeSilence" style="display:inline; margin:0;">Remove silence</label>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="burnSubtitles" checked>
-        <label for="burnSubtitles" style="display:inline; margin:0;">Burn subtitles</label>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="simpleTranscript" checked>
-        <label for="simpleTranscript" style="display:inline; margin:0;">Simple transcript (faster)</label>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="skipUpload">
-        <label for="skipUpload" style="display:inline; margin:0;">Skip YouTube upload (test)</label>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="useModal" checked>
-        <label for="useModal" style="display:inline; margin:0;">Use Modal (remote processing)</label>
-        <a id="modalUsageLink" href="https://modal.com/settings/usage" target="_blank" style="font-size:11px; color:var(--link); margin-left:6px; opacity:.8;">usage ↗</a>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="useGroq" checked>
-        <label for="useGroq" style="display:inline; margin:0;">Use Groq API for transcription (whisper-large-v3, fast)</label>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="normalizeVolume">
-        <label for="normalizeVolume" style="display:inline; margin:0;">Normalize volume</label>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="doCharisma" checked>
-        <label for="doCharisma" style="display:inline; margin:0;">Charisma score</label>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="addSignature" checked>
-        <label for="addSignature" style="display:inline; margin:0;">Append signature video</label>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="ignorePostPublish">
-        <label for="ignorePostPublish" style="display:inline; margin:0;">Ignore post publishing scripts</label>
+      <div class="options-grid">
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="removeSilence" checked>
+            <label for="removeSilence" style="display:inline; margin:0;">Remove silence</label>
+          </div>
+        </div>
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="burnSubtitles" checked>
+            <label for="burnSubtitles" style="display:inline; margin:0;">Burn subtitles</label>
+          </div>
+        </div>
+        <div class="opt">
+          <label style="display:block; font-size:12px; color:var(--dim); margin-bottom:3px;">Transcript mode</label>
+          <select id="transcriptMode" onchange="updateSubtitleDependency()" style="width:100%;">
+            <option value="" disabled selected hidden>— select —</option>
+            <option value="normal">Normal transcript</option>
+            <option value="groq">Groq API (whisper-large-v3, fast)</option>
+            <option value="none">None (no transcript → subtitles disabled)</option>
+          </select>
+        </div>
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="useModal" checked>
+            <label for="useModal" style="display:inline; margin:0;">Use Modal (remote processing)</label>
+            <a id="modalUsageLink" href="https://modal.com/settings/usage" target="_blank" style="font-size:11px; color:var(--link); margin-left:6px; opacity:.8;">usage ↗</a>
+          </div>
+        </div>
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="normalizeVolume">
+            <label for="normalizeVolume" style="display:inline; margin:0;">Normalize volume</label>
+          </div>
+        </div>
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="doCharisma" checked>
+            <label for="doCharisma" style="display:inline; margin:0;">Charisma score</label>
+          </div>
+        </div>
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="addSignature" checked>
+            <label for="addSignature" style="display:inline; margin:0;">Append signature video</label>
+          </div>
+        </div>
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="skipUpload">
+            <label for="skipUpload" style="display:inline; margin:0;">Skip YouTube upload (test)</label>
+          </div>
+        </div>
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="ignorePostPublish">
+            <label for="ignorePostPublish" style="display:inline; margin:0;">Ignore post publishing scripts</label>
+          </div>
+        </div>
       </div>
 
       <div class="cols2">
@@ -577,10 +599,9 @@ async function startJob() {
     prompt_summary: document.getElementById('promptSummary').value,
     do_remove_silence: document.getElementById('removeSilence').checked,
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
-    simple_transcript: document.getElementById('simpleTranscript').checked,
+    transcript_mode: document.getElementById('transcriptMode').value,
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
-    use_groq: document.getElementById('useGroq').checked,
     do_normalize_volume: document.getElementById('normalizeVolume').checked,
     do_charisma: document.getElementById('doCharisma').checked,
     do_add_signature: document.getElementById('addSignature').checked,
@@ -841,10 +862,9 @@ async function doResume() {
     prompt_summary: document.getElementById('promptSummary').value,
     from_step: from,
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
-    simple_transcript: document.getElementById('simpleTranscript').checked,
+    transcript_mode: document.getElementById('transcriptMode').value,
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
-    use_groq: document.getElementById('useGroq').checked,
     do_normalize_volume: document.getElementById('normalizeVolume').checked,
     do_charisma: document.getElementById('doCharisma').checked,
     do_add_signature: document.getElementById('addSignature').checked,
@@ -1022,6 +1042,7 @@ async function refreshPool() {
     row.className = 'pool-row';
     const name = item.source.split('/').pop();
     const st = item.status;
+    const isDone = st === 'finished' || st === 'error' || st === 'stopped';
     let html = `<span>${name} <small style="color:var(--dim)">(${st})</small></span>`;
     if (item.check_result !== null && item.check_result !== undefined) {
       const isOk = _isCheckOk(item.check_result);
@@ -1050,8 +1071,8 @@ async function refreshPool() {
       }
     }
 
-    // Finished / error item: time + logs (use existing name line above)
-    if (item.status === 'finished' || item.status === 'error') {
+    // Finished / error / stopped item: time + logs (use existing name line above)
+    if (isDone) {
       if (item.video_url) {
         if (item.title) {
           const label = item.title.length > 40 ? item.title.slice(0, 40) + '…' : item.title;
@@ -1063,7 +1084,7 @@ async function refreshPool() {
       if (item.studio_url) {
         html += `<div><a href="${item.studio_url}" target="_blank" style="color:var(--link);font-size:12px;">✏️ Edit in Studio</a></div>`;
       }
-      if (item.status === 'error' && item.error_message) {
+      if ((item.status === 'error' || item.status === 'stopped') && item.error_message) {
         html += `<div style="font-size:11px;color:var(--err,#e06c75);margin-top:2px;white-space:pre-wrap;word-break:break-word;">⚠ ${item.error_message}</div>`;
       }
 
@@ -1073,16 +1094,16 @@ async function refreshPool() {
       }
     }
 
-    const redoPostPublishBtn = (item.status === 'finished' || item.status === 'error')
+    const redoPostPublishBtn = isDone
       ? `<button title="Redo post-publish only" onclick="poolRedoPostPublish('${item.source}')">📮</button>`
       : '';
-    const infoBtn = (item.status === 'finished' || item.status === 'error')
+    const infoBtn = isDone
       ? `<button title="Show info" onclick="poolShowInfo('${item.source}')">📋</button>`
       : '';
-    const transcriptBtn = (item.status === 'finished' || item.status === 'error')
+    const transcriptBtn = isDone
       ? `<button title="Run transcript script" onclick="poolRunTranscriptScript('${item.source}')">📜</button>`
       : '';
-    const rerunCheckBtn = (item.status === 'finished' || item.status === 'error')
+    const rerunCheckBtn = isDone
       ? `<button title="Rerun content check" onclick="poolRerunCheck('${item.source}')">🔍</button>`
       : '';
     const actions = `<span class="pool-actions">` +
@@ -1105,8 +1126,9 @@ async function refreshPool() {
   }
 
   // Keep polling only while something is active
+  const isTerminal = (s) => s === 'finished' || s === 'error' || s === 'stopped';
   const hasActive = data.running || (data.items || []).some(
-    i => i.status !== 'finished' && i.status !== 'error'
+    i => !isTerminal(i.status)
   );
   if (hasActive) schedulePoolRefresh();
 }
@@ -1390,7 +1412,7 @@ async function addToPool() {
       description_prefix: document.getElementById('descPrefix').value,
       source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
       skip_upload: document.getElementById('skipUpload').checked,
-      use_groq: document.getElementById('useGroq').checked,
+      transcript_mode: document.getElementById('transcriptMode').value,
       do_normalize_volume: document.getElementById('normalizeVolume').checked,
       do_charisma: document.getElementById('doCharisma').checked,
       do_add_signature: document.getElementById('addSignature').checked,
@@ -1458,11 +1480,20 @@ function initPool() {
   refreshPool();
 }
 
+function updateSubtitleDependency() {
+  const mode = document.getElementById('transcriptMode').value;
+  const burn = document.getElementById('burnSubtitles');
+  const noTranscript = (mode === '' || mode === 'none');
+  burn.disabled = noTranscript;
+  if (noTranscript) burn.checked = false;
+}
+
 function init() {
   loadVideos();
   loadPrompts();
   initDropZone();
   initPool();
+  updateSubtitleDependency();
   document.getElementById('goBtn').disabled = false;
 }
 init();

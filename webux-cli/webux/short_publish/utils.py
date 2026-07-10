@@ -157,28 +157,33 @@ def _validate_urls(urls: list[str]) -> list[str]:
 
 
 async def _run(step, *cmd: str):
+    from .state import set_active_proc, clear_active_proc
+
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    set_active_proc(proc)
+    try:
+        async def _stream(stream, prefix):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode(errors="replace").rstrip()
+                if text and step:
+                    if step.output:
+                        step.output += "\n"
+                    step.output += f"{prefix}{text}"
 
-    async def _stream(stream, prefix):
-        while True:
-            line = await stream.readline()
-            if not line:
-                break
-            text = line.decode(errors="replace").rstrip()
-            if text and step:
-                if step.output:
-                    step.output += "\n"
-                step.output += f"{prefix}{text}"
-
-    await asyncio.gather(
-        _stream(proc.stdout, ""),
-        _stream(proc.stderr, "[err] "),
-        proc.wait(),
-    )
+        await asyncio.gather(
+            _stream(proc.stdout, ""),
+            _stream(proc.stderr, "[err] "),
+            proc.wait(),
+        )
+    finally:
+        clear_active_proc()
     rc = proc.returncode or 0
     # final out for caller compatibility (last non-empty line)
     out = ""

@@ -50,20 +50,20 @@ class Job:
     prompt_summary: str
     do_remove_silence: bool
     do_burn_subtitles: bool
-    simple_transcript: bool
     language: str
     model: str
     privacy: str
+    transcript_mode: str = "normal"
     prompt_check: str = ""
     description_prefix: str = ""
     skip_upload: bool = False
     use_modal: bool = True
-    use_groq: bool = False
     do_normalize_volume: bool = False
     do_charisma: bool = True
     do_add_signature: bool = True
     do_ignore_post_publish: bool = False
     source_urls: list[str] = field(default_factory=list)
+    stop_requested: bool = False
     steps: list[Step] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)
     title: str = ""
