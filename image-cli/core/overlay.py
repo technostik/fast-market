@@ -6,6 +6,7 @@ import os
 import re
 from typing import Tuple
 
+import click
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 from core.models import TextOverlayConfig
@@ -92,24 +93,98 @@ def _variant_family(family: str, style: str) -> str:
     return family
 
 
+@functools.lru_cache(maxsize=64)
+def _fontconfig_path(family: str, style: str = "normal") -> str | None:
+    """Resolve a family/style to a font file via fontconfig (``fc-match``).
+
+    This lets any system-installed font (e.g. ones installed through Typecatcher)
+    be found by its real family name, with fontconfig handling substitution.
+    Returns ``None`` when fontconfig is unavailable or finds nothing.
+    """
+    style_label = {
+        "bold": "Bold",
+        "italic": "Italic",
+        "bold-italic": "Bold Italic",
+    }.get((style or "normal").lower().replace("-", " "), "Regular")
+    try:
+        import subprocess
+        from pathlib import Path as _Path
+
+        result = subprocess.run(
+            ["fc-match", "-f", "%{file}", f"{family}:style={style_label}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            path = result.stdout.strip()
+            if path and _Path(path).exists():
+                return path
+    except Exception:
+        return None
+    return None
+
+
+_WARNED_FONTS: set[tuple[str, str]] = set()
+
+
+def _warn_font_missing(family: str, style: str) -> None:
+    """Emit a one-time console warning when a requested font cannot be found."""
+    key = (family, style or "normal")
+    if key in _WARNED_FONTS:
+        return
+    _WARNED_FONTS.add(key)
+    click.echo(
+        f"Warning: font '{family}' (style '{style or 'normal'}') not found and "
+        f"fontconfig returned nothing; falling back to DejaVuSans then PIL default. "
+        f"Install the font or set 'overlay.font' to a family present on this system.",
+        err=True,
+    )
+
+
 def load_font(family: str, size: int, style: str = "normal") -> ImageFont.ImageFont:
     """Load a truetype font (with style variant), falling back gracefully.
 
-    Tries, in order: the styled family name, the base family name, the
-    DejaVuSans fallback, then PIL's default bitmap font.
+    Resolution order: fontconfig (system truth, handles substitution and style),
+    then a direct name / filesystem search for the family and its style variant.
+    If nothing matches, a console warning is emitted (once) and it falls back to
+    DejaVuSans and finally PIL's default bitmap font.
     """
-    candidates = [_variant_family(family, style), family, "DejaVuSans"]
-    for candidate in candidates:
+    fc_path = _fontconfig_path(family, style)
+    if fc_path:
+        try:
+            return ImageFont.truetype(fc_path, size)
+        except (OSError, IOError):
+            pass
+
+    variant = _variant_family(family, style)
+    found_requested = bool(fc_path)
+    for candidate in (variant, family):
         try:
             return ImageFont.truetype(candidate, size)
         except (OSError, IOError):
             pass
         path = _find_font_file(candidate)
         if path:
+            found_requested = True
             try:
                 return ImageFont.truetype(path, size)
             except (OSError, IOError):
                 pass
+
+    if not found_requested:
+        _warn_font_missing(family, style)
+
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size)
+    except (OSError, IOError):
+        pass
+    path = _find_font_file("DejaVuSans")
+    if path:
+        try:
+            return ImageFont.truetype(path, size)
+        except (OSError, IOError):
+            pass
     return ImageFont.load_default()
 
 
@@ -187,17 +262,57 @@ def _block_metrics(vpos: str, hpos: str, img_w: int, img_h: int, block_w: int, b
     return x - pad, y - pad
 
 
-def _draw_band(draw: ImageDraw.ImageDraw, rect: tuple[int, int, int, int], bg: RGB, peak: int = 200) -> None:
-    """Draw a full-width horizontal band with a Gaussian (reverse-U) alpha curve."""
+def resolve_font_path(family: str, style: str = "normal") -> str:
+    """Return a human-readable description of the font that will be used.
+
+    Mirrors the family/style selection logic of :func:`load_font` (fontconfig
+    first, then filesystem search, then DejaVuSans fallback, then PIL default)
+    and returns the resolved file path or a descriptive label.
+    """
+    fc_path = _fontconfig_path(family, style)
+    if fc_path:
+        return fc_path
+    variant = _variant_family(family, style)
+    for name in (variant, family):
+        try:
+            ImageFont.truetype(name, 10)
+            return name
+        except (OSError, IOError):
+            pass
+        path = _find_font_file(name)
+        if path:
+            return path
+    try:
+        ImageFont.truetype("DejaVuSans.ttf", 10)
+        return "DejaVuSans (fallback)"
+    except (OSError, IOError):
+        pass
+    path = _find_font_file("DejaVuSans")
+    if path:
+        return path
+    return "PIL default font"
+
+
+def _draw_band(draw: ImageDraw.ImageDraw, rect: tuple[int, int, int, int], bg: RGB, peak: int = 235) -> None:
+    """Draw a full-width horizontal band with a wide Gaussian (reverse-U) curve.
+
+    The curve is a Gaussian normalized so its alpha is ``peak`` in the middle
+    and falls exactly to ``0`` at both band edges, giving a strong central band
+    that blends smoothly into the underlying image. A large standard deviation
+    (``sigma``) keeps the central plateau wide and the falloff soft.
+    """
     x0, y0, x1, y1 = rect
     height = y1 - y0
     if height <= 0:
         return
-    sigma = 0.45  # controls falloff; edges reach ~8% of peak
+    sigma = 1.2  # wider "écart type": softer, more spread-out gradient
+    edge = math.exp(-1.0 / (2 * sigma * sigma))  # Gaussian value at the band edge
+    denom = 1.0 - edge
     for i in range(height):
         yy = y0 + i
-        d = (i + 0.5 - height / 2) / (height / 2)  # -1 at top edge, +1 at bottom edge
-        alpha = int(peak * math.exp(-(d * d) / (2 * sigma * sigma)))
+        d = (i / (height - 1) - 0.5) * 2.0 if height > 1 else 0.0  # -1 top, +1 bottom
+        g = math.exp(-(d * d) / (2 * sigma * sigma))
+        alpha = int(peak * (g - edge) / denom)
         if alpha <= 0:
             continue
         draw.line([(x0, yy), (x1, yy)], fill=(bg[0], bg[1], bg[2], alpha))
@@ -252,14 +367,14 @@ def apply_text_overlay(
         draw.rectangle(rect, fill=(bg[0], bg[1], bg[2], 200))
     elif effect == "band" and bg is not None:
         band_h = max(1, int(img_h * max(1, cfg.band_size) / 100))
-        block_cy = y + pad + block_h / 2
-        band_rect = (
-            0,
-            int(block_cy - band_h / 2),
-            img_w,
-            int(block_cy + band_h / 2),
-        )
-        _draw_band(draw, band_rect, bg, peak=200)
+        if cfg.vpos == "bottom":
+            band_rect = (0, img_h - band_h, img_w, img_h)
+        elif cfg.vpos == "top":
+            band_rect = (0, 0, img_w, band_h)
+        else:
+            block_cy = y + pad + block_h / 2
+            band_rect = (0, int(block_cy - band_h / 2), img_w, int(block_cy + band_h / 2))
+        _draw_band(draw, band_rect, bg, peak=235)
     elif effect == "shadow" and bg is not None:
         for i, line in enumerate(lines):
             ly = y + pad + i * line_height

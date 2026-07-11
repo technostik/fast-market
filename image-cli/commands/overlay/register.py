@@ -9,7 +9,7 @@ from commands.base import CommandManifest
 from commands.helpers import out
 from core.config import load_image_config
 from core.models import TextOverlayConfig
-from core.overlay import apply_text_overlay
+from core.overlay import apply_text_overlay, resolve_font_path
 
 
 _POSITIONS = [
@@ -137,6 +137,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
             overlay_cfg,
             font_family=config.overlay.font,
             font_style=overlay_style or config.overlay.style,
+        )
+
+        click.echo(
+            f"Using font: {resolve_font_path(config.overlay.font, overlay_style or config.overlay.style)}",
+            err=True,
         )
 
         if not output:

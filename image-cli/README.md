@@ -73,7 +73,7 @@ overlay:
                                            # hex in YAML: use "ff0000" or 0xff0000 (not #ff0000)
   effect: band                              # none / box / shadow / band
   style: normal                             # normal / bold / italic / bold-italic
-  band_size: 8                              # band height as % of image height (band effect only)
+  band_size: 8                             # band height as % of image height (band effect only)
 
 available_sizes:
   - name: square
@@ -171,8 +171,9 @@ Text overlay uses a TrueType/OpenType font. The default family is `Tomorrow`; if
 is not installed, the loader falls back to `DejaVuSans` (usually present), then to
 PIL's built-in bitmap font.
 
-The font loader searches these directories for a file whose name contains the
-requested family:
+Fonts are resolved via **fontconfig** (`fc-match`), so any font installed on the
+system works by its real family name (the loader also falls back to a filesystem
+search of these directories, then to `DejaVuSans`, then to PIL's default):
 
 - `/usr/share/fonts`
 - `/usr/local/share/fonts`
@@ -187,12 +188,17 @@ mkdir -p ~/.fonts
 cp Tomorrow-Regular.ttf ~/.fonts/
 # optional, for style variants:
 cp Tomorrow-Bold.ttf Tomorrow-Italic.ttf Tomorrow-BoldItalic.ttf ~/.fonts/
-fc-cache -f   # refresh the fontconfig cache (optional but recommended)
+fc-cache -f   # refresh the fontconfig cache (recommended)
 ```
 
 For **style** variants, name the files `Family-Bold`, `Family-Italic`, and
 `Family-BoldItalic` (e.g. `Tomorrow-Bold.ttf`). If a variant is missing the loader
 falls back to the base family gracefully.
+
+**Console feedback:** the command prints `Using font: <path>` (to stderr) so you can
+see exactly which font file was selected, and a `Warning:` if the configured
+`overlay.font` family cannot be resolved (it then falls back to `DejaVuSans`/PIL
+default). To check a family name before configuring it, run `fc-match '<name>'`.
 
 Colors for `--overlay-fg` / `--overlay-bg` accept X11 color names (spaces normalized,
 e.g. `light green`), `#rgb` / `#rrggbb` hex codes, `0x`-prefixed hex, or bare hex

@@ -197,7 +197,10 @@ class TestOverlayCommand:
             ],
         )
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        # stderr (font warnings) may be mixed into output by the test runner;
+        # real stdout is clean JSON, so extract from the first '{'.
+        json_text = result.output[result.output.index("{") :]
+        data = json.loads(json_text)
         assert Path(data["path"]).exists()
         assert data["width"] == 200
         assert data["height"] == 150

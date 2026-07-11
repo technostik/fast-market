@@ -8,7 +8,7 @@ from PIL import Image
 from commands.base import CommandManifest
 from commands.helpers import build_engine, out
 from core.models import ImageGenRequest, TextOverlayConfig
-from core.overlay import apply_text_overlay
+from core.overlay import apply_text_overlay, resolve_font_path
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -272,6 +272,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     font_style=overlay_style or config.overlay.style,
                 )
                 final_image.save(result.path, format=result.output_format)
+
+                click.echo(
+                    f"Using font: {resolve_font_path(config.overlay.font, overlay_style or config.overlay.style)}",
+                    err=True,
+                )
 
             out(result.to_dict(), fmt)
         except Exception as e:
