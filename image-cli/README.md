@@ -121,7 +121,7 @@ image generate "a serene mountain landscape at sunset" [OPTIONS]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-e, --engine` | Engine to use (flux2) | from config |
-| `-s, --size` | Size preset (square/portrait/landscape/youtube/wide/tall/custom) | square |
+| `-s, --size` | Size preset (square/portrait/landscape/youtube/wide/tall/custom) | from config (`default_width`/`default_height`) |
 | `-w, --width` | Image width (overrides size) | from config |
 | `-h, --height` | Image height (overrides size) | from config |
 | `-g, --guidance-scale` | Guidance scale | from config |

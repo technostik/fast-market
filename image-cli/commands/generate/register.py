@@ -29,8 +29,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         type=click.Choice(
             ["square", "portrait", "landscape", "youtube", "wide", "tall", "custom"]
         ),
-        default="square",
-        help="Named image size preset",
+        default=None,
+        help="Named image size preset (default: from config default_width/height)",
     )
     @click.option(
         "--width",
