@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import functools
+import math
 import os
+import re
 from typing import Tuple
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
@@ -19,18 +21,41 @@ _FONT_SEARCH_DIRS = [
 RGB = Tuple[int, int, int]
 RGBA = Tuple[int, int, int, int]
 
+_HEX_RE = re.compile(r"^([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$")
+
 
 def resolve_color(name: str | None) -> RGB | None:
     """Resolve a color name/hex into an (R, G, B) tuple.
 
-    Handles ``"none"`` -> ``None``, X11 names (normalizing spaces so
-    ``"light green"`` becomes ``"lightgreen"``), and ``#rrggbb`` hex values.
+    Accepted forms (case-insensitive):
+      - X11 names, spaces normalized (``"light green"`` -> ``lightgreen``)
+      - ``#rrggbb`` / ``#rgb`` / ``#rrggbbaa`` (must be quoted in YAML, see note)
+      - ``0xrrggbb`` / ``0xrgb`` (safe to use unquoted in YAML)
+      - bare ``rrggbb`` / ``rgb`` (safe to use unquoted in YAML)
+
+    ``"none"`` / ``"transparent"`` / empty -> ``None`` (disables the effect).
     """
     if name is None:
         return None
+    if isinstance(name, int):
+        # YAML parses 0x... literals as integers
+        name = f"{name:06x}"
     normalized = name.strip().lower()
     if normalized in ("", "none", "transparent"):
         return None
+
+    # Hex forms (strip leading # or 0x so they work unquoted in YAML too)
+    hex_candidate = normalized.removeprefix("#").removeprefix("0x")
+    if _HEX_RE.match(hex_candidate):
+        if len(hex_candidate) == 3:
+            h = "".join(c * 2 for c in hex_candidate)
+        elif len(hex_candidate) == 8:
+            h = hex_candidate[:6]
+        else:
+            h = hex_candidate
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+    # X11 / named colors
     compact = normalized.replace(" ", "")
     for candidate in (compact, normalized):
         try:
@@ -163,15 +188,16 @@ def _block_metrics(vpos: str, hpos: str, img_w: int, img_h: int, block_w: int, b
 
 
 def _draw_band(draw: ImageDraw.ImageDraw, rect: tuple[int, int, int, int], bg: RGB, peak: int = 200) -> None:
-    """Draw a full-width horizontal band with a vertical alpha gradient."""
+    """Draw a full-width horizontal band with a Gaussian (reverse-U) alpha curve."""
     x0, y0, x1, y1 = rect
     height = y1 - y0
     if height <= 0:
         return
+    sigma = 0.45  # controls falloff; edges reach ~8% of peak
     for i in range(height):
         yy = y0 + i
-        t = abs((i + 0.5) - height / 2) / (height / 2)
-        alpha = int(peak * (1 - t))
+        d = (i + 0.5 - height / 2) / (height / 2)  # -1 at top edge, +1 at bottom edge
+        alpha = int(peak * math.exp(-(d * d) / (2 * sigma * sigma)))
         if alpha <= 0:
             continue
         draw.line([(x0, yy), (x1, yy)], fill=(bg[0], bg[1], bg[2], alpha))
@@ -225,7 +251,15 @@ def apply_text_overlay(
     if effect == "box" and bg is not None:
         draw.rectangle(rect, fill=(bg[0], bg[1], bg[2], 200))
     elif effect == "band" and bg is not None:
-        _draw_band(draw, rect, bg, peak=200)
+        band_h = max(1, int(img_h * max(1, cfg.band_size) / 100))
+        block_cy = y + pad + block_h / 2
+        band_rect = (
+            0,
+            int(block_cy - band_h / 2),
+            img_w,
+            int(block_cy + band_h / 2),
+        )
+        _draw_band(draw, band_rect, bg, peak=200)
     elif effect == "shadow" and bg is not None:
         for i, line in enumerate(lines):
             ly = y + pad + i * line_height

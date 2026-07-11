@@ -67,6 +67,21 @@ class TestCLICommands:
         assert "-H" in result.output
         assert "-p" in result.output
 
+    def test_overlay_help(self, runner):
+        """Test that overlay --help works and exposes the same options."""
+        import cli.main as cli_mod
+
+        importlib.reload(cli_mod)
+        result = runner.invoke(cli_mod.main, ["overlay", "--help"])
+        assert result.exit_code == 0
+        assert "IMAGE" in result.output
+        assert "--title" in result.output
+        assert "--position" in result.output
+        assert "--overlay-effect" in result.output
+        assert "--overlay-style" in result.output
+        assert "--overlay-band-size" in result.output
+        assert "--output" in result.output
+
 
 class TestSetupWizard:
     """Test setup subcommands functionality."""

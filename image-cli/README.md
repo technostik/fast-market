@@ -68,10 +68,12 @@ overlay:
   vpos: bottom                              # top / middle / bottom
   hpos: center                              # left / center / right
   size: fit                                 # integer font size or "fit"
-  fg: blue                                  # text color
-  bg: light green                           # effect color ("none" to disable)
+  fg: blue                                  # text color (name, hex, or "none")
+  bg: light green                           # effect color (name, hex, or "none" to disable)
+                                           # hex in YAML: use "ff0000" or 0xff0000 (not #ff0000)
   effect: band                              # none / box / shadow / band
   style: normal                             # normal / bold / italic / bold-italic
+  band_size: 8                              # band height as % of image height (band effect only)
 
 available_sizes:
   - name: square
@@ -138,6 +140,7 @@ image generate "a serene mountain landscape at sunset" [OPTIONS]
 | `--overlay-bg` | Background effect color name/hex, or `none` to disable | light green |
 | `--overlay-effect` | Background effect: `none`/`box`/`shadow`/`band` | band |
 | `--overlay-style` | Font style: `normal`/`bold`/`italic`/`bold-italic` | normal |
+| `--overlay-band-size` | Band height as % of image height (band effect) | 8 |
 | `-v, --verbose` | Enable verbose logging | |
 
 **Examples:**
@@ -160,6 +163,77 @@ image generate "minimalist logo" -F json | jq '.path'
 
 # Generate multiple variations with xargs
 seq 1 5 | xargs -I {} image generate "variation {} of abstract pattern" --format json | jq -r '.path' | xargs open
+```
+
+### Fonts
+
+Text overlay uses a TrueType/OpenType font. The default family is `Tomorrow`; if it
+is not installed, the loader falls back to `DejaVuSans` (usually present), then to
+PIL's built-in bitmap font.
+
+The font loader searches these directories for a file whose name contains the
+requested family:
+
+- `/usr/share/fonts`
+- `/usr/local/share/fonts`
+- `~/.fonts`
+- `~/.local/share/fonts`
+
+To install a font (e.g. Tomorrow), copy the `.ttf`/`.otf` files into one of those
+directories:
+
+```bash
+mkdir -p ~/.fonts
+cp Tomorrow-Regular.ttf ~/.fonts/
+# optional, for style variants:
+cp Tomorrow-Bold.ttf Tomorrow-Italic.ttf Tomorrow-BoldItalic.ttf ~/.fonts/
+fc-cache -f   # refresh the fontconfig cache (optional but recommended)
+```
+
+For **style** variants, name the files `Family-Bold`, `Family-Italic`, and
+`Family-BoldItalic` (e.g. `Tomorrow-Bold.ttf`). If a variant is missing the loader
+falls back to the base family gracefully.
+
+Colors for `--overlay-fg` / `--overlay-bg` accept X11 color names (spaces normalized,
+e.g. `light green`), `#rgb` / `#rrggbb` hex codes, `0x`-prefixed hex, or bare hex
+(`rrggbb` / `rgb`), or `none` (disables the effect).
+
+> **YAML caveat:** in the config file a leading `#` starts a comment, so a value like
+> `fg: #ff0000` is read as empty. Either quote it (`fg: "#ff0000"`) or use a form that
+> needs no quoting: `fg: 0xff0000` or `fg: ff0000`.
+
+### `image overlay`
+
+Add superimposed text (a title) onto an **existing** image and write a new image.
+Takes the same overlay options as `image generate`; defaults come from the `overlay:`
+config group.
+
+```bash
+image overlay INPUT_IMAGE --title "My Title" [OPTIONS]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `IMAGE` (argument) | Path to the existing image | (required) |
+| `-T, --title` | Text to superimpose | (required) |
+| `--position` | `top/middle/bottom` + `left/center/right` (9 combos) | bottom-center |
+| `-o, --output` | Output image path (default: `<input>_overlay<ext>`) | derived |
+| `--overlay-size` | Font size: integer or `fit` | fit |
+| `--overlay-fg` | Text color (name/hex/`none`) | blue |
+| `--overlay-bg` | Effect color (name/hex/`none`) | light green |
+| `--overlay-effect` | `none`/`box`/`shadow`/`band` | band |
+| `--overlay-style` | `normal`/`bold`/`italic`/`bold-italic` | normal |
+| `--overlay-band-size` | Band height as % of image height | 8 |
+| `-F, --format` | Output format (json/text) | text |
+
+**Examples:**
+```bash
+# Add a banded title to an existing photo
+image overlay photo.jpg --title "Summer 2024" --overlay-effect band
+
+# Bold, boxed title, custom color, explicit output
+image overlay logo.png --title "SALE" --overlay-style bold \
+  --overlay-effect box --overlay-fg "#ffffff" --overlay-bg ff0000 -o out.png
 ```
 
 ### `image setup`

@@ -42,6 +42,7 @@ def get_default_config() -> dict:
             "bg": "light green",
             "effect": "band",
             "style": "normal",
+            "band_size": 8,
         },
         "available_sizes": [
             {"name": "square", "width": 1024, "height": 1024},

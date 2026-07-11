@@ -19,6 +19,7 @@ class TextOverlayConfig:
     bg: str = "light green"  # "none" disables the background effect
     effect: str = "band"  # none / box / shadow / band
     style: str = "normal"  # normal / bold / italic / bold-italic
+    band_size: int = 8  # band height as % of image height (band effect only)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -31,6 +32,7 @@ class TextOverlayConfig:
             "bg": self.bg,
             "effect": self.effect,
             "style": self.style,
+            "band_size": self.band_size,
         }
 
 
@@ -46,6 +48,7 @@ class OverlayConfig:
     bg: str = "light green"
     effect: str = "band"
     style: str = "normal"
+    band_size: int = 8
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +60,7 @@ class OverlayConfig:
             "bg": self.bg,
             "effect": self.effect,
             "style": self.style,
+            "band_size": self.band_size,
         }
 
     @classmethod
@@ -72,6 +76,7 @@ class OverlayConfig:
             bg=data.get("bg", "light green"),
             effect=data.get("effect", "band"),
             style=data.get("style", "normal"),
+            band_size=data.get("band_size", 8),
         )
 
 
