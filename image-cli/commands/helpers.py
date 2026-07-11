@@ -48,6 +48,7 @@ def build_engine(
                     "default_seed": config.default_seed,
                     "output_dir": config.output_dir,
                     "force_device": config.force_device,
+                    "overlay": config.overlay.to_dict(),
                     "available_sizes": [s.to_dict() for s in config.available_sizes],
                     "available_formats": config.available_formats,
                 },

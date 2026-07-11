@@ -33,6 +33,16 @@ def get_default_config() -> dict:
         "output_dir": ".",
         "cache_pipeline": True,
         "force_device": None,
+        "overlay": {
+            "font": "Tomorrow",
+            "vpos": "bottom",
+            "hpos": "center",
+            "size": "fit",
+            "fg": "blue",
+            "bg": "light green",
+            "effect": "band",
+            "style": "normal",
+        },
         "available_sizes": [
             {"name": "square", "width": 1024, "height": 1024},
             {"name": "portrait", "width": 768, "height": 1024},

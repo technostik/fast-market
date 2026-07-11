@@ -7,6 +7,75 @@ from PIL import Image
 
 
 @dataclass(slots=True)
+class TextOverlayConfig:
+    """Configuration for superimposing text on a generated image."""
+
+    enabled: bool = False
+    text: str = ""
+    vpos: str = "bottom"  # top / middle / bottom
+    hpos: str = "center"  # left / center / right
+    size: str = "fit"  # "fit" or an integer font point size like "48"
+    fg: str = "blue"
+    bg: str = "light green"  # "none" disables the background effect
+    effect: str = "band"  # none / box / shadow / band
+    style: str = "normal"  # normal / bold / italic / bold-italic
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "text": self.text,
+            "vpos": self.vpos,
+            "hpos": self.hpos,
+            "size": self.size,
+            "fg": self.fg,
+            "bg": self.bg,
+            "effect": self.effect,
+            "style": self.style,
+        }
+
+
+@dataclass(slots=True)
+class OverlayConfig:
+    """Stored defaults for text overlay (the `overlay:` config group)."""
+
+    font: str = "Tomorrow"
+    vpos: str = "bottom"
+    hpos: str = "center"
+    size: str = "fit"
+    fg: str = "blue"
+    bg: str = "light green"
+    effect: str = "band"
+    style: str = "normal"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "font": self.font,
+            "vpos": self.vpos,
+            "hpos": self.hpos,
+            "size": self.size,
+            "fg": self.fg,
+            "bg": self.bg,
+            "effect": self.effect,
+            "style": self.style,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OverlayConfig:
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            font=data.get("font", "Tomorrow"),
+            vpos=data.get("vpos", "bottom"),
+            hpos=data.get("hpos", "center"),
+            size=data.get("size", "fit"),
+            fg=data.get("fg", "blue"),
+            bg=data.get("bg", "light green"),
+            effect=data.get("effect", "band"),
+            style=data.get("style", "normal"),
+        )
+
+
+@dataclass(slots=True)
 class ImageSize:
     """Named image size preset."""
 
@@ -128,6 +197,7 @@ class ImageGenConfig:
     output_dir: str = "."
     cache_pipeline: bool = True
     force_device: str | None = None
+    overlay: OverlayConfig = field(default_factory=OverlayConfig)
     available_sizes: list[ImageSize] = field(
         default_factory=lambda: [
             ImageSize("square", 1024, 1024),
@@ -176,6 +246,7 @@ class ImageGenConfig:
             output_dir=data.get("output_dir", "."),
             cache_pipeline=data.get("cache_pipeline", True),
             force_device=data.get("force_device"),
+            overlay=OverlayConfig.from_dict(data.get("overlay", {})),
             available_sizes=sizes if sizes else cls().available_sizes,
             available_formats=formats if formats else cls().available_formats,
         )

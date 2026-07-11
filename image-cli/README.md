@@ -62,6 +62,17 @@ output_dir: "./generated"
 cache_pipeline: true                        # Cache model in memory
 force_device: null                          # null = auto, "cuda", or "cpu"
 
+# Text overlay defaults (used when --title is provided)
+overlay:
+  font: Tomorrow                            # Font family; falls back to DejaVuSans then PIL default
+  vpos: bottom                              # top / middle / bottom
+  hpos: center                              # left / center / right
+  size: fit                                 # integer font size or "fit"
+  fg: blue                                  # text color
+  bg: light green                           # effect color ("none" to disable)
+  effect: band                              # none / box / shadow / band
+  style: normal                             # normal / bold / italic / bold-italic
+
 available_sizes:
   - name: square
     width: 1024
@@ -120,6 +131,13 @@ image generate "a serene mountain landscape at sunset" [OPTIONS]
 | `--output-format` | Output format (PNG/JPEG/WEBP) | from config |
 | `-o, --output-dir` | Output directory | from config |
 | `-F, --format` | Output format for CLI (json/text) | text |
+| `-T, --title` | Text to superimpose on the image (a title) | None |
+| `--position` | Text position: `top-left`/`top-center`/`top-right`/`middle-left`/`middle-center`/`middle-right`/`bottom-left`/`bottom-center`/`bottom-right` | bottom-center |
+| `--overlay-size` | Font size: an integer (e.g. `48`) or `fit` to auto-scale to the image | fit |
+| `--overlay-fg` | Foreground (text) color name or hex | blue |
+| `--overlay-bg` | Background effect color name/hex, or `none` to disable | light green |
+| `--overlay-effect` | Background effect: `none`/`box`/`shadow`/`band` | band |
+| `--overlay-style` | Font style: `normal`/`bold`/`italic`/`bold-italic` | normal |
 | `-v, --verbose` | Enable verbose logging | |
 
 **Examples:**
@@ -146,38 +164,45 @@ seq 1 5 | xargs -I {} image generate "variation {} of abstract pattern" --format
 
 ### `image setup`
 
-Configure image-agent interactively or non-interactively.
+Configure image-agent. `setup` is a command group with subcommands:
 
 ```bash
-image setup [OPTIONS]
+image setup [SUBCOMMAND] [OPTIONS]
 ```
 
-| Option | Description |
-|--------|-------------|
-| `-l, --list-engines` | List configured engines |
-| `-a, --add-engine` | Add an engine (flux2) |
-| `-r, --remove-engine` | Remove an engine |
-| `-d, --set-default-engine` | Set default engine |
-| `-m, --set-model-path` | Set model path (format: engine:path) |
-| `-s, --set-defaults` | Set generation defaults interactively |
-| `-o, --set-output-dir` | Set default output directory |
-| `-c, --show-config` | Show current configuration |
-| `-p, --show-config-path` | Show config file path |
+| Subcommand | Description |
+|------------|-------------|
+| `wizard` | Run the interactive wizard (engines, defaults, output dir) |
+| `show` | Show current configuration (`--path` for path only, `--engines` for engines only) |
+| `edit` | Open the config file in your default editor |
+| `reset` | Reset config to defaults (backs up existing config) |
+| `engine add` | Add an engine (`--engine flux2`) |
+| `engine remove ENGINE` | Remove an engine |
+| `engine set-default ENGINE` | Set the default engine |
+| `engine set-model-path ENGINE:PATH` | Set an engine's model path |
 
 **Examples:**
 
 ```bash
 # Run interactive wizard
-image setup
+image setup wizard
 
-# Add engine non-interactively
-image setup --add-engine flux2 --set-model-path flux2:/path/to/model
+# Show config / path / engines
+image setup show
+image setup show --path
+image setup show --engines
 
-# View current configuration
-image setup --show-config
+# Edit config in editor
+image setup edit
 
-# Set default output directory
-image setup --set-output-dir ~/Pictures/generated
+# Reset to defaults
+image setup reset
+
+# Manage engines
+image setup engine add --engine flux2
+image setup engine set-model-path flux2:/path/to/model
+image setup engine set-default flux2
+image setup engine remove flux2
 ```
 
 ### `image serve`

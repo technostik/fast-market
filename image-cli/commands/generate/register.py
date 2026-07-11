@@ -7,7 +7,8 @@ from PIL import Image
 
 from commands.base import CommandManifest
 from commands.helpers import build_engine, out
-from core.models import ImageGenRequest
+from core.models import ImageGenRequest, TextOverlayConfig
+from core.overlay import apply_text_overlay
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -107,6 +108,57 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="text",
         help="Output format",
     )
+    @click.option(
+        "--title",
+        "-T",
+        default=None,
+        help="Text to superimpose on the generated image",
+    )
+    @click.option(
+        "--position",
+        type=click.Choice(
+            [
+                "top-left",
+                "top-center",
+                "top-right",
+                "middle-left",
+                "middle-center",
+                "middle-right",
+                "bottom-left",
+                "bottom-center",
+                "bottom-right",
+            ]
+        ),
+        default=None,
+        help="Text position (vertical-horizontal). Default: bottom-center",
+    )
+    @click.option(
+        "--overlay-size",
+        default=None,
+        help="Font size: an integer (e.g. 48) or 'fit' to auto-scale",
+    )
+    @click.option(
+        "--overlay-fg",
+        default=None,
+        help="Foreground (text) color name or hex. Default: blue",
+    )
+    @click.option(
+        "--overlay-bg",
+        default=None,
+        help="Background effect color name/hex or 'none'. Default: light green",
+    )
+    @click.option(
+        "--overlay-effect",
+        type=click.Choice(["none", "box", "shadow", "band"]),
+        default=None,
+        help="Background effect: none/box/shadow/band. Default: band",
+    )
+    @click.option(
+        "--overlay-style",
+        type=click.Choice(["normal", "bold", "italic", "bold-italic"]),
+        default=None,
+        help="Font style: normal/bold/italic/bold-italic. Default: normal",
+    )
     @click.pass_context
     def generate_cmd(
         ctx,
@@ -124,6 +176,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         output_format,
         output_dir,
         fmt,
+        title,
+        position,
+        overlay_size,
+        overlay_fg,
+        overlay_bg,
+        overlay_effect,
+        overlay_style,
     ):
         """Generate an image from a text prompt."""
         engine_instance, plugins, config = build_engine(
@@ -177,6 +236,35 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         try:
             result = engine_instance.generate(request, output_dir=output_dir)
+
+            if title:
+                vpos = config.overlay.vpos
+                hpos = config.overlay.hpos
+                if position:
+                    vpos, hpos = position.split("-")
+
+                overlay_cfg = TextOverlayConfig(
+                    enabled=True,
+                    text=title,
+                    vpos=vpos,
+                    hpos=hpos,
+                    size=overlay_size or config.overlay.size,
+                    fg=overlay_fg or config.overlay.fg,
+                    bg=overlay_bg or config.overlay.bg,
+                    effect=overlay_effect or config.overlay.effect,
+                    style=overlay_style or config.overlay.style,
+                )
+
+                from PIL import Image
+
+                final_image = apply_text_overlay(
+                    Image.open(result.path),
+                    overlay_cfg,
+                    font_family=config.overlay.font,
+                    font_style=overlay_style or config.overlay.style,
+                )
+                final_image.save(result.path, format=result.output_format)
+
             out(result.to_dict(), fmt)
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
