@@ -353,6 +353,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             job.status = "error"; _save_meta(job); return
 
         image_prompt = await _generate_image_prompt(job, txt_path, pub_cfg)
+        job.thumbnail_prompt = image_prompt
         overlay_title = job.thumbnail_overlay_title.strip() or await _generate_overlay_title(job, txt_path, pub_cfg)
 
         thumb_engine = pub_cfg.get("thumbnail_engine", "").strip()
@@ -361,12 +362,19 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             cmd += ["--engine", thumb_engine]
         if overlay_title:
             cmd += ["--title", overlay_title]
+        overlay_fg = pub_cfg.get("thumbnail_overlay_fg", "").strip()
+        overlay_bg = pub_cfg.get("thumbnail_overlay_bg", "").strip()
+        if overlay_fg:
+            cmd += ["--overlay-fg", overlay_fg]
+        if overlay_bg:
+            cmd += ["--overlay-bg", overlay_bg]
 
         rc, full_stdout = await _run_capture(s3, *cmd)
         if _finish_step(job, s3, rc):
             return
 
         thumb_path = ""
+        thumb_base = ""
         try:
             # The JSON line may be wrapped in other stdout lines; extract it.
             start = full_stdout.find("{")
@@ -374,15 +382,20 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             if start != -1 and end > start:
                 data = json.loads(full_stdout[start:end])
                 thumb_path = data.get("path", "")
+                thumb_base = data.get("base_path", "")
         except (json.JSONDecodeError, ValueError, TypeError):
             thumb_path = ""
+            thumb_base = ""
         if not thumb_path or not Path(thumb_path).exists():
             s3.end_time = time.time(); s3.status = "error"
             s3.output += "\n[error] Thumbnail image path not found in generator output"
             job.status = "error"; _save_meta(job); return
 
         job.files["thumbnail"] = thumb_path
+        job.files["thumbnail_base"] = thumb_base or thumb_path
         s3.output += f"\n🖼 Thumbnail: {Path(thumb_path).name}"
+        if thumb_base and Path(thumb_base).exists() and thumb_base != thumb_path:
+            s3.output += f"\n🖼 Base (no overlay): {Path(thumb_base).name}"
         s3.end_time = time.time(); s3.status = "done"
         _save_meta(job)
     else:

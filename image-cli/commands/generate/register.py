@@ -243,6 +243,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         try:
             result = engine_instance.generate(request, output_dir=output_dir)
+            base_path = result.path
 
             if title:
                 vpos = config.overlay.vpos
@@ -271,10 +272,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     font_family=config.overlay.font,
                     font_style=overlay_style or config.overlay.style,
                 )
-                final_image.save(result.path, format=result.output_format)
+
+                # Save the overlayed image separately; keep the base (no-overlay)
+                # image intact so both versions are available.
+                base_p = Path(result.path)
+                overlay_path = base_p.parent / f"{base_p.stem}_overlay{base_p.suffix}"
+                final_image.save(overlay_path, format=result.output_format)
+                result.path = str(overlay_path)
 
                 click.echo(
                     f"Using font: {resolve_font_path(config.overlay.font, overlay_style or config.overlay.style)}",
+                    err=True,
+                )
+                click.echo(
+                    f"Base (no overlay): {base_path}",
                     err=True,
                 )
 

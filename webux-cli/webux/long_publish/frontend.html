@@ -103,6 +103,10 @@
       <div class="row"><label>Thumbnail overlay prompt <span class="prompt-info" id="infoOverlay" data-content="">ⓘ</span></label><select id="cfgThumbOverlay"><option value="">— none (disabled) —</option></select></div>
     </div>
     <div class="row"><label>Thumbnail engine (image model)</label><input id="cfgThumbEngine" type="text" placeholder="leave empty for default"></div>
+    <div class="cols2">
+      <div class="row"><label>Thumbnail overlay text color (fg)</label><input id="cfgThumbFg" type="text" placeholder="e.g. white / #ff0000"></div>
+      <div class="row"><label>Thumbnail overlay background (bg)</label><input id="cfgThumbBg" type="text" placeholder="e.g. black / none"></div>
+    </div>
     <div class="row"><label>Modal usage URL</label><input id="cfgModalUrl" type="text"></div>
     <button class="btn-sec" id="cfgSave">Save config</button>
     <span id="cfgMsg" class="hint"></span>
@@ -157,6 +161,28 @@
         </div>
       </div>
 
+      <hr>
+      <div class="row">
+        <label>🖼 Regenerate thumbnail overlay (already published video)</label>
+        <select id="thumbVidSel"><option value="">— select video —</option></select>
+      </div>
+      <div class="row" id="thumbCurWrap" style="display:none;">
+        <label>Current thumbnail</label>
+        <img class="thumb-preview" id="thumbCur" src="">
+      </div>
+      <div class="row"><label>New overlay title</label><input id="regenOverlayTitle" type="text"></div>
+      <div class="cols2">
+        <div class="row"><label>Text color (fg)</label><input id="regenFg" type="text" placeholder="from config if empty"></div>
+        <div class="row"><label>Background (bg)</label><input id="regenBg" type="text" placeholder="from config if empty"></div>
+      </div>
+      <div class="cols2">
+        <div class="row" style="align-self:flex-end;">
+          <button class="btn-sec" id="regenBtn">↻ Regenerate overlay</button>
+          <button class="btn-go" id="pushYtBtn" disabled>🛠 Update YouTube</button>
+        </div>
+      </div>
+      <pre class="log-box" id="regenOut" style="display:none;"></pre>
+
       <div class="steps" id="steps"></div>
       <pre class="log-box" id="logBox"></pre>
 
@@ -200,6 +226,8 @@ async function loadConfig(){
   el('cfgThumbPrompt').value = c.default_thumbnail_prompt||'';
   el('cfgThumbOverlay').value = c.default_thumbnail_overlay_prompt||'';
   el('cfgThumbEngine').value = c.thumbnail_engine||'';
+  el('cfgThumbFg').value = c.thumbnail_overlay_fg||'';
+  el('cfgThumbBg').value = c.thumbnail_overlay_bg||'';
   el('cfgModalUrl').value = c.modal_usage_url||'';
   el('cfgLang').value = c.transcript_language||'fr';
   el('cfgModel').value = c.transcript_model||'medium';
@@ -231,6 +259,8 @@ async function saveConfig(){
     default_thumbnail_prompt: el('cfgThumbPrompt').value,
     default_thumbnail_overlay_prompt: el('cfgThumbOverlay').value,
     thumbnail_engine: el('cfgThumbEngine').value,
+    thumbnail_overlay_fg: el('cfgThumbFg').value,
+    thumbnail_overlay_bg: el('cfgThumbBg').value,
     modal_usage_url: el('cfgModalUrl').value,
     transcript_mode: el('cfgGroq').checked ? 'groq' : 'normal',
     transcript_model: el('cfgModel').value,
@@ -240,6 +270,7 @@ async function saveConfig(){
   el('cfgMsg').textContent = 'saved';
   setTimeout(()=>el('cfgMsg').textContent='', 1500);
   await loadVideos();
+  await loadThumbVideos();
 }
 
 async function loadVideos(){
@@ -398,6 +429,69 @@ el('cfgToggle').addEventListener('click', ()=>{
 });
 el('cfgSave').addEventListener('click', saveConfig);
 
+// ── Thumbnail regeneration ──────────────────────────────────────────────────
+async function loadThumbVideos(){
+  const path = el('cfgSourcePath').value || '';
+  const ext = el('cfgExt').value || '';
+  const r = await fetch(API+'/list-thumbnails?path='+encodeURIComponent(path)+'&extensions='+encodeURIComponent(ext)).catch(()=>null);
+  const data = r ? await r.json() : {videos:[]};
+  const videos = (data.videos||[]).filter(v=>v.has_thumbnail);
+  const sel = el('thumbVidSel');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— select video —</option>' + videos.map(v=>`<option value="${v.path}">${v.name}</option>`).join('');
+  if (cur) sel.value = cur;
+}
+el('thumbVidSel').addEventListener('change', ()=>{
+  const path = el('thumbVidSel').value;
+  el('pushYtBtn').disabled = true;
+  if (!path){ el('thumbCurWrap').style.display='none'; return; }
+  const opt = el('thumbVidSel').selectedOptions[0];
+  const r = fetch(API+'/list-thumbnails?path='+encodeURIComponent(el('cfgSourcePath').value||'')+'&extensions='+encodeURIComponent(el('cfgExt').value||'')).then(x=>x.json()).catch(()=>({videos:[]}));
+  r.then(data=>{
+    const v = (data.videos||[]).find(x=>x.path===path);
+    if (v && v.thumbnail){
+      el('thumbCurWrap').style.display='block';
+      el('thumbCur').src = API+'/download?file='+encodeURIComponent(v.thumbnail);
+    } else {
+      el('thumbCurWrap').style.display='none';
+    }
+  });
+});
+el('regenBtn').addEventListener('click', async ()=>{
+  const source = el('thumbVidSel').value;
+  if (!source){ alert('Select a video'); return; }
+  const title = el('regenOverlayTitle').value;
+  if (!title.trim()){ alert('Enter a new overlay title'); return; }
+  el('regenOut').style.display='block';
+  el('regenOut').textContent = 'Regenerating…';
+  el('pushYtBtn').disabled = true;
+  const body = {
+    source,
+    overlay_title: title,
+    overlay_fg: el('regenFg').value,
+    overlay_bg: el('regenBg').value,
+  };
+  const r = await fetch(API+'/regenerate-thumbnail', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await r.json();
+  if (!r.ok){ el('regenOut').textContent = 'Error: '+(data.detail||''); return; }
+  el('regenOut').textContent = 'Done. New thumbnail: '+data.thumbnail;
+  el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.thumbnail);
+  el('thumbCurWrap').style.display='block';
+  el('pushYtBtn').dataset.thumbnail = data.thumbnail;
+  el('pushYtBtn').disabled = false;
+});
+el('pushYtBtn').addEventListener('click', async ()=>{
+  const source = el('thumbVidSel').value;
+  if (!source) return;
+  el('pushYtBtn').disabled = true;
+  const body = { source, thumbnail: el('pushYtBtn').dataset.thumbnail||'' };
+  el('regenOut').textContent = 'Updating YouTube…';
+  const r = await fetch(API+'/push-thumbnail', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await r.json();
+  if (!r.ok){ el('regenOut').textContent = 'Error: '+(data.detail||''); el('pushYtBtn').disabled=false; return; }
+  el('regenOut').textContent = 'Thumbnail pushed to YouTube (video '+data.video_id+')';
+});
+
 function updateOverlayRow(){
   el('overlayRow').style.display = el('doThumb').checked ? 'block' : 'none';
 }
@@ -454,7 +548,11 @@ async function poll(){
     if (data.video_url) links += `<a href="${data.video_url}" target="_blank">▶ Watch</a>`;
     if (data.studio_url) links += `<a href="${data.studio_url}" target="_blank">🛠 Studio</a>`;
     const thumb = (data.files||{}).thumbnail;
-    el('resThumb').innerHTML = thumb ? `<img class="thumb-preview" src="${API}/download?file=${encodeURIComponent(thumb)}">` : '';
+    const thumbBase = (data.files||{}).thumbnail_base;
+    let thumbHtml = '';
+    if (thumb) thumbHtml += `<div>Overlayed: <img class="thumb-preview" src="${API}/download?file=${encodeURIComponent(thumb)}"></div>`;
+    if (thumbBase && thumbBase !== thumb) thumbHtml += `<div>Base (no overlay): <img class="thumb-preview" src="${API}/download?file=${encodeURIComponent(thumbBase)}"></div>`;
+    el('resThumb').innerHTML = thumbHtml;
     el('resLinks').innerHTML = links;
   }
   if (data.status === 'done' || data.status === 'error' || data.status === 'stopped'){
@@ -471,6 +569,7 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
   updateOverlayRow();
   await loadVideos();
   await loadPrompts();
+  await loadThumbVideos();
   await refreshQuickPrompt();
   setInterval(loadVideos, 10000);
 })();

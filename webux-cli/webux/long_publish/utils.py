@@ -51,6 +51,8 @@ def _save_meta(job) -> None:
         meta["description_prefix"] = job.description_prefix
     if job.thumbnail_overlay_title:
         meta["thumbnail_overlay_title"] = job.thumbnail_overlay_title
+    if job.thumbnail_prompt:
+        meta["thumbnail_prompt"] = job.thumbnail_prompt
     if job.do_generate_thumbnail is not True:
         meta["do_generate_thumbnail"] = job.do_generate_thumbnail
     if job.transcript_text:

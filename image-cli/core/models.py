@@ -134,6 +134,7 @@ class ImageGenResult:
     prompt: str
     output_format: str
     generation_time: float | None = None
+    base_path: str | None = None  # the generated image *without* any overlay
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -145,6 +146,7 @@ class ImageGenResult:
             "prompt": self.prompt,
             "output_format": self.output_format,
             "generation_time": self.generation_time,
+            "base_path": self.base_path,
         }
 
 

@@ -25,7 +25,7 @@ _STEP_FILE_KEYS: list[list[str]] = [
     ["no_silence", "audio"],
     ["transcript", "transcript_txt"],
     ["final_video"],
-    ["thumbnail"],
+    ["thumbnail", "thumbnail_base"],
     ["final_video"],
     [],
 ]
@@ -60,6 +60,7 @@ class Job:
     do_generate_thumbnail: bool = True
     source_urls: list[str] = field(default_factory=list)
     thumbnail_overlay_title: str = ""
+    thumbnail_prompt: str = ""
     stop_requested: bool = False
     steps: list[Step] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)

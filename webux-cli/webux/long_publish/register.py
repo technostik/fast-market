@@ -85,6 +85,8 @@ async def get_config():
         "default_thumbnail_prompt": pub.get("default_thumbnail_prompt", ""),
         "default_thumbnail_overlay_prompt": pub.get("default_thumbnail_overlay_prompt", ""),
         "thumbnail_engine": pub.get("thumbnail_engine", ""),
+        "thumbnail_overlay_fg": pub.get("thumbnail_overlay_fg", ""),
+        "thumbnail_overlay_bg": pub.get("thumbnail_overlay_bg", ""),
         "transcript_mode": pub.get("transcript_mode", "normal"),
         "transcript_model": pub.get("transcript_model", "medium"),
         "transcript_language": pub.get("transcript_language", "fr"),
@@ -102,6 +104,8 @@ class ConfigSaveRequest(BaseModel):
     default_thumbnail_prompt: str = ""
     default_thumbnail_overlay_prompt: str = ""
     thumbnail_engine: str = ""
+    thumbnail_overlay_fg: str = ""
+    thumbnail_overlay_bg: str = ""
     transcript_mode: str = "normal"
     transcript_model: str = "medium"
     transcript_language: str = "fr"
@@ -120,6 +124,8 @@ async def save_config(req: ConfigSaveRequest):
     pub["default_thumbnail_prompt"] = req.default_thumbnail_prompt
     pub["default_thumbnail_overlay_prompt"] = req.default_thumbnail_overlay_prompt
     pub["thumbnail_engine"] = req.thumbnail_engine
+    pub["thumbnail_overlay_fg"] = req.thumbnail_overlay_fg
+    pub["thumbnail_overlay_bg"] = req.thumbnail_overlay_bg
     pub["transcript_mode"] = req.transcript_mode
     pub["transcript_model"] = req.transcript_model
     pub["transcript_language"] = req.transcript_language
@@ -522,6 +528,205 @@ async def review_info(body: dict):
         "final_video": meta.get("files", {}).get("final_video", ""),
         "thumbnail": meta.get("files", {}).get("thumbnail", ""),
     }
+
+
+# ── Thumbnail regeneration API ────────────────────────────────────────────────
+
+@router.get("/list-thumbnails")
+async def list_thumbnails(
+    path: str = Query(default=DEFAULT_VIDEO_SOURCE_PATH),
+    extensions: str = Query(default=DEFAULT_VIDEO_EXTENSIONS),
+):
+    """List every source video (including already-published ones) along with its
+    existing thumbnail info, so the overlay can be regenerated."""
+    d = Path(path).expanduser()
+    if not d.exists() or not d.is_dir():
+        return {"videos": [], "error": f"Directory not found: {path}"}
+    exts = {("." + e.strip().lstrip(".")).lower() for e in extensions.split(",") if e.strip()}
+    files = sorted(
+        [
+            f for f in d.iterdir()
+            if f.suffix.lower() in exts and not _is_intermediate(f)
+        ],
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    visible = []
+    for f in files:
+        meta_path = f.with_name(f.stem + "-long-meta.json")
+        thumb = ""
+        thumb_base = ""
+        video_url = ""
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                thumb = meta.get("files", {}).get("thumbnail", "")
+                thumb_base = meta.get("files", {}).get("thumbnail_base", "")
+                video_url = meta.get("video_url", "")
+            except Exception:
+                pass
+        visible.append({
+            "name": f.name,
+            "path": str(f),
+            "mtime": f.stat().st_mtime,
+            "thumbnail": thumb,
+            "thumbnail_base": thumb_base,
+            "video_url": video_url,
+            "has_thumbnail": bool(thumb and Path(thumb).exists()),
+        })
+    return {"videos": visible}
+
+
+class RegenThumbRequest(BaseModel):
+    source: str
+    overlay_title: str
+    overlay_fg: str = ""
+    overlay_bg: str = ""
+    overlay_effect: str = ""
+
+
+@router.post("/regenerate-thumbnail")
+async def regenerate_thumbnail(req: RegenThumbRequest):
+    """Regenerate only the overlay text on an existing thumbnail image (the
+    no-overlay base when available, otherwise a full regeneration using the
+    stored image prompt). Does NOT touch YouTube."""
+    source = str(Path(req.source).expanduser().resolve())
+    if not Path(source).exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {source}")
+    if not req.overlay_title.strip():
+        raise HTTPException(status_code=400, detail="Overlay title is required")
+
+    meta = _load_meta(source)
+    files = dict(meta.get("files", {}))
+
+    base = files.get("thumbnail_base", "")
+    if not base or not Path(base).expanduser().exists():
+        base = files.get("thumbnail", "")
+    base_is_clean = bool(base) and Path(base).expanduser().exists()
+
+    if base_is_clean and Path(base).expanduser().stem.endswith("_overlay") is False:
+        # We have a clean (no-overlay) base image: just reapply the overlay.
+        cmd = [_image(), "overlay", str(Path(base).expanduser().resolve()), "--title", req.overlay_title.strip(), "-F", "json"]
+        if req.overlay_fg.strip():
+            cmd += ["--overlay-fg", req.overlay_fg.strip()]
+        if req.overlay_bg.strip():
+            cmd += ["--overlay-bg", req.overlay_bg.strip()]
+        if req.overlay_effect.strip():
+            cmd += ["--overlay-effect", req.overlay_effect.strip()]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode:
+            err = stderr.decode(errors="replace").strip()
+            raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
+        new_path = ""
+        try:
+            text = stdout.decode(errors="replace")
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start != -1 and end > start:
+                data = json.loads(text[start:end])
+                new_path = data.get("path", "")
+        except (json.JSONDecodeError, ValueError, TypeError):
+            new_path = ""
+        if not new_path or not Path(new_path).expanduser().exists():
+            raise HTTPException(status_code=500, detail="Overlay output path not found in command output")
+        new_path = str(Path(new_path).expanduser().resolve())
+        files["thumbnail"] = new_path
+    else:
+        # No clean base available (e.g. a video published before base images
+        # were stored). Regenerate from scratch using the stored image prompt,
+        # if we have one.
+        image_prompt = meta.get("thumbnail_prompt", "").strip()
+        if not image_prompt:
+            raise HTTPException(
+                status_code=400,
+                detail="No clean base image or stored prompt for this video; "
+                       "re-run publish to regenerate the thumbnail from scratch",
+            )
+        out_dir = str(Path(source).parent)
+        cmd = [_image(), "generate", image_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir, "--title", req.overlay_title.strip()]
+        if req.overlay_fg.strip():
+            cmd += ["--overlay-fg", req.overlay_fg.strip()]
+        if req.overlay_bg.strip():
+            cmd += ["--overlay-bg", req.overlay_bg.strip()]
+        if req.overlay_effect.strip():
+            cmd += ["--overlay-effect", req.overlay_effect.strip()]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode:
+            err = stderr.decode(errors="replace").strip()
+            raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
+        new_path = ""
+        new_base = ""
+        try:
+            text = stdout.decode(errors="replace")
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start != -1 and end > start:
+                data = json.loads(text[start:end])
+                new_path = data.get("path", "")
+                new_base = data.get("base_path", "")
+        except (json.JSONDecodeError, ValueError, TypeError):
+            new_path = ""
+            new_base = ""
+        if not new_path or not Path(new_path).expanduser().exists():
+            raise HTTPException(status_code=500, detail="Thumbnail output path not found in command output")
+        new_path = str(Path(new_path).expanduser().resolve())
+        files["thumbnail"] = new_path
+        if new_base and Path(new_base).expanduser().exists():
+            files["thumbnail_base"] = str(Path(new_base).expanduser().resolve())
+
+    meta["files"] = files
+    meta["thumbnail_overlay_title"] = req.overlay_title.strip()
+    try:
+        p = Path(source).parent / f"{Path(source).stem}-long-meta.json"
+        p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"thumbnail": new_path, "base": files.get("thumbnail_base", "")}
+
+
+class PushThumbRequest(BaseModel):
+    source: str
+    thumbnail: str = ""
+
+
+@router.post("/push-thumbnail")
+async def push_thumbnail(req: PushThumbRequest):
+    """Explicit action: push the (already regenerated) thumbnail to YouTube for
+    the published video associated with this source."""
+    source = str(Path(req.source).expanduser().resolve())
+    if not Path(source).exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {source}")
+
+    meta = _load_meta(source)
+    thumb = req.thumbnail or meta.get("files", {}).get("thumbnail", "")
+    video_url = meta.get("video_url", "")
+    video_id = _extract_video_id(video_url)
+    if not video_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No YouTube video ID found for this source; cannot push thumbnail",
+        )
+    if not thumb or not Path(thumb).expanduser().exists():
+        raise HTTPException(status_code=400, detail="No thumbnail available to push")
+
+    thumb = str(Path(thumb).expanduser().resolve())
+    cmd = [_yt(), "thumbnail-set", video_id, "--file", thumb]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode:
+        err = stderr.decode(errors="replace").strip()
+        raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
+
+    return {"ok": True, "video_id": video_id}
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
