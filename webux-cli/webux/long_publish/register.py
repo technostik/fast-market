@@ -10,7 +10,10 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from common import structlog
 from common.webux.base import WebuxPluginManifest
+
+logger = structlog.get_logger(__name__)
 
 from .models import (
     Job,
@@ -26,6 +29,8 @@ from .utils import (
     _save_publish_cfg,
     _load_meta,
     _pr,
+    _image,
+    _yt,
     _stem,
     _ass_to_plain_text,
     _validate_urls,
@@ -579,109 +584,215 @@ async def list_thumbnails(
 
 class RegenThumbRequest(BaseModel):
     source: str
-    overlay_title: str
+    mode: str = ""           # "image" | "overlay" | "" (auto)
+    image_prompt: str = ""   # explicit base image prompt (full regeneration)
+    overlay_title: str = ""  # overlay text to (re)apply (optional)
     overlay_fg: str = ""
     overlay_bg: str = ""
     overlay_effect: str = ""
 
 
+def _parse_generate_output(text: str) -> tuple[str, str]:
+    """Parse the JSON block emitted by ``image generate`` / ``image overlay``.
+
+    Returns ``(overlay_path, base_path)`` (either may be empty)."""
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start == -1 or end <= start:
+        return "", ""
+    try:
+        data = json.loads(text[start:end])
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return "", ""
+    return data.get("path", ""), data.get("base_path", "")
+
+
+def _resolve_overlay(req: RegenThumbRequest, pub_cfg: dict) -> tuple[str, str, str]:
+    """Resolve overlay fg/bg/effect: the form value wins, else the publish
+    config (``thumbnail_overlay_fg`` / ``thumbnail_overlay_bg`` / ...)."""
+    fg = (req.overlay_fg or pub_cfg.get("thumbnail_overlay_fg", "") or "").strip()
+    bg = (req.overlay_bg or pub_cfg.get("thumbnail_overlay_bg", "") or "").strip()
+    effect = (req.overlay_effect or pub_cfg.get("thumbnail_overlay_effect", "") or "").strip()
+    return fg, bg, effect
+
+
+def _append_overlay_opts(cmd: list[str], fg: str, bg: str, effect: str) -> list[str]:
+    if fg:
+        cmd += ["--overlay-fg", fg]
+    if bg:
+        cmd += ["--overlay-bg", bg]
+    if effect:
+        cmd += ["--overlay-effect", effect]
+    return cmd
+
+
+def _name_thumb_for_source(source: str, overlay_path: str, base_path: str, stem: str | None = None) -> tuple[str, str]:
+    """Rename generated thumbnail files so they are tied to the final uploaded
+    video: ``<stem>_thumb.<ext>`` (base) and ``<stem>_thumb_overlay.<ext>``
+    (overlay), instead of the image CLI's default ``flux2cloud_<seed>.png``."""
+    src = Path(source).expanduser().resolve()
+    out_dir = src.parent
+    if not stem:
+        stem = src.stem
+    new_overlay, new_base = overlay_path, base_path
+
+    if overlay_path and Path(overlay_path).expanduser().exists():
+        p = Path(overlay_path).expanduser()
+        target = out_dir / f"{stem}_thumb_overlay{p.suffix}"
+        if p.resolve() != target.resolve():
+            p.replace(target)
+        new_overlay = str(target.resolve())
+
+    if base_path and Path(base_path).expanduser().exists():
+        b = Path(base_path).expanduser()
+        target = out_dir / f"{stem}_thumb{b.suffix}"
+        if b.resolve() != target.resolve():
+            b.replace(target)
+        new_base = str(target.resolve())
+
+    return new_overlay, new_base
+
+
 @router.post("/regenerate-thumbnail")
 async def regenerate_thumbnail(req: RegenThumbRequest):
-    """Regenerate only the overlay text on an existing thumbnail image (the
-    no-overlay base when available, otherwise a full regeneration using the
-    stored image prompt). Does NOT touch YouTube."""
+    """Regenerate the thumbnail for an already-published video.
+
+    - ``mode="image"`` (or an ``image_prompt`` with ``mode=""``): generate a
+      brand new base image from the prompt, applying the overlay when
+      ``overlay_title`` is set.
+    - ``mode="overlay"`` (or just an ``overlay_title`` with ``mode=""``):
+      reapply the overlay text on the existing clean base image; if no clean
+      base exists, the stored image prompt is reused.
+
+    Overlay fg/bg/effect default to the publish config when not given in the
+    request. Does NOT touch YouTube; push explicitly via ``/push-thumbnail``."""
     source = str(Path(req.source).expanduser().resolve())
     if not Path(source).exists():
         raise HTTPException(status_code=400, detail=f"File not found: {source}")
-    if not req.overlay_title.strip():
-        raise HTTPException(status_code=400, detail="Overlay title is required")
 
     meta = _load_meta(source)
     files = dict(meta.get("files", {}))
+    out_dir = str(Path(source).parent)
+    pub_cfg = _load_publish_cfg()
 
-    base = files.get("thumbnail_base", "")
-    if not base or not Path(base).expanduser().exists():
-        base = files.get("thumbnail", "")
-    base_is_clean = bool(base) and Path(base).expanduser().exists()
+    image_prompt = req.image_prompt.strip()
+    overlay_title = req.overlay_title.strip()
+    fg, bg, effect = _resolve_overlay(req, pub_cfg)
 
-    if base_is_clean and Path(base).expanduser().stem.endswith("_overlay") is False:
-        # We have a clean (no-overlay) base image: just reapply the overlay.
-        cmd = [_image(), "overlay", str(Path(base).expanduser().resolve()), "--title", req.overlay_title.strip(), "-F", "json"]
-        if req.overlay_fg.strip():
-            cmd += ["--overlay-fg", req.overlay_fg.strip()]
-        if req.overlay_bg.strip():
-            cmd += ["--overlay-bg", req.overlay_bg.strip()]
-        if req.overlay_effect.strip():
-            cmd += ["--overlay-effect", req.overlay_effect.strip()]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode:
-            err = stderr.decode(errors="replace").strip()
-            raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
-        new_path = ""
-        try:
-            text = stdout.decode(errors="replace")
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start != -1 and end > start:
-                data = json.loads(text[start:end])
-                new_path = data.get("path", "")
-        except (json.JSONDecodeError, ValueError, TypeError):
-            new_path = ""
-        if not new_path or not Path(new_path).expanduser().exists():
-            raise HTTPException(status_code=500, detail="Overlay output path not found in command output")
-        new_path = str(Path(new_path).expanduser().resolve())
-        files["thumbnail"] = new_path
-    else:
-        # No clean base available (e.g. a video published before base images
-        # were stored). Regenerate from scratch using the stored image prompt,
-        # if we have one.
-        image_prompt = meta.get("thumbnail_prompt", "").strip()
+    # Decide what to do based on the explicit mode (or auto-detect).
+    if req.mode == "image":
         if not image_prompt:
+            raise HTTPException(status_code=400, detail="Image prompt is required to regenerate the image")
+        do_image, do_overlay = True, False
+    elif req.mode == "overlay":
+        do_image, do_overlay = False, True
+    else:
+        if image_prompt:
+            do_image, do_overlay = True, False
+        elif overlay_title:
+            do_image, do_overlay = False, True
+        else:
             raise HTTPException(
                 status_code=400,
-                detail="No clean base image or stored prompt for this video; "
-                       "re-run publish to regenerate the thumbnail from scratch",
+                detail="Provide an image prompt (to regenerate the image) or an overlay title",
             )
-        out_dir = str(Path(source).parent)
-        cmd = [_image(), "generate", image_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir, "--title", req.overlay_title.strip()]
-        if req.overlay_fg.strip():
-            cmd += ["--overlay-fg", req.overlay_fg.strip()]
-        if req.overlay_bg.strip():
-            cmd += ["--overlay-bg", req.overlay_bg.strip()]
-        if req.overlay_effect.strip():
-            cmd += ["--overlay-effect", req.overlay_effect.strip()]
+
+    # For overlay mode, fall back to the stored overlay title if none given.
+    if do_overlay and not overlay_title:
+        overlay_title = meta.get("thumbnail_overlay_title", "").strip()
+        if not overlay_title:
+            raise HTTPException(status_code=400, detail="Provide an overlay title to regenerate the overlay")
+
+    logger.info("long_publish_regen_start", source=source, mode=("image" if do_image else "overlay"),
+                has_prompt=bool(image_prompt), has_overlay=bool(overlay_title))
+
+    # Name thumbnails after the final uploaded video (sanitized title), falling
+    # back to the source stem when no final video is recorded.
+    final_video = files.get("final_video", "")
+    final_stem = Path(final_video).stem if (final_video and Path(final_video).expanduser().exists()) else Path(source).stem
+
+    new_path = ""
+    new_base = ""
+
+    if do_image:
+        # Full regeneration from an explicit prompt.
+        cmd = [_image(), "generate", image_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir]
+        if overlay_title:
+            cmd += ["--title", overlay_title]
+        cmd = _append_overlay_opts(cmd, fg, bg, effect)
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode:
             err = stderr.decode(errors="replace").strip()
+            logger.error("long_publish_cmd_failed", cmd=cmd, rc=proc.returncode, stderr=err)
             raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
-        new_path = ""
-        new_base = ""
-        try:
-            text = stdout.decode(errors="replace")
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start != -1 and end > start:
-                data = json.loads(text[start:end])
-                new_path = data.get("path", "")
-                new_base = data.get("base_path", "")
-        except (json.JSONDecodeError, ValueError, TypeError):
-            new_path = ""
-            new_base = ""
+        new_path, new_base = _parse_generate_output(stdout.decode(errors="replace"))
         if not new_path or not Path(new_path).expanduser().exists():
             raise HTTPException(status_code=500, detail="Thumbnail output path not found in command output")
-        new_path = str(Path(new_path).expanduser().resolve())
+        new_path, new_base = _name_thumb_for_source(source, new_path, new_base, final_stem)
         files["thumbnail"] = new_path
-        if new_base and Path(new_base).expanduser().exists():
-            files["thumbnail_base"] = str(Path(new_base).expanduser().resolve())
+        if new_base:
+            files["thumbnail_base"] = new_base
+        meta["thumbnail_prompt"] = image_prompt
+    else:
+        base = files.get("thumbnail_base", "")
+        if not base or not Path(base).expanduser().exists():
+            base = files.get("thumbnail", "")
+        base_is_clean = bool(base) and Path(base).expanduser().exists() \
+            and not Path(base).expanduser().stem.endswith("_overlay")
+
+        if base_is_clean:
+            # Clean (no-overlay) base image available: just reapply the overlay.
+            cmd = [_image(), "overlay", str(Path(base).expanduser().resolve()), "--title", overlay_title, "-F", "json"]
+            cmd = _append_overlay_opts(cmd, fg, bg, effect)
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode:
+                err = stderr.decode(errors="replace").strip()
+                logger.error("long_publish_cmd_failed", cmd=cmd, rc=proc.returncode, stderr=err)
+                raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
+            new_path, _ = _parse_generate_output(stdout.decode(errors="replace"))
+            if not new_path or not Path(new_path).expanduser().exists():
+                raise HTTPException(status_code=500, detail="Overlay output path not found in command output")
+            new_path, renamed_base = _name_thumb_for_source(source, new_path, base, final_stem)
+            files["thumbnail"] = new_path
+            if renamed_base:
+                files["thumbnail_base"] = renamed_base
+        else:
+            # No clean base available (video published before base images were
+            # stored). Regenerate from scratch using the stored image prompt.
+            stored_prompt = meta.get("thumbnail_prompt", "").strip()
+            if not stored_prompt:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No clean base image or stored prompt for this video; "
+                           "re-run publish to regenerate the thumbnail from scratch",
+                )
+            cmd = [_image(), "generate", stored_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir, "--title", overlay_title]
+            cmd = _append_overlay_opts(cmd, fg, bg, effect)
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode:
+                err = stderr.decode(errors="replace").strip()
+                logger.error("long_publish_cmd_failed", cmd=cmd, rc=proc.returncode, stderr=err)
+                raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
+            new_path, new_base = _parse_generate_output(stdout.decode(errors="replace"))
+            if not new_path or not Path(new_path).expanduser().exists():
+                raise HTTPException(status_code=500, detail="Thumbnail output path not found in command output")
+            new_path, new_base = _name_thumb_for_source(source, new_path, new_base, final_stem)
+            files["thumbnail"] = new_path
+            if new_base:
+                files["thumbnail_base"] = new_base
 
     meta["files"] = files
-    meta["thumbnail_overlay_title"] = req.overlay_title.strip()
+    if overlay_title:
+        meta["thumbnail_overlay_title"] = overlay_title
     try:
         p = Path(source).parent / f"{Path(source).stem}-long-meta.json"
         p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")

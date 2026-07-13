@@ -75,6 +75,9 @@
     .resume-box { display:none; padding:10px; border:1px solid var(--border);
                   border-radius:6px; background:var(--bg2); margin:10px 0; }
     .thumb-preview { max-width:100%; border-radius:6px; border:1px solid var(--border); margin-top:6px; }
+    .log-box { font-size:11px; color:var(--dim); background:#0f172a; border:1px solid var(--border);
+               border-radius:6px; padding:8px; margin-top:10px; white-space:pre-wrap; word-break:break-all;
+               max-height:240px; overflow:auto; }
   </style>
 </head>
 <body>
@@ -163,21 +166,23 @@
 
       <hr>
       <div class="row">
-        <label>🖼 Regenerate thumbnail overlay (already published video)</label>
+        <label>🖼 Regenerate thumbnail (already published video)</label>
         <select id="thumbVidSel"><option value="">— select video —</option></select>
       </div>
       <div class="row" id="thumbCurWrap" style="display:none;">
         <label>Current thumbnail</label>
         <img class="thumb-preview" id="thumbCur" src="">
       </div>
-      <div class="row"><label>New overlay title</label><input id="regenOverlayTitle" type="text"></div>
+      <div class="row"><label>New image prompt <span class="hint">(used by "Regenerate image")</span></label><textarea id="regenImagePrompt" rows="2" placeholder="generate a brand new base image from this prompt"></textarea></div>
+      <div class="row"><label>New overlay title <span class="hint">(used by "Regenerate overlay"; falls back to the stored title)</span></label><input id="regenOverlayTitle" type="text"></div>
       <div class="cols2">
         <div class="row"><label>Text color (fg)</label><input id="regenFg" type="text" placeholder="from config if empty"></div>
         <div class="row"><label>Background (bg)</label><input id="regenBg" type="text" placeholder="from config if empty"></div>
       </div>
       <div class="cols2">
-        <div class="row" style="align-self:flex-end;">
-          <button class="btn-sec" id="regenBtn">↻ Regenerate overlay</button>
+        <div class="row" style="align-self:flex-end; gap:8px;">
+          <button class="btn-sec" id="regenImgBtn">🖼 Regenerate image</button>
+          <button class="btn-sec" id="regenOverlayBtn">🏷 Regenerate overlay</button>
           <button class="btn-go" id="pushYtBtn" disabled>🛠 Update YouTube</button>
         </div>
       </div>
@@ -451,35 +456,47 @@ el('thumbVidSel').addEventListener('change', ()=>{
     const v = (data.videos||[]).find(x=>x.path===path);
     if (v && v.thumbnail){
       el('thumbCurWrap').style.display='block';
-      el('thumbCur').src = API+'/download?file='+encodeURIComponent(v.thumbnail);
+      el('thumbCur').src = API+'/download?file='+encodeURIComponent(v.thumbnail)+'&t='+Date.now();
+      el('pushYtBtn').dataset.thumbnail = v.thumbnail;
+      el('pushYtBtn').disabled = false;
     } else {
       el('thumbCurWrap').style.display='none';
+      el('pushYtBtn').dataset.thumbnail = '';
+      el('pushYtBtn').disabled = true;
     }
   });
 });
-el('regenBtn').addEventListener('click', async ()=>{
-  const source = el('thumbVidSel').value;
-  if (!source){ alert('Select a video'); return; }
-  const title = el('regenOverlayTitle').value;
-  if (!title.trim()){ alert('Enter a new overlay title'); return; }
-  el('regenOut').style.display='block';
-  el('regenOut').textContent = 'Regenerating…';
-  el('pushYtBtn').disabled = true;
-  const body = {
-    source,
-    overlay_title: title,
-    overlay_fg: el('regenFg').value,
-    overlay_bg: el('regenBg').value,
+function regenThumbnail(mode){
+  return async ()=>{
+    const source = el('thumbVidSel').value;
+    if (!source){ alert('Select a video'); return; }
+    const title = el('regenOverlayTitle').value;
+    const imagePrompt = el('regenImagePrompt').value;
+    if (mode === 'image' && !imagePrompt.trim()){ alert('Enter an image prompt for "Regenerate image"'); return; }
+    if (mode === 'overlay' && !title.trim()){ alert('Enter an overlay title for "Regenerate overlay"'); return; }
+    el('regenOut').style.display='block';
+    el('regenOut').textContent = (mode === 'image' ? 'Generating image…' : 'Regenerating overlay…');
+    el('pushYtBtn').disabled = true;
+    const body = {
+      source,
+      mode,
+      image_prompt: imagePrompt,
+      overlay_title: title,
+      overlay_fg: el('regenFg').value,
+      overlay_bg: el('regenBg').value,
+    };
+    const r = await fetch(API+'/regenerate-thumbnail', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await r.json();
+    if (!r.ok){ el('regenOut').textContent = 'Error: '+(data.detail||''); return; }
+    el('regenOut').textContent = 'Done. New thumbnail: '+data.thumbnail;
+    el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.thumbnail)+'&t='+Date.now();
+    el('thumbCurWrap').style.display='block';
+    el('pushYtBtn').dataset.thumbnail = data.thumbnail;
+    el('pushYtBtn').disabled = false;
   };
-  const r = await fetch(API+'/regenerate-thumbnail', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  const data = await r.json();
-  if (!r.ok){ el('regenOut').textContent = 'Error: '+(data.detail||''); return; }
-  el('regenOut').textContent = 'Done. New thumbnail: '+data.thumbnail;
-  el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.thumbnail);
-  el('thumbCurWrap').style.display='block';
-  el('pushYtBtn').dataset.thumbnail = data.thumbnail;
-  el('pushYtBtn').disabled = false;
-});
+}
+el('regenImgBtn').addEventListener('click', regenThumbnail('image'));
+el('regenOverlayBtn').addEventListener('click', regenThumbnail('overlay'));
 el('pushYtBtn').addEventListener('click', async ()=>{
   const source = el('thumbVidSel').value;
   if (!source) return;
@@ -513,7 +530,7 @@ function renderSteps(steps){
     const time = s.elapsed_seconds!=null ? `<span class="step-time">${s.elapsed_seconds}s</span>` : '';
     const prog = s.progress!=null ? `<progress class="step-progress" value="${s.progress}" max="100"></progress>` : '';
     const dls = (s.output_files||[]).map(f=>`<a href="${API}/download?file=${encodeURIComponent(f.path)}" download>${f.name}</a>`).join('');
-    const out = s.output ? `<div class="step-out collapsed" id="out${i}">${escapeHtml(s.output)}</div>` : '';
+    const out = s.output ? `<div class="step-out collapsed" id="out${i}">${escapeHtml(cleanCtrl(s.output))}</div>` : '';
     const toggle = s.output ? `<span class="step-toggle" onclick="toggleOut(event,${i})">show</span>` : '';
     return `<div class="step"><div class="step-icon">${icon}</div><div class="step-name">${i}. ${s.name} ${toggle} ${time} ${prog}${out}${dls?'<div class="step-dl">'+dls+'</div>':''}</div></div>`;
   }).join('');
@@ -525,9 +542,10 @@ function toggleOut(ev, i){
   ev.target.textContent = collapsed ? 'hide' : 'show';
 }
 function escapeHtml(t){ return t.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function cleanCtrl(t){ return (t||'').split('\n').map(l=>l.split('\r').pop()).join('\n'); }
 
 function updateLog(steps){
-  const full = steps.map(s=>`[${s.name}] ${s.output||''}`).join('\n\n');
+  const full = steps.map(s=>`[${s.name}] ${cleanCtrl(s.output||'')}`).join('\n\n');
   el('logBox').style.display = full ? 'block':'none';
   el('logBox').textContent = full;
 }
