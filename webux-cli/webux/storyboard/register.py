@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -64,6 +66,7 @@ async def get_config():
         "scene_range": cfg.get("scene_range", "2–5"),
         "scene_duration": cfg.get("scene_duration", "15–45 seconds"),
         "prompts": cfg.get("prompts", {}),
+        "prompt_overrides": cfg.get("prompt_overrides", {}),
     }
 
 
@@ -89,12 +92,38 @@ class ConfigSaveRequest(BaseModel):
     scene_range: str = "2–5"
     scene_duration: str = "15–45 seconds"
     prompts: dict = {}
+    prompt_overrides: dict = {}
 
 
 @router.post("/config")
 async def save_config(req: ConfigSaveRequest):
     save_storyboard_config(req.model_dump())
     return {"ok": True}
+
+
+@router.get("/list-prompts")
+async def list_prompts():
+    pr = shutil.which("prompt") or "prompt"
+    proc = await asyncio.create_subprocess_exec(
+        pr, "list", "--names-only",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    names = [n.strip() for n in stdout.decode(errors="replace").splitlines() if n.strip()]
+    return {"prompts": names}
+
+
+@router.get("/prompt-content")
+async def prompt_content(name: str = Query(...)):
+    pr = shutil.which("prompt") or "prompt"
+    proc = await asyncio.create_subprocess_exec(
+        pr, "get", name, "--content",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    return {"name": name, "content": stdout.decode(errors="replace").strip()}
 
 
 @router.get("/state")
@@ -468,6 +497,26 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 .prompt-field { margin-top: 8px; }
 .prompt-label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
 .prompt-area { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; color: var(--text); font-size: 11px; font-family: monospace; resize: vertical; min-height: 80px; }
+.prompt-sel { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; color: var(--text); font-size: 12px; margin-bottom: 4px; }
+.prompt-info { cursor: help; color: #fff; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.prompt-info:hover::after {
+  content: attr(data-content);
+  position: absolute;
+  left: 8px; right: 8px;
+  margin-top: 4px;
+  display: block;
+  white-space: pre-wrap;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text);
+  z-index: 50;
+  max-height: 320px;
+  overflow: auto;
+}
 
 /* ── Init overlay ── */
 .init-overlay { position: absolute; inset: 0; background: rgba(17,17,27,.9); display: flex; align-items: center; justify-content: center; z-index: 10; }
@@ -749,16 +798,19 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <div style="margin-top:6px;font-size:10px;color:var(--text-dim)">Also available: <code style="color:var(--accent)">{lang}</code> <code style="color:var(--accent)">{narrative_style}</code> <code style="color:var(--accent)">{image_style}</code></div>
       </div>
       <div class="prompt-field">
-        <div class="prompt-label">Story Breakdown Prompt</div>
-        <textarea class="prompt-area" id="cfgPromptStory" rows="5"></textarea>
+        <div class="prompt-label">Story Breakdown Prompt <span class="prompt-info" id="infoStory" data-content="">ⓘ</span></div>
+        <select id="cfgPromptStorySel" class="prompt-sel" onchange="onPromptSelect('Story')"></select>
+        <textarea class="prompt-area" id="cfgPromptStory" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
       </div>
       <div class="prompt-field">
-        <div class="prompt-label">Scene Transcript Prompt</div>
-        <textarea class="prompt-area" id="cfgPromptTranscript" rows="4"></textarea>
+        <div class="prompt-label">Scene Transcript Prompt <span class="prompt-info" id="infoTranscript" data-content="">ⓘ</span></div>
+        <select id="cfgPromptTranscriptSel" class="prompt-sel" onchange="onPromptSelect('Transcript')"></select>
+        <textarea class="prompt-area" id="cfgPromptTranscript" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
       </div>
       <div class="prompt-field">
-        <div class="prompt-label">Scene Image Prompt</div>
-        <textarea class="prompt-area" id="cfgPromptImage" rows="4"></textarea>
+        <div class="prompt-label">Scene Image Prompt <span class="prompt-info" id="infoImage" data-content="">ⓘ</span></div>
+        <select id="cfgPromptImageSel" class="prompt-sel" onchange="onPromptSelect('Image')"></select>
+        <textarea class="prompt-area" id="cfgPromptImage" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
       </div>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;">
@@ -828,10 +880,61 @@ async function loadConfig() {
     document.getElementById('cfgSceneRange').value = cfg.scene_range || '2–5';
     document.getElementById('cfgSceneDuration').value = cfg.scene_duration || '15–45 seconds';
     const p = cfg.prompts || {};
-    document.getElementById('cfgPromptStory').value = p.story_breakdown || '';
-    document.getElementById('cfgPromptTranscript').value = p.scene_transcript || '';
-    document.getElementById('cfgPromptImage').value = p.scene_image_prompt || '';
+    const ov = cfg.prompt_overrides || {};
+    await populateStoryPrompts();
+    document.getElementById('cfgPromptStorySel').value = p.story_breakdown || 'storyboard-breakdown';
+    document.getElementById('cfgPromptTranscriptSel').value = p.scene_transcript || 'storyboard-scene-transcript';
+    document.getElementById('cfgPromptImageSel').value = p.scene_image_prompt || 'storyboard-scene-image';
+    document.getElementById('cfgPromptStory').value = ov.story_breakdown || '';
+    document.getElementById('cfgPromptTranscript').value = ov.scene_transcript || '';
+    document.getElementById('cfgPromptImage').value = ov.scene_image_prompt || '';
+    refreshPromptPreview('Story');
+    refreshPromptPreview('Transcript');
+    refreshPromptPreview('Image');
   } catch(e) { console.warn('loadConfig error', e); }
+}
+
+const _storyPromptCache = {};
+
+async function populateStoryPrompts() {
+  try {
+    const r = await fetch('/api/storyboard/list-prompts');
+    if (!r.ok) return;
+    const data = await r.json();
+    const names = data.prompts || [];
+    for (const key of ['Story', 'Transcript', 'Image']) {
+      const sel = document.getElementById('cfgPrompt' + key + 'Sel');
+      if (!sel) continue;
+      const cur = sel.value;
+      sel.innerHTML = '';
+      for (const n of names) {
+        const o = document.createElement('option');
+        o.value = n; o.textContent = n;
+        sel.appendChild(o);
+      }
+      if (names.includes(cur)) sel.value = cur;
+    }
+  } catch (e) { /* list-prompts unavailable */ }
+}
+
+async function refreshPromptPreview(key) {
+  const sel = document.getElementById('cfgPrompt' + key + 'Sel');
+  const info = document.getElementById('info' + key);
+  if (!sel || !info) return;
+  const name = sel.value;
+  if (!name) { info.setAttribute('data-content', ''); return; }
+  if (!_storyPromptCache[name]) {
+    try {
+      const r = await fetch('/api/storyboard/prompt-content?name=' + encodeURIComponent(name));
+      const d = await r.json();
+      _storyPromptCache[name] = d.content || '';
+    } catch (e) { _storyPromptCache[name] = ''; }
+  }
+  info.setAttribute('data-content', _storyPromptCache[name]);
+}
+
+function onPromptSelect(key) {
+  refreshPromptPreview(key);
 }
 
 async function saveConfig() {
@@ -855,6 +958,11 @@ async function saveConfig() {
     scene_range: document.getElementById('cfgSceneRange').value || '2–5',
     scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
     prompts: {
+      story_breakdown: document.getElementById('cfgPromptStorySel').value,
+      scene_transcript: document.getElementById('cfgPromptTranscriptSel').value,
+      scene_image_prompt: document.getElementById('cfgPromptImageSel').value,
+    },
+    prompt_overrides: {
       story_breakdown: document.getElementById('cfgPromptStory').value,
       scene_transcript: document.getElementById('cfgPromptTranscript').value,
       scene_image_prompt: document.getElementById('cfgPromptImage').value,

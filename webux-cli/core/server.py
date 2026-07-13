@@ -78,6 +78,58 @@ async function webuxExit() {
 </script>
 """
 
+_PROMPT_INFO_CSS = """
+.prompt-info { position: relative; cursor: help; color: #fff; font-weight: 400; margin-left: 6px; }
+.prompt-info:hover::after {
+  content: attr(data-content);
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  display: block;
+  width: min(640px, 85vw);
+  max-height: 340px;
+  overflow: auto;
+  white-space: pre-wrap;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text);
+  z-index: 999;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+"""
+
+_PROMPT_INFO_SCRIPT = """
+<script>
+// Wire an (i) info bubble to a prompt-select: on hover it shows the currently
+// selected prompt's content (fetched from /api/system/prompt-content).
+function setupPromptInfo(selectId, infoId) {
+  const sel = document.getElementById(selectId);
+  const info = document.getElementById(infoId);
+  if (!sel || !info) return;
+  if (info.dataset.bound) return;
+  info.dataset.bound = '1';
+  const load = async () => {
+    const name = sel.value;
+    if (!name) { info.dataset.content = '(no prompt selected)'; return; }
+    try {
+      const r = await fetch('/api/system/prompt-content?name=' + encodeURIComponent(name));
+      const d = await r.json();
+      info.dataset.content = d.content || d.error || '(empty)';
+    } catch (e) {
+      info.dataset.content = '(failed to load)';
+    }
+  };
+  info.addEventListener('mouseenter', load);
+  sel.addEventListener('change', () => { info.dataset.content = ''; });
+}
+</script>
+"""
+
 
 def _build_nav(plugins: dict[str, WebuxPluginManifest], active: str | None = None) -> str:
     links = []
@@ -91,8 +143,8 @@ def _build_nav(plugins: dict[str, WebuxPluginManifest], active: str | None = Non
 
 
 def _inject_nav(plugin_html: str, nav_html: str) -> str:
-    style_tag = f"<style>{_NAV_CSS}</style>"
-    script_tag = _WEBUX_EXIT_SCRIPT
+    style_tag = f"<style>{_NAV_CSS}{_PROMPT_INFO_CSS}</style>"
+    script_tag = _WEBUX_EXIT_SCRIPT + _PROMPT_INFO_SCRIPT
     if "</head>" in plugin_html:
         plugin_html = plugin_html.replace(
             "</head>",
@@ -177,7 +229,7 @@ def build_app(
                     logger.info("webux_plugin_lazy_mounted", name=plugin.name)
                     mounted_this_request = True
 
-        if path.startswith("/api/") and not mounted_this_request:
+        if path.startswith("/api/") and not mounted_this_request and not path.startswith("/api/system/"):
             mounted_names = {p.name for p in manifests.values() if p.name in mounted_routers}
             matched = any(path.startswith(f"/api/{n}/") or path == f"/api/{n}" for n in mounted_names)
             if not matched:
@@ -226,5 +278,28 @@ def build_app(
         if shutdown_callback:
             shutdown_callback()
         return {"ok": True}
+
+    @app.get("/api/system/prompt-content")
+    def system_prompt_content(name: str = ""):
+        if not name:
+            return {"name": name, "content": "", "error": "missing name"}
+        import shutil
+        import subprocess
+
+        pr = shutil.which("prompt") or "prompt"
+        try:
+            proc = subprocess.run(
+                [pr, "get", name, "--content"],
+                capture_output=True, text=True, check=False,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            return {"name": name, "content": "", "error": f"prompt error: {exc}"}
+        if proc.returncode != 0:
+            return {
+                "name": name,
+                "content": "",
+                "error": (proc.stderr or proc.stdout or "prompt get failed").strip(),
+            }
+        return {"name": name, "content": proc.stdout.strip()}
 
     return app

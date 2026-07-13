@@ -35,6 +35,7 @@ class SaveReplyRequest(BaseModel):
 class RegenerateRequest(BaseModel):
     file: str
     indices: List[int]
+    prompt_name: str | None = None
 
 
 class GetPromptRequest(BaseModel):
@@ -199,6 +200,19 @@ def save_reply(payload: SaveReplyRequest) -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/list-prompts")
+def list_prompts():
+    try:
+        proc = subprocess.run(
+            ["prompt", "list", "--names-only"],
+            capture_output=True, text=True, check=False,
+        )
+        names = [n.strip() for n in proc.stdout.splitlines() if n.strip()]
+    except Exception:
+        names = []
+    return {"prompts": names}
+
+
 @router.post("/get_prompt")
 def get_prompt(payload: GetPromptRequest) -> dict[str, str]:
     cmd = ["prompt", "get", payload.name, "--content"]
@@ -244,7 +258,7 @@ def regenerate(payload: RegenerateRequest) -> dict[str, int | str]:
     if not selected:
         raise HTTPException(status_code=400, detail="No valid rows selected")
 
-    prompt_name = selected[0].get("metadata", {}).get("prompt-name")
+    prompt_name = payload.prompt_name or selected[0].get("metadata", {}).get("prompt-name")
     promote_url = selected[0].get("metadata", {}).get("promote-url")
 
     if not prompt_name:

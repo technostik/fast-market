@@ -90,8 +90,8 @@
     <div class="row"><label>Signature (appended to description)</label><textarea id="cfgSignature" rows="2"></textarea></div>
     <div class="row"><label>Signature video path</label><input id="cfgSigVideo" type="text"></div>
     <div class="cols2">
-      <div class="row"><label>Title prompt</label><input id="cfgTitlePrompt" type="text"></div>
-      <div class="row"><label>Description prompt</label><input id="cfgDescPrompt" type="text"></div>
+      <div class="row"><label>Title prompt <span class="prompt-info" id="infoTitle" data-content="">ⓘ</span></label><select id="cfgTitlePrompt"></select></div>
+      <div class="row"><label>Description prompt <span class="prompt-info" id="infoDesc" data-content="">ⓘ</span></label><select id="cfgDescPrompt"></select></div>
     </div>
     <div class="cols2">
       <div class="row"><label>Transcript language</label><input id="cfgLang" type="text" value="fr"></div>
@@ -99,8 +99,8 @@
     </div>
     <div class="checkrow"><input type="checkbox" id="cfgGroq"><label style="margin:0">Use Groq for transcript (vs local Whisper)</label></div>
     <div class="cols2">
-      <div class="row"><label>Thumbnail image prompt</label><input id="cfgThumbPrompt" type="text" placeholder="prompt name"></div>
-      <div class="row"><label>Thumbnail overlay prompt</label><input id="cfgThumbOverlay" type="text" placeholder="prompt name"></div>
+      <div class="row"><label>Thumbnail image prompt <span class="prompt-info" id="infoThumb" data-content="">ⓘ</span></label><select id="cfgThumbPrompt"><option value="">— none (disabled) —</option></select></div>
+      <div class="row"><label>Thumbnail overlay prompt <span class="prompt-info" id="infoOverlay" data-content="">ⓘ</span></label><select id="cfgThumbOverlay"><option value="">— none (disabled) —</option></select></div>
     </div>
     <div class="row"><label>Thumbnail engine (image model)</label><input id="cfgThumbEngine" type="text" placeholder="leave empty for default"></div>
     <div class="row"><label>Modal usage URL</label><input id="cfgModalUrl" type="text"></div>
@@ -198,6 +198,7 @@ function el(id){ return document.getElementById(id); }
 
 async function loadConfig(){
   const c = await fetch(API+'/config').then(r=>r.json()).catch(()=>({}));
+  await populateConfigPrompts();
   el('cfgSourcePath').value = c.video_source_path||'';
   el('cfgExt').value = c.video_extensions||'';
   el('cfgSignature').value = c.signature||'';
@@ -268,6 +269,38 @@ async function loadPrompts(){
   const data = r ? await r.json() : {prompts:[]};
   const opts = '<option value="">— prompt —</option>' + (data.prompts||[]).map(p=>`<option>${p}</option>`).join('');
   el('quickPromptSel').innerHTML = opts;
+}
+
+async function populateConfigPrompts(){
+  try {
+    const r = await fetch(API+'/list-prompts').catch(()=>null);
+    const data = r ? await r.json() : {prompts:[]};
+    const names = data.prompts||[];
+    const ids = ['cfgTitlePrompt','cfgDescPrompt','cfgThumbPrompt','cfgThumbOverlay'];
+    for (const id of ids){
+      const sel = el(id);
+      if (!sel) continue;
+      const cur = sel.value;
+      sel.innerHTML = '';
+      if (id==='cfgThumbPrompt' || id==='cfgThumbOverlay'){
+        const o = document.createElement('option');
+        o.value=''; o.textContent='— none (disabled) —';
+        sel.appendChild(o);
+      }
+      for (const n of names){
+        const o = document.createElement('option');
+        o.value=n; o.textContent=n;
+        sel.appendChild(o);
+      }
+      if (id==='cfgThumbPrompt' || id==='cfgThumbOverlay' ? (cur===''||names.includes(cur)) : names.includes(cur)){
+        sel.value = cur;
+      }
+    }
+    setupPromptInfo('cfgTitlePrompt','infoTitle');
+    setupPromptInfo('cfgDescPrompt','infoDesc');
+    setupPromptInfo('cfgThumbPrompt','infoThumb');
+    setupPromptInfo('cfgThumbOverlay','infoOverlay');
+  } catch(e){ /* list-prompts unavailable */ }
 }
 
 el('videoSel').addEventListener('change', ()=>{

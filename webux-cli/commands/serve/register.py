@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import os
 import signal
+import subprocess
 import threading
-import time
+from pathlib import Path
 import webbrowser
 
 import click
@@ -53,6 +54,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
         config = load_tool_config("webux")
         discovered = discover_webux_plugins(config)
         logger.info("server_start", host=host, port=port, plugins=list(discovered.keys()))
+
+        # Ensure all webux prompts exist in the prompt store (idempotent).
+        try:
+            seed_file = (
+                Path(__file__).resolve().parents[2]
+                / "webux"
+                / "resources"
+                / "webux_prompts.yaml"
+            )
+            subprocess.run(
+                ["prompt", "setup", "webux", "import", "--force", "--file", str(seed_file)],
+                check=False,
+                capture_output=True,
+                timeout=60,
+            )
+        except Exception as exc:  # pragma: no cover - best effort seed
+            logger.warning("webux_prompt_seed_failed", error=str(exc))
 
         if open_browser:
             webbrowser.open(f"http://{host}:{port}")

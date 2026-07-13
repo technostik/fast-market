@@ -426,14 +426,7 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
     script_file = workdir / "script.txt"
     script_file.write_text(script_text, encoding="utf-8")
 
-    # Resolve config placeholders first, then escape remaining { } for prompt CLI.
-    template = _resolve_prompt(config["prompts"]["story_breakdown"], config)
-    prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
-
-    rc = await _run(s, _prompt_cmd(), "apply", prompt_with_placeholder,
-                    "--format", "text",
-                    f"content=@{script_file}",
-                    log_to=state)
+    rc = await _apply_story_prompt(s, state, config, "story_breakdown", script_file)
     if rc != 0:
         s.status = "error"
         s.end_time = time.time()
@@ -511,14 +504,8 @@ async def _gen_transcript(
     state.save(state_path)
 
     scene_dir = _scene_dir(state, sc)
-    template = _resolve_prompt(config["prompts"]["scene_transcript"], config)
-    prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
-
     description_file = scene_dir / "description.txt"
-    rc = await _run(step, _prompt_cmd(), "apply", prompt_with_placeholder,
-                    "--format", "text",
-                    f"content=@{description_file}",
-                    log_to=state)
+    rc = await _apply_story_prompt(step, state, config, "scene_transcript", description_file)
     if rc != 0:
         step.status = "error"
         step.end_time = time.time()
@@ -550,13 +537,7 @@ async def _gen_image_prompt(
     input_file = scene_dir / "image_prompt_input.txt"
     input_file.write_text(content, encoding="utf-8")
 
-    template = _resolve_prompt(config["prompts"]["scene_image_prompt"], config)
-    prompt_with_placeholder = template.replace("{", "{{").replace("}", "}}") + "{content}"
-
-    rc = await _run(step, _prompt_cmd(), "apply", prompt_with_placeholder,
-                    "--format", "text",
-                    f"content=@{input_file}",
-                    log_to=state)
+    rc = await _apply_story_prompt(step, state, config, "scene_image_prompt", input_file)
     if rc != 0:
         step.status = "error"
         step.end_time = time.time()
@@ -980,6 +961,43 @@ def _resolve_prompt(template: str, config: dict) -> str:
     for k, v in subs.items():
         template = template.replace(f"{{{k}}}", str(v))
     return template
+
+
+async def _apply_story_prompt(
+    step: StepState, state: "ProjectState", config: dict, key: str, content_file: Path
+) -> int:
+    """Apply a storyboard prompt.
+
+    Uses the named prompt from the prompt store (config["prompts"][key]) and lets
+    the prompt CLI substitute the config placeholders. If an inline override is
+    configured (config["prompt_overrides"][key]), it is applied directly instead.
+    """
+    prompts = config.get("prompts") or {}
+    overrides = config.get("prompt_overrides") or {}
+    name = prompts.get(key, "")
+    override = overrides.get(key, "")
+
+    if override and override.strip():
+        # Legacy inline path: substitute config vars, escape braces, append {content}.
+        template = _resolve_prompt(override, config)
+        prompt_arg = template.replace("{", "{{").replace("}", "}}") + "{content}"
+        return await _run(
+            step, _prompt_cmd(), "apply", prompt_arg,
+            "--format", "text", f"content=@{content_file}", log_to=state,
+        )
+
+    subs = {
+        "lang": config.get("language", "en"),
+        "chapter_range": config.get("chapter_range", "2–5"),
+        "scene_range": config.get("scene_range", "2–5"),
+        "scene_duration": config.get("scene_duration", "15–45 seconds"),
+        "narrative_style": config.get("narrative_style", "documentary narration"),
+        "image_style": config.get("image_style", "cinematic, dramatic lighting"),
+    }
+    args = [_prompt_cmd(), "apply", name, "--format", "text", f"content=@{content_file}"]
+    for k, v in subs.items():
+        args.append(f"{k}={v}")
+    return await _run(step, *args, log_to=state)
 
 
 def _slugify(text: str) -> str:

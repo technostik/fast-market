@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from common.core.config import load_tool_config, save_tool_config
 
-from ..storyboard.config import DEFAULT_PROMPTS
+from ..storyboard.config import DEFAULT_PROMPT_NAMES
 
 
 def load_voiceboard_config() -> dict:
@@ -33,7 +33,7 @@ def load_voiceboard_config() -> dict:
     base.setdefault("voice_file", "")
     base.setdefault("segments_json", "")
     prompts = base.setdefault("prompts", {})
-    prompts.setdefault("scene_image_prompt", DEFAULT_PROMPTS["scene_image_prompt"])
+    prompts.setdefault("scene_image_prompt", DEFAULT_PROMPT_NAMES["scene_image_prompt"])
     return base
 
 

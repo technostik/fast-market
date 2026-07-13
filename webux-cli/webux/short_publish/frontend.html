@@ -145,16 +145,18 @@
       <input type="text" id="cfgExts">
     </div>
     <div class="row">
-      <label>Default title prompt</label>
-      <input type="text" id="cfgTitlePrompt">
+      <label>Default title prompt <span class="prompt-info" id="infoTitle" data-content="">ⓘ</span></label>
+      <select id="cfgTitlePrompt"></select>
     </div>
     <div class="row">
-      <label>Default description prompt</label>
-      <input type="text" id="cfgDescPrompt">
+      <label>Default description prompt <span class="prompt-info" id="infoDesc" data-content="">ⓘ</span></label>
+      <select id="cfgDescPrompt"></select>
     </div>
     <div class="row">
-      <label>Default check prompt</label>
-      <input type="text" id="cfgCheckPrompt" placeholder="leave empty to disable">
+      <label>Default check prompt <span class="prompt-info" id="infoCheck" data-content="">ⓘ</span></label>
+      <select id="cfgCheckPrompt">
+        <option value="">— none (disabled) —</option>
+      </select>
     </div>
     <div class="row">
       <label>Signature (appended to descriptions)</label>
@@ -590,6 +592,38 @@ async function savePromptDefaults(title, desc) {
   await fetch('/api/short_publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
 }
 
+async function populateConfigPrompts() {
+  try {
+    const r = await fetch('/api/short_publish/list-prompts');
+    if (!r.ok) return;
+    const data = await r.json();
+    const names = data.prompts || [];
+    const ids = ['cfgTitlePrompt', 'cfgDescPrompt', 'cfgCheckPrompt'];
+    for (const id of ids) {
+      const sel = document.getElementById(id);
+      if (!sel) continue;
+      const cur = sel.value;
+      sel.innerHTML = '';
+      if (id === 'cfgCheckPrompt') {
+        const o = document.createElement('option');
+        o.value = ''; o.textContent = '— none (disabled) —';
+        sel.appendChild(o);
+      }
+      for (const n of names) {
+        const o = document.createElement('option');
+        o.value = n; o.textContent = n;
+        sel.appendChild(o);
+      }
+      if (id === 'cfgCheckPrompt' ? (cur === '' || names.includes(cur)) : names.includes(cur)) {
+        sel.value = cur;
+      }
+    }
+    setupPromptInfo('cfgTitlePrompt', 'infoTitle');
+    setupPromptInfo('cfgDescPrompt', 'infoDesc');
+    setupPromptInfo('cfgCheckPrompt', 'infoCheck');
+  } catch (e) { /* list-prompts unavailable */ }
+}
+
 async function startJob() {
   const src = document.getElementById('fileSelect').value;
   if (!src) { alert('Select a video'); return; }
@@ -917,6 +951,7 @@ async function showConfig() {
     const r = await fetch('/api/short_publish/config').catch(() => null);
     if (r && r.ok) {
       const c = await r.json();
+      await populateConfigPrompts();
       document.getElementById('cfgPath').value = c.video_source_path || '';
       document.getElementById('cfgExts').value = c.video_extensions || '';
       document.getElementById('cfgTitlePrompt').value = c.default_title_prompt || 'youtube-title';
@@ -956,6 +991,7 @@ async function toggleConfig() {
     const r = await fetch('/api/short_publish/config').catch(() => null);
     if (r && r.ok) {
       const c = await r.json();
+      await populateConfigPrompts();
       document.getElementById('cfgPath').value = c.video_source_path || '';
       document.getElementById('cfgExts').value = c.video_extensions || '';
       document.getElementById('cfgTitlePrompt').value = c.default_title_prompt || 'youtube-title';

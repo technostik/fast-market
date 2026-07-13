@@ -98,6 +98,10 @@ _YT_POSTER_HTML = """<!doctype html>
     <button id="selectAll">Select all</button>
     <button id="deselectAll">Deselect all</button>
     <button id="regenerateSelected" style="background:var(--warning);color:#000;">🔄 Regenerate selected</button>
+    <label style="display:flex;align-items:center;gap:6px;margin-left:8px;">Prompt:
+      <select id="regenPrompt" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 6px;"></select>
+      <span class="prompt-info" id="regenPromptInfo" data-content="">ⓘ</span>
+    </label>
     <button id="editPromptBtn" style="display:none;">📝 Edit Prompt</button>
     <label style="display:flex;align-items:center;gap:6px;">
       <input type="checkbox" id="dryRun"> Dry run
@@ -365,6 +369,26 @@ function getPromptNameFromRows(){
   return null;
 }
 
+async function populateYTPrompts(){
+  try {
+    const r = await fetch('/api/yt_poster/list-prompts');
+    if (!r.ok) return;
+    const data = await r.json();
+    const names = data.prompts || [];
+    const sel = document.getElementById('regenPrompt');
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— from metadata —</option>';
+    for (const n of names) {
+      const o = document.createElement('option');
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    }
+    if (names.includes(cur)) sel.value = cur;
+  } catch (e) { /* list-prompts unavailable */ }
+  setupPromptInfo('regenPrompt', 'regenPromptInfo');
+}
+
 // Helpers: redact secrets, derive per-comment key, render regen panel
 function redactSecrets(cmd) {
   if (!cmd) return '';
@@ -447,7 +471,11 @@ async function regenerateRows(indices){
   const resp = await fetch('/api/yt_poster/regenerate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ file: currentSourceFile, indices }),
+    body: JSON.stringify({
+      file: currentSourceFile,
+      indices,
+      prompt_name: document.getElementById('regenPrompt').value || null,
+    }),
   });
 
   spinner.style.display = 'none';
@@ -606,6 +634,7 @@ async function loadFile(){
 
   currentSourceFile = file;
   rows = data.map(item => ({ ...item, selected: true }));
+  populateYTPrompts();
   postMode = rows.some(r => r.comment_text) ? 'comment' : 'video';
   const colOrig = document.getElementById('colOrig');
   if (colOrig) colOrig.textContent = postMode === 'video' ? 'Transcript' : 'Original Comment';

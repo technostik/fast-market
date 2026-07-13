@@ -1,68 +1,19 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from common.core.config import load_tool_config, save_tool_config
 
-_STORY_BREAKDOWN_PROMPT = """\
-You are a creative director. Given the following script, break it into chapters and scenes \
-for a narrated video. Return ONLY valid JSON, no other text.
-
-Schema:
-{
-  "chapters": [
-    {
-      "title": "Short chapter title",
-      "scenes": [
-        {
-          "title": "Short scene title",
-          "description": "2-3 sentences describing what happens in this scene, \
-what visuals would accompany it, and what the narrator covers."
-        }
-      ]
-    }
-  ]
-}
-
-Rules:
-- Aim for {chapter_range} chapters, {scene_range} scenes per chapter.
-- Each scene should be {scene_duration} of narration.
-- Scene descriptions should be vivid enough to generate an image prompt.
-- Narration will be in {lang} — write descriptions accordingly.
-
-SCRIPT:
-"""
-
-_SCENE_TRANSCRIPT_PROMPT = """\
-You are a narrator scriptwriter. Given the scene description below, write the narrator's \
-spoken text for this scene. The text should be clear, engaging, and suitable for text-to-speech. \
-Return ONLY the narration text — no stage directions, no JSON, no headers.
-
-Narrative style: {narrative_style}
-Output language: {lang}
-
-SCENE DESCRIPTION:
-"""
-
-_SCENE_IMAGE_PROMPT = """\
-You are an art director. Given the scene description below, write a detailed image \
-generation prompt suitable for FLUX image generation. The prompt should describe the \
-visual elements, mood, lighting, and composition. Return ONLY the image prompt text, \
-no explanations.
-
-Visual style: {image_style}
-
-SCENE DESCRIPTION:
-"""
-
-DEFAULT_PROMPTS = {
-    "story_breakdown": _STORY_BREAKDOWN_PROMPT,
-    "scene_transcript": _SCENE_TRANSCRIPT_PROMPT,
-    "scene_image_prompt": _SCENE_IMAGE_PROMPT,
+# Prompts now live in the prompt store (create them with
+# `prompt setup webux import`). These are the default prompt *names*
+# the pipeline applies. Per-project overrides can be set in the WebUX
+# config panel (stored under `prompt_overrides`).
+DEFAULT_PROMPT_NAMES = {
+    "story_breakdown": "storyboard-breakdown",
+    "scene_transcript": "storyboard-scene-transcript",
+    "scene_image_prompt": "storyboard-scene-image",
 }
 
 
-def load_storyboard_config() -> dict:
+def load_storyboard_config(migrate: bool = True) -> dict:
     base = load_tool_config("storyboard")
     base.setdefault("tts_engine", "kokoro")
     base.setdefault("language", "en")
@@ -85,13 +36,27 @@ def load_storyboard_config() -> dict:
     base.setdefault("scene_range", "2–5")
     base.setdefault("scene_duration", "15–45 seconds")
     prompts = base.setdefault("prompts", {})
-    for k, v in DEFAULT_PROMPTS.items():
-        prompts.setdefault(k, v)
+    overrides = base.setdefault("prompt_overrides", {})
+    migrated = False
+    for k, default_name in DEFAULT_PROMPT_NAMES.items():
+        v = prompts.get(k, default_name)
+        # Migration: older configs stored the full prompt text inline. Treat
+        # such legacy text as an override of the default named prompt.
+        if isinstance(v, str) and ("\n" in v or "You are" in v or len(v) > 200):
+            if not overrides.get(k):
+                overrides[k] = v
+            v = default_name
+            migrated = True
+        prompts[k] = v
+    if migrated and migrate:
+        save_storyboard_config(base)
     return base
 
 
 def save_storyboard_config(updates: dict) -> None:
-    current = load_storyboard_config()
+    # Load without re-running migration: otherwise the migration's own save
+    # would reload the still-legacy config from disk and recurse forever.
+    current = load_storyboard_config(migrate=False)
     # Only persist storyboard-specific keys, not inherited common/llm config
     storyboard_keys = {
         "tts_engine", "language", "image_engine", "image_size", "image_style",
@@ -100,6 +65,7 @@ def save_storyboard_config(updates: dict) -> None:
         "image_seed", "image_steps", "draft_mode", "draft_steps",
         "chapter_transition", "chapter_transition_duration",
         "chapter_range", "scene_range", "scene_duration", "prompts",
+        "prompt_overrides",
     }
     merged = {k: v for k, v in current.items() if k in storyboard_keys}
     for k, v in updates.items():
