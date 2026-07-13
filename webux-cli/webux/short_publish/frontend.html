@@ -164,7 +164,7 @@
     </div>
     <div class="row">
       <label>Signature video (appended to end of published video, optional)</label>
-      <input type="text" id="cfgSignatureVideoPath" placeholder="absolute path, leave empty to disable">
+      <input type="text" id="cfgSignatureVideoPath" placeholder="absolute path, leave empty to disable" oninput="updateSignatureAvailability()">
     </div>
     <div class="row">
       <label>Post-publish script (absolute path)</label>
@@ -173,6 +173,14 @@
     <div class="row">
       <label>Transcript script (absolute path)</label>
       <input type="text" id="cfgTranscriptScript">
+    </div>
+    <div class="row">
+      <label>Transcript mode</label>
+      <select id="cfgTranscriptMode" onchange="updateSubtitleDependency()">
+        <option value="normal">Normal transcript</option>
+        <option value="groq">Groq API (whisper-large-v3, fast)</option>
+        <option value="none">None (no transcript → subtitles disabled)</option>
+      </select>
     </div>
     <div class="row">
       <label>Modal usage URL</label>
@@ -243,15 +251,6 @@
             <input type="checkbox" id="burnSubtitles" checked>
             <label for="burnSubtitles" style="display:inline; margin:0;">Burn subtitles</label>
           </div>
-        </div>
-        <div class="opt">
-          <label style="display:block; font-size:12px; color:var(--dim); margin-bottom:3px;">Transcript mode</label>
-          <select id="transcriptMode" onchange="updateSubtitleDependency()" style="width:100%;">
-            <option value="" disabled selected hidden>— select —</option>
-            <option value="normal">Normal transcript</option>
-            <option value="groq">Groq API (whisper-large-v3, fast)</option>
-            <option value="none">None (no transcript → subtitles disabled)</option>
-          </select>
         </div>
         <div class="opt">
           <div class="checkrow">
@@ -633,12 +632,12 @@ async function startJob() {
     prompt_summary: document.getElementById('promptSummary').value,
     do_remove_silence: document.getElementById('removeSilence').checked,
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
-    transcript_mode: document.getElementById('transcriptMode').value,
+    transcript_mode: document.getElementById('cfgTranscriptMode').value,
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
     do_normalize_volume: document.getElementById('normalizeVolume').checked,
     do_charisma: document.getElementById('doCharisma').checked,
-    do_add_signature: document.getElementById('addSignature').checked,
+    do_add_signature: (!document.getElementById('addSignature').disabled && document.getElementById('addSignature').checked),
     ignore_post_publish: document.getElementById('ignorePostPublish').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
@@ -896,12 +895,12 @@ async function doResume() {
     prompt_summary: document.getElementById('promptSummary').value,
     from_step: from,
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
-    transcript_mode: document.getElementById('transcriptMode').value,
+    transcript_mode: document.getElementById('cfgTranscriptMode').value,
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
     do_normalize_volume: document.getElementById('normalizeVolume').checked,
     do_charisma: document.getElementById('doCharisma').checked,
-    do_add_signature: document.getElementById('addSignature').checked,
+    do_add_signature: (!document.getElementById('addSignature').disabled && document.getElementById('addSignature').checked),
     ignore_post_publish: document.getElementById('ignorePostPublish').checked,
     language: document.getElementById('language').value,
     model: document.getElementById('model').value,
@@ -961,7 +960,10 @@ async function showConfig() {
       document.getElementById('cfgSignatureVideoPath').value = c.signature_video_path || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
+      document.getElementById('cfgTranscriptMode').value = c.transcript_mode || 'normal';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
+      updateSubtitleDependency();
+      updateSignatureAvailability();
     }
   }
 }
@@ -977,6 +979,7 @@ async function saveConfig() {
     signature_video_path: document.getElementById('cfgSignatureVideoPath').value,
     post_publish_script: document.getElementById('cfgPostScript').value,
     transcript_script: document.getElementById('cfgTranscriptScript').value,
+    transcript_mode: document.getElementById('cfgTranscriptMode').value,
     modal_usage_url: document.getElementById('cfgModalUsageUrl').value
   };
   const r = await fetch('/api/short_publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -1001,7 +1004,10 @@ async function toggleConfig() {
       document.getElementById('cfgSignatureVideoPath').value = c.signature_video_path || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
+      document.getElementById('cfgTranscriptMode').value = c.transcript_mode || 'normal';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
+      updateSubtitleDependency();
+      updateSignatureAvailability();
       const link = document.getElementById('modalUsageLink');
       if (link && c.modal_usage_url) link.href = c.modal_usage_url;
     }
@@ -1448,10 +1454,10 @@ async function addToPool() {
       description_prefix: document.getElementById('descPrefix').value,
       source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
       skip_upload: document.getElementById('skipUpload').checked,
-      transcript_mode: document.getElementById('transcriptMode').value,
+      transcript_mode: document.getElementById('cfgTranscriptMode').value,
       do_normalize_volume: document.getElementById('normalizeVolume').checked,
       do_charisma: document.getElementById('doCharisma').checked,
-      do_add_signature: document.getElementById('addSignature').checked,
+      do_add_signature: (!document.getElementById('addSignature').disabled && document.getElementById('addSignature').checked),
       ignore_post_publish: document.getElementById('ignorePostPublish').checked
     })
   });
@@ -1517,11 +1523,25 @@ function initPool() {
 }
 
 function updateSubtitleDependency() {
-  const mode = document.getElementById('transcriptMode').value;
+  const mode = document.getElementById('cfgTranscriptMode').value;
   const burn = document.getElementById('burnSubtitles');
   const noTranscript = (mode === '' || mode === 'none');
   burn.disabled = noTranscript;
   if (noTranscript) burn.checked = false;
+}
+
+function signatureAvailable() {
+  const path = document.getElementById('cfgSignatureVideoPath');
+  return !!(path && path.value.trim());
+}
+
+function updateSignatureAvailability() {
+  const el = document.getElementById('addSignature');
+  if (!el) return;
+  const avail = signatureAvailable();
+  el.disabled = !avail;
+  el.checked = el.checked && avail;
+  el.style.opacity = avail ? '1' : '0.4';
 }
 
 function init() {

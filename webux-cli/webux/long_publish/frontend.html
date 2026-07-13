@@ -88,7 +88,7 @@
       <div class="row"><label>Video extensions</label><input id="cfgExt" type="text"></div>
     </div>
     <div class="row"><label>Signature (appended to description)</label><textarea id="cfgSignature" rows="2"></textarea></div>
-    <div class="row"><label>Signature video path</label><input id="cfgSigVideo" type="text"></div>
+    <div class="row"><label>Signature video path</label><input id="cfgSigVideo" type="text" oninput="updateSignatureAvailability()"></div>
     <div class="cols2">
       <div class="row"><label>Title prompt <span class="prompt-info" id="infoTitle" data-content="">ⓘ</span></label><select id="cfgTitlePrompt"></select></div>
       <div class="row"><label>Description prompt <span class="prompt-info" id="infoDesc" data-content="">ⓘ</span></label><select id="cfgDescPrompt"></select></div>
@@ -135,14 +135,6 @@
             <option value="private">private</option>
             <option value="public">public</option>
           </select>
-        </div>
-        <div class="row">
-          <label>Transcript mode</label>
-          <span style="display:flex;align-items:center;gap:6px;font-size:13px;">
-            <span>local Whisper</span>
-            <input type="checkbox" id="useGroq">
-            <span>Groq</span>
-          </span>
         </div>
       </div>
       <div class="row"><label>Description prefix</label><textarea id="descPrefix" rows="2"></textarea></div>
@@ -212,7 +204,22 @@ async function loadConfig(){
   el('cfgLang').value = c.transcript_language||'fr';
   el('cfgModel').value = c.transcript_model||'medium';
   el('cfgGroq').checked = (c.transcript_mode==='groq');
+  updateSignatureAvailability();
 }
+
+function signatureAvailable() {
+  const p = el('cfgSigVideo');
+  return !!(p && p.value.trim());
+}
+function updateSignatureAvailability() {
+  const cb = el('doSignature');
+  if (!cb) return;
+  const avail = signatureAvailable();
+  cb.disabled = !avail;
+  cb.checked = cb.checked && avail;
+  cb.style.opacity = avail ? '1' : '0.4';
+}
+
 async function saveConfig(){
   const body = {
     video_source_path: el('cfgSourcePath').value,
@@ -343,9 +350,9 @@ function startBody(){
     prompt_summary: el('cfgDescPrompt').value,
     do_remove_silence: el('doRemoveSilence').checked,
     do_normalize_volume: el('doNormalize').checked,
-    do_add_signature: el('doSignature').checked,
+    do_add_signature: (!el('doSignature').disabled && el('doSignature').checked),
     do_generate_thumbnail: el('doThumb').checked,
-    transcript_mode: el('useGroq').checked ? 'groq' : 'normal',
+    transcript_mode: el('cfgGroq').checked ? 'groq' : 'normal',
     language: el('cfgLang').value,
     model: el('cfgModel').value,
     privacy: el('privacy').value,

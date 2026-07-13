@@ -108,6 +108,7 @@ async def get_config():
         "default_title_prompt": pub.get("default_title_prompt", "youtube-title"),
         "default_description_prompt": pub.get("default_description_prompt", "youtube-summary"),
         "default_check_prompt": pub.get("default_check_prompt", ""),
+        "transcript_mode": pub.get("transcript_mode", "normal"),
         "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings/usage"),
     }
 
@@ -122,6 +123,7 @@ class ConfigSaveRequest(BaseModel):
     default_title_prompt: str = "youtube-title"
     default_description_prompt: str = "youtube-summary"
     default_check_prompt: str = ""
+    transcript_mode: str = "normal"
     modal_usage_url: str = "https://modal.com/settings/usage"
 
 
@@ -137,6 +139,7 @@ async def save_config(req: ConfigSaveRequest):
     pub["default_title_prompt"] = req.default_title_prompt
     pub["default_description_prompt"] = req.default_description_prompt
     pub["default_check_prompt"] = req.default_check_prompt
+    pub["transcript_mode"] = req.transcript_mode
     pub["modal_usage_url"] = req.modal_usage_url
     _save_publish_cfg(pub)
     return {"ok": True}
