@@ -1,0 +1,439 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Long Publish</title>
+  <style>
+    :root {
+      --bg:#1a1a2e; --bg2:#16213e; --text:#eee; --dim:#888;
+      --accent:#0f3460; --ok:#4ade80; --err:#f87171; --warn:#fbbf24; --border:#333;
+      --link:#7dd3fc;
+    }
+    body { margin:0; padding:16px; background:var(--bg); color:var(--text);
+           font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+    .wrap { max-width:880px; margin:0 auto; }
+    h2 { margin:0 0 12px; font-size:18px; }
+    label { display:block; font-size:12px; color:var(--dim); margin-bottom:3px; }
+    input[type=text], select, textarea {
+      width:100%; padding:7px 10px; border:1px solid var(--border);
+      background:var(--bg2); color:var(--text); border-radius:6px;
+      box-sizing:border-box; font-size:13px;
+    }
+    textarea { resize:vertical; }
+    .row { margin-bottom:10px; }
+    .cols2 { display:flex; gap:12px; }
+    .cols2 .row { flex:1; }
+    .checkrow { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px; }
+    .options-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; margin-bottom:10px; }
+    .options-grid .opt { min-width:0; }
+    button { padding:7px 14px; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
+    .btn-go     { background:var(--ok); color:#000; }
+    .btn-go:hover { opacity:.88; }
+    .btn-go:disabled { opacity:.4; cursor:default; }
+    .btn-resume { background:var(--warn); color:#000; }
+    .btn-resume:hover { opacity:.88; }
+    .btn-resume:disabled { opacity:.4; cursor:default; }
+    .btn-sec    { background:var(--accent); color:var(--text); }
+    .btn-sec:hover { opacity:.88; }
+    .main-layout { display:flex; gap:16px; align-items:flex-start; }
+    .main-left { flex:1; min-width:0; }
+    .main-right { flex:0 0 280px; }
+    .video-wrap { border:1px solid var(--border); border-radius:8px; overflow:hidden;
+                  background:#000; display:none; }
+    .video-wrap video { width:100%; height:200px; object-fit:contain; display:block; }
+    .video-name { font-size:11px; color:var(--dim); padding:4px 8px;
+                  background:var(--bg2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .steps { margin:14px 0 10px; }
+    .step { display:flex; align-items:flex-start; gap:10px; padding:6px 0;
+            border-bottom:1px solid var(--border); font-size:13px; }
+    .step:last-child { border-bottom:none; }
+    .step-icon { width:20px; flex-shrink:0; font-size:14px; margin-top:1px; }
+    .step-name { flex:1; }
+    .step-progress { width:120px; height:6px; margin-left:8px; vertical-align:middle; }
+    .step-out { font-size:11px; color:var(--dim); margin-top:2px; word-break:break-all; white-space:pre-wrap; max-height:140px; overflow:auto; }
+    .step-out.collapsed { display:none; }
+    .step-toggle { cursor:pointer; font-size:10px; color:var(--dim); margin-left:6px;
+                   user-select:none; opacity:.7; }
+    .step-toggle:hover { opacity:1; }
+    .step-time { font-size:10px; color:var(--dim); margin-left:8px; font-variant-numeric:tabular-nums; }
+    .result { margin-top:12px; padding:12px; border-radius:8px;
+              background:var(--bg2); border:1px solid var(--ok); display:none; }
+    .result-title { font-size:15px; font-weight:700; margin-bottom:6px; }
+    .result-desc { font-size:12px; color:var(--dim); white-space:pre-wrap; max-height:110px;
+                   overflow-y:auto; border:1px solid var(--border); border-radius:4px;
+                   padding:8px; background:#0f172a; margin-bottom:8px; }
+    .result-links { display:flex; flex-direction:column; gap:5px; }
+    .result-links a { color:var(--link); font-size:13px; word-break:break-all; }
+    .hint { font-size:11px; color:var(--dim); margin-left:8px; }
+    hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
+    .config-toggle { cursor:pointer; color:var(--dim); font-size:12px; margin-bottom:8px; user-select:none; }
+    .config-panel { display:none; padding:10px; border:1px solid var(--border);
+                    border-radius:6px; background:var(--bg2); margin-bottom:12px; }
+    .step-dl { font-size:11px; margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; }
+    .step-dl a { color:var(--link); text-decoration:none; padding:1px 7px;
+                 border:1px solid var(--link); border-radius:4px; opacity:.85; }
+    .resume-box { display:none; padding:10px; border:1px solid var(--border);
+                  border-radius:6px; background:var(--bg2); margin:10px 0; }
+    .thumb-preview { max-width:100%; border-radius:6px; border:1px solid var(--border); margin-top:6px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h2>🎬 Long Publish</h2>
+
+  <div class="config-toggle" id="cfgToggle">⚙ Config (click to show)</div>
+  <div class="config-panel" id="cfgPanel">
+    <div class="cols2">
+      <div class="row"><label>Video source path</label><input id="cfgSourcePath" type="text"></div>
+      <div class="row"><label>Video extensions</label><input id="cfgExt" type="text"></div>
+    </div>
+    <div class="row"><label>Signature (appended to description)</label><textarea id="cfgSignature" rows="2"></textarea></div>
+    <div class="row"><label>Signature video path</label><input id="cfgSigVideo" type="text"></div>
+    <div class="cols2">
+      <div class="row"><label>Title prompt</label><input id="cfgTitlePrompt" type="text"></div>
+      <div class="row"><label>Description prompt</label><input id="cfgDescPrompt" type="text"></div>
+    </div>
+    <div class="cols2">
+      <div class="row"><label>Transcript language</label><input id="cfgLang" type="text" value="fr"></div>
+      <div class="row"><label>Transcript model</label><input id="cfgModel" type="text" value="medium"></div>
+    </div>
+    <div class="checkrow"><input type="checkbox" id="cfgGroq"><label style="margin:0">Use Groq for transcript (vs local Whisper)</label></div>
+    <div class="cols2">
+      <div class="row"><label>Thumbnail image prompt</label><input id="cfgThumbPrompt" type="text" placeholder="prompt name"></div>
+      <div class="row"><label>Thumbnail overlay prompt</label><input id="cfgThumbOverlay" type="text" placeholder="prompt name"></div>
+    </div>
+    <div class="row"><label>Thumbnail engine (image model)</label><input id="cfgThumbEngine" type="text" placeholder="leave empty for default"></div>
+    <div class="row"><label>Modal usage URL</label><input id="cfgModalUrl" type="text"></div>
+    <button class="btn-sec" id="cfgSave">Save config</button>
+    <span id="cfgMsg" class="hint"></span>
+  </div>
+
+  <div class="main-layout">
+    <div class="main-left">
+      <div class="row">
+        <label>Source video</label>
+        <select id="videoSel"><option value="">— select —</option></select>
+      </div>
+      <div class="video-wrap" id="videoWrap">
+        <video id="videoEl" controls></video>
+        <div class="video-name" id="videoName"></div>
+      </div>
+
+      <div class="options-grid">
+        <div class="opt checkrow"><input type="checkbox" id="doRemoveSilence" checked><label style="margin:0">Remove silence</label></div>
+        <div class="opt checkrow"><input type="checkbox" id="doNormalize"><label style="margin:0">Normalize volume</label></div>
+        <div class="opt checkrow"><input type="checkbox" id="doSignature" checked><label style="margin:0">Append signature video</label></div>
+        <div class="opt checkrow"><input type="checkbox" id="useModal" checked><label style="margin:0">Use Modal</label></div>
+        <div class="opt checkrow"><input type="checkbox" id="skipUpload"><label style="margin:0">Skip upload</label></div>
+        <div class="opt checkrow"><input type="checkbox" id="doThumb" checked><label style="margin:0">Generate thumbnail</label></div>
+      </div>
+      <div class="cols2">
+        <div class="row">
+          <label>Privacy</label>
+          <select id="privacy">
+            <option value="unlisted">unlisted</option>
+            <option value="private">private</option>
+            <option value="public">public</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Transcript mode</label>
+          <span style="display:flex;align-items:center;gap:6px;font-size:13px;">
+            <span>local Whisper</span>
+            <input type="checkbox" id="useGroq">
+            <span>Groq</span>
+          </span>
+        </div>
+      </div>
+      <div class="row"><label>Description prefix</label><textarea id="descPrefix" rows="2"></textarea></div>
+      <div class="row"><label>Source URLs (one per line)</label><textarea id="sourceUrls" rows="2"></textarea></div>
+      <div class="row" id="overlayRow"><label>Thumbnail overlay title (optional, overrides prompt)</label><input id="thumbOverlayTitle" type="text"></div>
+
+      <button class="btn-go" id="startBtn">▶ Publish</button>
+
+      <div class="resume-box" id="resumeBox">
+        <div id="resumeInfo" style="font-size:12px;color:var(--dim);margin-bottom:8px;"></div>
+        <div class="cols2">
+          <div class="row">
+            <label>Resume from step</label>
+            <select id="resumeStep"></select>
+          </div>
+          <div class="row" style="align-self:flex-end;">
+            <button class="btn-resume" id="resumeBtn">↻ Resume</button>
+            <button class="btn-sec" id="markDoneBtn">✓ Mark step done</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="steps" id="steps"></div>
+      <pre class="log-box" id="logBox"></pre>
+
+      <div class="result" id="result">
+        <div class="result-title" id="resTitle"></div>
+        <div class="result-desc" id="resDesc"></div>
+        <div id="resThumb"></div>
+        <div class="result-links" id="resLinks"></div>
+      </div>
+    </div>
+
+    <div class="main-right">
+      <div class="row">
+        <label>Quick prompt</label>
+        <select id="quickPromptSel"><option value="">— prompt —</option></select>
+      </div>
+      <div class="row"><textarea id="quickContent" rows="4" placeholder="content / transcript"></textarea></div>
+      <button class="btn-sec" id="quickRun">Run</button>
+      <pre class="log-box" id="quickOut" style="display:none;margin-top:8px;"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api/long_publish';
+let currentJob = null;
+let pollTimer = null;
+const STEP_ICONS = { pending:'⏳', running:'⏳', done:'✅', error:'❌', skipped:'⏭', stopped:'⏹' };
+
+function el(id){ return document.getElementById(id); }
+
+async function loadConfig(){
+  const c = await fetch(API+'/config').then(r=>r.json()).catch(()=>({}));
+  el('cfgSourcePath').value = c.video_source_path||'';
+  el('cfgExt').value = c.video_extensions||'';
+  el('cfgSignature').value = c.signature||'';
+  el('cfgSigVideo').value = c.signature_video_path||'';
+  el('cfgTitlePrompt').value = c.default_title_prompt||'';
+  el('cfgDescPrompt').value = c.default_description_prompt||'';
+  el('cfgThumbPrompt').value = c.default_thumbnail_prompt||'';
+  el('cfgThumbOverlay').value = c.default_thumbnail_overlay_prompt||'';
+  el('cfgThumbEngine').value = c.thumbnail_engine||'';
+  el('cfgModalUrl').value = c.modal_usage_url||'';
+  el('cfgLang').value = c.transcript_language||'fr';
+  el('cfgModel').value = c.transcript_model||'medium';
+  el('cfgGroq').checked = (c.transcript_mode==='groq');
+}
+async function saveConfig(){
+  const body = {
+    video_source_path: el('cfgSourcePath').value,
+    video_extensions: el('cfgExt').value,
+    signature: el('cfgSignature').value,
+    signature_video_path: el('cfgSigVideo').value,
+    default_title_prompt: el('cfgTitlePrompt').value,
+    default_description_prompt: el('cfgDescPrompt').value,
+    default_thumbnail_prompt: el('cfgThumbPrompt').value,
+    default_thumbnail_overlay_prompt: el('cfgThumbOverlay').value,
+    thumbnail_engine: el('cfgThumbEngine').value,
+    modal_usage_url: el('cfgModalUrl').value,
+    transcript_mode: el('cfgGroq').checked ? 'groq' : 'normal',
+    transcript_model: el('cfgModel').value,
+    transcript_language: el('cfgLang').value,
+  };
+  await fetch(API+'/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  el('cfgMsg').textContent = 'saved';
+  setTimeout(()=>el('cfgMsg').textContent='', 1500);
+  await loadVideos();
+}
+
+async function loadVideos(){
+  const path = el('cfgSourcePath').value || '';
+  const ext = el('cfgExt').value || '';
+  const r = await fetch(API+'/list-videos?path='+encodeURIComponent(path)+'&extensions='+encodeURIComponent(ext)).catch(()=>null);
+  const data = r ? await r.json() : {videos:[]};
+  const videos = data.videos||[];
+  const opts = (v)=>`<option value="${v.path}" ${v.resumable?'data-resumable="1"':''}>${v.name}${v.resumable?' ↻':''}</option>`;
+  const sel = el('videoSel');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— select —</option>' + videos.map(opts).join('');
+  if (cur) sel.value = cur;
+}
+
+// Gate the quick prompt on transcript availability for the selected video.
+async function refreshQuickPrompt(){
+  const src = el('videoSel').value;
+  const qb = el('quickRun'), qs = el('quickPromptSel'), qc = el('quickContent');
+  if (!src){
+    qb.disabled = true; qs.disabled = true; qc.disabled = true;
+    qb.style.opacity = qc.style.opacity = qs.style.opacity = .4;
+    return;
+  }
+  const r = await fetch(API+'/review-info', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({source:src}) }).catch(()=>null);
+  const data = r ? await r.json() : {};
+  const hasTranscript = !!(data.transcript_text && data.transcript_text.trim());
+  qb.disabled = !hasTranscript; qs.disabled = !hasTranscript; qc.disabled = !hasTranscript;
+  qb.style.opacity = qc.style.opacity = qs.style.opacity = hasTranscript ? 1 : .4;
+  if (hasTranscript) qc.value = data.transcript_text;
+}
+async function loadPrompts(){
+  const r = await fetch(API+'/list-prompts').catch(()=>null);
+  const data = r ? await r.json() : {prompts:[]};
+  const opts = '<option value="">— prompt —</option>' + (data.prompts||[]).map(p=>`<option>${p}</option>`).join('');
+  el('quickPromptSel').innerHTML = opts;
+}
+
+el('videoSel').addEventListener('change', ()=>{
+  const path = el('videoSel').value;
+  if (path){
+    el('videoWrap').style.display='block';
+    el('videoEl').src = API+'/video-preview?file='+encodeURIComponent(path);
+    el('videoName').textContent = path.split('/').pop();
+    checkResume(path);
+  } else {
+    el('videoWrap').style.display='none';
+    el('resumeBox').style.display='none';
+  }
+  refreshQuickPrompt();
+});
+
+async function checkResume(source){
+  const r = await fetch(API+'/check-resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({source}) }).catch(()=>null);
+  const data = r ? await r.json() : null;
+  if (!data || !data.can_resume){
+    el('resumeBox').style.display='none';
+    return;
+  }
+  el('resumeBox').style.display='block';
+  const steps = ['Remove silence','Extract transcript','Generate title & description','Generate thumbnail','Append signature video','Upload to YouTube'];
+  el('resumeStep').innerHTML = data.available_from_steps.map(s=>`<option value="${s}">${s}. ${steps[s]||'step '+s}</option>`).join('');
+  const info = [];
+  if (data.title) info.push('Title: '+data.title);
+  if (data.thumbnail_overlay_title) info.push('Overlay: '+data.thumbnail_overlay_title);
+  el('resumeInfo').textContent = info.join('  •  ');
+  el('descPrefix').value = data.description_prefix||'';
+  el('sourceUrls').value = (data.source_urls||[]).join('\n');
+  el('thumbOverlayTitle').value = data.thumbnail_overlay_title||'';
+}
+
+function startBody(){
+  return {
+    source: el('videoSel').value,
+    prompt_title: el('cfgTitlePrompt').value,
+    prompt_summary: el('cfgDescPrompt').value,
+    do_remove_silence: el('doRemoveSilence').checked,
+    do_normalize_volume: el('doNormalize').checked,
+    do_add_signature: el('doSignature').checked,
+    do_generate_thumbnail: el('doThumb').checked,
+    transcript_mode: el('useGroq').checked ? 'groq' : 'normal',
+    language: el('cfgLang').value,
+    model: el('cfgModel').value,
+    privacy: el('privacy').value,
+    use_modal: el('useModal').checked,
+    skip_upload: el('skipUpload').checked,
+    description_prefix: el('descPrefix').value,
+    source_urls: el('sourceUrls').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    thumbnail_overlay_title: el('thumbOverlayTitle').value,
+  };
+}
+
+el('startBtn').addEventListener('click', async ()=>{
+  if (!el('videoSel').value){ alert('Select a source video'); return; }
+  const r = await fetch(API+'/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(startBody()) });
+  const data = await r.json();
+  currentJob = data.job_id;
+  startPoll();
+});
+
+el('resumeBtn').addEventListener('click', async ()=>{
+  const source = el('videoSel').value;
+  if (!source) return;
+  const body = startBody();
+  body.from_step = parseInt(el('resumeStep').value, 10);
+  const r = await fetch(API+'/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await r.json();
+  if (data.job_id){ currentJob = data.job_id; startPoll(); }
+  else if (data.detail){ alert(data.detail); }
+});
+
+el('markDoneBtn').addEventListener('click', async ()=>{
+  const source = el('videoSel').value;
+  const step = parseInt(el('resumeStep').value, 10) - 1;
+  if (!source) return;
+  await fetch(API+'/mark-step-done', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({source, step}) });
+  checkResume(source);
+});
+
+el('cfgToggle').addEventListener('click', ()=>{
+  const p = el('cfgPanel');
+  p.style.display = p.style.display==='block' ? 'none':'block';
+  el('cfgToggle').textContent = p.style.display==='block' ? '⚙ Config (click to hide)' : '⚙ Config (click to show)';
+});
+el('cfgSave').addEventListener('click', saveConfig);
+
+function updateOverlayRow(){
+  el('overlayRow').style.display = el('doThumb').checked ? 'block' : 'none';
+}
+el('doThumb').addEventListener('change', updateOverlayRow);
+
+el('quickRun').addEventListener('click', async ()=>{
+  const name = el('quickPromptSel').value;
+  const content = el('quickContent').value;
+  if (!name) return;
+  const r = await fetch(API+'/quick-prompt', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prompt_name:name, content}) });
+  const data = await r.json();
+  el('quickOut').style.display='block';
+  el('quickOut').textContent = data.ok ? data.result : ('Error: '+(data.error||''));
+});
+
+function renderSteps(steps){
+  el('steps').innerHTML = steps.map((s,i)=>{
+    const icon = STEP_ICONS[s.status]||'⏳';
+    const time = s.elapsed_seconds!=null ? `<span class="step-time">${s.elapsed_seconds}s</span>` : '';
+    const prog = s.progress!=null ? `<progress class="step-progress" value="${s.progress}" max="100"></progress>` : '';
+    const dls = (s.output_files||[]).map(f=>`<a href="${API}/download?file=${encodeURIComponent(f.path)}" download>${f.name}</a>`).join('');
+    const out = s.output ? `<div class="step-out collapsed" id="out${i}">${escapeHtml(s.output)}</div>` : '';
+    const toggle = s.output ? `<span class="step-toggle" onclick="toggleOut(event,${i})">show</span>` : '';
+    return `<div class="step"><div class="step-icon">${icon}</div><div class="step-name">${i}. ${s.name} ${toggle} ${time} ${prog}${out}${dls?'<div class="step-dl">'+dls+'</div>':''}</div></div>`;
+  }).join('');
+}
+function toggleOut(ev, i){
+  const e = el('out'+i);
+  const collapsed = e.classList.contains('collapsed');
+  e.classList.toggle('collapsed');
+  ev.target.textContent = collapsed ? 'hide' : 'show';
+}
+function escapeHtml(t){ return t.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function updateLog(steps){
+  const full = steps.map(s=>`[${s.name}] ${s.output||''}`).join('\n\n');
+  el('logBox').style.display = full ? 'block':'none';
+  el('logBox').textContent = full;
+}
+
+async function poll(){
+  if (!currentJob) return;
+  const r = await fetch(API+'/status/'+currentJob).catch(()=>null);
+  if (!r) return;
+  const data = await r.json();
+  if (data.gone){ stopPoll(); return; }
+  renderSteps(data.steps||[]);
+  updateLog(data.steps||[]);
+  if (data.title || data.description){
+    el('result').style.display='block';
+    el('resTitle').textContent = data.title||'';
+    el('resDesc').textContent = data.description||'';
+    let links = '';
+    if (data.video_url) links += `<a href="${data.video_url}" target="_blank">▶ Watch</a>`;
+    if (data.studio_url) links += `<a href="${data.studio_url}" target="_blank">🛠 Studio</a>`;
+    const thumb = (data.files||{}).thumbnail;
+    el('resThumb').innerHTML = thumb ? `<img class="thumb-preview" src="${API}/download?file=${encodeURIComponent(thumb)}">` : '';
+    el('resLinks').innerHTML = links;
+  }
+  if (data.status === 'done' || data.status === 'error' || data.status === 'stopped'){
+    stopPoll();
+    refreshQuickPrompt();
+  }
+}
+function startPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer = setInterval(poll, 1500); poll(); }
+function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
+
+// init
+(async ()=>{
+  await loadConfig();
+  updateOverlayRow();
+  await loadVideos();
+  await loadPrompts();
+  await refreshQuickPrompt();
+  setInterval(loadVideos, 10000);
+})();
+</script>
+</body>
+</html>

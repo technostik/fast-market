@@ -35,6 +35,7 @@ def upload_video(
     description: str = "",
     tags: list[str] | None = None,
     privacy: str = "unlisted",
+    thumbnail: str | None = None,
     progress_callback=None,
 ) -> str:
     """Upload a video to YouTube. Returns the video URL."""
@@ -80,7 +81,18 @@ def upload_video(
             progress_callback(int(status.progress() * 100))
 
     video_id = response["id"]
-    return f"https://www.youtube.com/watch?v={video_id}"
+    watch_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    if thumbnail:
+        try:
+            client.youtube.thumbnails().set(
+                videoId=video_id,
+                media_body=MediaFileUpload(thumbnail, resumable=True),
+            ).execute()
+        except Exception as e:  # thumbnail failure is non-fatal
+            click.echo(f"Warning: thumbnail upload failed: {e}", err=True)
+
+    return watch_url
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -95,12 +107,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="unlisted",
         show_default=True,
     )
+    @click.option(
+        "--thumbnail",
+        type=click.Path(exists=True),
+        default=None,
+        help="Thumbnail image to set on the uploaded video",
+    )
     def upload_cmd(
         video_file: str,
         title: str,
         description: str,
         tags: str,
         privacy: str,
+        thumbnail: str | None,
     ):
         """Upload a video to YouTube."""
         tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
@@ -110,7 +129,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         def _progress(pct: int) -> None:
             click.echo(f"Upload {pct}%...", err=True)
 
-        url = upload_video(video_file, title, description, tags_list, privacy, _progress)
+        url = upload_video(video_file, title, description, tags_list, privacy, thumbnail, _progress)
         click.echo(url)
 
     return CommandManifest(name="upload", click_command=upload_cmd)

@@ -25,6 +25,7 @@ fileviewer = "webux.fileviewer.register:register"
 yt_poster = "webux.yt_poster.register:register"
 skill_runner = "webux.skill_runner.register:register"
 short_publish = "webux.short_publish.register:register"
+long_publish = "webux.long_publish.register:register"
 storyboard = "webux.storyboard.register:register"
 voiceboard = "webux.voiceboard.register:register"
 charisma = "webux.charisma.register:register"
@@ -39,6 +40,7 @@ packages = [
     "webux.yt_poster",
     "webux.skill_runner",
     "webux.short_publish",
+    "webux.long_publish",
     "webux.storyboard",
     "webux.voiceboard",
     "webux.charisma",
