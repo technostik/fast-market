@@ -34,6 +34,7 @@ from .utils import (
     _stem,
     _ass_to_plain_text,
     _validate_urls,
+    _extract_video_id,
 )
 from .pipeline import _run_pipeline_from, _run_job_safely  # noqa: E402
 
