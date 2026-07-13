@@ -375,22 +375,22 @@ def apply_text_overlay(
             block_cy = y + pad + block_h / 2
             band_rect = (0, int(block_cy - band_h / 2), img_w, int(block_cy + band_h / 2))
         _draw_band(draw, band_rect, bg, peak=235)
-    elif effect == "shadow" and bg is not None:
-        for i, line in enumerate(lines):
-            ly = y + pad + i * line_height
+    for i, line in enumerate(lines):
+        ly = y + pad + i * line_height
+        line_w = draw.textlength(line, font=font)
+        lx = x + pad + (int(block_w) - line_w) / 2
+
+        if effect == "shadow" and bg is not None:
             draw.text(
-                (x + pad, ly),
+                (lx, ly),
                 line,
                 font=font,
                 fill=fg_color,
                 stroke_width=max(1, font_size // 10),
                 stroke_fill=(bg[0], bg[1], bg[2], 255),
             )
-
-    if effect != "shadow":
-        for i, line in enumerate(lines):
-            ly = y + pad + i * line_height
-            draw.text((x + pad, ly), line, font=font, fill=fg_color)
+        elif effect != "shadow":
+            draw.text((lx, ly), line, font=font, fill=fg_color)
 
     combined = Image.alpha_composite(base, overlay)
     if image.mode != "RGBA":
