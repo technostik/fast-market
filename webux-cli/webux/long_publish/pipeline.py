@@ -268,11 +268,21 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         set_active_proc(proc)
         try:
             async def _stream(stream, prefix):
+                buf = b""
                 while True:
-                    line = await stream.readline()
-                    if not line:
+                    chunk = await stream.read(4096)
+                    if not chunk:
                         break
-                    text = line.decode(errors="replace").rstrip()
+                    buf += chunk
+                    while b"\n" in buf:
+                        raw, buf = buf.split(b"\n", 1)
+                        text = raw.decode(errors="replace").rstrip()
+                        if text:
+                            if s2.output:
+                                s2.output += "\n"
+                            s2.output += f"{prefix}{text}"
+                if buf:
+                    text = buf.decode(errors="replace").rstrip()
                     if text:
                         if s2.output:
                             s2.output += "\n"

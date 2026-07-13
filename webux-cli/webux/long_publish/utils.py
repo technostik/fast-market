@@ -173,11 +173,21 @@ async def _run(step, *cmd: str):
     set_active_proc(proc)
     try:
         async def _stream(stream, prefix):
+            buf = b""
             while True:
-                line = await stream.readline()
-                if not line:
+                chunk = await stream.read(4096)
+                if not chunk:
                     break
-                text = line.decode(errors="replace").rstrip()
+                buf += chunk
+                while b"\n" in buf:
+                    raw, buf = buf.split(b"\n", 1)
+                    text = raw.decode(errors="replace").rstrip()
+                    if text and step:
+                        if step.output:
+                            step.output += "\n"
+                        step.output += f"{prefix}{text}"
+            if buf:
+                text = buf.decode(errors="replace").rstrip()
                 if text and step:
                     if step.output:
                         step.output += "\n"
@@ -210,11 +220,23 @@ async def _run_capture(step, *cmd: str):
     stdout_chunks: list[str] = []
     try:
         async def _stream(stream, prefix):
+            buf = b""
             while True:
-                line = await stream.readline()
-                if not line:
+                chunk = await stream.read(4096)
+                if not chunk:
                     break
-                text = line.decode(errors="replace").rstrip()
+                buf += chunk
+                while b"\n" in buf:
+                    raw, buf = buf.split(b"\n", 1)
+                    text = raw.decode(errors="replace").rstrip()
+                    if stream is proc.stdout:
+                        stdout_chunks.append(text)
+                    if text and step:
+                        if step.output:
+                            step.output += "\n"
+                        step.output += f"{prefix}{text}"
+            if buf:
+                text = buf.decode(errors="replace").rstrip()
                 if stream is proc.stdout:
                     stdout_chunks.append(text)
                 if text and step:
