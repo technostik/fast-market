@@ -454,7 +454,8 @@ prompts:
   content: 'You are an art director. Given the scene description below, write a detailed
     image generation prompt suitable for FLUX image generation. The prompt should
     describe the visual elements, mood, lighting, and composition. Return ONLY the
-    image prompt text, no explanations.
+    image prompt text, no explanations. The image must contain no text, no words,
+    no letters, no logos, and no watermarks.
 
 
     Visual style: {image_style}
