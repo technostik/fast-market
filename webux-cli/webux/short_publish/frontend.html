@@ -182,6 +182,25 @@
         <option value="none">None (no transcript → subtitles disabled)</option>
       </select>
     </div>
+    <div class="cols2">
+      <div class="row">
+        <label>Language</label>
+        <select id="cfgLanguage">
+          <option value="fr">French</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Whisper model</label>
+        <select id="cfgModel">
+          <option value="tiny">tiny</option>
+          <option value="base">base</option>
+          <option value="small">small</option>
+          <option value="medium">medium</option>
+          <option value="large">large</option>
+        </select>
+      </div>
+    </div>
     <div class="row">
       <label>Modal usage URL</label>
       <input type="text" id="cfgModalUsageUrl">
@@ -288,26 +307,6 @@
             <input type="checkbox" id="ignorePostPublish">
             <label for="ignorePostPublish" style="display:inline; margin:0;">Ignore post publishing scripts</label>
           </div>
-        </div>
-      </div>
-
-      <div class="cols2">
-        <div class="row">
-          <label>Language</label>
-          <select id="language">
-            <option value="fr">French</option>
-            <option value="en">English</option>
-          </select>
-        </div>
-        <div class="row">
-          <label>Whisper model</label>
-          <select id="model">
-            <option value="tiny">tiny</option>
-            <option value="base">base</option>
-            <option value="small">small</option>
-            <option value="medium" selected>medium</option>
-            <option value="large">large</option>
-          </select>
         </div>
       </div>
 
@@ -639,8 +638,6 @@ async function startJob() {
     do_charisma: document.getElementById('doCharisma').checked,
     do_add_signature: (!document.getElementById('addSignature').disabled && document.getElementById('addSignature').checked),
     ignore_post_publish: document.getElementById('ignorePostPublish').checked,
-    language: document.getElementById('language').value,
-    model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
     description_prefix: document.getElementById('descPrefix').value,
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n')
@@ -902,8 +899,6 @@ async function doResume() {
     do_charisma: document.getElementById('doCharisma').checked,
     do_add_signature: (!document.getElementById('addSignature').disabled && document.getElementById('addSignature').checked),
     ignore_post_publish: document.getElementById('ignorePostPublish').checked,
-    language: document.getElementById('language').value,
-    model: document.getElementById('model').value,
     privacy: document.getElementById('privacy').value,
     description_prefix: document.getElementById('descPrefix').value,
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n')
@@ -962,6 +957,8 @@ async function showConfig() {
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
       document.getElementById('cfgTranscriptMode').value = c.transcript_mode || 'normal';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
+      document.getElementById('cfgLanguage').value = c.language || 'fr';
+      document.getElementById('cfgModel').value = c.model || 'medium';
       updateSubtitleDependency();
       updateSignatureAvailability();
     }
@@ -980,7 +977,9 @@ async function saveConfig() {
     post_publish_script: document.getElementById('cfgPostScript').value,
     transcript_script: document.getElementById('cfgTranscriptScript').value,
     transcript_mode: document.getElementById('cfgTranscriptMode').value,
-    modal_usage_url: document.getElementById('cfgModalUsageUrl').value
+    modal_usage_url: document.getElementById('cfgModalUsageUrl').value,
+    language: document.getElementById('cfgLanguage').value,
+    model: document.getElementById('cfgModel').value
   };
   const r = await fetch('/api/short_publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (r.ok) alert('Saved'); else alert('Save failed');
@@ -1006,6 +1005,8 @@ async function toggleConfig() {
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
       document.getElementById('cfgTranscriptMode').value = c.transcript_mode || 'normal';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
+      document.getElementById('cfgLanguage').value = c.language || 'fr';
+      document.getElementById('cfgModel').value = c.model || 'medium';
       updateSubtitleDependency();
       updateSignatureAvailability();
       const link = document.getElementById('modalUsageLink');

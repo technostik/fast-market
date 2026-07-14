@@ -110,6 +110,8 @@ async def get_config():
         "default_check_prompt": pub.get("default_check_prompt", ""),
         "transcript_mode": pub.get("transcript_mode", "normal"),
         "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings/usage"),
+        "language": pub.get("language", "fr"),
+        "model": pub.get("model", "medium"),
     }
 
 
@@ -125,6 +127,8 @@ class ConfigSaveRequest(BaseModel):
     default_check_prompt: str = ""
     transcript_mode: str = "normal"
     modal_usage_url: str = "https://modal.com/settings/usage"
+    language: str = ""
+    model: str = ""
 
 
 @router.post("/config")
@@ -141,6 +145,8 @@ async def save_config(req: ConfigSaveRequest):
     pub["default_check_prompt"] = req.default_check_prompt
     pub["transcript_mode"] = req.transcript_mode
     pub["modal_usage_url"] = req.modal_usage_url
+    pub["language"] = req.language
+    pub["model"] = req.model
     _save_publish_cfg(pub)
     return {"ok": True}
 
@@ -309,8 +315,8 @@ class StartRequest(BaseModel):
     do_remove_silence: bool = True
     do_burn_subtitles: bool = True
     transcript_mode: str = "normal"
-    language: str = "fr"
-    model: str = "medium"
+    language: str = ""
+    model: str = ""
     privacy: str = "unlisted"
     description_prefix: str = ""
     source_urls: list[str] = []
@@ -336,8 +342,8 @@ class ResumeRequest(BaseModel):
     do_charisma: bool = True
     do_add_signature: bool = True
     ignore_post_publish: bool = False
-    language: str = "fr"
-    model: str = "medium"
+    language: str = ""
+    model: str = ""
     privacy: str = "unlisted"
     description_prefix: str = ""
     source_urls: list[str] = []
@@ -360,8 +366,8 @@ async def start(req: StartRequest):
         do_remove_silence=req.do_remove_silence,
         do_burn_subtitles=req.do_burn_subtitles,
         transcript_mode=req.transcript_mode,
-        language=req.language,
-        model=req.model,
+        language=req.language or pub.get("language", "fr"),
+        model=req.model or pub.get("model", "medium"),
         privacy=req.privacy,
         description_prefix=req.description_prefix,
         source_urls=_validate_urls(req.source_urls),
@@ -435,8 +441,8 @@ async def resume(req: ResumeRequest):
         do_remove_silence=False,
         do_burn_subtitles=req.do_burn_subtitles,
         transcript_mode=req.transcript_mode,
-        language=req.language,
-        model=req.model,
+        language=req.language or pub_cfg.get("language", "fr"),
+        model=req.model or pub_cfg.get("model", "medium"),
         privacy=req.privacy,
         description_prefix=req.description_prefix,
         source_urls=_validate_urls(req.source_urls),
