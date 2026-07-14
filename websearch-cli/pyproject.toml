@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "websearch-agent"
+version = "0.1.0"
+description = "Search the web via pluggable providers (Google News, Reddit, Hacker News)."
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+websearch = "websearch_entry:main"
+
+[tool.setuptools]
+packages = [
+    "common",
+    "cli",
+    "core",
+    "plugins",
+    "plugins.google_news",
+    "plugins.reddit",
+    "plugins.hacker_news",
+    "commands",
+    "commands.search",
+    "commands.setup",
+    "commands.setup.subcommands",
+    "websearch_entry",
+]

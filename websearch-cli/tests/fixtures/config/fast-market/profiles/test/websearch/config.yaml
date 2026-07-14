@@ -1,0 +1,11 @@
+language: fr
+limit: 10
+google_news:
+  hl: fr
+  gl: FR
+reddit:
+  user_agent: "fast-market-websearch-test/1.0"
+  client_id: ""
+  client_secret: ""
+hacker_news:
+  tags: story

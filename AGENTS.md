@@ -16,6 +16,7 @@ Tool with pluggable input and output to help market content for web creators
 | `task` | `task-cli/` | Agentic task execution |
 | `skill` | `skill-cli/` | Skill management |
 | `toolsetup` | `toolsetup-cli/` | Tool configuration |
+| `websearch` | `websearch-cli/` | Web search via pluggable providers (Google News, Reddit, Hacker News) |
 
 # Coding rules
 
