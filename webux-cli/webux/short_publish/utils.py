@@ -139,6 +139,16 @@ async def _get_video_duration(path: str) -> float:
         return 0.0
 
 
+SHORTS_MAX_SECONDS = 180.0
+
+
+def _effective_limit_seconds(signature_duration: float = 0.0) -> float:
+    """YouTube Shorts hard limit (180s) minus the signature video length that
+    will be concatenated onto the clip later, so the resulting upload stays
+    within the 3-minute limit."""
+    return SHORTS_MAX_SECONDS - max(0.0, signature_duration)
+
+
 def _sanitize_filename(title: str) -> str:
     import re
     safe = re.sub(r'[<>:"/\\|?*\n\r\t]', '', title)

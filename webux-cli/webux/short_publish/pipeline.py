@@ -18,6 +18,7 @@ from .utils import (
     _ass_to_plain_text,
     _get_video_duration,
     _sanitize_filename,
+    _effective_limit_seconds,
     _run,
     _extract_video_id,
 )
@@ -129,11 +130,21 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             if await _run_tracked(job, s0, *cmd):
                 return
             duration = await _get_video_duration(out_path)
-            if duration > 180:
+            # Subtract the signature video length: it is appended later (step 3)
+            # and would otherwise push the final upload past YouTube's 3-min limit.
+            sig_duration = 0.0
+            if job.do_add_signature:
+                sig_path = pub_cfg.get("signature_video_path", "").strip()
+                if sig_path:
+                    sig_path_obj = Path(sig_path).expanduser()
+                    if sig_path_obj.exists():
+                        sig_duration = await _get_video_duration(str(sig_path_obj))
+            effective_limit = _effective_limit_seconds(sig_duration)
+            if duration > effective_limit:
                 s0.end_time = time.time(); s0.status = "error"
-                s0.output += "\nvideo too long"
+                s0.output += f"\nvideo too long (incl. signature): {duration:.0f}s > {effective_limit:.0f}s"
                 job.status = "error"; _save_meta(job); return
-            s0.output += f"\n⏱ Duration: {duration:.0f}s"
+            s0.output += f"\n⏱ Duration: {duration:.0f}s (limit {effective_limit:.0f}s incl. signature)"
             current_video = out_path
             job.files["no_silence"] = out_path
 
