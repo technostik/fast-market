@@ -244,6 +244,20 @@ async def _pool_worker():
         _update_meta_status(next_item.source, "processing")
         _save_pool_to_disk()
 
+        # ── Source file missing guard ───────────────────────────────────────────
+        if not Path(next_item.source).expanduser().exists():
+            next_item.status = "error"
+            next_item.finished_at = time.time()
+            next_item.error_message = (
+                f"[source] Source file not found: {next_item.source}\n"
+                "Remove this item from the pool manually (pool/remove) and re-add an existing file."
+            )
+            _update_meta_status(next_item.source, "error")
+            _save_pool_to_disk()
+            _pool_state["current"] = None
+            next_item.job_id = None
+            continue
+
         # Create Job and store job_id so UI can show progress
         try:
             from .register import _create_publish_job  # circular-safe

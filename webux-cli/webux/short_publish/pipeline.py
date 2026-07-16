@@ -104,6 +104,11 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
 
 
 async def _run_pipeline_core(job: Job, from_step: int) -> None:
+    if not Path(job.source).expanduser().exists():
+        job.status = "error"
+        job.end_time = time.time()
+        _save_meta(job)
+        return
     stem = _stem(job.source)
     pub_cfg = _load_publish_cfg()
     d = Path(pub_cfg.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH)).expanduser().resolve()
