@@ -460,6 +460,18 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         s4 = job.steps[4]
         s4.start_time = time.time()
         s4.status = "running"
+        if not (job.title or "").strip():
+            s4.end_time = time.time()
+            s4.status = "error"
+            s4.output = (
+                "⚠ Upload blocked: the generated video title is empty.\n"
+                "The title prompt produced no output. Check the title prompt "
+                f"('{job.prompt_title}') and retry (resume from step 3)."
+            )
+            job.status = "error"
+            job.end_time = time.time()
+            _save_meta(job)
+            return
         rc, url_out = await _run(
             s4, _yt(), "upload", final_video,
             "--title", job.title,
