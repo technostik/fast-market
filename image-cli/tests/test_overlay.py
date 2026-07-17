@@ -141,6 +141,38 @@ class TestApplyTextOverlay:
         # band height for 10% of 500px should be ~50px; just ensure it ran
         assert out.mode == "RGB"
 
+    def _ink_rows(self, img: "Image.Image") -> "tuple[int, int]":
+        """Return (top, bottom) y of the non-background ink span."""
+        arr = img.load()
+        w, h = img.size
+        bg = arr[0, 0]
+        top = h
+        bottom = 0
+        for y in range(h):
+            for x in range(0, w, 7):
+                if arr[x, y] != bg:
+                    top = min(top, y)
+                    bottom = max(bottom, y)
+                    break
+        return top, bottom
+
+    def test_offset_shifts_text_down(self):
+        common = dict(enabled=True, text="Title", vpos="bottom", hpos="center",
+                      effect="none", bg="none", fg="white")
+        base = apply_text_overlay(self._img(), TextOverlayConfig(**common), font_family="DejaVuSans")
+        shifted = apply_text_overlay(self._img(), TextOverlayConfig(**common, offset_pct=15), font_family="DejaVuSans")
+        assert self._ink_rows(shifted)[0] > self._ink_rows(base)[0]
+
+    def test_size_pct_scales_text(self):
+        common = dict(enabled=True, text="Title", vpos="bottom", hpos="center",
+                      effect="none", bg="none", fg="white", size="64")
+        base = apply_text_overlay(self._img(), TextOverlayConfig(**common), font_family="DejaVuSans")
+        bigger = apply_text_overlay(self._img(), TextOverlayConfig(**common, size_pct=150), font_family="DejaVuSans")
+        # Larger font => a taller ink span.
+        b_top, b_bottom = self._ink_rows(base)
+        g_top, g_bottom = self._ink_rows(bigger)
+        assert (g_bottom - g_top) > (b_bottom - b_top)
+
 
 class TestSaveOutput:
     def test_default_suffix(self, tmp_path):

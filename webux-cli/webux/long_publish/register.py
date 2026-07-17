@@ -591,6 +591,8 @@ class RegenThumbRequest(BaseModel):
     overlay_fg: str = ""
     overlay_bg: str = ""
     overlay_effect: str = ""
+    overlay_size_pct: float = 0   # font size multiplier vs default (0 = use default)
+    overlay_offset: int = 0       # shift text + band down by this % of image height
 
 
 def _parse_generate_output(text: str) -> tuple[str, str]:
@@ -608,22 +610,28 @@ def _parse_generate_output(text: str) -> tuple[str, str]:
     return data.get("path", ""), data.get("base_path", "")
 
 
-def _resolve_overlay(req: RegenThumbRequest, pub_cfg: dict) -> tuple[str, str, str]:
-    """Resolve overlay fg/bg/effect: the form value wins, else the publish
-    config (``thumbnail_overlay_fg`` / ``thumbnail_overlay_bg`` / ...)."""
+def _resolve_overlay(req: RegenThumbRequest, pub_cfg: dict) -> tuple[str, str, str, float, int]:
+    """Resolve overlay fg/bg/effect/size_pct/offset: the form value wins, else
+    the publish config (``thumbnail_overlay_fg`` / ``thumbnail_overlay_bg`` / ...)."""
     fg = (req.overlay_fg or pub_cfg.get("thumbnail_overlay_fg", "") or "").strip()
     bg = (req.overlay_bg or pub_cfg.get("thumbnail_overlay_bg", "") or "").strip()
     effect = (req.overlay_effect or pub_cfg.get("thumbnail_overlay_effect", "") or "").strip()
-    return fg, bg, effect
+    size_pct = req.overlay_size_pct or float(pub_cfg.get("thumbnail_overlay_size_pct", 0) or 0)
+    offset = req.overlay_offset or int(pub_cfg.get("thumbnail_overlay_offset", 0) or 0)
+    return fg, bg, effect, size_pct, offset
 
 
-def _append_overlay_opts(cmd: list[str], fg: str, bg: str, effect: str) -> list[str]:
+def _append_overlay_opts(cmd: list[str], fg: str, bg: str, effect: str, size_pct: float = 0, offset: int = 0) -> list[str]:
     if fg:
         cmd += ["--overlay-fg", fg]
     if bg:
         cmd += ["--overlay-bg", bg]
     if effect:
         cmd += ["--overlay-effect", effect]
+    if size_pct:
+        cmd += ["--overlay-size-pct", str(size_pct)]
+    if offset:
+        cmd += ["--overlay-offset", str(offset)]
     return cmd
 
 
@@ -681,7 +689,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
 
     image_prompt = req.image_prompt.strip()
     overlay_title = req.overlay_title.strip()
-    fg, bg, effect = _resolve_overlay(req, pub_cfg)
+    fg, bg, effect, size_pct, offset = _resolve_overlay(req, pub_cfg)
 
     # Decide what to do based on the explicit mode (or auto-detect).
     if req.mode == "image":
@@ -723,7 +731,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
         cmd = [_image(), "generate", image_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir]
         if overlay_title:
             cmd += ["--title", overlay_title]
-        cmd = _append_overlay_opts(cmd, fg, bg, effect)
+        cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
@@ -750,7 +758,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
             # A base image is available: only reapply the overlay text on top of
             # it. This must never regenerate the full image.
             cmd = [_image(), "overlay", str(Path(base).expanduser().resolve()), "--title", overlay_title, "-F", "json"]
-            cmd = _append_overlay_opts(cmd, fg, bg, effect)
+            cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
@@ -780,7 +788,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
                            "to regenerate the thumbnail from scratch",
                 )
             cmd = [_image(), "generate", fallback_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir, "--title", overlay_title]
-            cmd = _append_overlay_opts(cmd, fg, bg, effect)
+            cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )

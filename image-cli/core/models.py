@@ -20,6 +20,8 @@ class TextOverlayConfig:
     effect: str = "band"  # none / box / shadow / band
     style: str = "normal"  # normal / bold / italic / bold-italic
     band_size: int = 8  # band height as % of image height (band effect only)
+    size_pct: float = 100  # font size multiplier vs the resolved default (100 = unchanged)
+    offset_pct: int = 0  # shift text + band downward by this %% of image height
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +35,8 @@ class TextOverlayConfig:
             "effect": self.effect,
             "style": self.style,
             "band_size": self.band_size,
+            "size_pct": self.size_pct,
+            "offset_pct": self.offset_pct,
         }
 
 
@@ -49,6 +53,8 @@ class OverlayConfig:
     effect: str = "band"
     style: str = "normal"
     band_size: int = 8
+    size_pct: float = 100
+    offset_pct: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,6 +67,8 @@ class OverlayConfig:
             "effect": self.effect,
             "style": self.style,
             "band_size": self.band_size,
+            "size_pct": self.size_pct,
+            "offset_pct": self.offset_pct,
         }
 
     @classmethod
@@ -77,6 +85,8 @@ class OverlayConfig:
             effect=data.get("effect", "band"),
             style=data.get("style", "normal"),
             band_size=data.get("band_size", 8),
+            size_pct=data.get("size_pct", 100),
+            offset_pct=data.get("offset_pct", 0),
         )
 
 

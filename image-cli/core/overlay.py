@@ -347,6 +347,16 @@ def apply_text_overlay(
         font = load_font(family, font_size, style)
         lines = _wrap_text(draw, cfg.text, font, max_w)
 
+    # Relative size multiplier (percentage of the resolved default size).
+    try:
+        size_pct = float(cfg.size_pct)
+    except (TypeError, ValueError):
+        size_pct = 100.0
+    if size_pct and size_pct != 100.0:
+        font_size = max(4, int(round(font_size * size_pct / 100.0)))
+        font = load_font(family, font_size, style)
+        lines = _wrap_text(draw, cfg.text, font, max_w)
+
     font = load_font(family, font_size, style)
     ascent, descent = font.getmetrics()
     line_height = ascent + descent
@@ -355,6 +365,15 @@ def apply_text_overlay(
 
     pad = max(6, int(font_size * 0.25))
     x, y = _block_metrics(cfg.vpos, cfg.hpos, img_w, img_h, int(block_w), block_h, pad)
+
+    # Relative downward shift (percentage of image height) applied to both the
+    # text block and the background effect so the band follows the text.
+    try:
+        offset_pct = int(cfg.offset_pct)
+    except (TypeError, ValueError):
+        offset_pct = 0
+    if offset_pct:
+        y = y + int(img_h * offset_pct / 100.0)
 
     fg = resolve_color(cfg.fg)
     bg = resolve_color(cfg.bg)
@@ -374,6 +393,10 @@ def apply_text_overlay(
         else:
             block_cy = y + pad + block_h / 2
             band_rect = (0, int(block_cy - band_h / 2), img_w, int(block_cy + band_h / 2))
+        # Apply the same downward offset to the band so it tracks the text.
+        if offset_pct:
+            dy = int(img_h * offset_pct / 100.0)
+            band_rect = (band_rect[0], band_rect[1] + dy, band_rect[2], band_rect[3] + dy)
         _draw_band(draw, band_rect, bg, peak=235)
     for i, line in enumerate(lines):
         ly = y + pad + i * line_height

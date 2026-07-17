@@ -180,6 +180,10 @@
         <div class="row"><label>Background (bg)</label><input id="regenBg" type="text" placeholder="from config if empty"></div>
       </div>
       <div class="cols2">
+        <div class="row"><label>Font size (× % of default) <span class="hint">e.g. 120 = +20%</span></label><input id="regenSizePct" type="number" min="10" max="400" step="5" placeholder="100 = default"></div>
+        <div class="row"><label>Drop offset (% down) <span class="hint">e.g. 10 = band + text +10%</span></label><input id="regenOffset" type="number" min="-50" max="80" step="1" placeholder="0 = default"></div>
+      </div>
+      <div class="cols2">
         <div class="row" style="align-self:flex-end; gap:8px;">
           <button class="btn-sec" id="regenImgBtn">🖼 Regenerate image</button>
           <button class="btn-sec" id="regenOverlayBtn">🏷 Regenerate overlay</button>
@@ -484,6 +488,8 @@ function regenThumbnail(mode){
       overlay_title: title,
       overlay_fg: el('regenFg').value,
       overlay_bg: el('regenBg').value,
+      overlay_size_pct: Number(el('regenSizePct').value) || 0,
+      overlay_offset: Number(el('regenOffset').value) || 0,
     };
     const r = await fetch(API+'/regenerate-thumbnail', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await r.json();

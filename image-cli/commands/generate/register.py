@@ -175,6 +175,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Band height as %% of image height (band effect). Default: 8",
     )
+    @click.option(
+        "--overlay-size-pct",
+        type=float,
+        default=None,
+        help="Font size multiplier vs the resolved size (e.g. 120 = +20%). Default: 100",
+    )
+    @click.option(
+        "--overlay-offset",
+        type=int,
+        default=None,
+        help="Shift text + band downward by this %% of image height (e.g. 10 = +10%%)",
+    )
     @click.pass_context
     def generate_cmd(
         ctx,
@@ -201,6 +213,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
         overlay_effect,
         overlay_style,
         overlay_band_size,
+        overlay_size_pct,
+        overlay_offset,
     ):
         """Generate an image from a text prompt."""
         engine_instance, plugins, config = build_engine(
@@ -288,6 +302,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     effect=overlay_effect or config.overlay.effect,
                     style=overlay_style or config.overlay.style,
                     band_size=overlay_band_size or config.overlay.band_size,
+                    size_pct=overlay_size_pct if overlay_size_pct is not None else config.overlay.size_pct,
+                    offset_pct=overlay_offset if overlay_offset is not None else config.overlay.offset_pct,
                 )
 
                 from PIL import Image
