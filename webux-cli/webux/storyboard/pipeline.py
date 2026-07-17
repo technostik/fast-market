@@ -34,6 +34,12 @@ def stop_pipeline() -> None:
         _current_task.cancel()
 
 
+def _set_current_task(task: asyncio.Task) -> None:
+    """Register a background task so get_current_state()/is_running() track it."""
+    global _current_task
+    _current_task = task
+
+
 # ── Tool path helpers ─────────────────────────────────────────────────────────
 
 def _sound() -> str:
@@ -250,6 +256,22 @@ async def _run_pipeline(
 
     # Run only ONE global step (step-by-step mode)
     if only_global_step:
+        if only_global_step == "character":
+            if not config.get("character_enabled"):
+                state.character_step = StepState()
+                state.character_step.status = "skipped"
+                state.character_step.output = "Central character disabled in config."
+                state.save(state_path)
+                return
+            state.character_step = StepState()
+            state.character_description = ""
+            state.character_image = None
+            state.save(state_path)
+            await _gen_character(
+                state, state_path, config,
+                use_reference=bool(config.get("character_use_reference")),
+            )
+            return
         if only_global_step == "parse":
             state.parse_step = StepState()
             state.save(state_path)
@@ -312,8 +334,19 @@ async def _run_pipeline(
             state.final_file = None
         state.save(state_path)
 
-    # Stage 0: parse
-    if from_idx <= 0:
+    # Stage 0: central character (optional, pre-pipeline)
+    char_idx = GLOBAL_STEPS.index("character")
+    if config.get("character_enabled") and from_idx <= char_idx:
+        if state.character_step.status != "done":
+            await _gen_character(
+                state, state_path, config,
+                use_reference=bool(config.get("character_use_reference")),
+            )
+            if state.character_step.status != "done":
+                return
+
+    # Stage 1: parse
+    if from_idx <= GLOBAL_STEPS.index("parse"):
         if state.parse_step.status != "done":
             await _parse_script(state, state_path, config)
             if state.parse_step.status != "done":
@@ -494,6 +527,112 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
     state.save(state_path)
 
 
+async def _gen_character(
+    state: ProjectState, state_path: Path, config: dict,
+    *,
+    use_reference: bool = False,   # load from stored config reference instead of generating
+    reedit_description: str | None = None,  # user-provided description override
+) -> None:
+    """Generate (or load) the central character: a 3/4 reference image + description.
+
+    When `use_reference` is True and a stored reference exists in config, it is
+    copied into the current project and the step is marked done without generation.
+    When `reedit_description` is provided, the description is taken from the user
+    and only the image is (re)generated from it.
+    """
+    step = state.character_step
+    step.status = "running"
+    step.start_time = time.time()
+    step.output = ""
+    state.save(state_path)
+
+    workdir = Path(state.workdir)
+
+    # 1. Load from a stored cross-story reference if requested.
+    if use_reference:
+        ref_img = config.get("character_reference_image")
+        ref_desc = config.get("character_reference_description", "")
+        if ref_img and Path(ref_img).exists():
+            dest = workdir / "character.png"
+            shutil.copy2(ref_img, dest)
+            state.character_image = str(dest)
+            state.character_description = ref_desc or state.character_description
+            step.output = f"Loaded stored reference character.\nDescription: {state.character_description}"
+            step.output_file = str(dest)
+            step.status = "done"
+            step.end_time = time.time()
+            state.save(state_path)
+            return
+        step.output = "[warn] No stored reference found in config — generating instead."
+
+    # 2. Determine the description (auto from script, or user-provided/edited).
+    if reedit_description and reedit_description.strip():
+        state.character_description = reedit_description.strip()
+    elif not state.character_description:
+        # Auto-generate the description from the full script via the character prompt.
+        script_file = workdir / "script.txt"
+        if not script_file.exists():
+            script_file.write_text(state.script_text, encoding="utf-8")
+        rc = await _apply_story_prompt(step, state, config, "character", script_file)
+        if rc != 0:
+            step.status = "error"
+            step.end_time = time.time()
+            state.save(state_path)
+            return
+        state.character_description = step.output.strip()
+
+    # 3. Generate the 3/4 reference image from the description.
+    image_engine = config.get("image_engine", "flux2cloud")
+    char_style = config.get("character_style", "realist")
+    if char_style == "free" and config.get("character_style_free"):
+        char_style = config.get("character_style_free")
+    style_suffix = {
+        "cartoon": "franco-belgian comic / cartoon style, clean lines, flat colors",
+        "realist": "photorealistic, cinematic lighting, high detail",
+    }.get(char_style, char_style)
+
+    char_prompt = (
+        f"Character reference sheet, 3/4 front-facing view from head to knees, "
+        f"plain neutral solid background, full body visible, no other people, "
+        f"no text, no logo. {style_suffix}. "
+        f"Subject: {state.character_description}"
+    )
+
+    char_out = workdir / "character.png"
+    cmd = [
+        _image_cmd(), "generate", char_prompt,
+        "--engine", image_engine,
+        "--output-dir", str(workdir),
+        "--size", "square",
+        "--format", "json",
+    ]
+    rc = await _run(step, *cmd, log_to=state)
+    if rc != 0:
+        step.status = "error"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    image_file = _extract_json_path(step.output)
+    if image_file and Path(image_file).exists():
+        # Normalize to a stable name in workdir.
+        if Path(image_file) != char_out:
+            shutil.copy2(image_file, char_out)
+        state.character_image = str(char_out)
+        step.output_file = str(char_out)
+    else:
+        imgs = sorted(workdir.glob("*.png")) + sorted(workdir.glob("*.jpg"))
+        if imgs:
+            shutil.copy2(imgs[-1], char_out)
+            state.character_image = str(char_out)
+            step.output_file = str(char_out)
+
+    step.output = f"Character generated.\nDescription: {state.character_description}"
+    step.status = "done"
+    step.end_time = time.time()
+    state.save(state_path)
+
+
 async def _gen_transcript(
     state: ProjectState, state_path: Path, config: dict, sc: Scene
 ) -> None:
@@ -537,7 +676,12 @@ async def _gen_image_prompt(
     input_file = scene_dir / "image_prompt_input.txt"
     input_file.write_text(content, encoding="utf-8")
 
-    rc = await _apply_story_prompt(step, state, config, "scene_image_prompt", input_file)
+    # Inject the central character description as the {character} placeholder when enabled.
+    subs = {}
+    if config.get("character_enabled") and state.character_description:
+        subs["character"] = state.character_description
+
+    rc = await _apply_story_prompt(step, state, config, "scene_image_prompt", input_file, subs)
     if rc != 0:
         step.status = "error"
         step.end_time = time.time()
@@ -631,6 +775,16 @@ async def _gen_image(
             cmd.extend(["--steps", str(image_steps)])
     if image_seed is not None:
         cmd.extend(["--seed", str(image_seed)])
+
+    # Inject the central character reference image for subject consistency.
+    if config.get("character_enabled") and state.character_image and Path(state.character_image).exists():
+        # The reference must be referenced in the prompt (cloud "image 0" style).
+        # The scene image prompt already embeds the character description; we also
+        # append an explicit reference instruction so engines that use the image
+        # know to keep the subject of the reference.
+        cmd.extend(["--reference-image", state.character_image])
+        if config.get("character_strength") is not None:
+            cmd.extend(["--strength", str(config.get("character_strength"))])
 
     rc = await _run(step, *cmd, log_to=state)
     if rc != 0:
@@ -964,13 +1118,15 @@ def _resolve_prompt(template: str, config: dict) -> str:
 
 
 async def _apply_story_prompt(
-    step: StepState, state: "ProjectState", config: dict, key: str, content_file: Path
+    step: StepState, state: "ProjectState", config: dict, key: str, content_file: Path,
+    extra_subs: dict | None = None,
 ) -> int:
     """Apply a storyboard prompt.
 
     Uses the named prompt from the prompt store (config["prompts"][key]) and lets
     the prompt CLI substitute the config placeholders. If an inline override is
     configured (config["prompt_overrides"][key]), it is applied directly instead.
+    `extra_subs` are additional placeholder=value pairs appended to the apply call.
     """
     prompts = config.get("prompts") or {}
     overrides = config.get("prompt_overrides") or {}
@@ -980,6 +1136,9 @@ async def _apply_story_prompt(
     if override and override.strip():
         # Legacy inline path: substitute config vars, escape braces, append {content}.
         template = _resolve_prompt(override, config)
+        # Also substitute any extra subs present in the inline template.
+        for k, v in (extra_subs or {}).items():
+            template = template.replace("{" + k + "}", str(v))
         prompt_arg = template.replace("{", "{{").replace("}", "}}") + "{content}"
         return await _run(
             step, _prompt_cmd(), "apply", prompt_arg,
@@ -994,6 +1153,7 @@ async def _apply_story_prompt(
         "narrative_style": config.get("narrative_style", "documentary narration"),
         "image_style": config.get("image_style", "cinematic, dramatic lighting"),
     }
+    subs.update(extra_subs or {})
     args = [_prompt_cmd(), "apply", name, "--format", "text", f"content=@{content_file}"]
     for k, v in subs.items():
         args.append(f"{k}={v}")

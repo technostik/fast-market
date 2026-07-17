@@ -24,6 +24,10 @@ class ImageEnginePlugin(ABC):
         """Return True if this engine supports img2img (init_image)."""
         raise NotImplementedError
 
+    def supports_reference_image(self) -> bool:
+        """Return True if this engine supports reference-image subject consistency."""
+        return False
+
     @abstractmethod
     def supports_seeds(self) -> bool:
         """Return True if this engine supports seed-based generation."""

@@ -16,6 +16,7 @@ from .models import ProjectState, StepState, SCENE_STEPS
 from .pipeline import (
     start_pipeline, stop_pipeline, is_running,
     get_current_state, _find_scene, GLOBAL_TO_SCENE_STEP,
+    _run_safely, _set_current_task,
 )
 
 router = APIRouter()
@@ -65,6 +66,13 @@ async def get_config():
         "chapter_range": cfg.get("chapter_range", "2–5"),
         "scene_range": cfg.get("scene_range", "2–5"),
         "scene_duration": cfg.get("scene_duration", "15–45 seconds"),
+        "character_enabled": cfg.get("character_enabled", False),
+        "character_use_reference": cfg.get("character_use_reference", False),
+        "character_style": cfg.get("character_style", "realist"),
+        "character_style_free": cfg.get("character_style_free", ""),
+        "character_reference_image": cfg.get("character_reference_image"),
+        "character_reference_description": cfg.get("character_reference_description", ""),
+        "character_strength": cfg.get("character_strength", 0.35),
         "prompts": cfg.get("prompts", {}),
         "prompt_overrides": cfg.get("prompt_overrides", {}),
     }
@@ -91,6 +99,13 @@ class ConfigSaveRequest(BaseModel):
     chapter_range: str = "2–5"
     scene_range: str = "2–5"
     scene_duration: str = "15–45 seconds"
+    character_enabled: bool = False
+    character_use_reference: bool = False
+    character_style: str = "realist"
+    character_style_free: str = ""
+    character_reference_image: str | None = None
+    character_reference_description: str = ""
+    character_strength: float = 0.35
     prompts: dict = {}
     prompt_overrides: dict = {}
 
@@ -181,6 +196,62 @@ async def run_pipeline(req: RunRequest):
                    only_step=req.only_step,
                    only_scene=req.only_scene)
     return {"ok": True, "running": True}
+
+
+class CharacterRequest(BaseModel):
+    use_reference: bool = False        # load from stored config reference
+    description: str | None = None     # user-provided/edited description
+    save_as_reference: bool = False    # persist result into config for reuse
+
+
+@router.post("/character")
+async def generate_character(req: CharacterRequest):
+    """Generate (or load) the central character reference, before running the pipeline."""
+    if is_running():
+        raise HTTPException(status_code=409, detail="Pipeline already running")
+    cfg = load_storyboard_config()
+    state = _load_state(cfg)
+    if state is None:
+        raise HTTPException(status_code=400, detail="Project not initialized — call /init first")
+    sp = _state_path(cfg)
+
+    async def _coro():
+        from .pipeline import _gen_character
+        await _gen_character(
+            state, sp, cfg,
+            use_reference=req.use_reference,
+            reedit_description=req.description,
+        )
+        # Persist as a reusable reference in config if requested.
+        if req.save_as_reference and state.character_image and Path(state.character_image).exists():
+            save_storyboard_config({
+                "character_reference_image": state.character_image,
+                "character_reference_description": state.character_description,
+            })
+
+    import asyncio as _asyncio
+    task = _asyncio.create_task(_run_safely(_coro(), state, sp))
+    _set_current_task(task)
+    return {"ok": True, "running": True}
+
+
+@router.post("/character/save")
+async def save_character(req: CharacterRequest):
+    """Save the current character description (and optionally persist as reference)."""
+    cfg = load_storyboard_config()
+    state = _load_state(cfg)
+    if state is None:
+        raise HTTPException(status_code=400, detail="Project not initialized")
+    sp = _state_path(cfg)
+    if req.description is not None:
+        state.character_description = req.description
+    if req.save_as_reference and state.character_image and Path(state.character_image).exists():
+        save_storyboard_config({
+            "character_reference_image": state.character_image,
+            "character_reference_description": state.character_description,
+        })
+    state.save(sp)
+    return {"ok": True}
 
 
 @router.post("/stop")
@@ -540,6 +611,32 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
   </div>
 </div>
 
+<!-- Character modal -->
+<div class="modal-overlay" id="charModal" onclick="if(event.target===this)closeCharModal()">
+  <div class="modal-card" style="max-width:760px">
+    <div class="modal-title">🧍 Central Character</div>
+    <div id="charStatus" style="font-size:11px;color:var(--text-dim);margin-bottom:8px"></div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div style="flex:0 0 240px">
+        <img id="charPreview" src="" style="width:100%;max-width:240px;border-radius:6px;border:1px solid var(--border);display:none" />
+        <div id="charNoImg" style="font-size:11px;color:var(--text-dim);font-style:italic">No character generated yet.</div>
+      </div>
+      <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:8px">
+        <div class="detail-label">Character Description <span style="color:var(--text-dim);font-weight:400;text-transform:none;font-size:10px">— edit to redesign</span></div>
+        <textarea id="charDesc" class="edit-area" style="min-height:160px"></textarea>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="genCharacter(false)">✨ Generate</button>
+          <button class="btn btn-neutral btn-sm" onclick="genCharacter(true)">📥 Use Stored Reference</button>
+          <button class="btn btn-neutral btn-sm" onclick="saveCharDesc()">💾 Save Description</button>
+          <button class="btn btn-neutral btn-sm" onclick="saveCharAsRef()">🔄 Reuse as Reference</button>
+          <button class="btn btn-neutral btn-sm" onclick="closeCharModal()">Close</button>
+        </div>
+        <div id="charMsg" style="font-size:11px;color:var(--green)"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Init overlay (shown when no project) -->
 <div class="init-overlay" id="initOverlay">
   <div class="init-card">
@@ -559,6 +656,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
   <span class="workdir-label" id="workdirLabel">…</span>
   <span class="topbar-sep">|</span>
   <button class="btn btn-neutral" id="btnScript" onclick="showScriptModal()" disabled>📄 Script</button>
+  <button class="btn btn-neutral" id="btnChar" onclick="showCharModal()" disabled>🧍 Character</button>
   <button class="btn btn-primary" id="btnRunAll" onclick="runAll()" disabled>▶ Run All</button>
   <span class="regen-group">
     <span style="font-size:10px;color:var(--text-dim)">Regen:</span>
@@ -774,6 +872,37 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
           <span style="color:var(--text-dim);font-size:11px">(512×288 images, 1 step — fastest draft preview)</span>
         </label>
       </div>
+      <div class="cfg-field" style="grid-column:span 2;margin-top:8px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px">
+        <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Central Character</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px">
+          <input type="checkbox" id="cfgCharEnabled" />
+          <span>Generate a central character (reused across all scene images)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px">
+          <input type="checkbox" id="cfgCharUseRef" />
+          <span>Use stored reference character instead of generating</span>
+        </label>
+        <div class="cfg-field" style="margin-bottom:6px">
+          <span class="cfg-label">Character Style</span>
+          <select id="cfgCharStyle">
+            <option value="realist">Realist (photorealistic)</option>
+            <option value="cartoon">Cartoon (comic / BD)</option>
+            <option value="free">Free text…</option>
+          </select>
+        </div>
+        <div class="cfg-field" id="cfgCharStyleFreeWrap" style="display:none;margin-bottom:6px">
+          <span class="cfg-label">Free-style description</span>
+          <input type="text" id="cfgCharStyleFree" placeholder="e.g. watercolor, Studio Ghibli" />
+        </div>
+        <div class="cfg-field" style="margin-bottom:6px">
+          <span class="cfg-label">Reference Strength (local engine)</span>
+          <input type="number" id="cfgCharStrength" min="0" max="1" step="0.05" value="0.35" style="width:90px" />
+        </div>
+        <div style="font-size:10px;color:var(--text-dim)">
+          The character is auto-designed from the script, then editable in the 🧍 Character panel.
+          Generate it before running the pipeline, or it runs automatically when enabled.
+        </div>
+      </div>
     </div>
     <div class="cfg-prompts">
       <div style="margin-bottom:8px;padding:8px;background:var(--bg3);border-radius:4px;border:1px solid var(--border)">
@@ -826,11 +955,11 @@ const STEP_LABELS = {
   gen_audio: 'Audio', gen_image: 'Image', assemble_clip: 'Clip'
 };
 const GLOBAL_STEP_LABELS = {
-  parse: 'Parse Script', transcript: 'Transcripts', image_prompt: 'Image Prompts',
+  character: 'Character', parse: 'Parse Script', transcript: 'Transcripts', image_prompt: 'Image Prompts',
   audio: 'Audio', image: 'Images', clip: 'Clips',
   chapter: 'Ch. Merges', final: 'Final Video'
 };
-const GLOBAL_STEP_ORDER = ['parse','transcript','image_prompt','audio','image','clip','chapter','final'];
+const GLOBAL_STEP_ORDER = ['character','parse','transcript','image_prompt','audio','image','clip','chapter','final'];
 
 let state = null;
 let selectedSceneId = null;
@@ -876,6 +1005,12 @@ async function loadConfig() {
     document.getElementById('cfgImgSeed').value = cfg.image_seed != null ? cfg.image_seed : '';
     document.getElementById('cfgImgSteps').value = cfg.image_steps != null ? cfg.image_steps : '';
     document.getElementById('cfgDraftMode').checked = cfg.draft_mode || false;
+    document.getElementById('cfgCharEnabled').checked = cfg.character_enabled || false;
+    document.getElementById('cfgCharUseRef').checked = cfg.character_use_reference || false;
+    document.getElementById('cfgCharStyle').value = cfg.character_style || 'realist';
+    document.getElementById('cfgCharStyleFree').value = cfg.character_style_free || '';
+    document.getElementById('cfgCharStrength').value = cfg.character_strength != null ? cfg.character_strength : 0.35;
+    document.getElementById('cfgCharStyleFreeWrap').style.display = (cfg.character_style === 'free') ? '' : 'none';
     document.getElementById('cfgChapterRange').value = cfg.chapter_range || '2–5';
     document.getElementById('cfgSceneRange').value = cfg.scene_range || '2–5';
     document.getElementById('cfgSceneDuration').value = cfg.scene_duration || '15–45 seconds';
@@ -954,6 +1089,11 @@ async function saveConfig() {
     image_seed: document.getElementById('cfgImgSeed').value !== '' ? parseInt(document.getElementById('cfgImgSeed').value) : null,
     image_steps: document.getElementById('cfgImgSteps').value !== '' ? parseInt(document.getElementById('cfgImgSteps').value) : null,
     draft_mode: document.getElementById('cfgDraftMode').checked,
+    character_enabled: document.getElementById('cfgCharEnabled').checked,
+    character_use_reference: document.getElementById('cfgCharUseRef').checked,
+    character_style: document.getElementById('cfgCharStyle').value,
+    character_style_free: document.getElementById('cfgCharStyleFree').value,
+    character_strength: parseFloat(document.getElementById('cfgCharStrength').value) || 0.35,
     chapter_range: document.getElementById('cfgChapterRange').value || '2–5',
     scene_range: document.getElementById('cfgSceneRange').value || '2–5',
     scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
@@ -1182,6 +1322,7 @@ function applyState(data) {
   ['btnRegenAudio','btnRegenImage','btnRegenClip','btnRegenFinal'].forEach(id => document.getElementById(id).disabled = data.running || !hasScenes);
   document.getElementById('btnStop').disabled = !data.running;
   document.getElementById('btnScript').disabled = false;
+  document.getElementById('btnChar').disabled = !data.initialized;
 
   // Error banner
   updateErrorBanner(data);
@@ -1226,6 +1367,27 @@ function applyState(data) {
       }
     }
   }
+
+  // Keep the open Character modal preview in sync (but don't clobber the textarea
+  // while the user is typing in it).
+  if (document.getElementById('charModal').classList.contains('open')) {
+    refreshCharModalLive(data);
+  }
+}
+
+function refreshCharModalLive(data) {
+  const img = data.character_image;
+  const prev = document.getElementById('charPreview');
+  const noImg = document.getElementById('charNoImg');
+  const charDesc = document.getElementById('charDesc');
+  if (img) {
+    const url = '/api/storyboard/preview?file=' + encodeURIComponent(img) + '&t=' + Math.floor((data.character_step && data.character_step.end_time) || 0);
+    if (prev.dataset.src !== url) { prev.dataset.src = url; prev.src = url; prev.style.display = ''; noImg.style.display = 'none'; }
+  }
+  if (document.activeElement !== charDesc) {
+    charDesc.value = data.character_description || '';
+  }
+  refreshCharStatus();
 }
 
 function _detailIsBusy() {
@@ -1572,6 +1734,70 @@ function showScriptModal() {
 
 function closeScriptModal() {
   document.getElementById('scriptModal').className = 'modal-overlay';
+}
+
+// ── Character modal ────────────────────────────────────────────────────────────
+function showCharModal() {
+  const data = state || {};
+  document.getElementById('charDesc').value = data.character_description || '';
+  const img = data.character_image;
+  const prev = document.getElementById('charPreview');
+  const noImg = document.getElementById('charNoImg');
+  if (img) {
+    prev.src = '/api/storyboard/preview?file=' + encodeURIComponent(img) + '&t=' + Date.now();
+    prev.style.display = ''; noImg.style.display = 'none';
+  } else {
+    prev.style.display = 'none'; noImg.style.display = '';
+  }
+  document.getElementById('charMsg').textContent = '';
+  document.getElementById('charModal').className = 'modal-overlay open';
+  refreshCharStatus();
+}
+
+function closeCharModal() {
+  document.getElementById('charModal').className = 'modal-overlay';
+}
+
+function refreshCharStatus() {
+  const data = state || {};
+  const st = (data.character_step && data.character_step.status) || 'pending';
+  document.getElementById('charStatus').textContent = 'Status: ' + st +
+    (data.character_image ? ' · reference ready' : '');
+}
+
+async function genCharacter(useRef) {
+  const desc = document.getElementById('charDesc').value.trim();
+  document.getElementById('charMsg').textContent = useRef ? 'Loading…' : 'Generating…';
+  try {
+    const r = await fetch('/api/storyboard/character', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ use_reference: !!useRef, description: desc || null }),
+    });
+    if (!r.ok) { const e = await r.json(); document.getElementById('charMsg').textContent = e.detail || 'Error'; return; }
+    schedulePoll(500);
+  } catch(e) { document.getElementById('charMsg').textContent = String(e); }
+}
+
+async function saveCharDesc() {
+  const desc = document.getElementById('charDesc').value;
+  try {
+    const r = await fetch('/api/storyboard/character/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ description: desc, save_as_reference: false }),
+    });
+    if (r.ok) document.getElementById('charMsg').textContent = '✓ Description saved';
+  } catch(e) {}
+}
+
+async function saveCharAsRef() {
+  const desc = document.getElementById('charDesc').value;
+  try {
+    const r = await fetch('/api/storyboard/character/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ description: desc, save_as_reference: true }),
+    });
+    if (r.ok) document.getElementById('charMsg').textContent = '✓ Saved as reusable reference';
+  } catch(e) {}
 }
 
 async function saveScript() {

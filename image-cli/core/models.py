@@ -104,6 +104,10 @@ class ImageGenRequest:
     seed: int | None = None
     init_image: Image.Image | None = None
     strength: float | None = None
+    # Reference image(s) for subject/character consistency. The engine keeps the
+    # subject of the reference and places it into the new scene. Supports up to 4
+    # references (indexed 0..3) — referenced in the prompt as "image 0", etc.
+    reference_images: list[Image.Image] | None = None
     output_format: str = "PNG"
     engine: str | None = None
 
@@ -117,6 +121,7 @@ class ImageGenRequest:
             "seed": self.seed,
             "init_image": self.init_image is not None,
             "strength": self.strength,
+            "reference_images": len(self.reference_images or []),
             "output_format": self.output_format,
             "engine": self.engine,
         }

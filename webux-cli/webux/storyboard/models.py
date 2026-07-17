@@ -8,7 +8,7 @@ from typing import Any
 
 SCENE_STEPS = ("gen_transcript", "gen_image_prompt", "gen_audio", "gen_image", "assemble_clip")
 
-GLOBAL_STEPS = ("parse", "transcript", "image_prompt", "audio", "image", "clip", "chapter", "final")
+GLOBAL_STEPS = ("character", "parse", "transcript", "image_prompt", "audio", "image", "clip", "chapter", "final")
 
 # Maps global step name to the scene-level step name it corresponds to (if any)
 GLOBAL_TO_SCENE_STEP: dict[str, str] = {
@@ -159,6 +159,10 @@ class ProjectState:
     final_step: StepState = field(default_factory=StepState)
     final_file: str | None = None
     console_log: list = field(default_factory=list)  # [{t, cmd, output, rc}]
+    # Central character (optional, pre-pipeline step)
+    character_step: StepState = field(default_factory=StepState)
+    character_description: str = ""
+    character_image: str | None = None  # 3/4 reference PNG path in workdir
 
     def log_cmd(self, cmd: str, output: str, rc: int | None) -> None:
         self.console_log.append({"t": time.time(), "cmd": cmd, "output": output[-3000:], "rc": rc})
@@ -174,6 +178,9 @@ class ProjectState:
             "final_step": self.final_step.to_dict(),
             "final_file": self.final_file,
             "console_log": self.console_log,
+            "character_step": self.character_step.to_dict(),
+            "character_description": self.character_description,
+            "character_image": self.character_image,
         }
 
     @classmethod
@@ -186,6 +193,9 @@ class ProjectState:
             final_step=StepState.from_dict(d.get("final_step", {})),
             final_file=d.get("final_file"),
             console_log=d.get("console_log", []),
+            character_step=StepState.from_dict(d.get("character_step", {})),
+            character_description=d.get("character_description", ""),
+            character_image=d.get("character_image"),
         )
 
     def save(self, path: str | Path) -> None:
@@ -223,6 +233,7 @@ class ProjectState:
         """Status per global step name for the sidebar."""
         summary: dict[str, str] = {}
 
+        summary["character"] = self.character_step.status
         summary["parse"] = self.parse_step.status
 
         for gstep, skey in GLOBAL_TO_SCENE_STEP.items():

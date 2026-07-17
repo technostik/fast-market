@@ -23,6 +23,9 @@ All pipeline state lives in `{workdir}/storyboard/state.json`. The file is writt
 ProjectState
   script_text: str
   parse_step: StepState
+  character_step: StepState        # optional pre-pipeline step
+  character_description: str        # reused in every scene image prompt ({character})
+  character_image: str | None      # 3/4 reference PNG in workdir
   chapters[]:
     Chapter
       scenes[]:
@@ -49,6 +52,7 @@ StepState fields:
 
 | Global step | Scene-level key | Tool invoked |
 |---|---|---|
+| character | — (optional, pre-pipeline) | `prompt apply storyboard-character content=@script.txt` → description, then `image generate` (3/4 portrait) → `character.png`. Skipped unless `character_enabled` in config. |
 | parse | — | `prompt apply <template> --format text content=@script.txt` |
 | transcript | gen_transcript | `prompt apply <template> --format text content=@description.txt` |
 | image_prompt | gen_image_prompt | `prompt apply <template> --format text content=@image_prompt_input.txt` |

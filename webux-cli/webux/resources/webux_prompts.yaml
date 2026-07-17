@@ -449,6 +449,37 @@ prompts:
   max_tokens: 2048
   model_provider: ''
   model_name: ''
+- name: storyboard-character
+  description: Génère la description d'un personnage central cohérent à partir d'un script (pour référence d'image)
+  content: 'You are a character designer for a narrated video. Read the full script
+    below and design ONE central character who will appear throughout the story.
+
+
+    Rules:
+    - Pick the single most natural protagonist / recurring figure suggested by the
+    script (a narrator-avatar, the main subject, or a recurring entity). If the script
+    has no obvious character, invent one that fits the tone.
+    - Write a precise, reusable visual description a text-to-image model can use
+    verbatim in every scene to keep the SAME character: age, gender, build, height,
+    skin tone, hair (color/style/length), face shape, distinguishing features (marks,
+    glasses, clothing, colors, accessories), and default pose hints.
+    - The character will be rendered as a clean 3/4 front-facing portrait reference
+    (head to knees, plain neutral background) \u2014 describe them so they read clearly
+    at that framing.
+    - Keep it to ONE tight paragraph, concrete and visual, no commentary, no JSON.
+
+
+    Output language: {lang}
+
+
+    SCRIPT:
+
+
+    {content}'
+  temperature: 0.7
+  max_tokens: 2048
+  model_provider: ''
+  model_name: ''
 - name: storyboard-scene-image
   description: Génère un prompt d'image FLUX à partir d'une description de scène
   content: 'You are an art director. Given the scene description below, write a detailed
@@ -463,7 +494,14 @@ prompts:
 
     SCENE DESCRIPTION:
 
-    {content}'
+    {content}
+
+
+    CENTRAL CHARACTER (must appear in this scene, integrated naturally into the
+    action and setting \u2014 as the protagonist or any fitting figure; keep them
+    visually consistent with this exact description across every scene):
+
+    {character}'
   temperature: 0.7
   max_tokens: 2048
   model_provider: ''

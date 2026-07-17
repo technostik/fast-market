@@ -41,6 +41,11 @@ class ImageGenEngine:
                 f"Engine {engine_name} does not support img2img (init_image)"
             )
 
+        if request.reference_images and not plugin.supports_reference_image():
+            raise ValueError(
+                f"Engine {engine_name} does not support reference-image consistency"
+            )
+
         if not plugin.supports_seeds() and request.seed is not None:
             raise ValueError(f"Engine {engine_name} does not support seeds")
 
@@ -59,6 +64,7 @@ class ImageGenEngine:
             seed=seed,
             init_image=request.init_image,
             strength=request.strength,
+            reference_images=request.reference_images,
             output_format=request.output_format,
             engine=engine_name,
         )

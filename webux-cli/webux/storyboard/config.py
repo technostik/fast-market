@@ -10,6 +10,7 @@ DEFAULT_PROMPT_NAMES = {
     "story_breakdown": "storyboard-breakdown",
     "scene_transcript": "storyboard-scene-transcript",
     "scene_image_prompt": "storyboard-scene-image",
+    "character": "storyboard-character",
 }
 
 
@@ -35,6 +36,14 @@ def load_storyboard_config(migrate: bool = True) -> dict:
     base.setdefault("chapter_range", "2–5")
     base.setdefault("scene_range", "2–5")
     base.setdefault("scene_duration", "15–45 seconds")
+    # Central character (optional, pre-pipeline step)
+    base.setdefault("character_enabled", False)
+    base.setdefault("character_use_reference", False)   # reuse stored reference from config
+    base.setdefault("character_style", "realist")       # cartoon | realist | (free text below)
+    base.setdefault("character_style_free", "")
+    base.setdefault("character_reference_image", None)   # stored path for cross-story reuse
+    base.setdefault("character_reference_description", "")  # stored description for reuse
+    base.setdefault("character_strength", 0.35)         # reference weight (local flux2 img2img)
     prompts = base.setdefault("prompts", {})
     overrides = base.setdefault("prompt_overrides", {})
     migrated = False
@@ -66,6 +75,9 @@ def save_storyboard_config(updates: dict) -> None:
         "chapter_transition", "chapter_transition_duration",
         "chapter_range", "scene_range", "scene_duration", "prompts",
         "prompt_overrides",
+        "character_enabled", "character_use_reference", "character_style",
+        "character_style_free", "character_reference_image",
+        "character_reference_description", "character_strength",
     }
     merged = {k: v for k, v in current.items() if k in storyboard_keys}
     for k, v in updates.items():

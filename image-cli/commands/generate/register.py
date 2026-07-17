@@ -75,6 +75,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Initial image for img2img generation",
     )
     @click.option(
+        "--reference-image",
+        "-R",
+        "reference_images",
+        type=click.Path(exists=True),
+        multiple=True,
+        help="Reference image for subject/character consistency (up to 4: image 0..3). "
+             "The subject of the reference is kept and placed into the new scene. "
+             "Reference it in the prompt as 'image 0', 'image 1', etc.",
+    )
+    @click.option(
         "--keep-original-size",
         is_flag=True,
         default=False,
@@ -179,6 +189,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         init_image,
         keep_original_size,
         strength,
+        reference_images,
         output_format,
         output_dir,
         fmt,
@@ -224,6 +235,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
             else:
                 uploaded_image = uploaded_image.resize((actual_width, actual_height))
 
+        # Reference images for subject consistency. Loaded and downscaled to <512px
+        # on the longest side (required by some engines, e.g. Cloudflare FLUX.2
+        # Klein). Up to 4 references are supported (indexed 0..3 in the prompt).
+        ref_images: list[Image.Image] | None = None
+        if reference_images:
+            ref_images = []
+            for ri in reference_images[:4]:
+                im = Image.open(ri).convert("RGB")
+                max_side = max(im.width, im.height)
+                if max_side > 512:
+                    scale = 511 / max_side
+                    im = im.resize((max(1, int(im.width * scale)), max(1, int(im.height * scale))))
+                ref_images.append(im)
+
         request = ImageGenRequest(
             prompt=prompt,
             width=actual_width,
@@ -237,6 +262,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             seed=seed,
             init_image=uploaded_image,
             strength=strength,
+            reference_images=ref_images,
             output_format=output_format or config.default_output_format,
             engine=actual_engine,
         )
