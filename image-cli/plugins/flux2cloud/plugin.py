@@ -75,10 +75,16 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
             "steps": str(request.num_inference_steps),
         }
         # Reference images (subject/character consistency). Up to 4, sent as
-        # input_image_0..3. They are already downscaled to <512px by the caller.
+        # input_image_0..3. The Cloudflare FLUX.2 Klein API requires every
+        # reference to be strictly smaller than 512x512; downscale defensively.
         files: dict[str, bytes] = {}
         for idx, ref in enumerate((request.reference_images or [])[:4]):
             import io as _io
+            if max(ref.width, ref.height) >= 512:
+                scale = 511 / max(ref.width, ref.height)
+                ref = ref.resize(
+                    (max(1, int(ref.width * scale)), max(1, int(ref.height * scale)))
+                )
             buf = _io.BytesIO()
             ref.save(buf, format="PNG")
             files[f"input_image_{idx}"] = buf.getvalue()

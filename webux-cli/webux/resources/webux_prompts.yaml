@@ -509,12 +509,15 @@ prompts:
 - name: storyboard-scene-image-character
   description: Génère un prompt d'image FLUX intégrant le personnage central (référence fournie)
   content: 'You are an art director. Given the scene description below, write a detailed
-    image generation prompt suitable for FLUX image generation that features the
-    CENTRAL CHARACTER as the main subject. The prompt should describe the visual
-    elements, mood, lighting, and composition, and must keep the character
-    visually consistent with the provided reference image and exact description
-    across every scene. Return ONLY the image prompt text, no explanations. The
-    image must contain no text, no words, no letters, no logos, and no watermarks.
+    image generation prompt suitable for FLUX image generation. A reference image
+    of the character is supplied as "image 0" (index 0). The character from image
+    0 must appear in the scene as the main subject, naturally integrated into the
+    action and setting, keeping them visually identical to image 0. Do NOT describe
+    or re-describe the character''s appearance, clothing, or features \u2014 refer
+    to "image 0" / "the character" and focus the prompt on the SCENE: environment,
+    mood, lighting, composition, camera angle, and what the character is doing there.
+    Return ONLY the image prompt text, no explanations. The image must contain no
+    text, no words, no letters, no logos, and no watermarks.
 
 
     Visual style: {image_style}
@@ -525,10 +528,8 @@ prompts:
     {content}
 
 
-    CENTRAL CHARACTER (main subject \u2014 integrate them naturally into the action
-    and setting, keeping their appearance, clothing, and features strictly
-    consistent with the reference image and this exact description across every
-    scene):
+    CHARACTER IDENTITY (reference image 0 is supplied \u2014 refer to "image 0",
+    do not re-describe):
 
     {character}'
   temperature: 0.7

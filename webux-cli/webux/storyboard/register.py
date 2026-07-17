@@ -526,6 +526,7 @@ video.fmt-vid { max-width: 480px; max-height: 270px; border-radius: 4px; border:
 .matrix-tbl tr:hover td { background: var(--bg2); }
 .matrix-col-scene { width: 140px; }
 .matrix-col-image { width: 210px; }
+.matrix-col-prompt { width: auto; }
 .matrix-col-audio { width: 200px; }
 .matrix-col-video { width: 210px; }
 .matrix-scene-chapter { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; }
@@ -561,8 +562,11 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 .modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ── Error banner ── */
-.error-banner { display: none; background: var(--red); color: #fff; padding: 6px 12px; font-size: 12px; font-weight: 600; flex-shrink: 0; }
-.error-banner.visible { display: block; }
+.error-banner { display: none; background: var(--red); color: #fff; padding: 6px 12px; font-size: 12px; font-weight: 600; flex-shrink: 0; align-items: center; gap: 10px; }
+.error-banner.visible { display: flex; }
+.error-banner #errorBannerMsg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.error-banner-close { cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; opacity: .85; }
+.error-banner-close:hover { opacity: 1; }
 
 /* ── Console panel ── */
 .console-panel { flex: 0 0 180px; background: var(--bg3); border-top: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
@@ -733,7 +737,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 </div>
 
 <!-- Error banner -->
-<div class="error-banner" id="errorBanner">⚠ Pipeline error — expand a step below to see the output</div>
+<div class="error-banner" id="errorBanner"><span id="errorBannerMsg">⚠ Pipeline error — expand a step below to see the output</span><span class="error-banner-close" onclick="dismissErrorBanner()">×</span></div>
 
 <!-- Main layout -->
 <div class="main-layout">
@@ -1270,15 +1274,15 @@ function renderFormatView(chapters) {
           ${canEdit ? `<div><button class="btn-sm btn-primary" onclick="saveTranscript('${sc.id}')">Save</button></div>` : ''}`;
       } else if (formatTab === 'audio') {
         inner = sc.audio_file
-          ? `<audio class="fmt-audio" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.audio_file)}"></audio>`
+          ? `<audio class="fmt-audio" controls src="${mediaUrl(sc.audio_file, _stepEnd(sc, 'gen_audio'))}"></audio>`
           : `<span style="color:var(--text-dim);font-size:11px">Not yet generated</span>`;
       } else if (formatTab === 'image') {
         inner = sc.image_file
-          ? `<img class="fmt-img" src="/api/storyboard/preview?file=${encodeURIComponent(sc.image_file)}" onclick="window.open(this.src)" />`
+          ? `<img class="fmt-img" src="${mediaUrl(sc.image_file, _stepEnd(sc, 'gen_image'))}" onclick="window.open(this.src)" />`
           : `<span style="color:var(--text-dim);font-size:11px">Not yet generated</span>`;
       } else if (formatTab === 'clip') {
         inner = sc.clip_file
-          ? `<video class="fmt-vid" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.clip_file)}"></video>`
+          ? `<video class="fmt-vid" controls src="${mediaUrl(sc.clip_file, _stepEnd(sc, 'assemble_clip'))}"></video>`
           : `<span style="color:var(--text-dim);font-size:11px">Not yet generated</span>`;
       }
       blocks.push(`<div class="format-scene-block">
@@ -1303,17 +1307,20 @@ function renderMatrixView(chapters) {
         return `<span class="dot ${st === 'done' ? 'done' : st === 'running' ? 'running' : st === 'error' ? 'error' : st === 'skipped' ? 'skipped' : ''}" title="${STEP_LABELS[k]||k}: ${st}"></span>`;
       }).join('');
       const imgCell = sc.image_file
-        ? `<img class="matrix-img" src="/api/storyboard/preview?file=${encodeURIComponent(sc.image_file)}" onclick="window.open(this.src)" loading="lazy" />`
+        ? `<img class="matrix-img" src="${mediaUrl(sc.image_file, _stepEnd(sc, 'gen_image'))}" onclick="window.open(this.src)" loading="lazy" />`
         : `<span class="matrix-empty">—</span>`;
       const audioCell = sc.audio_file
-        ? `<audio class="matrix-audio" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.audio_file)}"></audio>`
+        ? `<audio class="matrix-audio" controls src="${mediaUrl(sc.audio_file, _stepEnd(sc, 'gen_audio'))}"></audio>`
         : `<span class="matrix-empty">—</span>`;
       const videoCell = sc.clip_file
-        ? `<video class="matrix-video" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.clip_file)}"></video>`
+        ? `<video class="matrix-video" controls src="${mediaUrl(sc.clip_file, _stepEnd(sc, 'assemble_clip'))}"></video>`
         : `<span class="matrix-empty">—</span>`;
       const textCell = sc.transcript
         ? `<div class="matrix-full-text">${esc(sc.transcript)}</div>`
         : `<span class="matrix-empty">Not yet generated</span>`;
+      const promptCell = sc.image_prompt
+        ? `<div class="matrix-full-text">${esc(sc.image_prompt)}</div>`
+        : `<span class="matrix-empty">—</span>`;
       rows.push(`<tr>
         <td class="matrix-col-scene">
           <div class="matrix-scene-chapter">${esc(ch.title || ch.id)}</div>
@@ -1321,6 +1328,7 @@ function renderMatrixView(chapters) {
           <div class="matrix-scene-dots">${dots}</div>
         </td>
         <td>${textCell}</td>
+        <td class="matrix-col-prompt">${promptCell}</td>
         <td class="matrix-col-image">${imgCell}</td>
         <td class="matrix-col-audio">${audioCell}</td>
         <td class="matrix-col-video">${videoCell}</td>
@@ -1335,6 +1343,7 @@ function renderMatrixView(chapters) {
     <thead><tr>
       <th class="matrix-col-scene">Scene</th>
       <th>Text</th>
+      <th class="matrix-col-prompt">Image Prompt</th>
       <th class="matrix-col-image">Image</th>
       <th class="matrix-col-audio">Audio</th>
       <th class="matrix-col-video">Video</th>
@@ -1642,13 +1651,13 @@ function renderDetail(sc, ch) {
   }).join('');
 
   const audioHtml = sc.audio_file
-    ? `<div><div class="detail-label">Audio</div><audio controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.audio_file)}"></audio></div>`
+    ? `<div><div class="detail-label">Audio</div><audio controls src="${mediaUrl(sc.audio_file, _stepEnd(sc, 'gen_audio'))}"></audio></div>`
     : '';
   const imageHtml = sc.image_file
-    ? `<div><div class="detail-label">Image</div><img class="scene-img" src="/api/storyboard/preview?file=${encodeURIComponent(sc.image_file)}" onclick="window.open(this.src)" /></div>`
+    ? `<div><div class="detail-label">Image</div><img class="scene-img" src="${mediaUrl(sc.image_file, _stepEnd(sc, 'gen_image'))}" onclick="window.open(this.src)" /></div>`
     : '';
   const videoHtml = sc.clip_file
-    ? `<div><div class="detail-label">Clip</div><video class="scene-vid" controls src="/api/storyboard/preview?file=${encodeURIComponent(sc.clip_file)}"></video></div>`
+    ? `<div><div class="detail-label">Clip</div><video class="scene-vid" controls src="${mediaUrl(sc.clip_file, _stepEnd(sc, 'assemble_clip'))}"></video></div>`
     : '';
 
   const canEdit = state && !state.running;
@@ -2039,7 +2048,42 @@ function clearConsoleDisplay() {
 function updateErrorBanner(data) {
   const gs = data.global_steps || {};
   const hasError = Object.values(gs).some(s => s === 'error');
-  document.getElementById('errorBanner').className = 'error-banner' + (hasError ? ' visible' : '');
+  // A new run clears any previous dismissal so fresh errors show again.
+  if (data.running) _errorDismissed = false;
+  const banner = document.getElementById('errorBanner');
+  if (hasError && !_errorDismissed) {
+    // Find the actual error message from the failing step.
+    let msg = 'Pipeline error — expand a step below to see the output';
+    const candidates = [];
+    if (data.character_step) candidates.push(data.character_step);
+    if (data.parse_step) candidates.push(data.parse_step);
+    if (data.final_step) candidates.push(data.final_step);
+    for (const ch of (data.chapters || [])) {
+      if (ch.merge_step) candidates.push(ch.merge_step);
+      for (const sc of (ch.scenes || [])) {
+        for (const k in (sc.steps || {})) candidates.push(sc.steps[k]);
+      }
+    }
+    const errored = candidates.find(s => s && s.status === 'error' && s.output);
+    if (errored) {
+      const raw = errored.output.trim();
+      // Keep the most informative tail (usually the exception / last lines).
+      const lines = raw.split('\n').filter(l => l.trim());
+      const tail = lines.slice(-3).join(' · ');
+      msg = '⚠ ' + tail;
+    }
+    document.getElementById('errorBannerMsg').textContent = msg;
+    banner.className = 'error-banner visible';
+  } else if (!hasError) {
+    _errorDismissed = false;
+    banner.className = 'error-banner';
+  }
+}
+
+let _errorDismissed = false;
+function dismissErrorBanner() {
+  _errorDismissed = true;
+  document.getElementById('errorBanner').className = 'error-banner';
 }
 
 // ── Config toggle ─────────────────────────────────────────────────────────────
@@ -2060,6 +2104,16 @@ function findChapterForScene(chapters, id) {
 }
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+// Build a preview URL with a cache-buster so regenerated media always refetches.
+// `endTime` is the step end_time (changes whenever the file is regenerated).
+function mediaUrl(file, endTime) {
+  const t = Math.floor(endTime || 0);
+  return '/api/storyboard/preview?file=' + encodeURIComponent(file) + (t ? '&t=' + t : '');
+}
+function _stepEnd(sc, key) {
+  const st = sc && sc.steps && sc.steps[key];
+  return st ? (st.end_time || 0) : 0;
 }
 
 boot();

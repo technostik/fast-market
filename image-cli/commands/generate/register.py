@@ -258,7 +258,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             for ri in reference_images[:4]:
                 im = Image.open(ri).convert("RGB")
                 max_side = max(im.width, im.height)
-                if max_side > 512:
+                # Cloudflare FLUX.2 Klein API requires every reference image to be
+                # strictly smaller than 512x512. Downscale the longest side to 511.
+                if max_side >= 512:
                     scale = 511 / max_side
                     im = im.resize((max(1, int(im.width * scale)), max(1, int(im.height * scale))))
                 ref_images.append(im)
