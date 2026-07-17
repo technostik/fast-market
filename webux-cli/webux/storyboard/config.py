@@ -10,6 +10,7 @@ DEFAULT_PROMPT_NAMES = {
     "story_breakdown": "storyboard-breakdown",
     "scene_transcript": "storyboard-scene-transcript",
     "scene_image_prompt": "storyboard-scene-image",
+    "scene_image_prompt_with_character": "storyboard-scene-image-character",
     "character": "storyboard-character",
 }
 

@@ -306,8 +306,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     offset_pct=overlay_offset if overlay_offset is not None else config.overlay.offset_pct,
                 )
 
-                from PIL import Image
-
                 final_image = apply_text_overlay(
                     Image.open(result.path),
                     overlay_cfg,

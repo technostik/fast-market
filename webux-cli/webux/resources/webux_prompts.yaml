@@ -506,6 +506,35 @@ prompts:
   max_tokens: 2048
   model_provider: ''
   model_name: ''
+- name: storyboard-scene-image-character
+  description: Génère un prompt d'image FLUX intégrant le personnage central (référence fournie)
+  content: 'You are an art director. Given the scene description below, write a detailed
+    image generation prompt suitable for FLUX image generation that features the
+    CENTRAL CHARACTER as the main subject. The prompt should describe the visual
+    elements, mood, lighting, and composition, and must keep the character
+    visually consistent with the provided reference image and exact description
+    across every scene. Return ONLY the image prompt text, no explanations. The
+    image must contain no text, no words, no letters, no logos, and no watermarks.
+
+
+    Visual style: {image_style}
+
+
+    SCENE DESCRIPTION:
+
+    {content}
+
+
+    CENTRAL CHARACTER (main subject \u2014 integrate them naturally into the action
+    and setting, keeping their appearance, clothing, and features strictly
+    consistent with the reference image and this exact description across every
+    scene):
+
+    {character}'
+  temperature: 0.7
+  max_tokens: 2048
+  model_provider: ''
+  model_name: ''
 - name: youtube-thumbnail
   description: Génère un prompt d'image pour la miniature YouTube en illustrant la tension narrative centrale (pas la transcription)
   content: 'À partir de la transcription ci-dessous, identifie la SINGULIÈRE tension ou

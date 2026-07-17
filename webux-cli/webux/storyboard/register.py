@@ -231,6 +231,10 @@ async def generate_character(req: CharacterRequest):
             reedit_description=req.description,
             force_description=req.force_description,
         )
+        # A character was explicitly generated (or loaded) → it must be used
+        # automatically in scene image generation.
+        if state.character_image and Path(state.character_image).exists():
+            save_storyboard_config({"character_enabled": True})
         # Persist as a reusable reference in config if requested.
         if req.save_as_reference and state.character_image and Path(state.character_image).exists():
             save_storyboard_config({
@@ -286,6 +290,9 @@ async def save_character(req: CharacterRequest):
             "character_reference_image": state.character_image,
             "character_reference_description": state.character_description,
         })
+    # A usable character exists in this project → enable it for scene generation.
+    if state.character_image and Path(state.character_image).exists():
+        save_storyboard_config({"character_enabled": True})
     state.save(sp)
     return {"ok": True}
 
@@ -625,6 +632,16 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
   overflow: auto;
 }
 
+/* ── Character modal status ── */
+.char-banner { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; background: var(--bg-2); border: 1px solid var(--border); }
+.char-banner .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--text-dim); border-top-color: var(--accent); border-radius: 50%; animation: charspin .8s linear infinite; }
+@keyframes charspin { to { transform: rotate(360deg); } }
+.char-banner.running { border-color: var(--accent); color: var(--accent); }
+.char-banner.done { border-color: var(--green); color: var(--green); }
+.char-banner.pending { color: var(--text-dim); }
+.char-banner .elapsed { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 11px; }
+.char-error { font-size: 11px; line-height: 1.4; white-space: pre-wrap; color: var(--red); background: rgba(243,139,168,.08); border: 1px solid var(--red); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; max-height: 200px; overflow: auto; }
+
 /* ── Init overlay ── */
 .init-overlay { position: absolute; inset: 0; background: rgba(17,17,27,.9); display: flex; align-items: center; justify-content: center; z-index: 10; }
 .init-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 24px 28px; max-width: 540px; width: 94%; text-align: center; }
@@ -651,7 +668,8 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 <div class="modal-overlay" id="charModal" onclick="if(event.target===this)closeCharModal()">
   <div class="modal-card" style="max-width:760px">
     <div class="modal-title">🧍 Central Character</div>
-    <div id="charStatus" style="font-size:11px;color:var(--text-dim);margin-bottom:8px"></div>
+    <div id="charBanner" class="char-banner" style="display:none"></div>
+    <div id="charError" class="char-error" style="display:none"></div>
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div style="flex:0 0 240px">
         <img id="charPreview" src="" style="width:100%;max-width:240px;border-radius:6px;border:1px solid var(--border);display:none" />
@@ -984,6 +1002,11 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <select id="cfgPromptImageSel" class="prompt-sel" onchange="onPromptSelect('Image')"></select>
         <textarea class="prompt-area" id="cfgPromptImage" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
       </div>
+      <div class="prompt-field">
+        <div class="prompt-label">Scene Image Prompt (with Character) <span class="prompt-info" id="infoImageChar" data-content="">ⓘ</span></div>
+        <select id="cfgPromptImageCharSel" class="prompt-sel" onchange="onPromptSelect('ImageChar')"></select>
+        <textarea class="prompt-area" id="cfgPromptImageChar" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
+      </div>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;">
       <button class="btn btn-primary" onclick="saveConfig()">Save Config</button>
@@ -1063,12 +1086,15 @@ async function loadConfig() {
     document.getElementById('cfgPromptStorySel').value = p.story_breakdown || 'storyboard-breakdown';
     document.getElementById('cfgPromptTranscriptSel').value = p.scene_transcript || 'storyboard-scene-transcript';
     document.getElementById('cfgPromptImageSel').value = p.scene_image_prompt || 'storyboard-scene-image';
+    document.getElementById('cfgPromptImageCharSel').value = p.scene_image_prompt_with_character || 'storyboard-scene-image-character';
     document.getElementById('cfgPromptStory').value = ov.story_breakdown || '';
     document.getElementById('cfgPromptTranscript').value = ov.scene_transcript || '';
     document.getElementById('cfgPromptImage').value = ov.scene_image_prompt || '';
+    document.getElementById('cfgPromptImageChar').value = ov.scene_image_prompt_with_character || '';
     refreshPromptPreview('Story');
     refreshPromptPreview('Transcript');
     refreshPromptPreview('Image');
+    refreshPromptPreview('ImageChar');
   } catch(e) { console.warn('loadConfig error', e); }
 }
 
@@ -1080,7 +1106,7 @@ async function populateStoryPrompts() {
     if (!r.ok) return;
     const data = await r.json();
     const names = data.prompts || [];
-    for (const key of ['Story', 'Transcript', 'Image']) {
+    for (const key of ['Story', 'Transcript', 'Image', 'ImageChar']) {
       const sel = document.getElementById('cfgPrompt' + key + 'Sel');
       if (!sel) continue;
       const cur = sel.value;
@@ -1144,11 +1170,13 @@ async function saveConfig() {
       story_breakdown: document.getElementById('cfgPromptStorySel').value,
       scene_transcript: document.getElementById('cfgPromptTranscriptSel').value,
       scene_image_prompt: document.getElementById('cfgPromptImageSel').value,
+      scene_image_prompt_with_character: document.getElementById('cfgPromptImageCharSel').value,
     },
     prompt_overrides: {
       story_breakdown: document.getElementById('cfgPromptStory').value,
       scene_transcript: document.getElementById('cfgPromptTranscript').value,
       scene_image_prompt: document.getElementById('cfgPromptImage').value,
+      scene_image_prompt_with_character: document.getElementById('cfgPromptImageChar').value,
     }
   };
   try {
@@ -1824,56 +1852,120 @@ function showCharModal() {
   document.getElementById('charLog').textContent = (data.character_step && data.character_step.output) || '';
   document.getElementById('charModal').className = 'modal-overlay open';
   refreshCharStatus();
+  startCharTicker();
+}
+
+let _charTicker = null;
+function startCharTicker() {
+  if (_charTicker) return;
+  _charTicker = setInterval(() => {
+    const el = document.getElementById('charElapsed');
+    if (!el) { stopCharTicker(); return; }
+    const cs = (state && state.character_step) || {};
+    if (cs.status === 'running') el.textContent = _fmtElapsed(_charElapsedSecs(cs));
+  }, 1000);
+}
+function stopCharTicker() {
+  if (_charTicker) { clearInterval(_charTicker); _charTicker = null; }
 }
 
 function closeCharModal() {
   document.getElementById('charModal').className = 'modal-overlay';
+  stopCharTicker();
 }
 
+const _charPhaseMsg = {
+  'Generating description from script…': 'Generating description from script',
+  'Generating image…': 'Generating character image',
+  'Loading reference…': 'Loading stored reference',
+};
+
+function _charElapsedSecs(cs) {
+  if (!cs || !cs.start_time) return 0;
+  const end = cs.end_time || (cs.status === 'running' ? (Date.now()/1000) : cs.start_time);
+  return Math.max(0, Math.round(end - cs.start_time));
+}
+
+function _fmtElapsed(secs) {
+  if (secs < 60) return secs + 's';
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return m + 'm' + (s ? ' ' + s + 's' : '');
+}
+
+// Central modal UI refresh — driven by poll data, not by the click handler.
 function refreshCharStatus() {
   const data = state || {};
   const cs = data.character_step || {};
   const st = cs.status || 'pending';
-  const flags = [];
-  if (data.character_description) flags.push('description ready');
-  if (data.character_image) flags.push('image ready');
-  let elapsed = '';
-  if (cs.start_time) {
-    const end = cs.end_time || (st === 'running' ? (Date.now()/1000) : cs.start_time);
-    const secs = Math.max(0, Math.round(end - cs.start_time));
-    elapsed = ` · ${secs}s`;
+  const banner = document.getElementById('charBanner');
+  const errBox = document.getElementById('charError');
+
+  // Banner: show what's happening + live elapsed while running.
+  let msg;
+  if (st === 'running') {
+    msg = cs.output && cs.output.trim() ? cs.output.trim().split('\n')[0].slice(0, 80)
+                                         : 'Working…';
+    msg = _charPhaseMsg[msg] || msg;
+  } else if (st === 'done') {
+    msg = '✓ Done' + (data.character_image ? ' — character ready' : ' — description ready');
+  } else if (st === 'error') {
+    msg = '✗ Error';
+  } else {
+    msg = data.character_image ? 'Character ready' : (data.character_description ? 'Description ready' : 'Idle');
   }
-  let statusTxt = 'Status: ' + st + elapsed;
-  if (flags.length) statusTxt += ' · ' + flags.join(' · ');
-  document.getElementById('charStatus').textContent = statusTxt;
+  const elapsed = (st === 'running' || st === 'done' || st === 'error') ? _charElapsedSecs(cs) : 0;
+  banner.className = 'char-banner ' + (st === 'running' ? 'running' : st === 'done' ? 'done' : st === 'error' ? 'running' : 'pending');
+  banner.style.display = (st === 'running' || st === 'done' || st === 'error' || data.character_image || data.character_description) ? '' : 'none';
+  banner.innerHTML = (st === 'running' ? '<span class="spin"></span>' : '') +
+    '<span>' + esc(msg) + '</span>' +
+    (elapsed ? '<span class="elapsed" id="charElapsed">' + _fmtElapsed(elapsed) + '</span>' : '');
+
+  // Error box: full output on failure.
+  if (st === 'error' && cs.output) {
+    errBox.style.display = '';
+    errBox.textContent = cs.output.trim();
+  } else {
+    errBox.style.display = 'none';
+  }
 }
 
 async function genCharacter(useRef) {
   const desc = document.getElementById('charDesc').value.trim();
-  document.getElementById('charMsg').textContent = useRef ? 'Loading reference…' : 'Generating image…';
   document.getElementById('charLog').textContent = '';
+  document.getElementById('charMsg').textContent = '';
   try {
     const r = await fetch('/api/storyboard/character', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ use_reference: !!useRef, description: desc || null }),
     });
-    if (!r.ok) { const e = await r.json(); document.getElementById('charMsg').textContent = e.detail || 'Error'; return; }
+    if (!r.ok) { const e = await r.json().catch(()=>({})); showCharError(e.detail || 'Error starting generation'); return; }
+    // Optimistically flip the banner to running so the user sees immediate feedback.
+    if (state && state.character_step) { state.character_step.status = 'running'; }
+    refreshCharStatus();
     schedulePoll(500);
-  } catch(e) { document.getElementById('charMsg').textContent = String(e); }
+  } catch(e) { showCharError(String(e)); }
 }
 
 async function genCharacterDescribe() {
   const desc = document.getElementById('charDesc').value.trim();
-  document.getElementById('charMsg').textContent = 'Generating description from script…';
   document.getElementById('charLog').textContent = '';
+  document.getElementById('charMsg').textContent = '';
   try {
     const r = await fetch('/api/storyboard/character/describe', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ description: desc || null }),
     });
-    if (!r.ok) { const e = await r.json(); document.getElementById('charMsg').textContent = e.detail || 'Error'; return; }
+    if (!r.ok) { const e = await r.json().catch(()=>({})); showCharError(e.detail || 'Error starting generation'); return; }
+    if (state && state.character_step) { state.character_step.status = 'running'; }
+    refreshCharStatus();
     schedulePoll(500);
-  } catch(e) { document.getElementById('charMsg').textContent = String(e); }
+  } catch(e) { showCharError(String(e)); }
+}
+
+function showCharError(text) {
+  const errBox = document.getElementById('charError');
+  errBox.style.display = '';
+  errBox.textContent = text;
 }
 
 async function saveCharDesc() {

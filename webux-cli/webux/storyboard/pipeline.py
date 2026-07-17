@@ -13,6 +13,7 @@ from .models import (
     ProjectState, Chapter, Scene, StepState,
     SCENE_STEPS, GLOBAL_STEPS, GLOBAL_TO_SCENE_STEP,
 )
+from .config import load_storyboard_config, save_storyboard_config
 
 # ── In-memory job tracker ─────────────────────────────────────────────────────
 
@@ -226,6 +227,13 @@ async def _run_pipeline(
 ) -> None:
     """Run the full pipeline or a partial re-run."""
 
+    # Self-heal: if a generated character already exists in this project, make
+    # sure the config flag is on so scene generation uses it (covers characters
+    # generated before this auto-enable logic existed).
+    if state.character_image and Path(state.character_image).exists() and not config.get("character_enabled"):
+        save_storyboard_config({"character_enabled": True})
+        config["character_enabled"] = True
+
     # Single-scene mode: rerunStep (only_step) or rerunScene (only_scene or cascade)
     if scene_id and from_step:
         sc = _find_scene(state, scene_id)
@@ -271,6 +279,8 @@ async def _run_pipeline(
                 state, state_path, config,
                 use_reference=bool(config.get("character_use_reference")),
             )
+            if state.character_image and Path(state.character_image).exists():
+                save_storyboard_config({"character_enabled": True})
             return
         if only_global_step == "parse":
             state.parse_step = StepState()
@@ -344,6 +354,8 @@ async def _run_pipeline(
             )
             if state.character_step.status != "done":
                 return
+            if state.character_image and Path(state.character_image).exists():
+                save_storyboard_config({"character_enabled": True})
 
     # Stage 1: parse
     if from_idx <= GLOBAL_STEPS.index("parse"):
@@ -693,12 +705,18 @@ async def _gen_image_prompt(
     input_file = scene_dir / "image_prompt_input.txt"
     input_file.write_text(content, encoding="utf-8")
 
+    # Choose the image-prompt template based on whether a character is in play.
+    # When a central character is active, use the dedicated "with character" prompt
+    # (designed to incorporate the reference image); otherwise the plain one.
+    char_active = bool(config.get("character_enabled") and state.character_description)
+    prompt_key = "scene_image_prompt_with_character" if char_active else "scene_image_prompt"
+
     # Inject the central character description as the {character} placeholder when enabled.
     subs = {}
-    if config.get("character_enabled") and state.character_description:
+    if char_active:
         subs["character"] = state.character_description
 
-    rc = await _apply_story_prompt(step, state, config, "scene_image_prompt", input_file, subs)
+    rc = await _apply_story_prompt(step, state, config, prompt_key, input_file, subs)
     if rc != 0:
         step.status = "error"
         step.end_time = time.time()
@@ -795,13 +813,13 @@ async def _gen_image(
 
     # Inject the central character reference image for subject consistency.
     if config.get("character_enabled") and state.character_image and Path(state.character_image).exists():
-        # The reference must be referenced in the prompt (cloud "image 0" style).
-        # The scene image prompt already embeds the character description; we also
-        # append an explicit reference instruction so engines that use the image
-        # know to keep the subject of the reference.
+        # The scene image prompt (the dedicated "with character" template) already
+        # embeds the character description; we also pass the reference image so the
+        # engine keeps the subject visually consistent with the character sheet.
         cmd.extend(["--reference-image", state.character_image])
         if config.get("character_strength") is not None:
             cmd.extend(["--strength", str(config.get("character_strength"))])
+        step.output += f"\n[character] using reference image: {state.character_image} (strength={config.get('character_strength')})\n"
 
     rc = await _run(step, *cmd, log_to=state)
     if rc != 0:
