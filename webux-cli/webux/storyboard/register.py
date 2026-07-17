@@ -147,7 +147,13 @@ async def get_state():
     state = _load_state(cfg)
     if state is None:
         return {"initialized": False}
-    return {"initialized": True, **state.to_dict(), "global_steps": state.global_step_summary()}
+    return {
+        "initialized": True,
+        **state.to_dict(),
+        "global_steps": state.global_step_summary(),
+        "character_reference_image": cfg.get("character_reference_image"),
+        "character_reference_description": cfg.get("character_reference_description", ""),
+    }
 
 
 class InitRequest(BaseModel):
@@ -202,6 +208,8 @@ class CharacterRequest(BaseModel):
     use_reference: bool = False        # load from stored config reference
     description: str | None = None     # user-provided/edited description
     save_as_reference: bool = False    # persist result into config for reuse
+    gen_description: bool = False      # generate description only (from script)
+    force_description: bool = False    # regenerate description even if one exists
 
 
 @router.post("/character")
@@ -221,6 +229,7 @@ async def generate_character(req: CharacterRequest):
             state, sp, cfg,
             use_reference=req.use_reference,
             reedit_description=req.description,
+            force_description=req.force_description,
         )
         # Persist as a reusable reference in config if requested.
         if req.save_as_reference and state.character_image and Path(state.character_image).exists():
@@ -228,6 +237,33 @@ async def generate_character(req: CharacterRequest):
                 "character_reference_image": state.character_image,
                 "character_reference_description": state.character_description,
             })
+
+    import asyncio as _asyncio
+    task = _asyncio.create_task(_run_safely(_coro(), state, sp))
+    _set_current_task(task)
+    return {"ok": True, "running": True}
+
+
+@router.post("/character/describe")
+async def describe_character(req: CharacterRequest):
+    """Generate ONLY the character description from the script (no image)."""
+    if is_running():
+        raise HTTPException(status_code=409, detail="Pipeline already running")
+    cfg = load_storyboard_config()
+    state = _load_state(cfg)
+    if state is None:
+        raise HTTPException(status_code=400, detail="Project not initialized — call /init first")
+    sp = _state_path(cfg)
+
+    async def _coro():
+        from .pipeline import _gen_character
+        await _gen_character(
+            state, sp, cfg,
+            use_reference=False,
+            reedit_description=req.description,
+            gen_character_image=False,
+            force_description=req.force_description,
+        )
 
     import asyncio as _asyncio
     task = _asyncio.create_task(_run_safely(_coro(), state, sp))
@@ -620,18 +656,25 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
       <div style="flex:0 0 240px">
         <img id="charPreview" src="" style="width:100%;max-width:240px;border-radius:6px;border:1px solid var(--border);display:none" />
         <div id="charNoImg" style="font-size:11px;color:var(--text-dim);font-style:italic">No character generated yet.</div>
+        <div id="charRefWrap" style="margin-top:10px;display:none">
+          <div class="detail-label" style="font-size:10px">Stored Reference</div>
+          <img id="charRefPreview" src="" style="width:100%;max-width:240px;border-radius:6px;border:1px solid var(--border);margin-top:4px" />
+        </div>
       </div>
       <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:8px">
         <div class="detail-label">Character Description <span style="color:var(--text-dim);font-weight:400;text-transform:none;font-size:10px">— edit to redesign</span></div>
-        <textarea id="charDesc" class="edit-area" style="min-height:160px"></textarea>
+        <textarea id="charDesc" class="edit-area" style="min-height:120px"></textarea>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-sm" onclick="genCharacter(false)">✨ Generate</button>
+          <button class="btn btn-primary btn-sm" onclick="genCharacterDescribe()">📝 Generate Description</button>
+          <button class="btn btn-primary btn-sm" onclick="genCharacter(false)">✨ Generate Image</button>
           <button class="btn btn-neutral btn-sm" onclick="genCharacter(true)">📥 Use Stored Reference</button>
           <button class="btn btn-neutral btn-sm" onclick="saveCharDesc()">💾 Save Description</button>
           <button class="btn btn-neutral btn-sm" onclick="saveCharAsRef()">🔄 Reuse as Reference</button>
           <button class="btn btn-neutral btn-sm" onclick="closeCharModal()">Close</button>
         </div>
         <div id="charMsg" style="font-size:11px;color:var(--green)"></div>
+        <div class="detail-label" style="font-size:10px;margin-top:2px">Log</div>
+        <pre id="charLog" style="font-size:10px;line-height:1.4;color:var(--text-dim);background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:8px;max-height:160px;overflow:auto;white-space:pre-wrap;margin:0"></pre>
       </div>
     </div>
   </div>
@@ -1380,12 +1423,29 @@ function refreshCharModalLive(data) {
   const prev = document.getElementById('charPreview');
   const noImg = document.getElementById('charNoImg');
   const charDesc = document.getElementById('charDesc');
+  const charLog = document.getElementById('charLog');
   if (img) {
     const url = '/api/storyboard/preview?file=' + encodeURIComponent(img) + '&t=' + Math.floor((data.character_step && data.character_step.end_time) || 0);
     if (prev.dataset.src !== url) { prev.dataset.src = url; prev.src = url; prev.style.display = ''; noImg.style.display = 'none'; }
   }
   if (document.activeElement !== charDesc) {
     charDesc.value = data.character_description || '';
+  }
+  // Keep the live log in sync while generating (don't clobber while typing in it).
+  if (charLog && document.activeElement !== charLog) {
+    const out = (data.character_step && data.character_step.output) || '';
+    if (charLog.textContent !== out) charLog.textContent = out;
+    charLog.scrollTop = charLog.scrollHeight;
+  }
+  // Refresh stored reference preview if it appeared.
+  const refWrap = document.getElementById('charRefWrap');
+  const refImg = document.getElementById('charRefPreview');
+  const refSrc = data.character_reference_image;
+  if (refSrc) {
+    if (refImg.dataset.src !== refSrc) { refImg.dataset.src = refSrc; refImg.src = '/api/storyboard/preview?file=' + encodeURIComponent(refSrc) + '&t=' + Date.now(); }
+    refWrap.style.display = '';
+  } else {
+    refWrap.style.display = 'none';
   }
   refreshCharStatus();
 }
@@ -1749,7 +1809,19 @@ function showCharModal() {
   } else {
     prev.style.display = 'none'; noImg.style.display = '';
   }
+  // Live preview of the stored cross-story reference (shown even when the
+  // session has no generated character yet).
+  const refWrap = document.getElementById('charRefWrap');
+  const refImg = document.getElementById('charRefPreview');
+  const refSrc = data.character_reference_image;
+  if (refSrc) {
+    refImg.src = '/api/storyboard/preview?file=' + encodeURIComponent(refSrc) + '&t=' + Date.now();
+    refWrap.style.display = '';
+  } else {
+    refWrap.style.display = 'none';
+  }
   document.getElementById('charMsg').textContent = '';
+  document.getElementById('charLog').textContent = (data.character_step && data.character_step.output) || '';
   document.getElementById('charModal').className = 'modal-overlay open';
   refreshCharStatus();
 }
@@ -1760,18 +1832,44 @@ function closeCharModal() {
 
 function refreshCharStatus() {
   const data = state || {};
-  const st = (data.character_step && data.character_step.status) || 'pending';
-  document.getElementById('charStatus').textContent = 'Status: ' + st +
-    (data.character_image ? ' · reference ready' : '');
+  const cs = data.character_step || {};
+  const st = cs.status || 'pending';
+  const flags = [];
+  if (data.character_description) flags.push('description ready');
+  if (data.character_image) flags.push('image ready');
+  let elapsed = '';
+  if (cs.start_time) {
+    const end = cs.end_time || (st === 'running' ? (Date.now()/1000) : cs.start_time);
+    const secs = Math.max(0, Math.round(end - cs.start_time));
+    elapsed = ` · ${secs}s`;
+  }
+  let statusTxt = 'Status: ' + st + elapsed;
+  if (flags.length) statusTxt += ' · ' + flags.join(' · ');
+  document.getElementById('charStatus').textContent = statusTxt;
 }
 
 async function genCharacter(useRef) {
   const desc = document.getElementById('charDesc').value.trim();
-  document.getElementById('charMsg').textContent = useRef ? 'Loading…' : 'Generating…';
+  document.getElementById('charMsg').textContent = useRef ? 'Loading reference…' : 'Generating image…';
+  document.getElementById('charLog').textContent = '';
   try {
     const r = await fetch('/api/storyboard/character', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ use_reference: !!useRef, description: desc || null }),
+    });
+    if (!r.ok) { const e = await r.json(); document.getElementById('charMsg').textContent = e.detail || 'Error'; return; }
+    schedulePoll(500);
+  } catch(e) { document.getElementById('charMsg').textContent = String(e); }
+}
+
+async function genCharacterDescribe() {
+  const desc = document.getElementById('charDesc').value.trim();
+  document.getElementById('charMsg').textContent = 'Generating description from script…';
+  document.getElementById('charLog').textContent = '';
+  try {
+    const r = await fetch('/api/storyboard/character/describe', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ description: desc || null }),
     });
     if (!r.ok) { const e = await r.json(); document.getElementById('charMsg').textContent = e.detail || 'Error'; return; }
     schedulePoll(500);

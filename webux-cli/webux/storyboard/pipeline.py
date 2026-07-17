@@ -532,13 +532,20 @@ async def _gen_character(
     *,
     use_reference: bool = False,   # load from stored config reference instead of generating
     reedit_description: str | None = None,  # user-provided description override
+    force_description: bool = False,  # regenerate description even if one already exists
+    gen_character_image: bool = True,  # generate the reference image (False = description only)
 ) -> None:
     """Generate (or load) the central character: a 3/4 reference image + description.
 
-    When `use_reference` is True and a stored reference exists in config, it is
-    copied into the current project and the step is marked done without generation.
-    When `reedit_description` is provided, the description is taken from the user
-    and only the image is (re)generated from it.
+    Two phases:
+      1. Description — auto-generated from the script via the character prompt,
+         unless the user supplied one (reedit_description) or one already exists
+         (skipped unless force_description).
+      2. Image — a 3/4 reference portrait generated from the description.
+
+    Either phase can be skipped: `gen_character_image=False` produces only the
+    description; `use_reference=True` loads a stored cross-story reference image
+    and marks the step done without generating anything.
     """
     step = state.character_step
     step.status = "running"
@@ -568,8 +575,10 @@ async def _gen_character(
     # 2. Determine the description (auto from script, or user-provided/edited).
     if reedit_description and reedit_description.strip():
         state.character_description = reedit_description.strip()
-    elif not state.character_description:
+    elif not state.character_description or force_description:
         # Auto-generate the description from the full script via the character prompt.
+        step.output = "Generating character description from script…"
+        state.save(state_path)
         script_file = workdir / "script.txt"
         if not script_file.exists():
             script_file.write_text(state.script_text, encoding="utf-8")
@@ -581,7 +590,15 @@ async def _gen_character(
             return
         state.character_description = step.output.strip()
 
-    # 3. Generate the 3/4 reference image from the description.
+    # 3. Optionally stop after the description phase (e.g. "Generate Description" button).
+    if not gen_character_image:
+        step.output = f"Character description ready.\n{state.character_description}"
+        step.status = "done"
+        step.end_time = time.time()
+        state.save(state_path)
+        return
+
+    # 4. Generate the 3/4 reference image from the description.
     image_engine = config.get("image_engine", "flux2cloud")
     char_style = config.get("character_style", "realist")
     if char_style == "free" and config.get("character_style_free"):
