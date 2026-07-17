@@ -662,8 +662,11 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
       brand new base image from the prompt, applying the overlay when
       ``overlay_title`` is set.
     - ``mode="overlay"`` (or just an ``overlay_title`` with ``mode=""``):
-      reapply the overlay text on the existing clean base image; if no clean
-      base exists, the stored image prompt is reused.
+      reapply the overlay text on the existing base image. If no base image is
+      on disk, it falls back to regenerating the full image only when an image
+      prompt is available (the request prompt, else the stored one); if neither
+      exists, it returns a 400 error. This mode never silently regenerates the
+      full image when a base is present.
 
     Overlay fg/bg/effect default to the publish config when not given in the
     request. Does NOT touch YouTube; push explicitly via ``/push-thumbnail``."""
@@ -741,11 +744,11 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
         base = files.get("thumbnail_base", "")
         if not base or not Path(base).expanduser().exists():
             base = files.get("thumbnail", "")
-        base_is_clean = bool(base) and Path(base).expanduser().exists() \
-            and not Path(base).expanduser().stem.endswith("_overlay")
+        base_exists = bool(base) and Path(base).expanduser().exists()
 
-        if base_is_clean:
-            # Clean (no-overlay) base image available: just reapply the overlay.
+        if base_exists:
+            # A base image is available: only reapply the overlay text on top of
+            # it. This must never regenerate the full image.
             cmd = [_image(), "overlay", str(Path(base).expanduser().resolve()), "--title", overlay_title, "-F", "json"]
             cmd = _append_overlay_opts(cmd, fg, bg, effect)
             proc = await asyncio.create_subprocess_exec(
@@ -764,16 +767,19 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
             if renamed_base:
                 files["thumbnail_base"] = renamed_base
         else:
-            # No clean base available (video published before base images were
-            # stored). Regenerate from scratch using the stored image prompt.
-            stored_prompt = meta.get("thumbnail_prompt", "").strip()
-            if not stored_prompt:
+            # No base image on disk. Fall back to regenerating the full image
+            # only when a prompt is available (explicit request prompt, else the
+            # stored one). If neither is present, error out rather than silently
+            # doing the wrong thing.
+            fallback_prompt = image_prompt or meta.get("thumbnail_prompt", "").strip()
+            if not fallback_prompt:
                 raise HTTPException(
                     status_code=400,
-                    detail="No clean base image or stored prompt for this video; "
-                           "re-run publish to regenerate the thumbnail from scratch",
+                    detail="No base image available to reapply the overlay and no image "
+                           "prompt was provided; provide an image prompt or re-run publish "
+                           "to regenerate the thumbnail from scratch",
                 )
-            cmd = [_image(), "generate", stored_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir, "--title", overlay_title]
+            cmd = [_image(), "generate", fallback_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir, "--title", overlay_title]
             cmd = _append_overlay_opts(cmd, fg, bg, effect)
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
