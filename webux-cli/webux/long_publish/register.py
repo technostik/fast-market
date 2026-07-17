@@ -6,7 +6,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Form, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -93,6 +93,8 @@ async def get_config():
         "thumbnail_engine": pub.get("thumbnail_engine", ""),
         "thumbnail_overlay_fg": pub.get("thumbnail_overlay_fg", ""),
         "thumbnail_overlay_bg": pub.get("thumbnail_overlay_bg", ""),
+        "thumbnail_overlay_size_pct": pub.get("thumbnail_overlay_size_pct", 0),
+        "thumbnail_overlay_offset": pub.get("thumbnail_overlay_offset", 0),
         "transcript_mode": pub.get("transcript_mode", "normal"),
         "transcript_model": pub.get("transcript_model", "medium"),
         "transcript_language": pub.get("transcript_language", "fr"),
@@ -112,6 +114,8 @@ class ConfigSaveRequest(BaseModel):
     thumbnail_engine: str = ""
     thumbnail_overlay_fg: str = ""
     thumbnail_overlay_bg: str = ""
+    thumbnail_overlay_size_pct: float = 0
+    thumbnail_overlay_offset: int = 0
     transcript_mode: str = "normal"
     transcript_model: str = "medium"
     transcript_language: str = "fr"
@@ -132,6 +136,8 @@ async def save_config(req: ConfigSaveRequest):
     pub["thumbnail_engine"] = req.thumbnail_engine
     pub["thumbnail_overlay_fg"] = req.thumbnail_overlay_fg
     pub["thumbnail_overlay_bg"] = req.thumbnail_overlay_bg
+    pub["thumbnail_overlay_size_pct"] = req.thumbnail_overlay_size_pct
+    pub["thumbnail_overlay_offset"] = req.thumbnail_overlay_offset
     pub["transcript_mode"] = req.transcript_mode
     pub["transcript_model"] = req.transcript_model
     pub["transcript_language"] = req.transcript_language
@@ -853,6 +859,110 @@ async def push_thumbnail(req: PushThumbRequest):
         raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
 
     return {"ok": True, "video_id": video_id}
+
+
+class ReplaceBaseRequest(BaseModel):
+    source: str
+    base_image: str = ""   # absolute path on disk (alternative to file upload)
+
+
+@router.post("/replace-base-image")
+async def replace_base_image(
+    source: str = Form(...),
+    upload: UploadFile | None = File(None),
+    base_image: str = Form(""),
+):
+    """Replace the clean (no-overlay) base image of an already-published video
+    with an image from disk.
+
+    Provide either an uploaded file (``upload``) or an absolute ``base_image``
+    path. The image becomes the new ``thumbnail_base`` (named for the source).
+    If a stored overlay title exists, the overlay is reapplied so the
+    overlayed ``thumbnail`` is refreshed too; otherwise the thumb is left as the
+    base itself. Does NOT touch YouTube."""
+    source = str(Path(source).expanduser().resolve())
+    if not Path(source).exists():
+        raise HTTPException(status_code=400, detail=f"File not found: {source}")
+
+    meta = _load_meta(source)
+    files = dict(meta.get("files", {}))
+    out_dir = Path(source).parent
+    final_video = files.get("final_video", "")
+    final_stem = Path(final_video).stem if (final_video and Path(final_video).expanduser().exists()) else Path(source).stem
+
+    # Resolve the incoming image to a local path we can copy.
+    tmp_upload: str | None = None
+    if upload is not None and upload.filename:
+        suffix = Path(upload.filename).suffix or ".png"
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=str(out_dir))
+        tf.write(await upload.read())
+        tf.close()
+        tmp_upload = tf.name
+        src_img = tmp_upload
+    elif base_image.strip():
+        src_img = str(Path(base_image).expanduser().resolve())
+        if not Path(src_img).exists():
+            raise HTTPException(status_code=400, detail=f"Image not found: {base_image}")
+    else:
+        raise HTTPException(status_code=400, detail="Provide an uploaded image or an absolute image path")
+
+    # Copy into the source folder, named <stem>_thumb<ext> as the new base.
+    ext = Path(src_img).suffix or ".png"
+    target = out_dir / f"{final_stem}_thumb{ext}"
+    if Path(src_img).resolve() != target.resolve():
+        import shutil as _shutil
+        _shutil.copy2(src_img, target)
+    new_base = str(target.resolve())
+
+    fg, bg, effect, size_pct, offset = _resolve_overlay_defaults(meta, _load_publish_cfg())
+    overlay_title = meta.get("thumbnail_overlay_title", "").strip()
+
+    new_path = new_base
+    if overlay_title:
+        cmd = [_image(), "overlay", new_base, "--title", overlay_title, "-F", "json"]
+        cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode:
+            err = stderr.decode(errors="replace").strip()
+            logger.error("long_publish_cmd_failed", cmd=cmd, rc=proc.returncode, stderr=err)
+            raise HTTPException(status_code=500, detail=err or f"Exit code {proc.returncode}")
+        new_path, _ = _parse_generate_output(stdout.decode(errors="replace"))
+        if not new_path or not Path(new_path).expanduser().exists():
+            raise HTTPException(status_code=500, detail="Overlay output path not found in command output")
+        new_path, renamed_base = _name_thumb_for_source(source, new_path, new_base, final_stem)
+        if renamed_base:
+            new_base = renamed_base
+
+    files["thumbnail_base"] = new_base
+    files["thumbnail"] = new_path
+    meta["files"] = files
+    try:
+        p = Path(source).parent / f"{Path(source).stem}-long-meta.json"
+        p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp_upload and Path(tmp_upload).exists():
+            try:
+                Path(tmp_upload).unlink()
+            except Exception:
+                pass
+
+    return {"thumbnail": new_path, "base": new_base}
+
+
+def _resolve_overlay_defaults(meta: dict, pub_cfg: dict) -> tuple[str, str, str, float, int]:
+    """Resolve overlay fg/bg/effect/size_pct/offset from the stored meta first,
+    then the publish config defaults."""
+    fg = (meta.get("thumbnail_overlay_fg", "") or pub_cfg.get("thumbnail_overlay_fg", "") or "").strip()
+    bg = (meta.get("thumbnail_overlay_bg", "") or pub_cfg.get("thumbnail_overlay_bg", "") or "").strip()
+    effect = (meta.get("thumbnail_overlay_effect", "") or pub_cfg.get("thumbnail_overlay_effect", "") or "").strip()
+    size_pct = float(meta.get("thumbnail_overlay_size_pct", 0) or pub_cfg.get("thumbnail_overlay_size_pct", 0) or 0)
+    offset = int(meta.get("thumbnail_overlay_offset", 0) or pub_cfg.get("thumbnail_overlay_offset", 0) or 0)
+    return fg, bg, effect, size_pct, offset
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────

@@ -110,6 +110,10 @@
       <div class="row"><label>Thumbnail overlay text color (fg)</label><input id="cfgThumbFg" type="text" placeholder="e.g. white / #ff0000"></div>
       <div class="row"><label>Thumbnail overlay background (bg)</label><input id="cfgThumbBg" type="text" placeholder="e.g. black / none"></div>
     </div>
+    <div class="cols2">
+      <div class="row"><label>Default overlay font size (× %)</label><input id="cfgThumbSizePct" type="number" min="10" max="400" step="5" placeholder="100 = default"></div>
+      <div class="row"><label>Default overlay drop offset (% down)</label><input id="cfgThumbOffset" type="number" min="-50" max="80" step="1" placeholder="0 = default"></div>
+    </div>
     <div class="row"><label>Modal usage URL</label><input id="cfgModalUrl" type="text"></div>
     <button class="btn-sec" id="cfgSave">Save config</button>
     <span id="cfgMsg" class="hint"></span>
@@ -190,6 +194,13 @@
           <button class="btn-go" id="pushYtBtn" disabled>🛠 Update YouTube</button>
         </div>
       </div>
+      <div class="row">
+        <label>Replace base image (no overlay) from disk</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input id="baseFile" type="file" accept="image/*">
+          <button class="btn-sec" id="replaceBaseBtn">📂 Use this image</button>
+        </div>
+      </div>
       <pre class="log-box" id="regenOut" style="display:none;"></pre>
 
       <div class="steps" id="steps"></div>
@@ -237,6 +248,8 @@ async function loadConfig(){
   el('cfgThumbEngine').value = c.thumbnail_engine||'';
   el('cfgThumbFg').value = c.thumbnail_overlay_fg||'';
   el('cfgThumbBg').value = c.thumbnail_overlay_bg||'';
+  el('cfgThumbSizePct').value = c.thumbnail_overlay_size_pct||0;
+  el('cfgThumbOffset').value = c.thumbnail_overlay_offset||0;
   el('cfgModalUrl').value = c.modal_usage_url||'';
   el('cfgLang').value = c.transcript_language||'fr';
   el('cfgModel').value = c.transcript_model||'medium';
@@ -270,6 +283,8 @@ async function saveConfig(){
     thumbnail_engine: el('cfgThumbEngine').value,
     thumbnail_overlay_fg: el('cfgThumbFg').value,
     thumbnail_overlay_bg: el('cfgThumbBg').value,
+    thumbnail_overlay_size_pct: Number(el('cfgThumbSizePct').value) || 0,
+    thumbnail_overlay_offset: Number(el('cfgThumbOffset').value) || 0,
     modal_usage_url: el('cfgModalUrl').value,
     transcript_mode: el('cfgGroq').checked ? 'groq' : 'normal',
     transcript_model: el('cfgModel').value,
@@ -481,6 +496,9 @@ function regenThumbnail(mode){
     el('regenOut').style.display='block';
     el('regenOut').textContent = (mode === 'image' ? 'Generating image…' : 'Regenerating overlay…');
     el('pushYtBtn').disabled = true;
+    // UX values override config defaults; fall back to config when blank.
+    const sizePct = Number(el('regenSizePct').value) || Number(el('cfgThumbSizePct').value) || 0;
+    const offset = Number(el('regenOffset').value) || Number(el('cfgThumbOffset').value) || 0;
     const body = {
       source,
       mode,
@@ -488,8 +506,8 @@ function regenThumbnail(mode){
       overlay_title: title,
       overlay_fg: el('regenFg').value,
       overlay_bg: el('regenBg').value,
-      overlay_size_pct: Number(el('regenSizePct').value) || 0,
-      overlay_offset: Number(el('regenOffset').value) || 0,
+      overlay_size_pct: sizePct,
+      overlay_offset: offset,
     };
     const r = await fetch(API+'/regenerate-thumbnail', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await r.json();
@@ -503,6 +521,26 @@ function regenThumbnail(mode){
 }
 el('regenImgBtn').addEventListener('click', regenThumbnail('image'));
 el('regenOverlayBtn').addEventListener('click', regenThumbnail('overlay'));
+el('replaceBaseBtn').addEventListener('click', async ()=>{
+  const source = el('thumbVidSel').value;
+  if (!source){ alert('Select a video'); return; }
+  const f = el('baseFile').files[0];
+  if (!f){ alert('Choose an image file first'); return; }
+  el('regenOut').style.display='block';
+  el('regenOut').textContent = 'Replacing base image…';
+  el('pushYtBtn').disabled = true;
+  const fd = new FormData();
+  fd.append('source', source);
+  fd.append('upload', f);
+  const r = await fetch(API+'/replace-base-image', { method:'POST', body: fd });
+  const data = await r.json();
+  if (!r.ok){ el('regenOut').textContent = 'Error: '+(data.detail||''); return; }
+  el('regenOut').textContent = 'Done. New base: '+data.base;
+  el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.thumbnail)+'&t='+Date.now();
+  el('thumbCurWrap').style.display='block';
+  el('pushYtBtn').dataset.thumbnail = data.thumbnail;
+  el('pushYtBtn').disabled = false;
+});
 el('pushYtBtn').addEventListener('click', async ()=>{
   const source = el('thumbVidSel').value;
   if (!source) return;
