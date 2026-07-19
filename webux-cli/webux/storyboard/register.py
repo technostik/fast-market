@@ -66,13 +66,15 @@ async def get_config():
         "chapter_range": cfg.get("chapter_range", "2–5"),
         "scene_range": cfg.get("scene_range", "2–5"),
         "scene_duration": cfg.get("scene_duration", "15–45 seconds"),
-        "character_enabled": cfg.get("character_enabled", False),
-        "character_use_reference": cfg.get("character_use_reference", False),
-        "character_style": cfg.get("character_style", "realist"),
-        "character_style_free": cfg.get("character_style_free", ""),
-        "character_reference_image": cfg.get("character_reference_image"),
-        "character_reference_description": cfg.get("character_reference_description", ""),
-        "character_strength": cfg.get("character_strength", 0.35),
+        "character": {
+            "enabled": cfg.get("character_enabled", False),
+            "use_reference": cfg.get("character_use_reference", False),
+            "style": cfg.get("character_style", "realist"),
+            "style_free": cfg.get("character_style_free", ""),
+            "reference_image": cfg.get("character_reference_image"),
+            "reference_description": cfg.get("character_reference_description", ""),
+            "strength": cfg.get("character_strength", 0.35),
+        },
         "prompts": cfg.get("prompts", {}),
         "prompt_overrides": cfg.get("prompt_overrides", {}),
     }
@@ -99,13 +101,15 @@ class ConfigSaveRequest(BaseModel):
     chapter_range: str = "2–5"
     scene_range: str = "2–5"
     scene_duration: str = "15–45 seconds"
-    character_enabled: bool = False
-    character_use_reference: bool = False
-    character_style: str = "realist"
-    character_style_free: str = ""
-    character_reference_image: str | None = None
-    character_reference_description: str = ""
-    character_strength: float = 0.35
+    character: dict = {
+        "enabled": False,
+        "use_reference": False,
+        "style": "realist",
+        "style_free": "",
+        "reference_image": None,
+        "reference_description": "",
+        "strength": 0.35,
+    }
     prompts: dict = {}
     prompt_overrides: dict = {}
 
@@ -153,6 +157,7 @@ async def get_state():
         "global_steps": state.global_step_summary(),
         "character_reference_image": cfg.get("character_reference_image"),
         "character_reference_description": cfg.get("character_reference_description", ""),
+        "character": cfg.get("character", {}),
     }
 
 
@@ -308,6 +313,7 @@ async def poll_job():
             "initialized": True,
             **live_state.to_dict(),
             "global_steps": live_state.global_step_summary(),
+            "character": cfg.get("character", {}),
         }
     state = _load_state(cfg)
     if state is None:
@@ -317,6 +323,7 @@ async def poll_job():
         "initialized": True,
         **state.to_dict(),
         "global_steps": state.global_step_summary(),
+        "character": cfg.get("character", {}),
     }
 
 
@@ -1085,12 +1092,13 @@ async function loadConfig() {
     document.getElementById('cfgImgSeed').value = cfg.image_seed != null ? cfg.image_seed : '';
     document.getElementById('cfgImgSteps').value = cfg.image_steps != null ? cfg.image_steps : '';
     document.getElementById('cfgDraftMode').checked = cfg.draft_mode || false;
-    document.getElementById('cfgCharEnabled').checked = cfg.character_enabled || false;
-    document.getElementById('cfgCharUseRef').checked = cfg.character_use_reference || false;
-    document.getElementById('cfgCharStyle').value = cfg.character_style || 'realist';
-    document.getElementById('cfgCharStyleFree').value = cfg.character_style_free || '';
-    document.getElementById('cfgCharStrength').value = cfg.character_strength != null ? cfg.character_strength : 0.35;
-    document.getElementById('cfgCharStyleFreeWrap').style.display = (cfg.character_style === 'free') ? '' : 'none';
+    const c = cfg.character || {};
+    document.getElementById('cfgCharEnabled').checked = c.enabled || false;
+    document.getElementById('cfgCharUseRef').checked = c.use_reference || false;
+    document.getElementById('cfgCharStyle').value = c.style || 'realist';
+    document.getElementById('cfgCharStyleFree').value = c.style_free || '';
+    document.getElementById('cfgCharStrength').value = c.strength != null ? c.strength : 0.35;
+    document.getElementById('cfgCharStyleFreeWrap').style.display = (c.style === 'free') ? '' : 'none';
     refreshCharReference(cfg);
     document.getElementById('cfgChapterRange').value = cfg.chapter_range || '2–5';
     document.getElementById('cfgSceneRange').value = cfg.scene_range || '2–5';
@@ -1184,11 +1192,13 @@ async function saveConfig() {
     image_seed: document.getElementById('cfgImgSeed').value !== '' ? parseInt(document.getElementById('cfgImgSeed').value) : null,
     image_steps: document.getElementById('cfgImgSteps').value !== '' ? parseInt(document.getElementById('cfgImgSteps').value) : null,
     draft_mode: document.getElementById('cfgDraftMode').checked,
-    character_enabled: document.getElementById('cfgCharEnabled').checked,
-    character_use_reference: document.getElementById('cfgCharUseRef').checked,
-    character_style: document.getElementById('cfgCharStyle').value,
-    character_style_free: document.getElementById('cfgCharStyleFree').value,
-    character_strength: parseFloat(document.getElementById('cfgCharStrength').value) || 0.35,
+    character: {
+      enabled: document.getElementById('cfgCharEnabled').checked,
+      use_reference: document.getElementById('cfgCharUseRef').checked,
+      style: document.getElementById('cfgCharStyle').value,
+      style_free: document.getElementById('cfgCharStyleFree').value,
+      strength: parseFloat(document.getElementById('cfgCharStrength').value) || 0.35,
+    },
     chapter_range: document.getElementById('cfgChapterRange').value || '2–5',
     scene_range: document.getElementById('cfgSceneRange').value || '2–5',
     scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
@@ -1219,7 +1229,7 @@ function refreshCharReference(cfg) {
   const img = document.getElementById('cfgCharRefPreview');
   const desc = document.getElementById('cfgCharRefDesc');
   const clearBtn = document.getElementById('cfgCharRefClearBtn');
-  const refImg = cfg && cfg.character_reference_image;
+  const refImg = cfg && cfg.character && cfg.character.reference_image;
   if (refImg) {
     if (img.dataset.src !== refImg) { img.dataset.src = refImg; img.src = '/api/storyboard/preview?file=' + encodeURIComponent(refImg) + '&t=' + Date.now(); }
     img.style.display = '';
@@ -1231,7 +1241,7 @@ function refreshCharReference(cfg) {
     noneEl.style.display = '';
     clearBtn.style.display = 'none';
   }
-  desc.textContent = (cfg && cfg.character_reference_description) ? cfg.character_reference_description : '';
+  desc.textContent = (cfg && cfg.character && cfg.character.reference_description) ? cfg.character.reference_description : '';
   box.style.display = '';
 }
 
@@ -1254,13 +1264,15 @@ async function clearCharReference() {
     image_seed: document.getElementById('cfgImgSeed').value !== '' ? parseInt(document.getElementById('cfgImgSeed').value) : null,
     image_steps: document.getElementById('cfgImgSteps').value !== '' ? parseInt(document.getElementById('cfgImgSteps').value) : null,
     draft_mode: document.getElementById('cfgDraftMode').checked,
-    character_enabled: document.getElementById('cfgCharEnabled').checked,
-    character_use_reference: document.getElementById('cfgCharUseRef').checked,
-    character_style: document.getElementById('cfgCharStyle').value,
-    character_style_free: document.getElementById('cfgCharStyleFree').value,
-    character_strength: parseFloat(document.getElementById('cfgCharStrength').value) || 0.35,
-    character_reference_image: null,
-    character_reference_description: "",
+    character: {
+      enabled: document.getElementById('cfgCharEnabled').checked,
+      use_reference: document.getElementById('cfgCharUseRef').checked,
+      style: document.getElementById('cfgCharStyle').value,
+      style_free: document.getElementById('cfgCharStyleFree').value,
+      strength: parseFloat(document.getElementById('cfgCharStrength').value) || 0.35,
+      reference_image: null,
+      reference_description: "",
+    },
     chapter_range: document.getElementById('cfgChapterRange').value || '2–5',
     scene_range: document.getElementById('cfgSceneRange').value || '2–5',
     scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
@@ -1582,7 +1594,7 @@ function refreshCharModalLive(data) {
   // Refresh stored reference preview if it appeared.
   const refWrap = document.getElementById('charRefWrap');
   const refImg = document.getElementById('charRefPreview');
-  const refSrc = data.character_reference_image;
+  const refSrc = data.character && data.character.reference_image;
   if (refSrc) {
     if (refImg.dataset.src !== refSrc) { refImg.dataset.src = refSrc; refImg.src = '/api/storyboard/preview?file=' + encodeURIComponent(refSrc) + '&t=' + Date.now(); }
     refWrap.style.display = '';
@@ -1955,7 +1967,7 @@ function showCharModal() {
   // session has no generated character yet).
   const refWrap = document.getElementById('charRefWrap');
   const refImg = document.getElementById('charRefPreview');
-  const refSrc = data.character_reference_image;
+  const refSrc = data.character && data.character.reference_image;
   if (refSrc) {
     refImg.src = '/api/storyboard/preview?file=' + encodeURIComponent(refSrc) + '&t=' + Date.now();
     refWrap.style.display = '';

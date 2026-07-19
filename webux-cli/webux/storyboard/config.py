@@ -17,6 +17,30 @@ DEFAULT_PROMPT_NAMES = {
     "character": "storyboard-character",
 }
 
+# All character-related settings live under a single `character:` YAML section.
+# The flat `character_*` keys below are the legacy on-disk format and are
+# migrated into the nested section on load (and no longer persisted).
+DEFAULT_CHARACTER = {
+    "enabled": False,
+    "use_reference": False,        # reuse stored reference from config
+    "style": "realist",            # cartoon | realist | (free text below)
+    "style_free": "",
+    "reference_image": None,       # stable path for cross-story reuse
+    "reference_description": "",   # stored description for reuse
+    "strength": 0.35,             # reference weight (local flux2 img2img)
+}
+
+# Legacy flat keys (on disk) → nested character sub-key.
+_LEGACY_CHARACTER_MAP = {
+    "character_enabled": "enabled",
+    "character_use_reference": "use_reference",
+    "character_style": "style",
+    "character_style_free": "style_free",
+    "character_reference_image": "reference_image",
+    "character_reference_description": "reference_description",
+    "character_strength": "strength",
+}
+
 
 def load_storyboard_config(migrate: bool = True) -> dict:
     base = load_tool_config("storyboard")
@@ -41,17 +65,28 @@ def load_storyboard_config(migrate: bool = True) -> dict:
     base.setdefault("chapter_range", "2–5")
     base.setdefault("scene_range", "2–5")
     base.setdefault("scene_duration", "15–45 seconds")
-    # Central character (optional, pre-pipeline step)
-    base.setdefault("character_enabled", False)
-    base.setdefault("character_use_reference", False)   # reuse stored reference from config
-    base.setdefault("character_style", "realist")       # cartoon | realist | (free text below)
-    base.setdefault("character_style_free", "")
-    base.setdefault("character_reference_image", None)   # stored path for cross-story reuse
-    base.setdefault("character_reference_description", "")  # stored description for reuse
-    base.setdefault("character_strength", 0.35)         # reference weight (local flux2 img2img)
+
+    # ── Central character (nested `character:` section) ──────────────────────
+    character = dict(DEFAULT_CHARACTER)
+    # Load any previously-saved nested section.
+    saved = base.get("character")
+    if isinstance(saved, dict):
+        character.update({k: v for k, v in saved.items() if k in DEFAULT_CHARACTER})
+    # Migrate legacy flat `character_*` keys (if present on disk).
+    migrated = False
+    for flat_key, nested_key in _LEGACY_CHARACTER_MAP.items():
+        if flat_key in base:
+            character[nested_key] = base[flat_key]
+            del base[flat_key]
+            migrated = True
+    base["character"] = character
+    # Expose flat aliases for backward-compatible reads in the pipeline.
+    for flat_key, nested_key in _LEGACY_CHARACTER_MAP.items():
+        base[flat_key] = character[nested_key]
+
     prompts = base.setdefault("prompts", {})
     overrides = base.setdefault("prompt_overrides", {})
-    migrated = False
+    prompt_migrated = False
     for k, default_name in DEFAULT_PROMPT_NAMES.items():
         v = prompts.get(k, default_name)
         # Migration: older configs stored the full prompt text inline. Treat
@@ -60,9 +95,9 @@ def load_storyboard_config(migrate: bool = True) -> dict:
             if not overrides.get(k):
                 overrides[k] = v
             v = default_name
-            migrated = True
+            prompt_migrated = True
         prompts[k] = v
-    if migrated and migrate:
+    if (migrated or prompt_migrated) and migrate:
         save_storyboard_config(base)
     return base
 
@@ -71,7 +106,7 @@ def save_storyboard_config(updates: dict) -> None:
     # Load without re-running migration: otherwise the migration's own save
     # would reload the still-legacy config from disk and recurse forever.
     current = load_storyboard_config(migrate=False)
-    # Only persist storyboard-specific keys, not inherited common/llm config
+    # Only persist storyboard-specific keys, not inherited common/llm config.
     storyboard_keys = {
         "tts_engine", "language", "image_engine", "image_size", "image_style",
         "narrative_style", "narrative_guidance", "animation_style", "ken_burns_zoom_from",
@@ -79,15 +114,22 @@ def save_storyboard_config(updates: dict) -> None:
         "image_seed", "image_steps", "draft_mode", "draft_steps",
         "chapter_transition", "chapter_transition_duration",
         "chapter_range", "scene_range", "scene_duration", "prompts",
-        "prompt_overrides",
-        "character_enabled", "character_use_reference", "character_style",
-        "character_style_free", "character_reference_image",
-        "character_reference_description", "character_strength",
+        "prompt_overrides", "character",
     }
     merged = {k: v for k, v in current.items() if k in storyboard_keys}
+    # Start from the persisted nested character section.
+    character = dict(merged.get("character") or DEFAULT_CHARACTER)
     for k, v in updates.items():
-        if k in storyboard_keys:
+        if k == "character":
+            # Full nested section replacement (merge to preserve unspecified keys).
+            if isinstance(v, dict):
+                character.update({kk: vv for kk, vv in v.items() if kk in DEFAULT_CHARACTER})
+        elif k in _LEGACY_CHARACTER_MAP:
+            # Legacy flat update → fold into the nested section.
+            character[_LEGACY_CHARACTER_MAP[k]] = v
+        elif k in storyboard_keys:
             merged[k] = v
+    merged["character"] = character
     save_tool_config("storyboard", merged)
 
 
@@ -113,7 +155,9 @@ def save_reference_character(image_path: str, description: str) -> str:
     dest = stable_reference_dir() / "character_reference.png"
     shutil.copy2(src, dest)
     save_storyboard_config({
-        "character_reference_image": str(dest),
-        "character_reference_description": description,
+        "character": {
+            "reference_image": str(dest),
+            "reference_description": description,
+        }
     })
     return str(dest)
