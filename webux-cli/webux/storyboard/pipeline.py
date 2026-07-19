@@ -67,7 +67,13 @@ async def _run(
     stdin_data: bytes | None = None,
     log_to: "ProjectState | None" = None,
 ) -> int:
-    cmd_str = " ".join(str(c) for c in cmd)
+    # Quote args that contain spaces so the logged command matches what actually
+    # runs (asyncio passes the list directly to the subprocess — no shell), and is
+    # safe to copy-paste into a shell.
+    def _fmt(c: str) -> str:
+        s = str(c)
+        return f'"{s}"' if (" " in s or "\t" in s) else s
+    cmd_str = " ".join(_fmt(c) for c in cmd)
     if log_to is not None:
         log_to.console_log.append({"t": time.time(), "cmd": cmd_str, "output": "", "rc": None})
 
@@ -708,13 +714,17 @@ async def _gen_image_prompt(
     # Choose the image-prompt template based on whether a character is in play.
     # When a central character is active, use the dedicated "with character" prompt
     # (designed to incorporate the reference image); otherwise the plain one.
-    char_active = bool(config.get("character_enabled") and state.character_description)
+    # The description can come from the live state OR from a stored reference in
+    # config (e.g. a re-opened project that saved a reference but hasn't generated
+    # a character in this session yet) — both make the character "active".
+    char_desc = state.character_description or config.get("character_reference_description", "")
+    char_active = bool(config.get("character_enabled") and char_desc)
     prompt_key = "scene_image_prompt_with_character" if char_active else "scene_image_prompt"
 
     # Inject the central character description as the {character} placeholder when enabled.
     subs = {}
     if char_active:
-        subs["character"] = state.character_description
+        subs["character"] = char_desc
 
     rc = await _apply_story_prompt(step, state, config, prompt_key, input_file, subs)
     if rc != 0:

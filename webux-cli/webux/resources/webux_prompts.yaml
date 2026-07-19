@@ -441,6 +441,12 @@ prompts:
 
     Output language: {lang}
 
+    Target chapter count: {chapter_range}
+
+    Target scenes per chapter: {scene_range}
+
+    Target scene duration: {scene_duration}
+
 
     Narrative guidance (the scene must remember this broader context): {narrative_guidance}
 
@@ -497,14 +503,7 @@ prompts:
 
     SCENE DESCRIPTION:
 
-    {content}
-
-
-    CENTRAL CHARACTER (must appear in this scene, integrated naturally into the
-    action and setting \u2014 as the protagonist or any fitting figure; keep them
-    visually consistent with this exact description across every scene):
-
-    {character}'
+    {content}'
   temperature: 0.7
   max_tokens: 2048
   model_provider: ''

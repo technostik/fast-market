@@ -120,6 +120,14 @@ chapter_transition_duration: 1.0   # seconds — controls both the silence gap a
 chapter_range: "2–5"         # injected as {chapter_range} into story_breakdown prompt
 scene_range: "2–5"           # injected as {scene_range}
 scene_duration: "15–45 seconds"   # injected as {scene_duration}
+character:                    # all central-character settings under one section
+  enabled: false              # generate/use a central character across scenes
+  use_reference: false        # reuse the stored reference character instead of generating
+  style: realist              # realist | cartoon | free
+  style_free: ""              # free-text style when style: free
+  reference_image: null       # stable path to the stored 3/4 reference (profile `reference/` dir)
+  reference_description: ""   # stored description for cross-story reuse
+  strength: 0.35              # reference weight for local flux2 img2img
 prompts:
   story_breakdown: "..."
   scene_transcript: "..."

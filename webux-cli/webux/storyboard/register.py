@@ -87,6 +87,7 @@ class ConfigSaveRequest(BaseModel):
     image_size: str = "landscape"
     image_style: str = ""
     narrative_style: str = ""
+    narrative_guidance: str = ""
     animation_style: str = "ken_burns"
     ken_burns_zoom_from: float = 1.0
     ken_burns_zoom_to: float = 1.3
