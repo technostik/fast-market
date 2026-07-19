@@ -326,7 +326,9 @@ async def _run_pipeline(
     # "Run from X": reset the boundary step and ALL downstream steps so they re-run.
     # "Run remaining" (no from_global_step): no reset — only runs pending steps.
     if from_global_step:
-        if from_idx == 0:
+        # Reset the parse step whenever we run from parse or earlier, so it
+        # re-splits the script (e.g. after changing chapter_range/scene_range).
+        if from_idx <= GLOBAL_STEPS.index("parse"):
             state.parse_step = StepState()
         _scene_stages_ordered = [
             ("transcript", "gen_transcript"), ("image_prompt", "gen_image_prompt"),

@@ -1898,6 +1898,9 @@ function renderFinalPanel(data) {
 
 async function postRun(body) {
   try {
+    // Persist any unsaved config-panel edits (e.g. chapter_range / scene_range)
+    // before running, so the pipeline uses the values currently shown in the UI.
+    await saveConfig();
     const r = await fetch('/api/storyboard/run', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
