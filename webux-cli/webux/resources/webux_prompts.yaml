@@ -442,6 +442,9 @@ prompts:
     Output language: {lang}
 
 
+    Narrative guidance (the scene must remember this broader context): {narrative_guidance}
+
+
     SCENE DESCRIPTION:
 
     {content}'

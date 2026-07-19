@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from common.webux.base import WebuxPluginManifest
 
-from .config import load_storyboard_config, save_storyboard_config
+from .config import load_storyboard_config, save_storyboard_config, save_reference_character
 from .models import ProjectState, StepState, SCENE_STEPS
 from .pipeline import (
     start_pipeline, stop_pipeline, is_running,
@@ -237,10 +237,7 @@ async def generate_character(req: CharacterRequest):
             save_storyboard_config({"character_enabled": True})
         # Persist as a reusable reference in config if requested.
         if req.save_as_reference and state.character_image and Path(state.character_image).exists():
-            save_storyboard_config({
-                "character_reference_image": state.character_image,
-                "character_reference_description": state.character_description,
-            })
+            save_reference_character(state.character_image, state.character_description)
 
     import asyncio as _asyncio
     task = _asyncio.create_task(_run_safely(_coro(), state, sp))
@@ -286,10 +283,7 @@ async def save_character(req: CharacterRequest):
     if req.description is not None:
         state.character_description = req.description
     if req.save_as_reference and state.character_image and Path(state.character_image).exists():
-        save_storyboard_config({
-            "character_reference_image": state.character_image,
-            "character_reference_description": state.character_description,
-        })
+        save_reference_character(state.character_image, state.character_description)
     # A usable character exists in this project → enable it for scene generation.
     if state.character_image and Path(state.character_image).exists():
         save_storyboard_config({"character_enabled": True})
@@ -880,6 +874,10 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <span class="cfg-label">Narrative Style</span>
         <textarea id="cfgNarrStyle" rows="2"></textarea>
       </div>
+      <div class="cfg-field" style="grid-column:span 2">
+        <span class="cfg-label">Narrative Guidance <span style="font-weight:400;color:var(--text-dim);font-size:10px">— broader story context injected into every scene transcript</span></span>
+        <textarea id="cfgNarrGuidance" rows="3"></textarea>
+      </div>
       <div class="cfg-field">
         <span class="cfg-label">Ken Burns Zoom From</span>
         <input type="number" id="cfgZoomFrom" min="0.5" max="2.0" step="0.05" value="1.0" />
@@ -1002,21 +1000,25 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <div class="prompt-label">Story Breakdown Prompt <span class="prompt-info" id="infoStory" data-content="">ⓘ</span></div>
         <select id="cfgPromptStorySel" class="prompt-sel" onchange="onPromptSelect('Story')"></select>
         <textarea class="prompt-area" id="cfgPromptStory" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
+        <button class="btn btn-neutral btn-sm" onclick="resetPrompt('Story')">↺ Reset to default</button>
       </div>
       <div class="prompt-field">
         <div class="prompt-label">Scene Transcript Prompt <span class="prompt-info" id="infoTranscript" data-content="">ⓘ</span></div>
         <select id="cfgPromptTranscriptSel" class="prompt-sel" onchange="onPromptSelect('Transcript')"></select>
         <textarea class="prompt-area" id="cfgPromptTranscript" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
+        <button class="btn btn-neutral btn-sm" onclick="resetPrompt('Transcript')">↺ Reset to default</button>
       </div>
       <div class="prompt-field">
         <div class="prompt-label">Scene Image Prompt <span class="prompt-info" id="infoImage" data-content="">ⓘ</span></div>
         <select id="cfgPromptImageSel" class="prompt-sel" onchange="onPromptSelect('Image')"></select>
         <textarea class="prompt-area" id="cfgPromptImage" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
+        <button class="btn btn-neutral btn-sm" onclick="resetPrompt('Image')">↺ Reset to default</button>
       </div>
       <div class="prompt-field">
         <div class="prompt-label">Scene Image Prompt (with Character) <span class="prompt-info" id="infoImageChar" data-content="">ⓘ</span></div>
         <select id="cfgPromptImageCharSel" class="prompt-sel" onchange="onPromptSelect('ImageChar')"></select>
         <textarea class="prompt-area" id="cfgPromptImageChar" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
+        <button class="btn btn-neutral btn-sm" onclick="resetPrompt('ImageChar')">↺ Reset to default</button>
       </div>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;">
@@ -1073,6 +1075,7 @@ async function loadConfig() {
     document.getElementById('cfgImgSize').value = cfg.image_size || 'landscape';
     document.getElementById('cfgImgStyle').value = cfg.image_style || '';
     document.getElementById('cfgNarrStyle').value = cfg.narrative_style || '';
+    document.getElementById('cfgNarrGuidance').value = cfg.narrative_guidance || '';
     document.getElementById('cfgFps').value = cfg.fps || 24;
     document.getElementById('cfgZoomFrom').value = cfg.ken_burns_zoom_from ?? 1.0;
     document.getElementById('cfgZoomTo').value = cfg.ken_burns_zoom_to ?? 1.3;
@@ -1153,6 +1156,16 @@ function onPromptSelect(key) {
   refreshPromptPreview(key);
 }
 
+async function resetPrompt(key) {
+  const ta = document.getElementById('cfgPrompt' + key);
+  if (!ta) return;
+  if (!confirm('Reset this prompt to the default (' + (document.getElementById('cfgPrompt' + key + 'Sel').value || 'default') + ')? This clears the inline override.')) return;
+  ta.value = '';
+  await saveConfig();
+  const msg = document.getElementById('cfgSaveMsg');
+  if (msg) { msg.textContent = '✓ ' + key + ' reset'; setTimeout(() => { if (msg.textContent === '✓ ' + key + ' reset') msg.textContent = ''; }, 2000); }
+}
+
 async function saveConfig() {
   const body = {
     tts_engine: document.getElementById('cfgTts').value,
@@ -1161,6 +1174,7 @@ async function saveConfig() {
     image_size: document.getElementById('cfgImgSize').value,
     image_style: document.getElementById('cfgImgStyle').value,
     narrative_style: document.getElementById('cfgNarrStyle').value,
+    narrative_guidance: document.getElementById('cfgNarrGuidance').value,
     fps: parseInt(document.getElementById('cfgFps').value) || 24,
     ken_burns_zoom_from: parseFloat(document.getElementById('cfgZoomFrom').value) || 1.0,
     ken_burns_zoom_to: parseFloat(document.getElementById('cfgZoomTo').value) || 1.3,
@@ -1230,6 +1244,7 @@ async function clearCharReference() {
     image_size: document.getElementById('cfgImgSize').value,
     image_style: document.getElementById('cfgImgStyle').value,
     narrative_style: document.getElementById('cfgNarrStyle').value,
+    narrative_guidance: document.getElementById('cfgNarrGuidance').value,
     fps: parseInt(document.getElementById('cfgFps').value) || 24,
     ken_burns_zoom_from: parseFloat(document.getElementById('cfgZoomFrom').value) || 1.0,
     ken_burns_zoom_to: parseFloat(document.getElementById('cfgZoomTo').value) || 1.3,

@@ -105,6 +105,7 @@ image_engine: flux2cloud     # flux2cloud | flux2
 image_size: landscape        # landscape | square | portrait | youtube | wide
 image_style: "cinematic, dramatic lighting, photorealistic"
 narrative_style: "documentary, dramatic third-person narration"
+narrative_guidance: ""        # broader story context injected into every scene transcript ({narrative_guidance})
 animation_style: ken_burns   # currently only ken_burns is used
 ken_burns_zoom_from: 1.0
 ken_burns_zoom_to: 1.3

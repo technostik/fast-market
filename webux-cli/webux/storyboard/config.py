@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from common.core.config import load_tool_config, save_tool_config
+import shutil
+from pathlib import Path
+
+from common.core.config import load_tool_config, save_tool_config, get_tool_config_path
 
 # Prompts now live in the prompt store (create them with
 # `prompt setup webux import`). These are the default prompt *names*
@@ -23,6 +26,7 @@ def load_storyboard_config(migrate: bool = True) -> dict:
     base.setdefault("image_size", "landscape")
     base.setdefault("image_style", "cinematic, dramatic lighting, photorealistic, hyperrealistic")
     base.setdefault("narrative_style", "documentary, dramatic third-person narration")
+    base.setdefault("narrative_guidance", "")   # broader story context injected into scene prompts
     base.setdefault("animation_style", "ken_burns")
     base.setdefault("ken_burns_zoom_from", 1.0)
     base.setdefault("ken_burns_zoom_to", 1.3)
@@ -70,7 +74,7 @@ def save_storyboard_config(updates: dict) -> None:
     # Only persist storyboard-specific keys, not inherited common/llm config
     storyboard_keys = {
         "tts_engine", "language", "image_engine", "image_size", "image_style",
-        "narrative_style", "animation_style", "ken_burns_zoom_from",
+        "narrative_style", "narrative_guidance", "animation_style", "ken_burns_zoom_from",
         "ken_burns_zoom_to", "ken_burns_motion", "fps",
         "image_seed", "image_steps", "draft_mode", "draft_steps",
         "chapter_transition", "chapter_transition_duration",
@@ -85,3 +89,31 @@ def save_storyboard_config(updates: dict) -> None:
         if k in storyboard_keys:
             merged[k] = v
     save_tool_config("storyboard", merged)
+
+
+def stable_reference_dir() -> Path:
+    """Directory (inside the profile config dir) where the reusable reference
+    character image is stored, so it survives workdir wipes across restarts."""
+    d = get_tool_config_path("storyboard").parent / "reference"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def save_reference_character(image_path: str, description: str) -> str:
+    """Copy the given reference image into the stable profile dir and persist it
+    in the storyboard config. Returns the stable image path.
+
+    The reference image originally lives in the project workdir, which is
+    recreated with a fresh random name on every /init. Storing it there means a
+    workdir wipe (or restart after re-init) silently loses the reference. Keeping
+    a copy in the profile config dir makes the reference durable."""
+    src = Path(image_path).expanduser()
+    if not src.exists():
+        raise FileNotFoundError(f"Reference image not found: {image_path}")
+    dest = stable_reference_dir() / "character_reference.png"
+    shutil.copy2(src, dest)
+    save_storyboard_config({
+        "character_reference_image": str(dest),
+        "character_reference_description": description,
+    })
+    return str(dest)

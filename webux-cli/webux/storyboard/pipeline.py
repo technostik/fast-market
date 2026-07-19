@@ -1145,6 +1145,7 @@ def _resolve_prompt(template: str, config: dict) -> str:
         "scene_range": config.get("scene_range", "2–5"),
         "scene_duration": config.get("scene_duration", "15–45 seconds"),
         "narrative_style": config.get("narrative_style", "documentary narration"),
+        "narrative_guidance": config.get("narrative_guidance", ""),
         "image_style": config.get("image_style", "cinematic, dramatic lighting"),
     }
     for k, v in subs.items():
@@ -1186,6 +1187,7 @@ async def _apply_story_prompt(
         "scene_range": config.get("scene_range", "2–5"),
         "scene_duration": config.get("scene_duration", "15–45 seconds"),
         "narrative_style": config.get("narrative_style", "documentary narration"),
+        "narrative_guidance": config.get("narrative_guidance", ""),
         "image_style": config.get("image_style", "cinematic, dramatic lighting"),
     }
     subs.update(extra_subs or {})
