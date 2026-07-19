@@ -963,9 +963,16 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
           <span class="cfg-label">Reference Strength (local engine)</span>
           <input type="number" id="cfgCharStrength" min="0" max="1" step="0.05" value="0.35" style="width:90px" />
         </div>
-        <div style="font-size:10px;color:var(--text-dim)">
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">
           The character is auto-designed from the script, then editable in the 🧍 Character panel.
           Generate it before running the pipeline, or it runs automatically when enabled.
+        </div>
+        <div id="cfgCharRefBox" style="padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px">
+          <div class="detail-label" style="font-size:10px;color:var(--accent);margin-bottom:6px">Stored Reference Character</div>
+          <div id="cfgCharRefNone" style="font-size:11px;color:var(--text-dim);font-style:italic;margin-bottom:6px">No reference character set.</div>
+          <img id="cfgCharRefPreview" src="" style="display:none;width:100%;max-width:160px;border-radius:6px;border:1px solid var(--border);margin-bottom:6px" />
+          <div id="cfgCharRefDesc" style="font-size:11px;color:var(--text);white-space:pre-wrap;line-height:1.4;margin-bottom:8px"></div>
+          <button class="btn btn-neutral btn-sm" id="cfgCharRefClearBtn" style="display:none" onclick="clearCharReference()">🗑 Clear Reference</button>
         </div>
       </div>
     </div>
@@ -1081,6 +1088,7 @@ async function loadConfig() {
     document.getElementById('cfgCharStyleFree').value = cfg.character_style_free || '';
     document.getElementById('cfgCharStrength').value = cfg.character_strength != null ? cfg.character_strength : 0.35;
     document.getElementById('cfgCharStyleFreeWrap').style.display = (cfg.character_style === 'free') ? '' : 'none';
+    refreshCharReference(cfg);
     document.getElementById('cfgChapterRange').value = cfg.chapter_range || '2–5';
     document.getElementById('cfgSceneRange').value = cfg.scene_range || '2–5';
     document.getElementById('cfgSceneDuration').value = cfg.scene_duration || '15–45 seconds';
@@ -1188,6 +1196,84 @@ async function saveConfig() {
     const msg = document.getElementById('cfgSaveMsg');
     if (r.ok) { msg.textContent = '✓ Saved'; setTimeout(() => msg.textContent = '', 2000); }
     else { msg.textContent = 'Error saving'; msg.style.color = 'var(--red)'; }
+  } catch(e) { console.error(e); }
+}
+
+function refreshCharReference(cfg) {
+  const box = document.getElementById('cfgCharRefBox');
+  const noneEl = document.getElementById('cfgCharRefNone');
+  const img = document.getElementById('cfgCharRefPreview');
+  const desc = document.getElementById('cfgCharRefDesc');
+  const clearBtn = document.getElementById('cfgCharRefClearBtn');
+  const refImg = cfg && cfg.character_reference_image;
+  if (refImg) {
+    if (img.dataset.src !== refImg) { img.dataset.src = refImg; img.src = '/api/storyboard/preview?file=' + encodeURIComponent(refImg) + '&t=' + Date.now(); }
+    img.style.display = '';
+    noneEl.style.display = 'none';
+    clearBtn.style.display = '';
+  } else {
+    img.style.display = 'none';
+    img.src = '';
+    noneEl.style.display = '';
+    clearBtn.style.display = 'none';
+  }
+  desc.textContent = (cfg && cfg.character_reference_description) ? cfg.character_reference_description : '';
+  box.style.display = '';
+}
+
+async function clearCharReference() {
+  if (!confirm('Clear the stored reference character? This removes it from the config for all projects.')) return;
+  const body = {
+    tts_engine: document.getElementById('cfgTts').value,
+    language: document.getElementById('cfgLang').value,
+    image_engine: document.getElementById('cfgImgEngine').value,
+    image_size: document.getElementById('cfgImgSize').value,
+    image_style: document.getElementById('cfgImgStyle').value,
+    narrative_style: document.getElementById('cfgNarrStyle').value,
+    fps: parseInt(document.getElementById('cfgFps').value) || 24,
+    ken_burns_zoom_from: parseFloat(document.getElementById('cfgZoomFrom').value) || 1.0,
+    ken_burns_zoom_to: parseFloat(document.getElementById('cfgZoomTo').value) || 1.3,
+    ken_burns_motion: document.getElementById('cfgMotion').value,
+    chapter_transition: document.getElementById('cfgTransition').value,
+    chapter_transition_duration: parseFloat(document.getElementById('cfgTransitionDuration').value) || 1.0,
+    image_seed: document.getElementById('cfgImgSeed').value !== '' ? parseInt(document.getElementById('cfgImgSeed').value) : null,
+    image_steps: document.getElementById('cfgImgSteps').value !== '' ? parseInt(document.getElementById('cfgImgSteps').value) : null,
+    draft_mode: document.getElementById('cfgDraftMode').checked,
+    character_enabled: document.getElementById('cfgCharEnabled').checked,
+    character_use_reference: document.getElementById('cfgCharUseRef').checked,
+    character_style: document.getElementById('cfgCharStyle').value,
+    character_style_free: document.getElementById('cfgCharStyleFree').value,
+    character_strength: parseFloat(document.getElementById('cfgCharStrength').value) || 0.35,
+    character_reference_image: null,
+    character_reference_description: "",
+    chapter_range: document.getElementById('cfgChapterRange').value || '2–5',
+    scene_range: document.getElementById('cfgSceneRange').value || '2–5',
+    scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
+    prompts: {
+      story_breakdown: document.getElementById('cfgPromptStorySel').value,
+      scene_transcript: document.getElementById('cfgPromptTranscriptSel').value,
+      scene_image_prompt: document.getElementById('cfgPromptImageSel').value,
+      scene_image_prompt_with_character: document.getElementById('cfgPromptImageCharSel').value,
+    },
+    prompt_overrides: {
+      story_breakdown: document.getElementById('cfgPromptStory').value,
+      scene_transcript: document.getElementById('cfgPromptTranscript').value,
+      scene_image_prompt: document.getElementById('cfgPromptImage').value,
+      scene_image_prompt_with_character: document.getElementById('cfgPromptImageChar').value,
+    }
+  };
+  try {
+    const r = await fetch('/api/storyboard/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (r.ok) {
+      document.getElementById('cfgCharRefPreview').dataset.src = '';
+      document.getElementById('cfgCharRefPreview').src = '';
+      document.getElementById('cfgCharRefPreview').style.display = 'none';
+      document.getElementById('cfgCharRefNone').style.display = '';
+      document.getElementById('cfgCharRefDesc').textContent = '';
+      document.getElementById('cfgCharRefClearBtn').style.display = 'none';
+      const msg = document.getElementById('cfgSaveMsg');
+      msg.textContent = '✓ Reference cleared'; setTimeout(() => { if (msg.textContent === '✓ Reference cleared') msg.textContent = ''; }, 2000);
+    }
   } catch(e) { console.error(e); }
 }
 
@@ -1453,6 +1539,10 @@ function applyState(data) {
   if (document.getElementById('charModal').classList.contains('open')) {
     refreshCharModalLive(data);
   }
+
+  // Config panel stored-reference box reflects the latest config (refreshes
+  // live after "Reuse as Reference", and shows "No reference character" if none).
+  refreshCharReference(data);
 }
 
 function refreshCharModalLive(data) {
