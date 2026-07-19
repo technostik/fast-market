@@ -441,11 +441,7 @@ prompts:
 
     Output language: {lang}
 
-    Target chapter count: {chapter_range}
-
-    Target scenes per chapter: {scene_range}
-
-    Target scene duration: {scene_duration}
+    Target scene duration, adapt the script to fit this duration: {scene_duration}
 
 
     Narrative guidance (the scene must remember this broader context): {narrative_guidance}
