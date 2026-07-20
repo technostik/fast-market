@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 from pathlib import Path
@@ -151,6 +152,28 @@ async def prompt_content(name: str = Query(...)):
     return {"name": name, "content": stdout.decode(errors="replace").strip()}
 
 
+@router.get("/list-image-engines")
+async def list_image_engines():
+    img = shutil.which("image") or "image"
+    proc = await asyncio.create_subprocess_exec(
+        img, "setup", "engine", "list", "--format", "json",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    engines: list[str] = []
+    default = ""
+    try:
+        data = json.loads(stdout.decode(errors="replace").strip() or "{}")
+        engines = data.get("engines", []) or []
+        default = data.get("default", "") or ""
+    except (ValueError, TypeError):
+        pass
+    if not engines:
+        engines = ["flux2cloud", "flux2"]
+    return {"engines": engines, "default": default}
+
+
 @router.get("/state")
 async def get_state():
     cfg = load_storyboard_config()
@@ -194,6 +217,7 @@ class RunRequest(BaseModel):
     from_step: str | None = None
     only_step: bool = False
     only_scene: bool = False  # run within scene only, don't cascade to chapter/final
+    image_engine: str | None = None  # per-run override (e.g. Redo Image with a chosen engine)
 
 
 @router.post("/run")
@@ -204,6 +228,9 @@ async def run_pipeline(req: RunRequest):
     state = _load_state(cfg)
     if state is None:
         raise HTTPException(status_code=400, detail="Project not initialized — call /init first")
+    # Per-run image engine override (does not persist to config).
+    if req.image_engine:
+        cfg = {**cfg, "image_engine": req.image_engine}
     sp = _state_path(cfg)
     start_pipeline(state, sp, cfg,
                    from_global_step=req.from_global_step,
@@ -918,7 +945,6 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <span class="cfg-label">Image Engine</span>
         <select id="cfgImgEngine">
           <option value="flux2cloud">flux2cloud</option>
-          <option value="flux2">flux2 (local)</option>
         </select>
       </div>
       <div class="cfg-field">
@@ -1158,6 +1184,27 @@ async function boot() {
   await pollJob();
 }
 
+let _imageEngines = ['flux2cloud'];
+let _configImageEngine = 'flux2cloud';
+async function fetchImageEngines() {
+  try {
+    const r = await fetch('/api/storyboard/list-image-engines');
+    if (r.ok) {
+      const d = await r.json();
+      if (Array.isArray(d.engines) && d.engines.length) _imageEngines = d.engines;
+    }
+  } catch (e) {}
+  return _imageEngines;
+}
+
+async function populateImageEngines(selected) {
+  const engines = await fetchImageEngines();
+  const sel = document.getElementById('cfgImgEngine');
+  const cur = selected || sel.value;
+  sel.innerHTML = engines.map(e => `<option value="${e}">${e}</option>`).join('');
+  if (cur && engines.includes(cur)) sel.value = cur;
+}
+
 async function loadConfig() {
   try {
     const r = await fetch('/api/storyboard/config');
@@ -1165,7 +1212,9 @@ async function loadConfig() {
     const cfg = await r.json();
     document.getElementById('cfgTts').value = cfg.tts_engine || 'kokoro';
     document.getElementById('cfgLang').value = cfg.language || 'en';
-    document.getElementById('cfgImgEngine').value = cfg.image_engine || 'flux2cloud';
+    _configImageEngine = cfg.image_engine || 'flux2cloud';
+    await populateImageEngines(_configImageEngine);
+    document.getElementById('cfgImgEngine').value = _configImageEngine;
     document.getElementById('cfgImgSize').value = cfg.image_size || 'landscape';
     document.getElementById('cfgImgStyle').value = cfg.image_style || '';
     document.getElementById('cfgNarrStyle').value = cfg.narrative_style || '';
@@ -1508,11 +1557,14 @@ function renderFormatView(chapters) {
           : (sc.image_prompt
               ? `<div class="detail-label">Prompt</div><div style="white-space:pre-wrap;font-size:11px;line-height:1.4;color:var(--text-dim);max-height:180px;overflow:auto">${esc(sc.image_prompt)}</div>`
               : `<div style="color:var(--text-dim);font-size:11px">No image prompt yet.</div>`);
+        const curEngine = _configImageEngine;
+        const engineOpts = _imageEngines.map(e => `<option value="${e}"${e === curEngine ? ' selected' : ''}>${e}</option>`).join('');
         const btns = canEdit
-          ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
               <button class="btn-sm btn-neutral" onclick="saveFmtImagePrompt('${sc.id}')">Save</button>
               <button class="btn-sm btn-neutral" onclick="rerunStep('${sc.id}','gen_image_prompt')">↻ Regen Prompt</button>
-              <button class="btn-sm btn-primary" onclick="rerunStep('${sc.id}','gen_image')">↻ Redo Image</button>
+              <select id="fmtImgEngine_${sc.id}" class="btn-sm" style="padding:2px 4px" title="Engine for Redo">${engineOpts}</select>
+              <button class="btn-sm btn-primary" onclick="redoImage('${sc.id}')">↻ Redo Image</button>
             </div>`
           : '';
         inner = `<div style="display:flex;gap:12px;align-items:flex-start">
@@ -2011,6 +2063,14 @@ async function runFromGlobal(step) {
 
 async function rerunStep(sceneId, stepName) {
   await postRun({ scene_id: sceneId, from_step: stepName, only_step: true });
+}
+
+async function redoImage(sceneId) {
+  const sel = document.getElementById('fmtImgEngine_' + sceneId);
+  const engine = sel ? sel.value : null;
+  const body = { scene_id: sceneId, from_step: 'gen_image', only_step: true };
+  if (engine) body.image_engine = engine;
+  await postRun(body);
 }
 
 async function rerunScene(sceneId, fromStep) {

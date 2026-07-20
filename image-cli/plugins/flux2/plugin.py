@@ -103,14 +103,12 @@ class Flux2EnginePlugin(ImageEnginePlugin):
 
         if request.init_image is not None:
             pipe_params["image"] = request.init_image
-            if request.strength is not None:
-                pipe_params["strength"] = request.strength
         elif request.reference_images:
-            # FLUX.2 Klein has no IP-Adapter; approximate subject consistency by
-            # using the first reference as a low-strength init_image. The subject
-            # leaks into the output while the prompt drives the new scene.
+            # FLUX.2 Klein has no IP-Adapter and its __call__ accepts no
+            # `strength` kwarg; approximate subject consistency by using the
+            # first reference as a low-strength init_image. The subject leaks
+            # into the output while the prompt drives the new scene.
             pipe_params["image"] = request.reference_images[0]
-            pipe_params["strength"] = request.strength if request.strength is not None else 0.35
 
         result = pipe(**pipe_params)
         return result.images[0]

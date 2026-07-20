@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import click
 
 from commands.helpers import _configure_logging
@@ -17,6 +19,44 @@ def register(plugin_manifests: dict) -> click.Command:
     group = click.Group(
         "engine", help="Manage image generation engines."
     )
+
+    @group.command("list", help="List available image generation engines.")
+    @click.option(
+        "--format",
+        "-f",
+        "output_format",
+        type=click.Choice(["text", "json"]),
+        default="text",
+        help="Output format.",
+    )
+    @click.pass_context
+    def list_cmd(ctx, output_format, **kwargs):
+        _configure_logging(ctx.obj["verbose"])
+        config = load_config(get_config_path())
+        # All engines the system can discover (plugins), regardless of whether
+        # they are configured in the config file.
+        available = sorted(plugin_manifests.keys()) if plugin_manifests else []
+        configured = set((config.get("engines") or {}).keys())
+        default_engine = config.get("default_engine", "")
+        if output_format == "json":
+            click.echo(json.dumps({
+                "engines": available,
+                "configured": sorted(configured),
+                "default": default_engine,
+            }))
+            return
+        if not available:
+            click.echo("No engines available.")
+            return
+        click.echo("Available engines:")
+        for name in available:
+            marks = []
+            if name == default_engine:
+                marks.append("default")
+            if name in configured:
+                marks.append("configured")
+            suffix = f" ({', '.join(marks)})" if marks else ""
+            click.echo(f"  - {name}{suffix}")
 
     @group.command("add", help="Add an engine (flux2).")
     @click.option(
