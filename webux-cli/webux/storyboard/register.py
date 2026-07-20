@@ -1486,13 +1486,39 @@ function renderFormatView(chapters) {
         inner = `<textarea class="edit-area" id="fmtTx_${sc.id}" ${canEdit ? '' : 'readonly'}>${esc(sc.transcript || '')}</textarea>
           ${canEdit ? `<div><button class="btn-sm btn-primary" onclick="saveTranscript('${sc.id}')">Save</button></div>` : ''}`;
       } else if (formatTab === 'audio') {
-        inner = sc.audio_file
+        const audioEl = sc.audio_file
           ? `<audio class="fmt-audio" controls src="${mediaUrl(sc.audio_file, _stepEnd(sc, 'gen_audio'))}"></audio>`
           : `<span style="color:var(--text-dim);font-size:11px">Not yet generated</span>`;
+        const txEl = sc.transcript
+          ? `<div class="detail-label">Transcript</div><div style="white-space:pre-wrap;font-size:11px;line-height:1.4;color:var(--text-dim);max-height:180px;overflow:auto">${esc(sc.transcript)}</div>`
+          : `<div style="color:var(--text-dim);font-size:11px">No transcript yet.</div>`;
+        const redoAudioBtn = canEdit
+          ? `<div style="margin-top:6px"><button class="btn-sm btn-primary" onclick="rerunStep('${sc.id}','gen_audio')">↻ Redo Audio</button></div>`
+          : '';
+        inner = `<div style="display:flex;gap:12px;align-items:flex-start">
+          <div style="flex:1;min-width:0">${txEl}${redoAudioBtn}</div>
+          <div style="flex-shrink:0">${audioEl}</div>
+        </div>`;
       } else if (formatTab === 'image') {
-        inner = sc.image_file
+        const imgEl = sc.image_file
           ? `<img class="fmt-img" src="${mediaUrl(sc.image_file, _stepEnd(sc, 'gen_image'))}" onclick="window.open(this.src)" />`
           : `<span style="color:var(--text-dim);font-size:11px">Not yet generated</span>`;
+        const promptEl = canEdit
+          ? `<div class="detail-label">Prompt</div><textarea class="edit-area" id="fmtImgPrompt_${sc.id}" style="min-height:120px">${esc(sc.image_prompt || '')}</textarea>`
+          : (sc.image_prompt
+              ? `<div class="detail-label">Prompt</div><div style="white-space:pre-wrap;font-size:11px;line-height:1.4;color:var(--text-dim);max-height:180px;overflow:auto">${esc(sc.image_prompt)}</div>`
+              : `<div style="color:var(--text-dim);font-size:11px">No image prompt yet.</div>`);
+        const btns = canEdit
+          ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn-sm btn-neutral" onclick="saveFmtImagePrompt('${sc.id}')">Save</button>
+              <button class="btn-sm btn-neutral" onclick="rerunStep('${sc.id}','gen_image_prompt')">↻ Regen Prompt</button>
+              <button class="btn-sm btn-primary" onclick="rerunStep('${sc.id}','gen_image')">↻ Redo Image</button>
+            </div>`
+          : '';
+        inner = `<div style="display:flex;gap:12px;align-items:flex-start">
+          <div style="flex:1;min-width:0">${promptEl}${btns}</div>
+          <div style="flex-shrink:0">${imgEl}</div>
+        </div>`;
       } else if (formatTab === 'clip') {
         inner = sc.clip_file
           ? `<video class="fmt-vid" controls src="${mediaUrl(sc.clip_file, _stepEnd(sc, 'assemble_clip'))}"></video>`
@@ -2081,6 +2107,16 @@ async function saveImagePrompt(sceneId) {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ image_prompt: val }),
+  });
+}
+
+async function saveFmtImagePrompt(sceneId) {
+  const el = document.getElementById('fmtImgPrompt_' + sceneId);
+  if (!el) return;
+  await fetch(`/api/storyboard/scene/${sceneId}`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ image_prompt: el.value }),
   });
 }
 
