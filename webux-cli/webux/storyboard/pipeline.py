@@ -766,8 +766,31 @@ async def _gen_character(
             dest = workdir / "character.png"
             shutil.copy2(ref_img, dest)
             state.character_image = str(dest)
-            state.character_description = ref_desc or state.character_description
-            step.output = f"Loaded stored reference character.\nDescription: {state.character_description}"
+            # Use the stored description if present, otherwise derive one from the
+            # script via the storyboard-character prompt. The description is required
+            # for scene image prompts ({character}); a reference image alone with no
+            # description means the character is never actually injected into scenes.
+            if ref_desc:
+                state.character_description = ref_desc
+            elif not state.character_description or force_description:
+                step.output = (
+                    "Loaded stored reference image; no stored description — "
+                    "generating one from the script…"
+                )
+                state.save(state_path)
+                script_file = workdir / "script.txt"
+                if not script_file.exists():
+                    script_file.write_text(state.script_text, encoding="utf-8")
+                rc = await _apply_story_prompt(step, state, config, "character", script_file)
+                if rc != 0:
+                    step.status = "error"
+                    step.end_time = time.time()
+                    state.save(state_path)
+                    return
+                state.character_description = step.output.strip()
+            step.output = (
+                f"Loaded stored reference character.\nDescription: {state.character_description}"
+            )
             step.output_file = str(dest)
             step.status = "done"
             step.end_time = time.time()
@@ -915,13 +938,19 @@ async def _gen_image_prompt(
     # config (e.g. a re-opened project that saved a reference but hasn't generated
     # a character in this session yet) — both make the character "active".
     char_desc = state.character_description or config.get("character_reference_description", "")
-    char_active = bool(config.get("character_enabled") and char_desc)
+    # The character is "active" (→ use the with-character template) when enabled AND
+    # we have either a description OR a usable reference image. In reference mode the
+    # description may be blank; the reference image alone still makes the character
+    # present in the scene, so we must not silently fall back to the plain template.
+    ref_image = state.character_image or config.get("character_reference_image")
+    has_ref_image = bool(ref_image and Path(ref_image).exists())
+    char_active = bool(config.get("character_enabled") and (char_desc or has_ref_image))
     prompt_key = "scene_image_prompt_with_character" if char_active else "scene_image_prompt"
 
     # Inject the central character description as the {character} placeholder when enabled.
     subs = {}
     if char_active:
-        subs["character"] = char_desc
+        subs["character"] = char_desc or "(refer to reference image 0)"
 
     rc = await _apply_story_prompt(step, state, config, prompt_key, input_file, subs)
     if rc != 0:
@@ -1019,14 +1048,19 @@ async def _gen_image(
         cmd.extend(["--seed", str(image_seed)])
 
     # Inject the central character reference image for subject consistency.
-    if config.get("character_enabled") and state.character_image and Path(state.character_image).exists():
+    # Prefer the live character image (generated/loaded this session); fall back to
+    # the stored cross-story reference in config (reference mode may not have set
+    # state.character_image). Either way the "with character" prompt refers to
+    # "image 0", so the reference MUST be passed here.
+    ref_image = state.character_image or config.get("character_reference_image")
+    if config.get("character_enabled") and ref_image and Path(ref_image).exists():
         # The scene image prompt (the dedicated "with character" template) already
         # embeds the character description; we also pass the reference image so the
         # engine keeps the subject visually consistent with the character sheet.
-        cmd.extend(["--reference-image", state.character_image])
+        cmd.extend(["--reference-image", ref_image])
         if config.get("character_strength") is not None:
             cmd.extend(["--strength", str(config.get("character_strength"))])
-        step.output += f"\n[character] using reference image: {state.character_image} (strength={config.get('character_strength')})\n"
+        step.output += f"\n[character] using reference image: {ref_image} (strength={config.get('character_strength')})\n"
 
     rc = await _run(step, *cmd, log_to=state)
     if rc != 0:
