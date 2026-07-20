@@ -830,6 +830,17 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
       <div class="format-body" id="formatBody"></div>
     </div>
 
+    <div class="tree-panel" id="narrationPanel" style="display:none">
+      <div class="panel-hdr" onclick="togglePanel('narrationPanel')">
+        🎙 Narration
+        <span id="narrationStats" style="flex:1;font-weight:400;color:var(--text-dim);font-size:10px;margin-left:6px"></span>
+        <button class="btn-sm" onclick="event.stopPropagation();showNarrationModal()" style="background:var(--surface);color:var(--text)">Edit</button>
+        <span class="ph-toggle" id="narrationPanelToggle">▾</span>
+      </div>
+      <div class="panel-bdy" id="narrationBody">
+        <div class="no-state">No narration yet — run the Narrate step.</div>
+      </div>
+    </div>
     <div class="tree-panel" id="treePanel">
       <div class="panel-hdr" onclick="togglePanel('treePanel')">
         📋 Chapters
@@ -1615,6 +1626,9 @@ function applyState(data) {
   // Global steps sidebar
   renderGlobalSteps(data.global_steps || {});
 
+  // Narration (shown before the chapters)
+  renderNarration(data);
+
   // Scene tree
   renderTree(data.chapters || []);
 
@@ -1758,6 +1772,41 @@ function computeStats(chapters) {
   return { words, durTotal, chDurs };
 }
 
+let _lastNarrationJson = null;
+let _pendingNarrationUpdate = false;
+function _narrationIsBusy() {
+  const el = document.getElementById('narrationPanel');
+  if (!el) return false;
+  const a = document.activeElement;
+  return !!(a && el.contains(a) && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT'));
+}
+function renderNarration(data) {
+  const panel = document.getElementById('narrationPanel');
+  const st = data.narration_step || {};
+  const text = data.narration_text || '';
+  // Show the panel once the narrate step has started (running/done/error) or text exists.
+  const visible = !!text || (st.status && st.status !== 'pending' && st.status !== 'skipped');
+  panel.style.display = visible ? '' : 'none';
+  if (!visible) return;
+
+  const j = JSON.stringify({ t: text, s: st.status });
+  if (j !== _lastNarrationJson) _pendingNarrationUpdate = true;
+  if (!(_pendingNarrationUpdate && !_narrationIsBusy())) return;
+  _lastNarrationJson = j; _pendingNarrationUpdate = false;
+
+  const body = document.getElementById('narrationBody');
+  const stats = document.getElementById('narrationStats');
+  const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0;
+  if (stats) stats.innerHTML = words > 0 ? `<b>${words.toLocaleString()}</b> words · ${stepIcon(st.status || 'pending')}` : stepIcon(st.status || 'pending');
+  if (!text.trim()) {
+    body.innerHTML = st.status === 'running'
+      ? '<div class="no-state">Narrating…</div>'
+      : '<div class="no-state">No narration yet — run the Narrate step.</div>';
+    return;
+  }
+  body.innerHTML = `<div class="narration-text" style="white-space:pre-wrap;font-size:12px;line-height:1.5;color:var(--text);max-height:220px;overflow:auto;padding:4px 2px">${esc(text)}</div>`;
+}
+
 function renderTree(chapters) {
   const body = document.getElementById('treeBody');
   const statsBar = document.getElementById('statsBar');
@@ -1833,7 +1882,7 @@ function togglePanel(id) {
 }
 
 function restorePanels() {
-  ['treePanel','detailPanel','consolePanel','finalPanel'].forEach(id => {
+  ['narrationPanel','treePanel','detailPanel','consolePanel','finalPanel'].forEach(id => {
     try {
       if (localStorage.getItem('sb-panel-' + id) === '1') {
         const el = document.getElementById(id);

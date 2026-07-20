@@ -665,6 +665,31 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
             scenes.append(scene)
         state.chapters.append(Chapter(id=ch_id, title=ch_title, scenes=scenes))
 
+    # Fail loudly here if the model returned scenes without a verbatim transcript
+    # excerpt. Otherwise the empty transcript slips through segmentation and only
+    # surfaces later as the confusing "No transcript to confirm" error in the
+    # per-scene gen_transcript step. Most common cause: the JSON output was
+    # truncated (raise max_tokens on the storyboard-breakdown prompt) or the model
+    # omitted/renamed the "transcript" field.
+    missing = [
+        sc.id
+        for ch in state.chapters
+        for sc in ch.scenes
+        if not sc.transcript.strip()
+    ]
+    if missing:
+        s.status = "error"
+        s.output += (
+            f"\n[error] Segmentation returned {len(missing)} scene(s) with no "
+            f"transcript: {', '.join(missing)}. The model likely truncated its JSON "
+            "output or omitted the 'transcript' field. Re-run the 'segment' step "
+            "(raise max_tokens on the storyboard-breakdown prompt if the narration "
+            "is long), or paste transcripts manually in the scene detail panel."
+        )
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+
     # Create directory structure
     for ch in state.chapters:
         for sc in ch.scenes:
