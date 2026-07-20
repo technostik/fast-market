@@ -412,21 +412,62 @@ prompts:
   max_tokens: 2048
   model_provider: ''
   model_name: ''
+- name: storyboard-narrate
+  description: Réécrit un article brut en une narration orale continue et fidèle (optionnellement condensée
+    pour viser une durée cible)
+  content: |-
+    You are a documentary narrator adapting a written article into a continuous spoken narration for a video. Read the entire article below and rewrite it as ONE continuous piece of narration text, ready to be read aloud by a text-to-speech voice. Return ONLY the narration text — no headers, no scene markers, no JSON, no stage directions.
+
+    Preserve the article's own argument, order of ideas, and throughline exactly — every transition and connection between ideas must remain intact and legible when HEARD, not read. Rewrite only what needs rewriting to sound natural when spoken: turn footnotes, bullet lists, headers, and visual formatting into flowing spoken sentences and explicit verbal transitions ("this brings us to...", "but here's the catch..."). Do not invent facts, examples, or claims that are not in the article.
+
+    {duration_instruction}
+
+    Narrative style: {narrative_style}
+    Output language: {lang}
+    Broader context to keep in mind throughout the whole narration: {narrative_guidance}
+
+    ARTICLE:
+    {content}
+  temperature: 0.6
+  max_tokens: 8192
+  model_provider: ''
+  model_name: ''
 - name: storyboard-breakdown
-  description: Découpe un script en chapitres et scènes (JSON) pour le storyboard
-  content: "You are a creative director. Given the following script, break it into\
-    \ chapters and scenes for a narrated video. Return ONLY valid JSON, no other text.\n\
-    \nSchema:\n{{\n  \"chapters\": [\n    {{\n      \"title\": \"Short chapter title\"\
-    ,\n      \"scenes\": [\n        {{\n          \"title\": \"Short scene title\"\
-    ,\n          \"description\": \"2-3 sentences describing what happens in this\
-    \ scene, what visuals would accompany it, and what the narrator covers.\"\n  \
-    \      }}\n      ]\n    }}\n  ]\n}}\n\nRules:\n- Aim for {chapter_range} chapters,\
-    \ {scene_range} scenes per chapter.\n- Each scene should be {scene_duration} of\
-    \ narration.\n- Scene descriptions should be vivid enough to generate an image\
-    \ prompt.\n- Narration will be in {lang} — write descriptions accordingly.\n\n\
-    SCRIPT:\n{content}"
-  temperature: 0.7
-  max_tokens: 2048
+  description: 'Découpe la narration finale déjà écrite en chapitres/scènes : extraits quasi-verbatim
+    (transcript) + description visuelle séparée (JSON)'
+  content: |-
+    You are a video editor splitting an already-finished, FINAL narration text into chapters and scenes for a narrated video. The text below has already been written and approved — your only job is to cut it into pieces and describe what to show on screen for each piece. Return ONLY valid JSON, no other text.
+
+    CRITICAL RULE: the "transcript" field of every scene MUST be an exact, word-for-word excerpt copied from the text below — do not paraphrase, summarize, reword, or add anything. You may only choose WHERE to cut (always at sentence boundaries), never rewrite. Concatenating every scene's "transcript" field in order must reproduce the ENTIRE input text exactly, with nothing added, removed, or changed.
+
+    Schema:
+    {{
+      "chapters": [
+        {{
+          "title": "Short chapter title",
+          "scenes": [
+            {{
+              "title": "Short scene title",
+              "transcript": "Exact word-for-word excerpt from the input text for this scene.",
+              "description": "2-3 sentences describing ONLY the visuals to show for this scene (setting, subject, mood, composition) — this is for an image generator, it is never spoken, and must not repeat the transcript verbatim."
+            }}
+          ]
+        }}
+      ]
+    }}
+
+    Rules:
+    - Aim for {chapter_range} chapters, {scene_range} scenes per chapter.
+    - Each scene's transcript should read aloud in about {scene_duration}.
+    - Cut only at sentence boundaries — never mid-sentence.
+    - Chapters should follow the natural structure / topic shifts already present in the text.
+    - The "description" is independent of the "transcript": describe what the viewer SEES, not what they hear. Keep continuity of setting where the text doesn't imply a scene change, and vary composition/framing between consecutive scenes to avoid visually repetitive shots.
+    - Input language is {lang} — keep the transcript excerpts in that exact language, unchanged.
+
+    FINAL NARRATION TEXT (cut this, verbatim, into scenes):
+    {content}
+  temperature: 0.4
+  max_tokens: 8192
   model_provider: ''
   model_name: ''
 - name: storyboard-scene-transcript

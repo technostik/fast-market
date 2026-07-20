@@ -15,6 +15,11 @@ from .models import (
 )
 from .config import load_storyboard_config, save_storyboard_config
 
+# Rough spoken-word rate used only to translate a target duration (seconds) into a
+# word-count budget for the LLM in the narrate prompt. Not used for anything precise —
+# actual scene timing always comes from the real TTS-rendered audio_duration.
+WORDS_PER_SECOND = 2.5
+
 # ── In-memory job tracker ─────────────────────────────────────────────────────
 
 _current_task: asyncio.Task | None = None
@@ -288,6 +293,12 @@ async def _run_pipeline(
             if state.character_image and Path(state.character_image).exists():
                 save_storyboard_config({"character_enabled": True})
             return
+        if only_global_step == "narrate":
+            state.narration_step = StepState()
+            state.narration_text = ""
+            state.save(state_path)
+            await _gen_narration(state, state_path, config)
+            return
         if only_global_step == "parse":
             state.parse_step = StepState()
             state.save(state_path)
@@ -326,8 +337,15 @@ async def _run_pipeline(
     # "Run from X": reset the boundary step and ALL downstream steps so they re-run.
     # "Run remaining" (no from_global_step): no reset — only runs pending steps.
     if from_global_step:
+        # Reset the narrate step whenever we run from narrate or earlier, so it
+        # regenerates the narration text (e.g. after changing content_mode or
+        # target_duration_seconds).
+        if from_idx <= GLOBAL_STEPS.index("narrate"):
+            state.narration_step = StepState()
+            state.narration_text = ""
         # Reset the parse step whenever we run from parse or earlier, so it
-        # re-splits the script (e.g. after changing chapter_range/scene_range).
+        # re-splits the (possibly new) narration (e.g. after changing
+        # chapter_range/scene_range, or after narrate re-ran above).
         if from_idx <= GLOBAL_STEPS.index("parse"):
             state.parse_step = StepState()
         _scene_stages_ordered = [
@@ -365,7 +383,14 @@ async def _run_pipeline(
             if state.character_image and Path(state.character_image).exists():
                 save_storyboard_config({"character_enabled": True})
 
-    # Stage 1: parse
+    # Stage 1: narrate (skipped internally when content_mode == "oral_script")
+    if from_idx <= GLOBAL_STEPS.index("narrate"):
+        if state.narration_step.status != "done":
+            await _gen_narration(state, state_path, config)
+            if state.narration_step.status != "done":
+                return
+
+    # Stage 2: parse (a.k.a. "segment" — cuts the final narration into scenes)
     if from_idx <= GLOBAL_STEPS.index("parse"):
         if state.parse_step.status != "done":
             await _parse_script(state, state_path, config)
@@ -457,13 +482,55 @@ def _clean_for_reparse(state: ProjectState) -> None:
     state.final_file = None
 
 
-async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> None:
-    s = state.parse_step
+def _duration_instruction(config: dict) -> str:
+    """Build the {duration_instruction} sub for the narrate prompt.
+
+    target_duration_seconds is None/unset  -> faithful, full-length narration.
+    target_duration_seconds is set          -> allowed/expected to condense to fit.
+    """
+    target = config.get("target_duration_seconds")
+    if not target:
+        return (
+            "Target length: NONE. Write the full, faithful narration of the ENTIRE "
+            "article — do not summarize, do not omit sections or arguments. Only adapt "
+            "the register from written to spoken; the total length should track the "
+            "full article."
+        )
+    try:
+        target = float(target)
+    except (TypeError, ValueError):
+        return (
+            "Target length: NONE. Write the full, faithful narration of the ENTIRE "
+            "article — do not summarize, do not omit sections or arguments. Only adapt "
+            "the register from written to spoken; the total length should track the "
+            "full article."
+        )
+    target_words = max(20, round(target * WORDS_PER_SECOND))
+    return (
+        f"Target length: your narration must fit within approximately {int(target)} "
+        f"seconds of spoken narration (roughly {target_words} words at a natural pace). "
+        "To hit this target, CONDENSE the article: keep its core thesis and structure "
+        "intact, but cut secondary examples, digressions, and repetition. Do not pad."
+    )
+
+
+async def _gen_narration(state: ProjectState, state_path: Path, config: dict) -> None:
+    """Stage 'narrate': produce ONE continuous, final oral narration text.
+
+    - content_mode == "oral_script": the pasted script is already a finished oral
+      script (e.g. produced upstream by a dedicated scriptwriting prompt/pipeline
+      that already handled pacing, hooks, callbacks...). We must NOT rewrite it —
+      any regeneration here would flatten narrative work already done elsewhere.
+      This step is a fast, deterministic pass-through.
+    - content_mode == "raw_article" (default): the pasted text is written material
+      (e.g. an essay) and needs a real oral adaptation. We call the LLM exactly
+      ONCE over the *entire* text so the result is coherent by construction —
+      no scene-by-scene blind rewriting, no lost throughline.
+    """
+    s = state.narration_step
     s.status = "running"
     s.start_time = time.time()
     s.output = ""
-    if state.chapters:
-        _clean_for_reparse(state)
     state.save(state_path)
 
     script_text = state.script_text
@@ -474,12 +541,72 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
         state.save(state_path)
         return
 
-    # Write script to file so prompt CLI can reference it as a named parameter
     workdir = Path(state.workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    narration_file = workdir / "narration.txt"
+
+    content_mode = config.get("content_mode", "raw_article")
+    if content_mode == "oral_script":
+        # Pass-through: the input IS the narration. No LLM call.
+        state.narration_text = script_text.strip()
+        narration_file.write_text(state.narration_text, encoding="utf-8")
+        s.output = (
+            "[skipped] content_mode=oral_script — using the pasted script verbatim "
+            "as the narration (no rewrite)."
+        )
+        s.output_file = str(narration_file)
+        s.status = "done"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+
     script_file = workdir / "script.txt"
     script_file.write_text(script_text, encoding="utf-8")
 
-    rc = await _apply_story_prompt(s, state, config, "story_breakdown", script_file)
+    rc = await _apply_story_prompt(
+        s, state, config, "narrate", script_file,
+        extra_subs={"duration_instruction": _duration_instruction(config)},
+    )
+    if rc != 0:
+        s.status = "error"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+
+    state.narration_text = s.output.strip()
+    narration_file.write_text(state.narration_text, encoding="utf-8")
+    s.output_file = str(narration_file)
+    s.status = "done"
+    s.end_time = time.time()
+    state.save(state_path)
+
+
+async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> None:
+    s = state.parse_step
+    s.status = "running"
+    s.start_time = time.time()
+    s.output = ""
+    if state.chapters:
+        _clean_for_reparse(state)
+    state.save(state_path)
+
+    narration_text = state.narration_text
+    if not narration_text.strip():
+        s.status = "error"
+        s.output = "[error] No narration text yet — run the 'narrate' step first"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
+
+    # Write the FINAL narration to file so prompt CLI can reference it as a named
+    # parameter. This step only cuts this already-final text into scenes — it must
+    # not regenerate or rephrase it.
+    workdir = Path(state.workdir)
+    narration_file = workdir / "narration.txt"
+    if not narration_file.exists():
+        narration_file.write_text(narration_text, encoding="utf-8")
+
+    rc = await _apply_story_prompt(s, state, config, "story_breakdown", narration_file)
     if rc != 0:
         s.status = "error"
         s.end_time = time.time()
@@ -520,11 +647,22 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
         scenes = []
         for si, sc_data in enumerate(ch_data.get("scenes", [])):
             sc_id = f"{ch_id}_sc{si:02d}"
-            scenes.append(Scene(
+            scene = Scene(
                 id=sc_id,
                 title=_slugify(sc_data.get("title", f"scene_{si}")),
                 raw_description=sc_data.get("description", ""),
-            ))
+                # The segment step already cut a near-verbatim excerpt of the final
+                # narration — this IS the scene's transcript. No further AI rewriting.
+                transcript=(sc_data.get("transcript") or "").strip(),
+            )
+            if scene.transcript:
+                # Pre-complete the "transcript" scene step: segmentation already did
+                # the job, no blind per-scene regeneration is needed (or wanted).
+                step = scene.steps["gen_transcript"]
+                step.status = "done"
+                step.start_time = step.end_time = time.time()
+                step.output = "[from segment] verbatim excerpt of the final narration."
+            scenes.append(scene)
         state.chapters.append(Chapter(id=ch_id, title=ch_title, scenes=scenes))
 
     # Create directory structure
@@ -533,6 +671,10 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
             scene_dir = Path(state.workdir) / "chapters" / ch.id / "scenes" / sc.id
             scene_dir.mkdir(parents=True, exist_ok=True)
             (scene_dir / "description.txt").write_text(sc.raw_description, encoding="utf-8")
+            if sc.transcript:
+                transcript_file = scene_dir / "transcript.txt"
+                transcript_file.write_text(sc.transcript, encoding="utf-8")
+                sc.steps["gen_transcript"].output_file = str(transcript_file)
 
     s.status = "done"
     s.end_time = time.time()
@@ -544,6 +686,22 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
             for i, ch in enumerate(state.chapters)
         )
     )
+    # Soft sanity check: the LLM was instructed to cut the narration verbatim, never
+    # to rewrite it. If the concatenated transcripts drift too far in word count from
+    # the source narration, it likely paraphrased instead of cutting — warn (don't
+    # fail) so it's visible in the step output / console.
+    narration_words = len(narration_text.split())
+    transcript_words = sum(
+        len(sc.transcript.split()) for ch in state.chapters for sc in ch.scenes
+    )
+    if narration_words > 0:
+        drift = abs(transcript_words - narration_words) / narration_words
+        if drift > 0.15:
+            s.output += (
+                f"\n[warn] Scene transcripts total {transcript_words} words vs "
+                f"{narration_words} in the narration ({drift:.0%} drift) — the model may "
+                "have paraphrased instead of cutting verbatim. Check the scenes."
+            )
     state.save(state_path)
 
 
@@ -673,24 +831,36 @@ async def _gen_character(
 async def _gen_transcript(
     state: ProjectState, state_path: Path, config: dict, sc: Scene
 ) -> None:
+    """Confirm/persist the scene transcript — no AI call.
+
+    The transcript is produced once, for the whole narration, by the 'segment' step
+    (a near-verbatim cut of the final narration text) so that consecutive scenes stay
+    coherent. Regenerating a single scene's transcript blindly from a 2-3 sentence
+    description (the old behaviour) is exactly what broke the meta-narration, so this
+    step is now a deterministic pass-through: it just (re)writes whatever transcript
+    the scene currently holds (from segmentation, or from a manual edit via the
+    scene detail panel / POST /scene/{id}) to disk and marks the step done.
+    """
     step = sc.steps["gen_transcript"]
     step.status = "running"
     step.start_time = time.time()
     step.output = ""
     state.save(state_path)
 
-    scene_dir = _scene_dir(state, sc)
-    description_file = scene_dir / "description.txt"
-    rc = await _apply_story_prompt(step, state, config, "scene_transcript", description_file)
-    if rc != 0:
+    if not sc.transcript.strip():
         step.status = "error"
+        step.output = (
+            "[error] No transcript to confirm — re-run the 'parse' (segment) step, "
+            "or paste one manually in the scene detail panel."
+        )
         step.end_time = time.time()
         state.save(state_path)
         return
 
-    sc.transcript = step.output.strip()
+    scene_dir = _scene_dir(state, sc)
     transcript_file = scene_dir / "transcript.txt"
     transcript_file.write_text(sc.transcript, encoding="utf-8")
+    step.output = "[confirmed] transcript persisted to disk (no AI rewrite)."
     step.output_file = str(transcript_file)
     step.status = "done"
     step.end_time = time.time()

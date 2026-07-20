@@ -10,6 +10,7 @@ from common.core.config import load_tool_config, save_tool_config, get_tool_conf
 # the pipeline applies. Per-project overrides can be set in the WebUX
 # config panel (stored under `prompt_overrides`).
 DEFAULT_PROMPT_NAMES = {
+    "narrate": "storyboard-narrate",
     "story_breakdown": "storyboard-breakdown",
     "scene_transcript": "storyboard-scene-transcript",
     "scene_image_prompt": "storyboard-scene-image",
@@ -51,6 +52,19 @@ def load_storyboard_config(migrate: bool = True) -> dict:
     base.setdefault("image_style", "cinematic, dramatic lighting, photorealistic, hyperrealistic")
     base.setdefault("narrative_style", "documentary, dramatic third-person narration")
     base.setdefault("narrative_guidance", "")   # broader story context injected into scene prompts
+    # content_mode drives whether the "narrate" step runs at all:
+    #   raw_article  → pasted text is written material (e.g. a Substack essay); the
+    #                  narrate step rewrites it into a continuous oral narration.
+    #   oral_script  → pasted text is ALREADY a finished oral script (e.g. produced by
+    #                  a separate scriptwriting prompt/pipeline, already paced and
+    #                  narratively crafted); narrate is skipped entirely and the text
+    #                  is used verbatim as the narration to segment.
+    base.setdefault("content_mode", "raw_article")
+    # target_duration_seconds: optional. When set (raw_article mode only), the narrate
+    # step is allowed/instructed to condense the article to roughly fit this spoken
+    # duration — useful for quick test renders. When null, narrate must be fully
+    # faithful (no summarizing), it only adapts register from written to spoken.
+    base.setdefault("target_duration_seconds", None)
     base.setdefault("animation_style", "ken_burns")
     base.setdefault("ken_burns_zoom_from", 1.0)
     base.setdefault("ken_burns_zoom_to", 1.3)
@@ -114,7 +128,7 @@ def save_storyboard_config(updates: dict) -> None:
         "image_seed", "image_steps", "draft_mode", "draft_steps",
         "chapter_transition", "chapter_transition_duration",
         "chapter_range", "scene_range", "scene_duration", "prompts",
-        "prompt_overrides", "character",
+        "prompt_overrides", "character", "content_mode", "target_duration_seconds",
     }
     merged = {k: v for k, v in current.items() if k in storyboard_keys}
     # Start from the persisted nested character section.

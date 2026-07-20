@@ -8,7 +8,13 @@ from typing import Any
 
 SCENE_STEPS = ("gen_transcript", "gen_image_prompt", "gen_audio", "gen_image", "assemble_clip")
 
-GLOBAL_STEPS = ("character", "parse", "transcript", "image_prompt", "audio", "image", "clip", "chapter", "final")
+# "narrate": ONE full-document pass that produces the final, continuous oral
+#   narration text (skipped entirely in content_mode="oral_script", where the
+#   pasted script IS already the narration).
+# "parse" (a.k.a. "segment" in the UI): splits that final narration text into
+#   chapters/scenes with near-verbatim transcript excerpts — it no longer
+#   invents scene text, it only cuts the already-final text.
+GLOBAL_STEPS = ("character", "narrate", "parse", "transcript", "image_prompt", "audio", "image", "clip", "chapter", "final")
 
 # Maps global step name to the scene-level step name it corresponds to (if any)
 GLOBAL_TO_SCENE_STEP: dict[str, str] = {
@@ -154,6 +160,8 @@ _MAX_CONSOLE_ENTRIES = 200
 class ProjectState:
     script_text: str
     workdir: str                     # abs path to storyboard output subdir
+    narration_step: StepState = field(default_factory=StepState)
+    narration_text: str = ""         # final continuous oral narration (source for segmentation)
     parse_step: StepState = field(default_factory=StepState)
     chapters: list[Chapter] = field(default_factory=list)
     final_step: StepState = field(default_factory=StepState)
@@ -173,6 +181,8 @@ class ProjectState:
         return {
             "script_text": self.script_text,
             "workdir": self.workdir,
+            "narration_step": self.narration_step.to_dict(),
+            "narration_text": self.narration_text,
             "parse_step": self.parse_step.to_dict(),
             "chapters": [c.to_dict() for c in self.chapters],
             "final_step": self.final_step.to_dict(),
@@ -188,6 +198,8 @@ class ProjectState:
         return cls(
             script_text=d.get("script_text", d.get("script_path", "")),
             workdir=d.get("workdir", ""),
+            narration_step=StepState.from_dict(d.get("narration_step", {})),
+            narration_text=d.get("narration_text", ""),
             parse_step=StepState.from_dict(d.get("parse_step", {})),
             chapters=[Chapter.from_dict(c) for c in d.get("chapters", [])],
             final_step=StepState.from_dict(d.get("final_step", {})),
@@ -212,7 +224,7 @@ class ProjectState:
 
     def global_status(self) -> str:
         """Aggregate status across all steps for the sidebar pipeline view."""
-        all_steps: list[StepState] = [self.parse_step]
+        all_steps: list[StepState] = [self.narration_step, self.parse_step]
         for ch in self.chapters:
             for sc in ch.scenes:
                 all_steps.extend(sc.steps.values())
@@ -234,6 +246,7 @@ class ProjectState:
         summary: dict[str, str] = {}
 
         summary["character"] = self.character_step.status
+        summary["narrate"] = self.narration_step.status
         summary["parse"] = self.parse_step.status
 
         for gstep, skey in GLOBAL_TO_SCENE_STEP.items():

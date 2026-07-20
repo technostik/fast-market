@@ -52,6 +52,9 @@ async def get_config():
         "image_size": cfg.get("image_size", "landscape"),
         "image_style": cfg.get("image_style", ""),
         "narrative_style": cfg.get("narrative_style", ""),
+        "narrative_guidance": cfg.get("narrative_guidance", ""),
+        "content_mode": cfg.get("content_mode", "raw_article"),
+        "target_duration_seconds": cfg.get("target_duration_seconds"),
         "animation_style": cfg.get("animation_style", "ken_burns"),
         "ken_burns_zoom_from": cfg.get("ken_burns_zoom_from", 1.0),
         "ken_burns_zoom_to": cfg.get("ken_burns_zoom_to", 1.3),
@@ -88,6 +91,8 @@ class ConfigSaveRequest(BaseModel):
     image_style: str = ""
     narrative_style: str = ""
     narrative_guidance: str = ""
+    content_mode: str = "raw_article"          # raw_article | oral_script
+    target_duration_seconds: float | None = None
     animation_style: str = "ken_burns"
     ken_burns_zoom_from: float = 1.0
     ken_burns_zoom_to: float = 1.3
@@ -359,7 +364,7 @@ async def update_scene(scene_id: str, req: SceneUpdateRequest):
 
 @router.post("/script")
 async def update_script(body: dict):
-    """Update the script text and reset parse state."""
+    """Update the script text and reset narrate/parse state (both depend on it)."""
     text = body.get("script_text", "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="script_text is empty")
@@ -369,6 +374,38 @@ async def update_script(body: dict):
         raise HTTPException(status_code=400, detail="Project not initialized")
     from .models import StepState
     state.script_text = text
+    state.narration_step = StepState()
+    state.narration_text = ""
+    state.parse_step = StepState()
+    state.chapters = []
+    state.save(_state_path(cfg))
+    return {"ok": True}
+
+
+class NarrationUpdateRequest(BaseModel):
+    narration_text: str
+
+
+@router.post("/narration")
+async def update_narration(req: NarrationUpdateRequest):
+    """Manually save/override the narration text (before segmenting), and reset
+    parse state so 'segment' re-cuts from this edited version."""
+    text = req.narration_text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="narration_text is empty")
+    cfg = load_storyboard_config()
+    state = _load_state(cfg)
+    if state is None:
+        raise HTTPException(status_code=400, detail="Project not initialized")
+    from .models import StepState
+    state.narration_text = text
+    state.narration_step.status = "done"
+    state.narration_step.output = "[manual edit] narration saved by hand."
+    workdir = Path(state.workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    narration_file = workdir / "narration.txt"
+    narration_file.write_text(text, encoding="utf-8")
+    state.narration_step.output_file = str(narration_file)
     state.parse_step = StepState()
     state.chapters = []
     state.save(_state_path(cfg))
@@ -665,7 +702,19 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
     <textarea id="scriptModalText" placeholder="Paste your script here..."></textarea>
     <div class="modal-footer">
       <button class="btn btn-neutral" onclick="closeScriptModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveScript()">Save &amp; Reset Parse</button>
+      <button class="btn btn-primary" onclick="saveScript()">Save &amp; Reset Narrate+Segment</button>
+    </div>
+  </div>
+</div>
+
+<!-- Narration edit modal -->
+<div class="modal-overlay" id="narrationModal" onclick="if(event.target===this)closeNarrationModal()">
+  <div class="modal-card">
+    <div class="modal-title">🎙 Narration <span style="font-weight:400;color:var(--text-dim);font-size:11px">— the final, continuous oral text (source for the Segment step)</span></div>
+    <textarea id="narrationModalText" placeholder="Run the Narrate step to generate this, or paste/edit it by hand..."></textarea>
+    <div class="modal-footer">
+      <button class="btn btn-neutral" onclick="closeNarrationModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNarration()">Save &amp; Reset Segment</button>
     </div>
   </div>
 </div>
@@ -723,6 +772,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
   <span class="workdir-label" id="workdirLabel">…</span>
   <span class="topbar-sep">|</span>
   <button class="btn btn-neutral" id="btnScript" onclick="showScriptModal()" disabled>📄 Script</button>
+  <button class="btn btn-neutral" id="btnNarration" onclick="showNarrationModal()" disabled>🎙 Narration</button>
   <button class="btn btn-neutral" id="btnChar" onclick="showCharModal()" disabled>🧍 Character</button>
   <button class="btn btn-primary" id="btnRunAll" onclick="runAll()" disabled>▶ Run All</button>
   <span class="regen-group">
@@ -878,12 +928,31 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <span class="cfg-label">Image Style</span>
         <textarea id="cfgImgStyle" rows="2"></textarea>
       </div>
+      <div class="cfg-field" style="grid-column:span 2;margin-top:8px;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px">
+        <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Narrate Step (source content)</div>
+        <div class="cfg-field" style="margin-bottom:6px">
+          <span class="cfg-label">Content Mode</span>
+          <select id="cfgContentMode">
+            <option value="raw_article">Raw article — rewrite as oral narration (Substack-style essay, etc.)</option>
+            <option value="oral_script">Pre-written oral script — use as-is, skip the rewrite (already-scripted YouTube script, etc.)</option>
+          </select>
+        </div>
+        <div class="cfg-field" id="cfgTargetDurationWrap">
+          <span class="cfg-label">Target Duration (seconds) <span style="font-weight:400;color:var(--text-dim);font-size:10px">— optional, raw_article only</span></span>
+          <input type="number" id="cfgTargetDuration" placeholder="leave empty = faithful, full-length narration" min="0" step="1" />
+        </div>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
+          Empty = narrate writes the FULL faithful narration (no summarizing, register-only adaptation).
+          Set a value to let narrate condense the article to roughly fit that spoken duration — handy for quick short test renders before a full production run.
+          In "oral_script" mode this is ignored: the pasted text is already final and used verbatim.
+        </div>
+      </div>
       <div class="cfg-field" style="grid-column:span 2">
         <span class="cfg-label">Narrative Style</span>
         <textarea id="cfgNarrStyle" rows="2"></textarea>
       </div>
       <div class="cfg-field" style="grid-column:span 2">
-        <span class="cfg-label">Narrative Guidance <span style="font-weight:400;color:var(--text-dim);font-size:10px">— broader story context injected into every scene transcript</span></span>
+        <span class="cfg-label">Narrative Guidance <span style="font-weight:400;color:var(--text-dim);font-size:10px">— broader story context injected into the narrate step (raw_article mode)</span></span>
         <textarea id="cfgNarrGuidance" rows="3"></textarea>
       </div>
       <div class="cfg-field">
@@ -1005,13 +1074,19 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <div style="margin-top:6px;font-size:10px;color:var(--text-dim)">Also available: <code style="color:var(--accent)">{lang}</code> <code style="color:var(--accent)">{narrative_style}</code> <code style="color:var(--accent)">{image_style}</code></div>
       </div>
       <div class="prompt-field">
-        <div class="prompt-label">Story Breakdown Prompt <span class="prompt-info" id="infoStory" data-content="">ⓘ</span></div>
+        <div class="prompt-label">Narrate Prompt <span class="prompt-info" id="infoNarrate" data-content="">ⓘ</span> <span style="font-weight:400;color:var(--text-dim);font-size:10px">— raw_article mode only, one call over the whole article</span></div>
+        <select id="cfgPromptNarrateSel" class="prompt-sel" onchange="onPromptSelect('Narrate')"></select>
+        <textarea class="prompt-area" id="cfgPromptNarrate" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
+        <button class="btn btn-neutral btn-sm" onclick="resetPrompt('Narrate')">↺ Reset to default</button>
+      </div>
+      <div class="prompt-field">
+        <div class="prompt-label">Segment Prompt <span class="prompt-info" id="infoStory" data-content="">ⓘ</span> <span style="font-weight:400;color:var(--text-dim);font-size:10px">— cuts the final narration into chapters/scenes, verbatim</span></div>
         <select id="cfgPromptStorySel" class="prompt-sel" onchange="onPromptSelect('Story')"></select>
         <textarea class="prompt-area" id="cfgPromptStory" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
         <button class="btn btn-neutral btn-sm" onclick="resetPrompt('Story')">↺ Reset to default</button>
       </div>
       <div class="prompt-field">
-        <div class="prompt-label">Scene Transcript Prompt <span class="prompt-info" id="infoTranscript" data-content="">ⓘ</span></div>
+        <div class="prompt-label">Scene Transcript Prompt <span class="prompt-info" id="infoTranscript" data-content="">ⓘ</span> <span style="font-weight:400;color:var(--orange);font-size:10px">— legacy, no longer called by default (segment now supplies verbatim transcripts)</span></div>
         <select id="cfgPromptTranscriptSel" class="prompt-sel" onchange="onPromptSelect('Transcript')"></select>
         <textarea class="prompt-area" id="cfgPromptTranscript" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
         <button class="btn btn-neutral btn-sm" onclick="resetPrompt('Transcript')">↺ Reset to default</button>
@@ -1042,11 +1117,11 @@ const STEP_LABELS = {
   gen_audio: 'Audio', gen_image: 'Image', assemble_clip: 'Clip'
 };
 const GLOBAL_STEP_LABELS = {
-  character: 'Character', parse: 'Parse Script', transcript: 'Transcripts', image_prompt: 'Image Prompts',
+  character: 'Character', narrate: 'Narrate', parse: 'Segment Scenes', transcript: 'Transcripts', image_prompt: 'Image Prompts',
   audio: 'Audio', image: 'Images', clip: 'Clips',
   chapter: 'Ch. Merges', final: 'Final Video'
 };
-const GLOBAL_STEP_ORDER = ['character','parse','transcript','image_prompt','audio','image','clip','chapter','final'];
+const GLOBAL_STEP_ORDER = ['character','narrate','parse','transcript','image_prompt','audio','image','clip','chapter','final'];
 
 let state = null;
 let selectedSceneId = null;
@@ -1084,6 +1159,8 @@ async function loadConfig() {
     document.getElementById('cfgImgStyle').value = cfg.image_style || '';
     document.getElementById('cfgNarrStyle').value = cfg.narrative_style || '';
     document.getElementById('cfgNarrGuidance').value = cfg.narrative_guidance || '';
+    document.getElementById('cfgContentMode').value = cfg.content_mode || 'raw_article';
+    document.getElementById('cfgTargetDuration').value = cfg.target_duration_seconds != null ? cfg.target_duration_seconds : '';
     document.getElementById('cfgFps').value = cfg.fps || 24;
     document.getElementById('cfgZoomFrom').value = cfg.ken_burns_zoom_from ?? 1.0;
     document.getElementById('cfgZoomTo').value = cfg.ken_burns_zoom_to ?? 1.3;
@@ -1107,14 +1184,17 @@ async function loadConfig() {
     const p = cfg.prompts || {};
     const ov = cfg.prompt_overrides || {};
     await populateStoryPrompts();
+    document.getElementById('cfgPromptNarrateSel').value = p.narrate || 'storyboard-narrate';
     document.getElementById('cfgPromptStorySel').value = p.story_breakdown || 'storyboard-breakdown';
     document.getElementById('cfgPromptTranscriptSel').value = p.scene_transcript || 'storyboard-scene-transcript';
     document.getElementById('cfgPromptImageSel').value = p.scene_image_prompt || 'storyboard-scene-image';
     document.getElementById('cfgPromptImageCharSel').value = p.scene_image_prompt_with_character || 'storyboard-scene-image-character';
+    document.getElementById('cfgPromptNarrate').value = ov.narrate || '';
     document.getElementById('cfgPromptStory').value = ov.story_breakdown || '';
     document.getElementById('cfgPromptTranscript').value = ov.scene_transcript || '';
     document.getElementById('cfgPromptImage').value = ov.scene_image_prompt || '';
     document.getElementById('cfgPromptImageChar').value = ov.scene_image_prompt_with_character || '';
+    refreshPromptPreview('Narrate');
     refreshPromptPreview('Story');
     refreshPromptPreview('Transcript');
     refreshPromptPreview('Image');
@@ -1130,7 +1210,7 @@ async function populateStoryPrompts() {
     if (!r.ok) return;
     const data = await r.json();
     const names = data.prompts || [];
-    for (const key of ['Story', 'Transcript', 'Image', 'ImageChar']) {
+    for (const key of ['Narrate', 'Story', 'Transcript', 'Image', 'ImageChar']) {
       const sel = document.getElementById('cfgPrompt' + key + 'Sel');
       if (!sel) continue;
       const cur = sel.value;
@@ -1184,6 +1264,8 @@ async function saveConfig() {
     image_style: document.getElementById('cfgImgStyle').value,
     narrative_style: document.getElementById('cfgNarrStyle').value,
     narrative_guidance: document.getElementById('cfgNarrGuidance').value,
+    content_mode: document.getElementById('cfgContentMode').value,
+    target_duration_seconds: document.getElementById('cfgTargetDuration').value !== '' ? parseFloat(document.getElementById('cfgTargetDuration').value) : null,
     fps: parseInt(document.getElementById('cfgFps').value) || 24,
     ken_burns_zoom_from: parseFloat(document.getElementById('cfgZoomFrom').value) || 1.0,
     ken_burns_zoom_to: parseFloat(document.getElementById('cfgZoomTo').value) || 1.3,
@@ -1204,12 +1286,14 @@ async function saveConfig() {
     scene_range: document.getElementById('cfgSceneRange').value || '2–5',
     scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
     prompts: {
+      narrate: document.getElementById('cfgPromptNarrateSel').value,
       story_breakdown: document.getElementById('cfgPromptStorySel').value,
       scene_transcript: document.getElementById('cfgPromptTranscriptSel').value,
       scene_image_prompt: document.getElementById('cfgPromptImageSel').value,
       scene_image_prompt_with_character: document.getElementById('cfgPromptImageCharSel').value,
     },
     prompt_overrides: {
+      narrate: document.getElementById('cfgPromptNarrate').value,
       story_breakdown: document.getElementById('cfgPromptStory').value,
       scene_transcript: document.getElementById('cfgPromptTranscript').value,
       scene_image_prompt: document.getElementById('cfgPromptImage').value,
@@ -1256,6 +1340,8 @@ async function clearCharReference() {
     image_style: document.getElementById('cfgImgStyle').value,
     narrative_style: document.getElementById('cfgNarrStyle').value,
     narrative_guidance: document.getElementById('cfgNarrGuidance').value,
+    content_mode: document.getElementById('cfgContentMode').value,
+    target_duration_seconds: document.getElementById('cfgTargetDuration').value !== '' ? parseFloat(document.getElementById('cfgTargetDuration').value) : null,
     fps: parseInt(document.getElementById('cfgFps').value) || 24,
     ken_burns_zoom_from: parseFloat(document.getElementById('cfgZoomFrom').value) || 1.0,
     ken_burns_zoom_to: parseFloat(document.getElementById('cfgZoomTo').value) || 1.3,
@@ -1278,12 +1364,14 @@ async function clearCharReference() {
     scene_range: document.getElementById('cfgSceneRange').value || '2–5',
     scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
     prompts: {
+      narrate: document.getElementById('cfgPromptNarrateSel').value,
       story_breakdown: document.getElementById('cfgPromptStorySel').value,
       scene_transcript: document.getElementById('cfgPromptTranscriptSel').value,
       scene_image_prompt: document.getElementById('cfgPromptImageSel').value,
       scene_image_prompt_with_character: document.getElementById('cfgPromptImageCharSel').value,
     },
     prompt_overrides: {
+      narrate: document.getElementById('cfgPromptNarrate').value,
       story_breakdown: document.getElementById('cfgPromptStory').value,
       scene_transcript: document.getElementById('cfgPromptTranscript').value,
       scene_image_prompt: document.getElementById('cfgPromptImage').value,
@@ -1491,6 +1579,7 @@ function applyState(data) {
     ['btnRegenAudio','btnRegenImage','btnRegenClip','btnRegenFinal'].forEach(id => document.getElementById(id).disabled = true);
     document.getElementById('btnStop').disabled = true;
     document.getElementById('btnScript').disabled = true;
+    document.getElementById('btnNarration').disabled = true;
     return;
   }
   document.getElementById('initOverlay').style.display = 'none';
@@ -1516,6 +1605,7 @@ function applyState(data) {
   ['btnRegenAudio','btnRegenImage','btnRegenClip','btnRegenFinal'].forEach(id => document.getElementById(id).disabled = data.running || !hasScenes);
   document.getElementById('btnStop').disabled = !data.running;
   document.getElementById('btnScript').disabled = false;
+  document.getElementById('btnNarration').disabled = false;
   document.getElementById('btnChar').disabled = !data.initialized;
 
   // Error banner
@@ -1672,7 +1762,11 @@ function renderTree(chapters) {
   const body = document.getElementById('treeBody');
   const statsBar = document.getElementById('statsBar');
   if (!chapters.length) {
-    body.innerHTML = '<div class="no-state">No chapters yet. Click ▶ Run All to parse the script.</div>';
+    const narrateDone = state && state.narration_step && state.narration_step.status === 'done' && state.narration_text;
+    const msg = narrateDone
+      ? 'Narration ready. Click ▶ Run All (or run the "Segment Scenes" step) to cut it into chapters/scenes.'
+      : 'No scenes yet. Click ▶ Run All to narrate the script, then segment it into scenes.';
+    body.innerHTML = `<div class="no-state">${msg}</div>`;
     if (statsBar) statsBar.textContent = '';
     return;
   }
@@ -1823,15 +1917,17 @@ async function runAll() {
 async function runOnly(step) {
   if (state && state.running) return;
   if (step === 'parse' && state && state.chapters && state.chapters.length > 0) {
-    if (!confirm('Re-running "Parse Script" will DELETE all generated chapters, scenes, audio, images, clips, and the final video.\n\nContinue?')) return;
+    if (!confirm(`Re-running "${GLOBAL_STEP_LABELS[step]}" will DELETE all generated chapters, scenes, audio, images, clips, and the final video.\n\nContinue?`)) return;
+  } else if (step === 'narrate' && state && state.chapters && state.chapters.length > 0) {
+    if (!confirm('Re-running "Narrate" will regenerate the narration text. The existing chapters/scenes were segmented from the OLD narration and will no longer match it — run "Segment Scenes" afterward to re-cut them.\n\nContinue?')) return;
   }
   await postRun({ only_global_step: step });
 }
 
 async function runFromGlobal(step) {
   if (state && state.running) return;
-  if (step === 'parse' && state && state.chapters && state.chapters.length > 0) {
-    if (!confirm('Re-running from "Parse Script" will DELETE all generated chapters, scenes, audio, images, clips, and the final video.\n\nContinue?')) return;
+  if ((step === 'parse' || step === 'narrate') && state && state.chapters && state.chapters.length > 0) {
+    if (!confirm(`Re-running from "${GLOBAL_STEP_LABELS[step]}" will DELETE all generated chapters, scenes, audio, images, clips, and the final video.\n\nContinue?`)) return;
   } else {
     if (!confirm(`Re-run pipeline from step "${GLOBAL_STEP_LABELS[step]}"?`)) return;
   }
@@ -1952,6 +2048,32 @@ function showScriptModal() {
 
 function closeScriptModal() {
   document.getElementById('scriptModal').className = 'modal-overlay';
+}
+
+// ── Narration modal ──────────────────────────────────────────────────────────
+function showNarrationModal() {
+  const text = state && state.narration_text ? state.narration_text : '';
+  document.getElementById('narrationModalText').value = text;
+  document.getElementById('narrationModal').className = 'modal-overlay open';
+}
+
+function closeNarrationModal() {
+  document.getElementById('narrationModal').className = 'modal-overlay';
+}
+
+async function saveNarration() {
+  const text = document.getElementById('narrationModalText').value.trim();
+  if (!text) { alert('Narration text is empty'); return; }
+  try {
+    const r = await fetch('/api/storyboard/narration', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ narration_text: text }),
+    });
+    if (!r.ok) { const e = await r.json(); alert(e.detail || 'Error saving narration'); return; }
+    closeNarrationModal();
+    schedulePoll(300);
+  } catch(e) { alert(String(e)); }
 }
 
 // ── Character modal ────────────────────────────────────────────────────────────
@@ -2177,6 +2299,7 @@ function updateErrorBanner(data) {
     let msg = 'Pipeline error — expand a step below to see the output';
     const candidates = [];
     if (data.character_step) candidates.push(data.character_step);
+    if (data.narration_step) candidates.push(data.narration_step);
     if (data.parse_step) candidates.push(data.parse_step);
     if (data.final_step) candidates.push(data.final_step);
     for (const ch of (data.chapters || [])) {
