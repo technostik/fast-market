@@ -420,6 +420,8 @@ prompts:
 
     Preserve the article's own argument, order of ideas, and throughline exactly — every transition and connection between ideas must remain intact and legible when HEARD, not read. Rewrite only what needs rewriting to sound natural when spoken: turn footnotes, bullet lists, headers, and visual formatting into flowing spoken sentences and explicit verbal transitions ("this brings us to...", "but here's the catch..."). Do not invent facts, examples, or claims that are not in the article.
 
+    STRUCTURE YOUR OUTPUT INTO PARAGRAPHS SEPARATED BY BLANK LINES at natural topic shifts, and PRESERVE that paragraph structure in your output (do not collapse it into one block of text). The downstream segmentation step cuts the narration into scenes using paragraph breaks as a primary signal, so keeping clear paragraph boundaries helps it cut at sensible places.
+
     {duration_instruction}
 
     Narrative style: {narrative_style}
@@ -433,41 +435,41 @@ prompts:
   model_provider: ''
   model_name: ''
 - name: storyboard-breakdown
-  description: 'Découpe la narration finale déjà écrite en chapitres/scènes : extraits quasi-verbatim
-    (transcript) + description visuelle séparée (JSON)'
+  description: 'Décrit visuellement chaque scène (déjà découpée) et regroupe les scènes
+    en chapitres (JSON) — ne recopie jamais le texte des scènes'
   content: |-
-    You are a video editor splitting an already-finished, FINAL narration text into chapters and scenes for a narrated video. The text below has already been written and approved — your only job is to cut it into pieces and describe what to show on screen for each piece. Return ONLY valid JSON, no other text.
+    You are a video editor working on a narrated video. The narration has ALREADY been cut into ordered scenes for you — they are provided below as SCENE 0, SCENE 1, SCENE 2, … in order. Your job is twofold:
+      1. Write a SHORT VISUAL description for EACH scene — what the viewer SEES, never what is spoken.
+      2. Group the scenes into chapters.
 
-    CRITICAL RULE: the "transcript" field of every scene MUST be an exact, word-for-word excerpt copied from the text below — do not paraphrase, summarize, reword, or add anything. You may only choose WHERE to cut (always at sentence boundaries), never rewrite. Concatenating every scene's "transcript" field in order must reproduce the ENTIRE input text exactly, with nothing added, removed, or changed.
+    Return ONLY valid JSON, no other text. Do NOT wrap it in markdown fences.
+
+    CRITICAL RULE: The scene texts below are provided for CONTEXT ONLY. Do NOT reproduce, quote, summarize, or modify any scene text in your output. Refer to scenes strictly by their index (0, 1, 2, …). Every scene MUST receive exactly one description, in the same order as the SCENE blocks. Your output contains NO narration text — only visual descriptions and chapter groupings.
 
     Schema:
     {{
+      "scene_descriptions": [
+        "visual-only description for SCENE 0 (what the viewer SEES, never spoken)",
+        "visual-only description for SCENE 1",
+        "… one entry per scene, in order …"
+      ],
       "chapters": [
-        {{
-          "title": "Short chapter title",
-          "scenes": [
-            {{
-              "title": "Short scene title",
-              "transcript": "Exact word-for-word excerpt from the input text for this scene.",
-              "description": "2-3 sentences describing ONLY the visuals to show for this scene (setting, subject, mood, composition) — this is for an image generator, it is never spoken, and must not repeat the transcript verbatim."
-            }}
-          ]
-        }}
+        {{"title": "Short chapter title", "scene_count": 3}},
+        {{"title": "Short chapter title", "scene_count": 2}}
       ]
     }}
 
     Rules:
-    - Aim for {chapter_range} chapters, {scene_range} scenes per chapter.
-    - Each scene's transcript should read aloud in about {scene_duration}.
-    - Cut only at sentence boundaries — never mid-sentence.
-    - Chapters should follow the natural structure / topic shifts already present in the text.
-    - The "description" is independent of the "transcript": describe what the viewer SEES, not what they hear. Keep continuity of setting where the text doesn't imply a scene change, and vary composition/framing between consecutive scenes to avoid visually repetitive shots.
-    - Input language is {lang} — keep the transcript excerpts in that exact language, unchanged.
+    - "scene_descriptions" MUST have exactly one entry per scene, in order, and its length MUST equal the number of SCENE blocks above.
+    - Each "scene_descriptions" entry describes ONLY the visuals for that scene (setting, subject, mood, composition) for an image generator. It is NEVER spoken and must NOT repeat the narration. Keep continuity of setting where the text doesn't imply a scene change, and vary composition/framing between consecutive scenes to avoid visually repetitive shots.
+    - "chapters" groups the scenes into CONTIGUOUS runs, in order. "scene_count" is the number of scenes in that chapter. The "scene_count" values MUST sum to the total number of scenes above — do not skip or duplicate any scene, and do not let them overlap.
+    - {chapter_instruction}
+    - Chapter titles should be short, natural-language prose (they are shown to viewers). Input language is {lang}.
 
-    FINAL NARRATION TEXT (cut this, verbatim, into scenes):
+    SCENES (read-only context — do not reproduce):
     {content}
   temperature: 0.4
-  max_tokens: 8192
+  max_tokens: 2048
   model_provider: ''
   model_name: ''
 - name: storyboard-scene-transcript

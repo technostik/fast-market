@@ -75,19 +75,41 @@ The fix is to stop conflating *writing* the narration with *chunking* it:
     "14 — Scénariste" prompt). `narrate` is skipped entirely: regenerating it here
     would flatten narrative work already done elsewhere. `narration_text` is set to
     `script_text` verbatim, no LLM call.
-- **`parse`** (labelled "Segment Scenes" in the UI) never invents narration text
-  anymore. It takes the *already-final* `narration_text` and only decides **where to
-  cut** it into scenes, extracting a near-verbatim `transcript` excerpt per scene
-  (the prompt is instructed to copy, never paraphrase — concatenating every scene's
-  transcript in order must reproduce the narration exactly) plus a separate, short
-  `description` field used only for the image prompt (what the viewer *sees*, never
-  what they hear). Because segmentation supplies the final transcript directly, the
-  scene-level `gen_transcript` step is now a deterministic pass-through (see below) —
-  there is no more blind, per-scene AI rewrite to break the flow.
-- `_parse_script` also runs a soft sanity check: if the total word count of all scene
-  transcripts drifts more than 15% from `narration_text`'s word count, it appends a
-  `[warn]` line to the step output (paraphrasing instead of cutting is the likely
-  cause) without failing the step.
+- **`parse`** (labelled "Segment Scenes" in the UI) splits the *already-final*
+  `narration_text` into scenes + chapter groupings. It does this in **two
+  sub-steps that are invisible to the state machine** (still a single `parse` global
+  step, no new `GLOBAL_STEPS` entry):
+  - **Step 2a — deterministic scene cutting (pure Python, no LLM).** A standalone,
+    easily-unit-tested helper `_segment_narration_deterministic(narration_text,
+    scene_duration_seconds)` walks the narration sentence-by-sentence and cuts it
+    into an ordered list of scene texts, each targeting `scene_duration_seconds ×
+    WORDS_PER_SECOND` words (paragraph breaks are a strong cut signal — the narrate
+    prompt is told to preserve paragraph structure for this reason). This is the
+    ONLY thing that decides where the transcript is cut, which is why transcripts
+    can **never** drift or get paraphrased: the scene text *is* the transcription.
+    Removing the LLM from cutting also removes the entire failure mode where an LLM
+    was asked to satisfy three contradictory free-text constraints at once (see the
+    Context section of the task that introduced this design).
+  - **Step 2b — LLM description + chapter grouping.** The ordered scene texts are
+    handed to the `storyboard-breakdown` prompt as a numbered `SCENE 0 / SCENE 1 /
+    …` list, and the LLM is told to refer to scenes **only by index** — it never
+    reproduces scene text in its output. The LLM returns, per scene, a short visual
+    `description` (what the viewer *sees*, never spoken) and a list of chapters as
+    contiguous runs over the scenes (`scene_count` values that sum to the number of
+    scenes). Because the LLM only ever touches indices and free-text descriptions,
+    nothing it can get wrong here can corrupt the transcript.
+  - **Validation, not hard-fail.** If `scene_descriptions` length ≠ number of scenes,
+    the missing entries are padded with `""` (a soft degradation: image prompts still
+    work, just less informed) and a `[warn]` is logged. If the chapter
+    `scene_count` values don't sum to the scene count, it falls back to ONE chapter
+    holding all scenes (titled from the first available chapter title, else
+    "Chapter 1") and logs a `[warn]`. The step only hard-fails if the JSON itself
+    doesn't parse.
+- The scene-level `gen_transcript` step is a deterministic pass-through (see below):
+  every scene's `transcript` is the exact algorithmic excerpt from step 2a, so there
+  is no more blind, per-scene AI rewrite to break the flow. The old "drift check"
+  (comparing total transcript word count to `narration_text`) is gone — transcripts
+  can't drift now because they come straight from the deterministic cut.
 
 ## Pipeline stages
 
@@ -95,7 +117,7 @@ The fix is to stop conflating *writing* the narration with *chunking* it:
 |---|---|---|
 | character | — (optional, pre-pipeline) | `prompt apply storyboard-character content=@script.txt` → description, then `image generate` (3/4 portrait) → `character.png`. Skipped unless `character_enabled` in config. |
 | narrate | — | `content_mode=raw_article`: `prompt apply storyboard-narrate content=@script.txt` (ONE call, full article) → `narration.txt`. `content_mode=oral_script`: no LLM call — `narration_text = script_text` verbatim. |
-| parse ("Segment Scenes") | — | `prompt apply storyboard-breakdown content=@narration.txt` — cuts the FINAL narration into chapters/scenes; each scene gets a near-verbatim `transcript` + a separate visual `description`. |
+| parse ("Segment Scenes") | — | **2a (deterministic, no LLM):** `_segment_narration_deterministic` cuts `narration.txt` into scenes by word budget (`scene_duration` × `WORDS_PER_SECOND`). **2b (LLM):** `prompt apply storyboard-breakdown content=@segment_input.txt` receives the scenes as a numbered list and returns `{scene_descriptions, chapters}` — per-scene visual `description` + chapter groupings (by index only, never touches transcript text). |
 | transcript | gen_transcript | **No LLM call.** Pass-through: persists `sc.transcript` (already set by `parse`, or hand-edited via the scene detail panel / `POST /scene/{id}`) to `transcript.txt` and marks the step done. Errors if the transcript is empty (re-run `parse`, or paste one by hand). |
 | image_prompt | gen_image_prompt | `prompt apply <template> --format text content=@image_prompt_input.txt` (built from `raw_description` + `transcript`) |
 | audio | gen_audio | `sound speak --file transcript.txt --engine <tts_engine> --language <lang> --output audio.wav` |
@@ -104,7 +126,7 @@ The fix is to stop conflating *writing* the narration with *chunking* it:
 | chapter | merge_step | moviepy `concatenate_videoclips` (or copy if single scene) — no transition, hard cut |
 | final | final_step | moviepy `_moviepy_concat` with configurable transition + silence gap between chapters |
 
-Prompt templates support placeholders: `{lang}`, `{chapter_range}`, `{scene_range}`, `{scene_duration}`, `{narrative_style}`, `{image_style}`. These are resolved by `_resolve_prompt()` before the prompt CLI escaping step. `narrate` additionally gets `{duration_instruction}` (computed dynamically by `_duration_instruction()` from `target_duration_seconds` — never a static config placeholder) and `{narrative_guidance}` (now injected once into the whole narration instead of into every scene fragment).
+Prompt templates support placeholders: `{lang}`, `{chapter_range}`, `{narrative_style}`, `{narrative_guidance}`, `{image_style}`. These are resolved by `_resolve_prompt()` before the prompt CLI escaping step. `narrate` additionally gets `{duration_instruction}` (computed dynamically by `_duration_instruction()` from `target_duration_seconds` — never a static config placeholder) and `{narrative_guidance}` (now injected once into the whole narration instead of into every scene fragment). The `storyboard-breakdown` prompt uses `{lang}` plus `{chapter_instruction}` — but `{chapter_instruction}` is **computed in Python** by `_chapter_instruction(config)` (mirroring `_duration_instruction()`) and injected via `extra_subs`, NOT stuffed into a static `{chapter_range}` placeholder: an empty `chapter_range` degrades to a sensible "choose a natural number of chapters" instruction instead of a confusing empty placeholder. `scene_duration` is **no longer** a prompt placeholder — it is a numeric seconds value consumed by the deterministic segmenter in step 2a.
 
 The `storyboard-scene-transcript` prompt (config key `scene_transcript`) still exists for backward-compat / manual experimentation but is **no longer called by default** — do not re-wire it into `gen_transcript` without re-reading the "Why narrate/segment" section above; doing so reintroduces the blind per-scene rewrite bug.
 
@@ -123,7 +145,7 @@ The `storyboard-scene-transcript` prompt (config key `scene_transcript`) still e
 │       └── scenes/
 │           └── ch00_sc00/       (id only)
 │               ├── description.txt        (visual-only hint, for image_prompt — never spoken)
-│               ├── transcript.txt          (near-verbatim excerpt of narration.txt)
+│               ├── transcript.txt          (exact algorithmic excerpt of narration.txt — from the deterministic cut)
 │               ├── image_prompt_input.txt
 │               ├── image_prompt.txt
 │               ├── audio.wav
@@ -167,9 +189,8 @@ draft_mode: false            # true → 512×288 images at draft_steps (fastest 
 draft_steps: 1
 chapter_transition: none     # none | fade | crossfade | random — applied between chapters in final merge
 chapter_transition_duration: 1.0   # seconds — controls both the silence gap and the visual effect duration
-chapter_range: "2–5"         # injected as {chapter_range} into the segment (story_breakdown) prompt
-scene_range: "2–5"           # injected as {scene_range}
-scene_duration: "15–45 seconds"   # injected as {scene_duration}
+chapter_range: ""            # EMPTY = let the LLM choose a natural number of chapters from topic shifts. A number/range (e.g. "4" or "3-5") = forced target. Computed into {chapter_instruction}, NOT a raw {chapter_range} placeholder.
+scene_duration: 10            # NUMERIC seconds per scene — consumed by the deterministic segmenter (target words = scene_duration × WORDS_PER_SECOND). No longer a free-text LLM hint.
 character:                    # all central-character settings under one section
   enabled: false              # generate/use a central character across scenes
   use_reference: false        # reuse the stored reference character instead of generating
@@ -180,7 +201,7 @@ character:                    # all central-character settings under one section
   strength: 0.35              # reference weight for local flux2 img2img
 prompts:
   narrate: "storyboard-narrate"
-  story_breakdown: "storyboard-breakdown"   # a.k.a. "segment" — cuts narration.txt into scenes
+  story_breakdown: "storyboard-breakdown"   # a.k.a. "segment" — describes pre-cut scenes visually + groups into chapters (cutting is now deterministic, step 2a)
   scene_transcript: "storyboard-scene-transcript"   # legacy — not called by default, see Pipeline stages
   scene_image_prompt: "..."
 ```
@@ -246,4 +267,4 @@ The detail panel (`_detailIsBusy`, `_pendingDetailUpdate`, `_lastRenderedSceneJs
 - **Ken Burns temp audio**: moviepy writes a temp audio file (`temp-audio-concat.m4a`) next to the output file (not in `/tmp`) to avoid CWD issues.
 - **Console log cap**: `console_log` keeps at most 200 entries; the UI trims entries from the display start via `_consoleClear` (Clear button). Pipeline errors (from `_run_safely`, `_assemble_chapter`, `_assemble_final`) are always appended to `console_log` via `_log_error_to_console()` with full traceback, regardless of which step they occur in.
 - **draft_mode dimensions**: When `draft_mode=true`, image generate receives `--width 512 --height 288` and `--steps <draft_steps>` instead of `--size`. The `--size` flag is skipped entirely.
-- **gen_transcript is a pass-through, not an AI step**: since the "segment" (`parse`) stage now supplies the final `transcript` per scene directly (near-verbatim excerpt of `narration_text`), `_gen_transcript` no longer calls an LLM — it just persists whatever `sc.transcript` currently holds (from segmentation, or a manual edit) to `transcript.txt` and marks the step done. It errors if `sc.transcript` is empty. Do not restore a per-scene LLM rewrite here; that is precisely the "blind fragment regeneration" bug that motivated the narrate/segment split (see above).
+- **gen_transcript is a pass-through, not an AI step**: since the "segment" (`parse`) stage now supplies the final `transcript` per scene directly — an EXACT excerpt produced by the deterministic cut in step 2a (not a paraphrase, not "near-verbatim") — `_gen_transcript` no longer calls an LLM. It just persists whatever `sc.transcript` currently holds (from the deterministic cut, or a manual edit) to `transcript.txt` and marks the step done. It errors if `sc.transcript` is empty. Do not restore a per-scene LLM rewrite here; that is precisely the "blind fragment regeneration" bug that motivated the narrate/segment split (see above). The `display_title` field on `Chapter` holds the raw LLM chapter title (shown to viewers); `title` stays the filesystem-safe slug.

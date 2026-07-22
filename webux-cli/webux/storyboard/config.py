@@ -76,9 +76,29 @@ def load_storyboard_config(migrate: bool = True) -> dict:
     base.setdefault("draft_steps", 1)
     base.setdefault("chapter_transition", "none")
     base.setdefault("chapter_transition_duration", 1.0)
-    base.setdefault("chapter_range", "2–5")
-    base.setdefault("scene_range", "2–5")
-    base.setdefault("scene_duration", "15–45 seconds")
+    # chapter_range now has real, functional meaning when EMPTY: an empty value
+    # means "let the LLM choose a natural number of chapters based on topic shifts".
+    # The old "2–5" default was a workaround for an LLM that had to guess the count
+    # itself; now that segmentation is deterministic (scenes) + LLM (chapters only),
+    # leaving it empty is the sensible default.
+    base.setdefault("chapter_range", "")
+    # scene_duration is now a NUMERIC seconds value consumed by the deterministic
+    # segmenter (WORDS_PER_SECOND * scene_duration = target words per scene). Removed
+    # the old free-text "15–45 seconds" hint. scene_range was removed entirely — the
+    # scene count is derived from scene_duration, never specified independently.
+    base.setdefault("scene_duration", 10)
+
+    # Migrate the old literal default chapter_range so existing configs adopt the
+    # new "empty = free choice" semantics instead of silently forcing 2–5 chapters.
+    if base.get("chapter_range") in ("2–5", "2-5"):
+        base["chapter_range"] = ""
+    # Drop any legacy scene_range / free-text scene_duration left over from disk.
+    base.pop("scene_range", None)
+    if isinstance(base.get("scene_duration"), str):
+        try:
+            base["scene_duration"] = float(base["scene_duration"])
+        except (TypeError, ValueError):
+            base["scene_duration"] = 10
 
     # ── Central character (nested `character:` section) ──────────────────────
     character = dict(DEFAULT_CHARACTER)
@@ -102,7 +122,7 @@ def load_storyboard_config(migrate: bool = True) -> dict:
     overrides = base.setdefault("prompt_overrides", {})
     prompt_migrated = False
     for k, default_name in DEFAULT_PROMPT_NAMES.items():
-        v = prompts.get(k, default_name)
+        v = prompts.get(k, default_name) or default_name
         # Migration: older configs stored the full prompt text inline. Treat
         # such legacy text as an override of the default named prompt.
         if isinstance(v, str) and ("\n" in v or "You are" in v or len(v) > 200):
@@ -121,13 +141,15 @@ def save_storyboard_config(updates: dict) -> None:
     # would reload the still-legacy config from disk and recurse forever.
     current = load_storyboard_config(migrate=False)
     # Only persist storyboard-specific keys, not inherited common/llm config.
+    # storyboard_keys deliberately excludes scene_range (removed) and keeps
+    # scene_duration as a numeric seconds value.
     storyboard_keys = {
         "tts_engine", "language", "image_engine", "image_size", "image_style",
         "narrative_style", "narrative_guidance", "animation_style", "ken_burns_zoom_from",
         "ken_burns_zoom_to", "ken_burns_motion", "fps",
         "image_seed", "image_steps", "draft_mode", "draft_steps",
         "chapter_transition", "chapter_transition_duration",
-        "chapter_range", "scene_range", "scene_duration", "prompts",
+        "chapter_range", "scene_duration", "prompts",
         "prompt_overrides", "character", "content_mode", "target_duration_seconds",
     }
     merged = {k: v for k, v in current.items() if k in storyboard_keys}

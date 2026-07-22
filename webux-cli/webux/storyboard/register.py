@@ -67,9 +67,8 @@ async def get_config():
         "draft_steps": cfg.get("draft_steps", 1),
         "chapter_transition": cfg.get("chapter_transition", "none"),
         "chapter_transition_duration": cfg.get("chapter_transition_duration", 1.0),
-        "chapter_range": cfg.get("chapter_range", "2–5"),
-        "scene_range": cfg.get("scene_range", "2–5"),
-        "scene_duration": cfg.get("scene_duration", "15–45 seconds"),
+        "chapter_range": cfg.get("chapter_range", ""),
+        "scene_duration": cfg.get("scene_duration", 10),
         "character": {
             "enabled": cfg.get("character_enabled", False),
             "use_reference": cfg.get("character_use_reference", False),
@@ -105,9 +104,8 @@ class ConfigSaveRequest(BaseModel):
     draft_steps: int = 1
     chapter_transition: str = "none"
     chapter_transition_duration: float = 1.0
-    chapter_range: str = "2–5"
-    scene_range: str = "2–5"
-    scene_duration: str = "15–45 seconds"
+    chapter_range: str = ""
+    scene_duration: float = 10
     character: dict = {
         "enabled": False,
         "use_reference": False,
@@ -1094,18 +1092,13 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">
           <div class="cfg-field">
             <span class="cfg-label">Chapter Range</span>
-            <input type="text" id="cfgChapterRange" placeholder="2–5" />
-            <span style="font-size:10px;color:var(--text-dim)">{chapter_range}</span>
+            <input type="text" id="cfgChapterRange" placeholder="e.g. 3 or 3-5" />
+            <span style="font-size:10px;color:var(--text-dim)">leave EMPTY = let the AI choose a natural number of chapters from topic shifts</span>
           </div>
           <div class="cfg-field">
-            <span class="cfg-label">Scenes per Chapter</span>
-            <input type="text" id="cfgSceneRange" placeholder="2–5" />
-            <span style="font-size:10px;color:var(--text-dim)">{scene_range}</span>
-          </div>
-          <div class="cfg-field">
-            <span class="cfg-label">Scene Duration</span>
-            <input type="text" id="cfgSceneDuration" placeholder="15–45 seconds" />
-            <span style="font-size:10px;color:var(--text-dim)">{scene_duration}</span>
+            <span class="cfg-label">Scene Duration (s)</span>
+            <input type="number" id="cfgSceneDuration" placeholder="10" min="1" step="1" value="10" />
+            <span style="font-size:10px;color:var(--text-dim)">target seconds per scene — drives the deterministic cut (word budget = seconds × 2.5). Not a hint to the AI.</span>
           </div>
         </div>
         <div style="margin-top:6px;font-size:10px;color:var(--text-dim)">Also available: <code style="color:var(--accent)">{lang}</code> <code style="color:var(--accent)">{narrative_style}</code> <code style="color:var(--accent)">{image_style}</code></div>
@@ -1117,7 +1110,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         <button class="btn btn-neutral btn-sm" onclick="resetPrompt('Narrate')">↺ Reset to default</button>
       </div>
       <div class="prompt-field">
-        <div class="prompt-label">Segment Prompt <span class="prompt-info" id="infoStory" data-content="">ⓘ</span> <span style="font-weight:400;color:var(--text-dim);font-size:10px">— cuts the final narration into chapters/scenes, verbatim</span></div>
+        <div class="prompt-label">Chapter &amp; Description Prompt <span class="prompt-info" id="infoStory" data-content="">ⓘ</span> <span style="font-weight:400;color:var(--text-dim);font-size:10px">— describes each pre-cut scene visually and groups scenes into chapters (does NOT cut the text)</span></div>
         <select id="cfgPromptStorySel" class="prompt-sel" onchange="onPromptSelect('Story')"></select>
         <textarea class="prompt-area" id="cfgPromptStory" rows="4" placeholder="Optional inline override — leave empty to use the selected prompt"></textarea>
         <button class="btn btn-neutral btn-sm" onclick="resetPrompt('Story')">↺ Reset to default</button>
@@ -1238,9 +1231,8 @@ async function loadConfig() {
     document.getElementById('cfgCharStrength').value = c.strength != null ? c.strength : 0.35;
     document.getElementById('cfgCharStyleFreeWrap').style.display = (c.style === 'free') ? '' : 'none';
     refreshCharReference(cfg);
-    document.getElementById('cfgChapterRange').value = cfg.chapter_range || '2–5';
-    document.getElementById('cfgSceneRange').value = cfg.scene_range || '2–5';
-    document.getElementById('cfgSceneDuration').value = cfg.scene_duration || '15–45 seconds';
+    document.getElementById('cfgChapterRange').value = cfg.chapter_range || '';
+    document.getElementById('cfgSceneDuration').value = cfg.scene_duration != null ? cfg.scene_duration : 10;
     const p = cfg.prompts || {};
     const ov = cfg.prompt_overrides || {};
     await populateStoryPrompts();
@@ -1342,9 +1334,8 @@ async function saveConfig() {
       style_free: document.getElementById('cfgCharStyleFree').value,
       strength: parseFloat(document.getElementById('cfgCharStrength').value) || 0.35,
     },
-    chapter_range: document.getElementById('cfgChapterRange').value || '2–5',
-    scene_range: document.getElementById('cfgSceneRange').value || '2–5',
-    scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
+    chapter_range: document.getElementById('cfgChapterRange').value || '',
+    scene_duration: parseFloat(document.getElementById('cfgSceneDuration').value) || 10,
     prompts: {
       narrate: document.getElementById('cfgPromptNarrateSel').value,
       story_breakdown: document.getElementById('cfgPromptStorySel').value,
@@ -1420,9 +1411,8 @@ async function clearCharReference() {
       reference_image: null,
       reference_description: "",
     },
-    chapter_range: document.getElementById('cfgChapterRange').value || '2–5',
-    scene_range: document.getElementById('cfgSceneRange').value || '2–5',
-    scene_duration: document.getElementById('cfgSceneDuration').value || '15–45 seconds',
+    chapter_range: document.getElementById('cfgChapterRange').value || '',
+    scene_duration: parseFloat(document.getElementById('cfgSceneDuration').value) || 10,
     prompts: {
       narrate: document.getElementById('cfgPromptNarrateSel').value,
       story_breakdown: document.getElementById('cfgPromptStorySel').value,
@@ -2129,7 +2119,7 @@ function renderFinalPanel(data) {
 
 async function postRun(body) {
   try {
-    // Persist any unsaved config-panel edits (e.g. chapter_range / scene_range)
+    // Persist any unsaved config-panel edits (e.g. chapter_range / scene_duration)
     // before running, so the pipeline uses the values currently shown in the UI.
     await saveConfig();
     const r = await fetch('/api/storyboard/run', {

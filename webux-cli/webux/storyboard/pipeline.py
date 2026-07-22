@@ -345,7 +345,7 @@ async def _run_pipeline(
             state.narration_text = ""
         # Reset the parse step whenever we run from parse or earlier, so it
         # re-splits the (possibly new) narration (e.g. after changing
-        # chapter_range/scene_range, or after narrate re-ran above).
+        # chapter_range/scene_duration, or after narrate re-ran above).
         if from_idx <= GLOBAL_STEPS.index("parse"):
             state.parse_step = StepState()
         _scene_stages_ordered = [
@@ -371,17 +371,20 @@ async def _run_pipeline(
         state.save(state_path)
 
     # Stage 0: central character (optional, pre-pipeline)
+    # Always run the character step if it is enabled and hasn't completed yet,
+    # regardless of from_global_step.  The character data (description + reference
+    # image) is a prerequisite for image_prompt and image generation — skipping it
+    # would leave those steps without the {character} placeholder and --reference-image.
     char_idx = GLOBAL_STEPS.index("character")
-    if config.get("character_enabled") and from_idx <= char_idx:
+    if config.get("character_enabled") and state.character_step.status != "done":
+        await _gen_character(
+            state, state_path, config,
+            use_reference=bool(config.get("character_use_reference")),
+        )
         if state.character_step.status != "done":
-            await _gen_character(
-                state, state_path, config,
-                use_reference=bool(config.get("character_use_reference")),
-            )
-            if state.character_step.status != "done":
-                return
-            if state.character_image and Path(state.character_image).exists():
-                save_storyboard_config({"character_enabled": True})
+            return
+        if state.character_image and Path(state.character_image).exists():
+            save_storyboard_config({"character_enabled": True})
 
     # Stage 1: narrate (skipped internally when content_mode == "oral_script")
     if from_idx <= GLOBAL_STEPS.index("narrate"):
@@ -581,6 +584,133 @@ async def _gen_narration(state: ProjectState, state_path: Path, config: dict) ->
     state.save(state_path)
 
 
+# ── Deterministic scene segmentation (pure, no LLM) ──────────────────────────
+#
+# This cuts the already-final narration text into an ordered list of scene texts
+# using ONLY a word-count budget derived from `scene_duration_seconds`. It is the
+# ONLY thing that decides where the transcript is cut, which is why transcripts
+# can never drift or get paraphrased: the scene text IS the transcription.
+#
+# Why deterministic instead of LLM-driven: asking an LLM to satisfy "N chapters ×
+# M scenes/chapter" AND "≈X seconds/scene" AND "reproduce the text verbatim" is
+# three free-text constraints that can contradict each other (e.g. a 30s narration
+# with 100 target scenes). The LLM silently drops whichever it can't meet, and no
+# error surfaces. Cutting in pure Python removes that whole failure mode.
+#
+# The segmenter uses paragraph breaks as a strong cut signal: it prefers to end a
+# scene at the end of a paragraph when it is close to the target size. (The
+# narrate prompt is instructed to preserve paragraph structure for this reason.)
+
+# How far past the target a paragraph's leftover may be before we instead cut
+# mid-paragraph at the nearest sentence boundary.
+PARAGRAPH_EXTEND_TOLERANCE = 0.4
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Lightweight sentence splitter.
+
+    Splits on sentence-ending punctuation (.!?) followed by whitespace. This is
+    NOT a perfect tokenizer (e.g. "M." may trigger an early split) — that is
+    acceptable here because we only need sentence *boundaries* for cutting, never
+    to reproduce the text exactly (paragraphs/words are preserved verbatim).
+    """
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [p for p in parts if p]
+
+
+def _segment_narration_deterministic(narration_text: str, scene_duration_seconds: float) -> list[str]:
+    """Cut `narration_text` into an ordered list of scene texts.
+
+    Each scene targets `scene_duration_seconds * WORDS_PER_SECOND` words. Cuts
+    happen only at sentence boundaries, never mid-sentence, and never drop or alter
+    a word. The concatenation of all returned scenes (modulo whitespace-joining)
+    equals `narration_text`.
+    """
+    if not narration_text or not narration_text.strip():
+        return []
+
+    # Guard against degenerate durations (0 / negative / NaN).
+    try:
+        target_words = int(round(float(scene_duration_seconds) * WORDS_PER_SECOND))
+    except (TypeError, ValueError):
+        target_words = int(round(WORDS_PER_SECOND))
+    if target_words < 1:
+        target_words = 1
+
+    paragraphs = [p for p in re.split(r"\n\s*\n", narration_text) if p.strip()]
+
+    scenes: list[str] = []
+    current: list[str] = []
+    current_words = 0
+    extend_pending = False  # True → flush current at the end of this paragraph
+
+    def _flush():
+        nonlocal current, current_words, extend_pending
+        if current:
+            scenes.append(" ".join(current))
+        current = []
+        current_words = 0
+        extend_pending = False
+
+    for para in paragraphs:
+        para_sentences = _split_sentences(para)
+        if not para_sentences:
+            continue
+        for si, sent in enumerate(para_sentences):
+            current.append(sent)
+            current_words += len(sent.split())
+            is_last_in_para = (si == len(para_sentences) - 1)
+
+            if not extend_pending and current_words >= target_words:
+                if is_last_in_para:
+                    # Ideal: the scene ends exactly at a paragraph boundary.
+                    _flush()
+                else:
+                    # Look ahead at the rest of this paragraph. If the leftover is
+                    # small (≤ tolerance over target), extend to the paragraph end
+                    # rather than cutting mid-paragraph. Otherwise, cut here (the
+                    # next scene starts at the next sentence).
+                    remaining_words = sum(
+                        len(para_sentences[j].split())
+                        for j in range(si + 1, len(para_sentences))
+                    )
+                    if remaining_words <= target_words * (1 + PARAGRAPH_EXTEND_TOLERANCE):
+                        extend_pending = True  # flush at the paragraph end
+                    else:
+                        _flush()  # cut now (mid-paragraph, nearest sentence to target)
+        # End of paragraph: flush only if we chose to extend to the paragraph end
+        # (extend_pending). We deliberately do NOT flush merely because `current`
+        # is non-empty below target — that would cut at every short paragraph and
+        # produce tiny scenes; instead we keep accumulating across paragraphs
+        # until the word budget is reached.
+        if extend_pending:
+            _flush()
+
+    # Flush any final leftover (e.g. the tail of a short narration) so no text is dropped.
+    if current:
+        _flush()
+
+    return scenes
+
+
+def _chapter_instruction(config: dict) -> str:
+    """Build the chapter-count instruction sentence for the breakdown prompt.
+
+    Mirrors how `_duration_instruction()` is built for the narrate step: the value
+    is computed in Python (not just stuffed into a placeholder) so an EMPTY
+    chapter_range degrades to a sensible "choose freely" instruction instead of a
+    confusing empty `{chapter_range}` placeholder in the prompt.
+    """
+    cr = (config.get("chapter_range") or "").strip()
+    if not cr:
+        return (
+            "Do NOT target a specific number of chapters. Instead, choose a NATURAL "
+            "number of chapters based on genuine topic shifts in the scene list — there "
+            "may be as few as one chapter or as many as the content warrants."
+        )
+    return f"Aim for around {cr} chapters (group the contiguous scenes accordingly)."
+
+
 async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> None:
     s = state.parse_step
     s.status = "running"
@@ -598,15 +728,36 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
         state.save(state_path)
         return
 
-    # Write the FINAL narration to file so prompt CLI can reference it as a named
-    # parameter. This step only cuts this already-final text into scenes — it must
-    # not regenerate or rephrase it.
-    workdir = Path(state.workdir)
-    narration_file = workdir / "narration.txt"
-    if not narration_file.exists():
-        narration_file.write_text(narration_text, encoding="utf-8")
+    # ── Step 2a: deterministic scene cutting (pure Python, no LLM) ───────────
+    # This is the ONLY place that decides where the transcript is cut. Because it
+    # is algorithmic, transcripts can never drift or get paraphrased — the scene
+    # text IS the transcription.
+    try:
+        scene_duration_seconds = float(config.get("scene_duration", 10) or 10)
+    except (TypeError, ValueError):
+        scene_duration_seconds = 10.0
+    scenes_text = _segment_narration_deterministic(narration_text, scene_duration_seconds)
+    if not scenes_text:
+        s.status = "error"
+        s.output = "[error] Segmentation produced no scenes from the narration text"
+        s.end_time = time.time()
+        state.save(state_path)
+        return
 
-    rc = await _apply_story_prompt(s, state, config, "story_breakdown", narration_file)
+    # ── Step 2b: LLM describes each scene visually + groups into chapters ────
+    # The LLM receives the scenes as a numbered list and refers to them ONLY by
+    # index — it never reproduces scene text, so nothing it can get wrong here can
+    # corrupt the transcript.
+    scene_list_block = "\n\n".join(f"SCENE {i}:\n{t}" for i, t in enumerate(scenes_text))
+    workdir = Path(state.workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    scene_list_file = workdir / "segment_input.txt"
+    scene_list_file.write_text(scene_list_block, encoding="utf-8")
+
+    rc = await _apply_story_prompt(
+        s, state, config, "story_breakdown", scene_list_file,
+        extra_subs={"chapter_instruction": _chapter_instruction(config)},
+    )
     if rc != 0:
         s.status = "error"
         s.end_time = time.time()
@@ -632,63 +783,82 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
         state.save(state_path)
         return
 
-    chapters = data.get("chapters", [])
-    if not chapters:
-        s.status = "error"
-        s.output += "\n[error] LLM returned no chapters"
-        s.end_time = time.time()
-        state.save(state_path)
-        return
+    scene_descriptions = data.get("scene_descriptions", []) or []
+    chapters_in = data.get("chapters", []) or []
+    n = len(scenes_text)
+    warns: list[str] = []
 
+    # Validate scene_descriptions length (index-aligned with scenes). Pad/truncate
+    # rather than failing — an empty visual description is a soft degradation that
+    # only leaves the image prompt less informed, not broken.
+    if len(scene_descriptions) != n:
+        warns.append(
+            f"[warn] LLM returned {len(scene_descriptions)} scene_descriptions for "
+            f"{n} scenes (expected one per scene). Padding/truncating to {n} so image "
+            "prompt generation still works — descriptions for missing scenes will be "
+            "blank (less informed, not broken)."
+        )
+        if len(scene_descriptions) < n:
+            scene_descriptions = list(scene_descriptions) + [""] * (n - len(scene_descriptions))
+        else:
+            scene_descriptions = list(scene_descriptions)[:n]
+
+    # Validate chapter scene_count sums. Chapters are contiguous runs over the
+    # ordered scene list. If the counts don't sum to the scene count, fall back to
+    # a single chapter containing everything (rather than failing or producing
+    # orphan/duplicate scenes).
+    total_counts = sum(int(c.get("scene_count", 0) or 0) for c in chapters_in)
+    if not chapters_in or total_counts != n:
+        warns.append(
+            f"[warn] Chapter scene_count values sum to {total_counts}, expected {n}. "
+            "Falling back to a single chapter containing all scenes."
+        )
+        fallback_title = "Chapter 1"
+        for c in chapters_in:
+            t = (c.get("title") or "").strip()
+            if t:
+                fallback_title = t
+                break
+        chapters_in = [{"title": fallback_title, "scene_count": n}]
+
+    # Build Chapter/Scene objects from the contiguous scene runs.
     state.chapters = []
-    for ci, ch_data in enumerate(chapters):
+    si_global = 0
+    for ci, ch_data in enumerate(chapters_in):
+        count = int(ch_data.get("scene_count", 0) or 0)
+        count = max(0, min(count, n - si_global))
+        if count == 0:
+            # Defensive: shouldn't happen when counts sum to n, but never emit an
+            # empty chapter.
+            count = n - si_global
+        if count == 0:
+            break
         ch_id = f"ch{ci:02d}"
-        ch_title = _slugify(ch_data.get("title", f"chapter_{ci}"))
+        display_title = (ch_data.get("title") or f"Chapter {ci+1}").strip()
+        ch_title = _slugify(display_title) or f"chapter_{ci+1}"
+        scene_slice = scenes_text[si_global: si_global + count]
         scenes = []
-        for si, sc_data in enumerate(ch_data.get("scenes", [])):
-            sc_id = f"{ch_id}_sc{si:02d}"
+        for local_si, sc_text in enumerate(scene_slice):
+            sc_id = f"{ch_id}_sc{local_si:02d}"
             scene = Scene(
                 id=sc_id,
-                title=_slugify(sc_data.get("title", f"scene_{si}")),
-                raw_description=sc_data.get("description", ""),
-                # The segment step already cut a near-verbatim excerpt of the final
-                # narration — this IS the scene's transcript. No further AI rewriting.
-                transcript=(sc_data.get("transcript") or "").strip(),
+                title=_slugify(f"{ch_title}_{local_si:02d}") or f"scene_{local_si}",
+                raw_description=scene_descriptions[si_global + local_si],
+                # The deterministic cut already produced the exact transcript — this
+                # IS the scene's transcript. No further AI rewriting.
+                transcript=sc_text.strip(),
             )
-            if scene.transcript:
-                # Pre-complete the "transcript" scene step: segmentation already did
-                # the job, no blind per-scene regeneration is needed (or wanted).
-                step = scene.steps["gen_transcript"]
-                step.status = "done"
-                step.start_time = step.end_time = time.time()
-                step.output = "[from segment] verbatim excerpt of the final narration."
+            # Pre-complete the "transcript" scene step: segmentation already did the
+            # job, no blind per-scene regeneration is needed (or wanted).
+            step = scene.steps["gen_transcript"]
+            step.status = "done"
+            step.start_time = step.end_time = time.time()
+            step.output = "[from segment] exact algorithmic excerpt of the final narration."
             scenes.append(scene)
-        state.chapters.append(Chapter(id=ch_id, title=ch_title, scenes=scenes))
-
-    # Fail loudly here if the model returned scenes without a verbatim transcript
-    # excerpt. Otherwise the empty transcript slips through segmentation and only
-    # surfaces later as the confusing "No transcript to confirm" error in the
-    # per-scene gen_transcript step. Most common cause: the JSON output was
-    # truncated (raise max_tokens on the storyboard-breakdown prompt) or the model
-    # omitted/renamed the "transcript" field.
-    missing = [
-        sc.id
-        for ch in state.chapters
-        for sc in ch.scenes
-        if not sc.transcript.strip()
-    ]
-    if missing:
-        s.status = "error"
-        s.output += (
-            f"\n[error] Segmentation returned {len(missing)} scene(s) with no "
-            f"transcript: {', '.join(missing)}. The model likely truncated its JSON "
-            "output or omitted the 'transcript' field. Re-run the 'segment' step "
-            "(raise max_tokens on the storyboard-breakdown prompt if the narration "
-            "is long), or paste transcripts manually in the scene detail panel."
-        )
-        s.end_time = time.time()
-        state.save(state_path)
-        return
+        si_global += count
+        state.chapters.append(Chapter(
+            id=ch_id, title=ch_title, display_title=display_title, scenes=scenes,
+        ))
 
     # Create directory structure
     for ch in state.chapters:
@@ -704,29 +874,17 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
     s.status = "done"
     s.end_time = time.time()
     total_scenes = sum(len(ch.scenes) for ch in state.chapters)
-    s.output = (
-        f"Parsed {len(state.chapters)} chapters, {total_scenes} scenes.\n"
+    summary = (
+        f"Segmented {len(state.chapters)} chapters, {total_scenes} scenes "
+        f"(deterministic cut, {scene_duration_seconds:g}s target/scene).\n"
         + "\n".join(
-            f"  Ch{i+1}: {ch.title} ({len(ch.scenes)} scenes)"
+            f"  Ch{i+1}: {ch.display_title or ch.title} ({len(ch.scenes)} scenes)"
             for i, ch in enumerate(state.chapters)
         )
     )
-    # Soft sanity check: the LLM was instructed to cut the narration verbatim, never
-    # to rewrite it. If the concatenated transcripts drift too far in word count from
-    # the source narration, it likely paraphrased instead of cutting — warn (don't
-    # fail) so it's visible in the step output / console.
-    narration_words = len(narration_text.split())
-    transcript_words = sum(
-        len(sc.transcript.split()) for ch in state.chapters for sc in ch.scenes
-    )
-    if narration_words > 0:
-        drift = abs(transcript_words - narration_words) / narration_words
-        if drift > 0.15:
-            s.output += (
-                f"\n[warn] Scene transcripts total {transcript_words} words vs "
-                f"{narration_words} in the narration ({drift:.0%} drift) — the model may "
-                "have paraphrased instead of cutting verbatim. Check the scenes."
-            )
+    if warns:
+        summary += "\n" + "\n".join(warns)
+    s.output = summary
     state.save(state_path)
 
 
@@ -1382,9 +1540,7 @@ def _resolve_prompt(template: str, config: dict) -> str:
     """Substitute all known config placeholders before prompt CLI escaping."""
     subs = {
         "lang": config.get("language", "en"),
-        "chapter_range": config.get("chapter_range", "2–5"),
-        "scene_range": config.get("scene_range", "2–5"),
-        "scene_duration": config.get("scene_duration", "15–45 seconds"),
+        "chapter_range": config.get("chapter_range", ""),
         "narrative_style": config.get("narrative_style", "documentary narration"),
         "narrative_guidance": config.get("narrative_guidance", ""),
         "image_style": config.get("image_style", "cinematic, dramatic lighting"),
@@ -1405,9 +1561,11 @@ async def _apply_story_prompt(
     configured (config["prompt_overrides"][key]), it is applied directly instead.
     `extra_subs` are additional placeholder=value pairs appended to the apply call.
     """
+    from .config import DEFAULT_PROMPT_NAMES
+
     prompts = config.get("prompts") or {}
     overrides = config.get("prompt_overrides") or {}
-    name = prompts.get(key, "")
+    name = prompts.get(key) or DEFAULT_PROMPT_NAMES.get(key, "")
     override = overrides.get(key, "")
 
     if override and override.strip():
@@ -1424,9 +1582,7 @@ async def _apply_story_prompt(
 
     subs = {
         "lang": config.get("language", "en"),
-        "chapter_range": config.get("chapter_range", "2–5"),
-        "scene_range": config.get("scene_range", "2–5"),
-        "scene_duration": config.get("scene_duration", "15–45 seconds"),
+        "chapter_range": config.get("chapter_range", ""),
         "narrative_style": config.get("narrative_style", "documentary narration"),
         "narrative_guidance": config.get("narrative_guidance", ""),
         "image_style": config.get("image_style", "cinematic, dramatic lighting"),

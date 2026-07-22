@@ -128,7 +128,8 @@ class Scene:
 @dataclass
 class Chapter:
     id: str                          # "ch00"
-    title: str
+    title: str                       # filesystem-safe slug (from _slugify) — used for paths
+    display_title: str = ""          # raw LLM chapter title, shown to viewers (NOT slugified)
     scenes: list[Scene] = field(default_factory=list)
     merge_step: StepState = field(default_factory=StepState)
     chapter_file: str | None = None
@@ -137,6 +138,7 @@ class Chapter:
         return {
             "id": self.id,
             "title": self.title,
+            "display_title": self.display_title,
             "scenes": [s.to_dict() for s in self.scenes],
             "merge_step": self.merge_step.to_dict(),
             "chapter_file": self.chapter_file,
@@ -147,6 +149,7 @@ class Chapter:
         return cls(
             id=d["id"],
             title=d.get("title", ""),
+            display_title=d.get("display_title", d.get("title", "")),
             scenes=[Scene.from_dict(s) for s in d.get("scenes", [])],
             merge_step=StepState.from_dict(d.get("merge_step", {})),
             chapter_file=d.get("chapter_file"),
