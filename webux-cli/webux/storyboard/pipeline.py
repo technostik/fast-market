@@ -804,22 +804,50 @@ async def _parse_script(state: ProjectState, state_path: Path, config: dict) -> 
             scene_descriptions = list(scene_descriptions)[:n]
 
     # Validate chapter scene_count sums. Chapters are contiguous runs over the
-    # ordered scene list. If the counts don't sum to the scene count, fall back to
-    # a single chapter containing everything (rather than failing or producing
-    # orphan/duplicate scenes).
+    # ordered scene list. If the counts don't sum to the scene count, try to
+    # recover by adjusting the last chapter before falling back to a single
+    # chapter. The LLM frequently miscounts by 1-2 scenes; a hard fallback to
+    # one chapter discards the user's chapter structure entirely.
     total_counts = sum(int(c.get("scene_count", 0) or 0) for c in chapters_in)
-    if not chapters_in or total_counts != n:
+    if not chapters_in:
         warns.append(
-            f"[warn] Chapter scene_count values sum to {total_counts}, expected {n}. "
-            "Falling back to a single chapter containing all scenes."
+            "[warn] LLM returned no chapters. Falling back to a single chapter "
+            "containing all scenes."
         )
-        fallback_title = "Chapter 1"
-        for c in chapters_in:
-            t = (c.get("title") or "").strip()
-            if t:
-                fallback_title = t
-                break
-        chapters_in = [{"title": fallback_title, "scene_count": n}]
+        chapters_in = [{"title": "Chapter 1", "scene_count": n}]
+    elif total_counts != n:
+        diff = total_counts - n
+        if diff > 0:
+            # LLM counted too many scenes — trim from the last chapter(s).
+            trimmed = 0
+            while diff > 0 and chapters_in:
+                last_count = int(chapters_in[-1].get("scene_count", 0) or 0)
+                reduce_by = min(diff, last_count)
+                if reduce_by >= last_count:
+                    chapters_in.pop()
+                else:
+                    chapters_in[-1] = {
+                        **chapters_in[-1], "scene_count": last_count - reduce_by,
+                    }
+                diff -= reduce_by
+                trimmed += reduce_by
+            if not chapters_in:
+                chapters_in = [{"title": "Chapter 1", "scene_count": n}]
+            warns.append(
+                f"[warn] LLM scene_count sum was {total_counts}, expected {n}. "
+                f"Adjusted by trimming {trimmed} scene(s) from the end."
+            )
+        else:
+            # LLM counted too few scenes — add the deficit to the last chapter.
+            increase_by = -diff
+            last = chapters_in[-1]
+            last_count = int(last.get("scene_count", 0) or 0)
+            chapters_in[-1] = {**last, "scene_count": last_count + increase_by}
+            warns.append(
+                f"[warn] LLM scene_count sum was {total_counts}, expected {n}. "
+                f"Adjusted by increasing the last chapter from "
+                f"{last_count} to {last_count + increase_by}."
+            )
 
     # Build Chapter/Scene objects from the contiguous scene runs.
     state.chapters = []

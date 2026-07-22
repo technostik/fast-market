@@ -462,7 +462,7 @@ prompts:
     Rules:
     - "scene_descriptions" MUST have exactly one entry per scene, in order, and its length MUST equal the number of SCENE blocks above.
     - Each "scene_descriptions" entry describes ONLY the visuals for that scene (setting, subject, mood, composition) for an image generator. It is NEVER spoken and must NOT repeat the narration. Keep continuity of setting where the text doesn't imply a scene change, and vary composition/framing between consecutive scenes to avoid visually repetitive shots.
-    - "chapters" groups the scenes into CONTIGUOUS runs, in order. "scene_count" is the number of scenes in that chapter. The "scene_count" values MUST sum to the total number of scenes above — do not skip or duplicate any scene, and do not let them overlap.
+    - "chapters" groups the scenes into CONTIGUOUS runs, in order. "scene_count" is the number of scenes in that chapter. The "scene_count" values MUST sum to exactly the number of SCENE blocks (not more, not fewer) — do not skip or duplicate any scene, and do not let them overlap. Count the SCENE blocks before writing scene_count values.
     - {chapter_instruction}
     - Chapter titles should be short, natural-language prose (they are shown to viewers). Input language is {lang}.
 
