@@ -178,7 +178,10 @@
         <img class="thumb-preview" id="thumbCur" src="">
       </div>
       <div class="row"><label>New image prompt <span class="hint">(used by "Regenerate image")</span></label><textarea id="regenImagePrompt" rows="2" placeholder="generate a brand new base image from this prompt"></textarea></div>
-      <div class="row"><label>New overlay title <span class="hint">(used by "Regenerate overlay"; falls back to the stored title)</span></label><input id="regenOverlayTitle" type="text"></div>
+      <div class="cols2">
+        <div class="row"><label>Image engine</label><select id="regenEngine"><option value="">— config default —</option></select></div>
+        <div class="row"><label>New overlay title <span class="hint">(used by "Regenerate overlay")</span></label><input id="regenOverlayTitle" type="text"></div>
+      </div>
       <div class="cols2">
         <div class="row"><label>Text color (fg)</label><input id="regenFg" type="text" placeholder="from config if empty"></div>
         <div class="row"><label>Background (bg)</label><input id="regenBg" type="text" placeholder="from config if empty"></div>
@@ -454,6 +457,19 @@ el('cfgToggle').addEventListener('click', ()=>{
 el('cfgSave').addEventListener('click', saveConfig);
 
 // ── Thumbnail regeneration ──────────────────────────────────────────────────
+async function loadEngines(){
+  const r = await fetch(API+'/list-engines').catch(()=>null);
+  const data = r ? await r.json() : {engines:[], default:''};
+  const sel = el('regenEngine');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— config default ('+data.default+') —</option>';
+  for (const e of (data.engines||[])){
+    const o = document.createElement('option');
+    o.value = e; o.textContent = e;
+    sel.appendChild(o);
+  }
+  if (cur && (data.engines||[]).includes(cur)) sel.value = cur;
+}
 async function loadThumbVideos(){
   const path = el('cfgSourcePath').value || '';
   const ext = el('cfgExt').value || '';
@@ -503,6 +519,7 @@ function regenThumbnail(mode){
       source,
       mode,
       image_prompt: imagePrompt,
+      engine: el('regenEngine').value,
       overlay_title: title,
       overlay_fg: el('regenFg').value,
       overlay_bg: el('regenBg').value,
@@ -631,6 +648,7 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
   updateOverlayRow();
   await loadVideos();
   await loadPrompts();
+  await loadEngines();
   await loadThumbVideos();
   await refreshQuickPrompt();
   setInterval(loadVideos, 10000);

@@ -83,5 +83,5 @@ def test_replace_base_image(tmp_path, store, monkeypatch):
     assert r.status_code == 200, r.text
     body = r.json()
     assert Path(body["base"]).exists()
-    # base renamed to <stem>_thumb<ext>
-    assert body["base"].endswith("_thumb.png")
+    # base renamed to <stem>_thumb_<N><ext>
+    assert body["base"].endswith("_thumb_1.png")

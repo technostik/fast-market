@@ -146,6 +146,29 @@ async def save_config(req: ConfigSaveRequest):
     return {"ok": True}
 
 
+# ── Image engines API ────────────────────────────────────────────────────────
+
+@router.get("/list-engines")
+async def list_engines():
+    """List available image generation engines from the image CLI."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _image(), "setup", "engine", "list", "-f", "json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode:
+            return {"engines": [], "default": ""}
+        data = json.loads(stdout.decode(errors="replace"))
+        return {
+            "engines": data.get("engines", []),
+            "default": data.get("default", ""),
+        }
+    except Exception:
+        return {"engines": [], "default": ""}
+
+
 # ── Video list API ────────────────────────────────────────────────────────────
 
 @router.get("/list-videos")
@@ -593,6 +616,7 @@ class RegenThumbRequest(BaseModel):
     source: str
     mode: str = ""           # "image" | "overlay" | "" (auto)
     image_prompt: str = ""   # explicit base image prompt (full regeneration)
+    engine: str = ""         # image generation engine override (empty = use config default)
     overlay_title: str = ""  # overlay text to (re)apply (optional)
     overlay_fg: str = ""
     overlay_bg: str = ""
@@ -641,26 +665,52 @@ def _append_overlay_opts(cmd: list[str], fg: str, bg: str, effect: str, size_pct
     return cmd
 
 
-def _name_thumb_for_source(source: str, overlay_path: str, base_path: str, stem: str | None = None) -> tuple[str, str]:
+def _get_next_thumbnail_version(out_dir: Path, stem: str) -> int:
+    """Find the next available version number for thumbnail files.
+
+    Looks for existing ``<stem>_thumb_<N>.<ext>`` files and returns N+1.
+    If no versioned files exist, returns 1."""
+    existing = list(out_dir.glob(f"{stem}_thumb_*.*"))
+    if not existing:
+        return 1
+    versions = []
+    for f in existing:
+        # Extract version number from filename like stem_thumb_1.png
+        name = f.stem
+        # Find the _thumb_ part and extract the number after it
+        idx = name.rfind("_thumb_")
+        if idx != -1:
+            ver_str = name[idx + 7:]  # Skip "_thumb_"
+            if ver_str.isdigit():
+                versions.append(int(ver_str))
+    return max(versions, default=0) + 1
+
+
+def _name_thumb_for_source(source: str, overlay_path: str, base_path: str, stem: str | None = None, version: int | None = None) -> tuple[str, str]:
     """Rename generated thumbnail files so they are tied to the final uploaded
-    video: ``<stem>_thumb.<ext>`` (base) and ``<stem>_thumb_overlay.<ext>``
-    (overlay), instead of the image CLI's default ``flux2cloud_<seed>.png``."""
+    video: ``<stem>_thumb_<N>.<ext>`` (base) and ``<stem>_thumb_overlay_<N>.<ext>``
+    (overlay), instead of the image CLI's default ``flux2cloud_<seed>.png``.
+
+    If ``version`` is not provided, it is auto-detected from existing files."""
     src = Path(source).expanduser().resolve()
     out_dir = src.parent
     if not stem:
         stem = src.stem
     new_overlay, new_base = overlay_path, base_path
 
+    if version is None:
+        version = _get_next_thumbnail_version(out_dir, stem)
+
     if overlay_path and Path(overlay_path).expanduser().exists():
         p = Path(overlay_path).expanduser()
-        target = out_dir / f"{stem}_thumb_overlay{p.suffix}"
+        target = out_dir / f"{stem}_thumb_overlay_{version}{p.suffix}"
         if p.resolve() != target.resolve():
             p.replace(target)
         new_overlay = str(target.resolve())
 
     if base_path and Path(base_path).expanduser().exists():
         b = Path(base_path).expanduser()
-        target = out_dir / f"{stem}_thumb{b.suffix}"
+        target = out_dir / f"{stem}_thumb_{version}{b.suffix}"
         if b.resolve() != target.resolve():
             b.replace(target)
         new_base = str(target.resolve())
@@ -729,12 +779,25 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
     final_video = files.get("final_video", "")
     final_stem = Path(final_video).stem if (final_video and Path(final_video).expanduser().exists()) else Path(source).stem
 
+    # Get the current version from meta (for overlay mode, use the latest version)
+    # For image mode, we'll increment the version.
+    src = Path(source).expanduser().resolve()
+    out_dir_path = src.parent
+    current_version = meta.get("thumbnail_version", 0)
+
     new_path = ""
     new_base = ""
+    new_version = current_version
+
+    # Read the thumbnail engine: request override wins, else publish config default.
+    thumb_engine = (req.engine or pub_cfg.get("thumbnail_engine", "")).strip()
 
     if do_image:
-        # Full regeneration from an explicit prompt.
+        # Full regeneration from an explicit prompt - always create a new version.
+        new_version = _get_next_thumbnail_version(out_dir_path, final_stem)
         cmd = [_image(), "generate", image_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir]
+        if thumb_engine:
+            cmd += ["--engine", thumb_engine]
         if overlay_title:
             cmd += ["--title", overlay_title]
         cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
@@ -749,12 +812,13 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
         new_path, new_base = _parse_generate_output(stdout.decode(errors="replace"))
         if not new_path or not Path(new_path).expanduser().exists():
             raise HTTPException(status_code=500, detail="Thumbnail output path not found in command output")
-        new_path, new_base = _name_thumb_for_source(source, new_path, new_base, final_stem)
+        new_path, new_base = _name_thumb_for_source(source, new_path, new_base, final_stem, version=new_version)
         files["thumbnail"] = new_path
         if new_base:
             files["thumbnail_base"] = new_base
         meta["thumbnail_prompt"] = image_prompt
     else:
+        # Overlay mode: use the latest base image (from the latest version).
         base = files.get("thumbnail_base", "")
         if not base or not Path(base).expanduser().exists():
             base = files.get("thumbnail", "")
@@ -763,6 +827,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
         if base_exists:
             # A base image is available: only reapply the overlay text on top of
             # it. This must never regenerate the full image.
+            # Use the current version (latest) for the overlay.
             cmd = [_image(), "overlay", str(Path(base).expanduser().resolve()), "--title", overlay_title, "-F", "json"]
             cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
             proc = await asyncio.create_subprocess_exec(
@@ -776,7 +841,8 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
             new_path, _ = _parse_generate_output(stdout.decode(errors="replace"))
             if not new_path or not Path(new_path).expanduser().exists():
                 raise HTTPException(status_code=500, detail="Overlay output path not found in command output")
-            new_path, renamed_base = _name_thumb_for_source(source, new_path, base, final_stem)
+            # Use the same version as the base image for the overlay.
+            new_path, renamed_base = _name_thumb_for_source(source, new_path, base, final_stem, version=current_version)
             files["thumbnail"] = new_path
             if renamed_base:
                 files["thumbnail_base"] = renamed_base
@@ -793,7 +859,10 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
                            "prompt was provided; provide an image prompt or re-run publish "
                            "to regenerate the thumbnail from scratch",
                 )
+            new_version = _get_next_thumbnail_version(out_dir_path, final_stem)
             cmd = [_image(), "generate", fallback_prompt, "--size", "youtube", "-F", "json", "--output-dir", out_dir, "--title", overlay_title]
+            if thumb_engine:
+                cmd += ["--engine", thumb_engine]
             cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -806,12 +875,13 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
             new_path, new_base = _parse_generate_output(stdout.decode(errors="replace"))
             if not new_path or not Path(new_path).expanduser().exists():
                 raise HTTPException(status_code=500, detail="Thumbnail output path not found in command output")
-            new_path, new_base = _name_thumb_for_source(source, new_path, new_base, final_stem)
+            new_path, new_base = _name_thumb_for_source(source, new_path, new_base, final_stem, version=new_version)
             files["thumbnail"] = new_path
             if new_base:
                 files["thumbnail_base"] = new_base
 
     meta["files"] = files
+    meta["thumbnail_version"] = new_version
     if overlay_title:
         meta["thumbnail_overlay_title"] = overlay_title
     try:
@@ -906,9 +976,12 @@ async def replace_base_image(
     else:
         raise HTTPException(status_code=400, detail="Provide an uploaded image or an absolute image path")
 
-    # Copy into the source folder, named <stem>_thumb<ext> as the new base.
+    # Get the next version number for the new base image.
+    new_version = _get_next_thumbnail_version(out_dir, final_stem)
+
+    # Copy into the source folder, named <stem>_thumb_<N><ext> as the new base.
     ext = Path(src_img).suffix or ".png"
-    target = out_dir / f"{final_stem}_thumb{ext}"
+    target = out_dir / f"{final_stem}_thumb_{new_version}{ext}"
     if Path(src_img).resolve() != target.resolve():
         import shutil as _shutil
         _shutil.copy2(src_img, target)
@@ -932,13 +1005,14 @@ async def replace_base_image(
         new_path, _ = _parse_generate_output(stdout.decode(errors="replace"))
         if not new_path or not Path(new_path).expanduser().exists():
             raise HTTPException(status_code=500, detail="Overlay output path not found in command output")
-        new_path, renamed_base = _name_thumb_for_source(source, new_path, new_base, final_stem)
+        new_path, renamed_base = _name_thumb_for_source(source, new_path, new_base, final_stem, version=new_version)
         if renamed_base:
             new_base = renamed_base
 
     files["thumbnail_base"] = new_base
     files["thumbnail"] = new_path
     meta["files"] = files
+    meta["thumbnail_version"] = new_version
     try:
         p = Path(source).parent / f"{Path(source).stem}-long-meta.json"
         p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
