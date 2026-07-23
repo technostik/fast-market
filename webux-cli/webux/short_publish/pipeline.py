@@ -19,6 +19,7 @@ from .utils import (
     _get_video_duration,
     _sanitize_filename,
     _effective_limit_seconds,
+    SHORTS_MAX_SECONDS,
     _run,
     _extract_video_id,
 )
@@ -467,6 +468,18 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
                 "⚠ Upload blocked: the generated video title is empty.\n"
                 "The title prompt produced no output. Check the title prompt "
                 f"('{job.prompt_title}') and retry (resume from step 3)."
+            )
+            job.status = "error"
+            job.end_time = time.time()
+            _save_meta(job)
+            return
+        final_duration = await _get_video_duration(final_video)
+        if final_duration > SHORTS_MAX_SECONDS:
+            s4.end_time = time.time()
+            s4.status = "error"
+            s4.output = (
+                f"Upload blocked: video duration {final_duration:.0f}s exceeds "
+                f"the {SHORTS_MAX_SECONDS:.0f}s Shorts limit."
             )
             job.status = "error"
             job.end_time = time.time()
