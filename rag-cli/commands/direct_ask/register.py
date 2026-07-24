@@ -44,7 +44,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     return CommandManifest(name="direct-ask", click_command=direct_ask_cmd)
 
 
-def _build_index_file(path, store, llm, model_name, handle_prefix="direct"):
+def _build_index_file(path, store, llm, model_name, handle_prefix="direct", on_progress=None):
     extracted = extract_local_file(path)
     handle = f"{handle_prefix}:{path.name}:{path.stat().st_size}"
 
@@ -60,9 +60,9 @@ def _build_index_file(path, store, llm, model_name, handle_prefix="direct"):
 
     if path.suffix.lower() == ".pdf":
         pages = [(pg.page_number, pg.text) for pg in extracted.pages]
-        tree = build_pdf_tree(pages, provider=llm, model=model_name, summary_provider=llm)
+        tree = build_pdf_tree(pages, provider=llm, model=model_name, summary_provider=llm, on_progress=on_progress)
     elif path.suffix.lower() in (".md", ".markdown"):
-        tree = build_md_tree(extracted.full_text, summary_provider=llm, model=model_name)
+        tree = build_md_tree(extracted.full_text, summary_provider=llm, model=model_name, on_progress=on_progress)
     else:
         raise click.ClickException(f"Unsupported file type: {path.suffix}")
 
@@ -86,8 +86,12 @@ def _verbose_tool_printer(tool_name, args, result):
 
 def _direct_ask_single(store, llm, model_name, p, question, fmt, keep, verbose, logger):
     doc = None
+
+    def _progress(current, total, title):
+        click.echo(f"  Summarizing [{current}/{total}] {title}")
+
     try:
-        doc, tree = _build_index_file(p, store, llm, model_name)
+        doc, tree = _build_index_file(p, store, llm, model_name, on_progress=_progress)
         logger.info("tree_built", nodes=len(tree))
 
         tree_nodes = store.get_tree_nodes_for_document(doc.id)
@@ -119,8 +123,12 @@ def _direct_ask_directory(store, llm, model_name, base_dir, files, question, fmt
         for i, f in enumerate(files, 1):
             rel = f.relative_to(base_dir)
             click.echo(f"[{i}/{len(files)}] Indexing {rel}")
+
+            def _progress(current, total, title):
+                click.echo(f"    Summarizing [{current}/{total}] {title}")
+
             try:
-                doc, tree = _build_index_file(f, store, llm, model_name, handle_prefix="direct")
+                doc, tree = _build_index_file(f, store, llm, model_name, handle_prefix="direct", on_progress=_progress)
                 docs.append(doc)
                 logger.info("tree_built", file=str(rel), nodes=len(tree))
             except Exception as exc:

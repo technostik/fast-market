@@ -168,7 +168,7 @@ def _clean_tree_for_output(tree_nodes: list[dict]) -> list[dict]:
     return cleaned
 
 
-def build_md_tree(content: str, summary_provider=None, model: str | None = None) -> list[dict]:
+def build_md_tree(content: str, summary_provider=None, model: str | None = None, on_progress=None) -> list[dict]:
     node_list, lines = extract_md_nodes(content)
     nodes_with_content = _assign_text_to_nodes(node_list, lines)
     tree = _build_tree_from_md_nodes(nodes_with_content)
@@ -185,31 +185,52 @@ def build_md_tree(content: str, summary_provider=None, model: str | None = None)
         tree = [node]
 
     if summary_provider:
-        _add_summaries(tree, summary_provider, model)
+        _add_summaries(tree, summary_provider, model, on_progress=on_progress)
 
     return tree
 
 
-def _add_summaries(tree: list[dict], provider: LLMProvider, model: str | None) -> None:
+def _count_nodes(tree: list[dict]) -> int:
+    count = 0
     for node in tree:
-        text = node.get("text", "")
-        if text and len(text) > 200:
-            prompt = (
-                "Generate a one-sentence summary of this document section.\n\n"
-                f"Section text:\n{_secure_doc_text(text[:3000])}\n\n"
-                "Directly return the summary, nothing else."
-            )
-            try:
-                node["summary"] = _llm_completion(provider, prompt, model=model).strip()
-            except Exception as exc:
-                logger.warning("summary_generation_failed", node_id=node.get("node_id"), error=str(exc))
-                node["summary"] = text[:200]
-        else:
-            node["summary"] = text[:200] if text else ""
-
+        count += 1
         children = node.get("nodes", [])
         if children:
-            _add_summaries(children, provider, model)
+            count += _count_nodes(children)
+    return count
+
+
+def _add_summaries(tree: list[dict], provider: LLMProvider, model: str | None, on_progress=None) -> None:
+    total = _count_nodes(tree) if on_progress else 0
+    counter = [0]
+
+    def _process(nodes: list[dict]) -> None:
+        for node in nodes:
+            if on_progress:
+                counter[0] += 1
+                title = node.get("title", "")[:40]
+                on_progress(counter[0], total, title)
+
+            text = node.get("text", "")
+            if text and len(text) > 200:
+                prompt = (
+                    "Generate a one-sentence summary of this document section.\n\n"
+                    f"Section text:\n{_secure_doc_text(text[:3000])}\n\n"
+                    "Directly return the summary, nothing else."
+                )
+                try:
+                    node["summary"] = _llm_completion(provider, prompt, model=model).strip()
+                except Exception as exc:
+                    logger.warning("summary_generation_failed", node_id=node.get("node_id"), error=str(exc))
+                    node["summary"] = text[:200]
+            else:
+                node["summary"] = text[:200] if text else ""
+
+            children = node.get("nodes", [])
+            if children:
+                _process(children)
+
+    _process(tree)
 
 
 # ── PDF tree building ──────────────────────────────────────────────────────
@@ -363,6 +384,7 @@ def build_pdf_tree(
     provider: LLMProvider | None = None,
     model: str | None = None,
     summary_provider: LLMProvider | None = None,
+    on_progress=None,
 ) -> list[dict]:
     logger.info("building_pdf_tree", pages=len(pages))
 
@@ -413,7 +435,7 @@ def build_pdf_tree(
     _attach_text_to_pdf_nodes(toc_tree, pages)
 
     if summary_provider:
-        _add_summaries(toc_tree, summary_provider, model)
+        _add_summaries(toc_tree, summary_provider, model, on_progress=on_progress)
 
     return toc_tree
 

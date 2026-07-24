@@ -158,8 +158,6 @@ def _index_local_file(store, engine, coll, llm, model_name, path, mode, tags, fm
         out({"status": "skipped", "handle": handle, "reason": "unchanged"}, fmt)
         return
 
-    from datetime import datetime, timezone
-
     doc = store.upsert_document(
         handle=handle,
         source_type=SourceType.local_file,
@@ -170,12 +168,15 @@ def _index_local_file(store, engine, coll, llm, model_name, path, mode, tags, fm
 
     run = store.create_index_run(doc.id, model_used=model_name or "", is_ephemeral=0)
 
+    def _progress(current, total, title):
+        click.echo(f"    Summarizing [{current}/{total}] {title}")
+
     try:
         if path.suffix.lower() == ".pdf":
             pages = [(p.page_number, p.text) for p in extracted.pages]
-            tree = build_pdf_tree(pages, provider=llm, model=model_name, summary_provider=llm)
+            tree = build_pdf_tree(pages, provider=llm, model=model_name, summary_provider=llm, on_progress=_progress)
         elif path.suffix.lower() in (".md", ".markdown"):
-            tree = build_md_tree(extracted.full_text, summary_provider=llm, model=model_name)
+            tree = build_md_tree(extracted.full_text, summary_provider=llm, model=model_name, on_progress=_progress)
         else:
             raise click.ClickException(f"Unsupported file type: {path.suffix}")
 

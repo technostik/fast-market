@@ -69,3 +69,40 @@ def test_build_md_tree_without_summary(sample_md_content: str):
     assert len(tree) > 0
     for node in tree:
         assert "summary" not in node or isinstance(node.get("summary"), str)
+
+
+def test_count_nodes(sample_md_content: str):
+    from core.tree_builder import _count_nodes
+    tree = build_md_tree(sample_md_content)
+    count = _count_nodes(tree)
+    assert count > 0
+    assert count >= 5
+
+
+def test_build_md_tree_with_progress_callback(sample_md_content: str):
+    calls = []
+
+    def on_progress(current, total, title):
+        calls.append((current, total, title))
+
+    tree = build_md_tree(sample_md_content, on_progress=on_progress)
+    assert len(tree) > 0
+    assert len(calls) == 0
+
+
+def test_add_summaries_calls_progress_callback(sample_md_content: str):
+    from unittest.mock import MagicMock
+    from core.tree_builder import _add_summaries, build_md_tree
+
+    calls = []
+    tree = build_md_tree(sample_md_content)
+
+    def on_progress(current, total, title):
+        calls.append((current, total, title))
+
+    mock_provider = MagicMock()
+    mock_provider.complete.return_value = MagicMock(content="A short summary.")
+
+    _add_summaries(tree, mock_provider, None, on_progress=on_progress)
+    assert len(calls) > 0
+    assert calls[-1][0] == calls[-1][1]
