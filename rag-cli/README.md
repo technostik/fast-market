@@ -88,6 +88,31 @@ rag setup run    # Run toolsetup wizard
 rag setup edit   # Open config in editor
 ```
 
+## Shell Completion
+
+Enable tab completion for bash, zsh, or fish:
+
+```bash
+# Install completion (adds to your shell config)
+rag --install-completion
+
+# Or show the completion script to add manually
+rag --show-completion
+```
+
+### What Autocompletes
+
+| Command | Autocomplete |
+|---------|--------------|
+| `rag index <path>` | File/directory paths |
+| `rag direct-ask <path>` | File/directory paths |
+| `rag collection use/show/delete <name>` | Collection names from database |
+| `rag ask/list --collection <name>` | Collection names from database |
+| `rag show/delete <handle>` | Document handles from database |
+| `rag index --mode` | `new`, `reindex` |
+| `rag index --source` | `local_file`, `corpus` |
+| `*/--format` | `json`, `text` |
+
 ## How It Works
 
 1. **Extract**: PDF pages via `pypdf`, Markdown via heading hierarchy

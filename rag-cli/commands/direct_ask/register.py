@@ -14,7 +14,7 @@ from storage.models import SourceType, IndexRunStatus
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("direct-ask", help="Ask a question about a file or directory without collection setup.")
-    @click.argument("path")
+    @click.argument("path", type=click.Path(exists=True))
     @click.argument("question")
     @click.option("--model", "-m", default=None, help="LLM model name.")
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")

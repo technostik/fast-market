@@ -4,12 +4,13 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_rag_store, out
+from commands.param_types import COLLECTION_NAME, DOCUMENT_HANDLE
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("delete", help="Delete a document from a collection or purge entirely.")
-    @click.argument("handle")
-    @click.option("--collection", "-c", default=None, help="Remove from this collection only.")
+    @click.argument("handle", type=DOCUMENT_HANDLE)
+    @click.option("--collection", "-c", default=None, type=COLLECTION_NAME, help="Remove from this collection only.")
     @click.option("--purge", is_flag=True, default=False, help="Delete document and tree everywhere.")
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
     def delete_cmd(handle, collection, purge, fmt):

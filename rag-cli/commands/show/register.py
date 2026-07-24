@@ -4,6 +4,7 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_rag_store, out
+from commands.param_types import DOCUMENT_HANDLE
 
 
 def _render_tree(tree: list[dict], indent: int = 0) -> str:
@@ -23,7 +24,7 @@ def _render_tree(tree: list[dict], indent: int = 0) -> str:
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("show", help="Show document details and tree structure.")
-    @click.argument("handle")
+    @click.argument("handle", type=DOCUMENT_HANDLE)
     @click.option("--tree", "show_tree", is_flag=True, default=False, help="Render ASCII tree.")
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
     def show_cmd(handle, show_tree, fmt):

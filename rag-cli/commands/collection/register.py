@@ -4,6 +4,7 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_rag_store, out
+from commands.param_types import COLLECTION_NAME
 from core.collection_pointer import write_active_collection, read_active_collection
 
 
@@ -26,7 +27,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             raise click.ClickException(str(exc))
 
     @collection_group.command("use")
-    @click.argument("name")
+    @click.argument("name", type=COLLECTION_NAME)
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
     def use_cmd(name, fmt):
         store, _ = get_rag_store()
@@ -49,7 +50,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         out(results, fmt)
 
     @collection_group.command("show")
-    @click.argument("name")
+    @click.argument("name", type=COLLECTION_NAME)
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
     def show_cmd(name, fmt):
         store, _ = get_rag_store()
@@ -65,7 +66,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         out(result, fmt)
 
     @collection_group.command("delete")
-    @click.argument("name")
+    @click.argument("name", type=COLLECTION_NAME)
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
     def delete_cmd(name, fmt):
         store, _ = get_rag_store()

@@ -6,6 +6,7 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_rag_store, out, resolve_provider_and_model
+from commands.param_types import COLLECTION_NAME
 from core.collection_pointer import resolve_collection_name
 from core.extractors import extract_local_file, discover_files
 from core.tree_builder import build_pdf_tree, build_md_tree
@@ -36,8 +37,8 @@ class IndexGroup(click.Group):
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.group("index", cls=IndexGroup, invoke_without_command=True, help="Index documents or manage index data.")
-    @click.argument("path", required=False)
-    @click.option("--collection", "-c", default=None, help="Target collection name.")
+    @click.argument("path", required=False, type=click.Path(exists=True))
+    @click.option("--collection", "-c", default=None, type=COLLECTION_NAME, help="Target collection name.")
     @click.option("--tag", "-t", multiple=True, help="Sub-scope tag(s) of an already-indexed doc.")
     @click.option(
         "--mode",

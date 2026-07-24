@@ -4,6 +4,7 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import get_rag_store, out, resolve_provider_and_model
+from commands.param_types import COLLECTION_NAME
 from core.collection_pointer import resolve_collection_name
 from core.tree_search import _build_flat_tree, run_agentic_search
 
@@ -11,7 +12,7 @@ from core.tree_search import _build_flat_tree, run_agentic_search
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("ask", help="Ask a question about documents in a collection.")
     @click.argument("question")
-    @click.option("--collection", "-c", default=None, help="Collection to query.")
+    @click.option("--collection", "-c", default=None, type=COLLECTION_NAME, help="Collection to query.")
     @click.option("--model", "-m", default=None, help="LLM model name.")
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
     @click.option("--provider", "-p", default=None, help="LLM provider name.")
