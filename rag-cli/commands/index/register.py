@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import click
@@ -9,12 +8,34 @@ from commands.base import CommandManifest
 from commands.helpers import get_rag_store, out, resolve_provider_and_model
 from core.collection_pointer import resolve_collection_name
 from core.extractors import extract_local_file
-from core.tree_builder import build_pdf_tree, build_md_tree, build_corpus_tree
+from core.tree_builder import build_pdf_tree, build_md_tree
 from storage.models import SourceType, IndexRunStatus
 
 
+class IndexGroup(click.Group):
+    """Click group that detects subcommands before Click tries to parse all options."""
+
+    def parse_args(self, ctx, args):
+        subcommand_names = self.list_commands(ctx)
+        if args and args[0] in subcommand_names:
+            ctx.invoked_subcommand = args[0]
+            ctx.args = args[1:]
+            ctx.params = {}
+            return
+        return super().parse_args(ctx, args)
+
+    def invoke(self, ctx):
+        if ctx.invoked_subcommand is not None:
+            sub_cmd = self.get_command(ctx, ctx.invoked_subcommand)
+            sub_ctx = sub_cmd.make_context(ctx.invoked_subcommand, list(ctx.args), parent=ctx)
+            with sub_ctx:
+                sub_cmd.invoke(sub_ctx)
+        else:
+            super().invoke(ctx)
+
+
 def register(plugin_manifests: dict) -> CommandManifest:
-    @click.command("index", help="Index a document into a collection.")
+    @click.group("index", cls=IndexGroup, invoke_without_command=True, help="Index documents or manage index data.")
     @click.argument("path", required=False)
     @click.option("--collection", "-c", default=None, help="Target collection name.")
     @click.option("--tag", "-t", multiple=True, help="Sub-scope tag(s) of an already-indexed doc.")
@@ -31,7 +52,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--model", "-m", default=None, help="LLM model name.")
     @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
     @click.option("--provider", "-p", default=None, help="LLM provider name.")
-    def index_cmd(path, collection, tag, mode, source, plugin_name, handle, sync_all, model, fmt, provider):
+    @click.pass_context
+    def index_group(ctx, path, collection, tag, mode, source, plugin_name, handle, sync_all, model, fmt, provider):
+        if ctx.invoked_subcommand is not None:
+            return
+
         collection_name = resolve_collection_name(collection)
         store, engine = get_rag_store()
         llm, model_name = resolve_provider_and_model(provider, model)
@@ -54,11 +79,65 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         _index_local_file(store, engine, coll, llm, model_name, p, mode, tag, fmt)
 
-    return CommandManifest(name="index", click_command=index_cmd)
+    @index_group.command("cleanup", help="Drop and recreate all RAG index data.")
+    @click.option("--all", "all_flag", is_flag=True, default=False, help="Clean all collections.")
+    @click.option("--force", "-f", is_flag=True, default=False, help="Skip confirmation prompt.")
+    @click.option("--format", "-F", "fmt", type=click.Choice(["json", "text"]), default="text")
+    def cleanup_cmd(all_flag, force, fmt):
+        store, engine = get_rag_store()
+
+        stats = collect_stats(store, engine)
+
+        if stats["total_docs"] == 0 and stats["total_nodes"] == 0 and stats["total_collections"] == 0:
+            out({"status": "empty", "message": "Index is already clean. Nothing to delete."}, fmt)
+            return
+
+        summary = {
+            "collections": stats["total_collections"],
+            "documents": stats["total_docs"],
+            "tree_nodes": stats["total_nodes"],
+            "index_runs": stats["total_runs"],
+            "collection_members": stats["total_members"],
+        }
+
+        if not force:
+            click.echo("This will permanently delete the following:")
+            click.echo(f"  Collections:      {summary['collections']}")
+            click.echo(f"  Documents:        {summary['documents']}")
+            click.echo(f"  Tree nodes:       {summary['tree_nodes']}")
+            click.echo(f"  Index runs:       {summary['index_runs']}")
+            click.echo(f"  Collection links: {summary['collection_members']}")
+            click.echo()
+            if not click.confirm("Proceed with cleanup?"):
+                click.echo("Aborted.")
+                return
+
+        drop_and_recreate(engine)
+        out({"status": "cleaned", **summary}, fmt)
+
+    return CommandManifest(name="index", click_command=index_group)
 
 
 def _handle_for_path(path: Path) -> str:
     return f"local:{path.name}:{path.stat().st_size}"
+
+
+def collect_stats(store, engine):
+    from storage.models import Base
+    with engine.connect() as conn:
+        return {
+            "total_collections": len(conn.execute(Base.metadata.tables["collections"].select()).fetchall()),
+            "total_docs": len(conn.execute(Base.metadata.tables["documents"].select()).fetchall()),
+            "total_nodes": len(conn.execute(Base.metadata.tables["tree_nodes"].select()).fetchall()),
+            "total_members": len(conn.execute(Base.metadata.tables["collection_members"].select()).fetchall()),
+            "total_runs": len(conn.execute(Base.metadata.tables["index_runs"].select()).fetchall()),
+        }
+
+
+def drop_and_recreate(engine):
+    from storage.models import Base
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
 
 
 def _index_local_file(store, engine, coll, llm, model_name, path, mode, tags, fmt):

@@ -46,11 +46,13 @@ rag collection delete <name>
 
 ```bash
 rag index <path> [--collection NAME] [--tag NAME] [--mode new|reindex]
+rag index cleanup --all --force
 ```
 
 - `--mode new` (default): full extraction + tree building + summaries
 - `--mode reindex`: regenerate summaries only (no re-extraction)
 - `--tag`: assign a sub-scope tag based on heading matching
+- `cleanup --all --force`: drop and recreate all index data (no confirmation prompt)
 
 ### Querying
 

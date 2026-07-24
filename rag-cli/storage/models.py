@@ -99,6 +99,7 @@ class TreeNode(Base):
         ForeignKey("tree_nodes.id", ondelete="SET NULL"), nullable=True
     )
     title: Mapped[str] = mapped_column(String, nullable=False, default="")
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     start_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     end_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")

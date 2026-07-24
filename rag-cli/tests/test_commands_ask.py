@@ -33,11 +33,12 @@ class FakeProvider(LLMProvider):
 
 
 class FakeTreeNode:
-    def __init__(self, id, node_id, parent_id, title, summary="", start_index=0, end_index=0):
+    def __init__(self, id, node_id, parent_id, title, text="", summary="", start_index=0, end_index=0):
         self.id = id
         self.node_id = node_id
         self.parent_id = parent_id
         self.title = title
+        self.text = text
         self.summary = summary
         self.start_index = start_index
         self.end_index = end_index

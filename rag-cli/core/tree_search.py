@@ -173,7 +173,7 @@ def _build_flat_tree(
             "db_id": tn.id,
             "node_id": tn.node_id,
             "title": tn.title,
-            "text": "",
+            "text": tn.text or "",
             "summary": tn.summary,
             "start_index": tn.start_index,
             "end_index": tn.end_index,
@@ -210,14 +210,30 @@ def run_agentic_search(
         _build_search_keyword_tool(),
     ]
 
+    full_system = (
+        "You are a document analysis assistant. You have access to a document "
+        "organized as a hierarchical tree. You MUST use the provided tools to "
+        "explore the document before answering.\n\n"
+        "MANDATORY workflow:\n"
+        "1. Start by calling list_children with node_id='root' to see the document structure.\n"
+        "2. Use list_children to navigate into the most relevant sections.\n"
+        "3. Use read_node to read the actual content of promising sections.\n"
+        "4. Use search_keyword to find specific terms or topics.\n"
+        "5. Only after gathering information from the document, provide your final answer.\n\n"
+        "NEVER answer from memory or guess. Always read the document content first.\n"
+        "When you have enough information, give a clear, comprehensive final answer "
+        "without making any more tool calls.\n\n"
+        f"{system_prompt}"
+    )
+
     messages = [
-        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
 
     for iteration in range(max_iterations):
         request = LLMRequest(
             messages=messages,
+            system=full_system,
             model=model,
             temperature=0.3,
             max_tokens=4096,
@@ -226,23 +242,29 @@ def run_agentic_search(
         response = provider.complete(request)
 
         if response.tool_calls:
-            for tc in response.tool_calls:
-                logger.info("ask_tool_call", tool=tc.name, node_id=tc.arguments.get("node_id", tc.arguments.get("query", "")))
-                messages.append(
+            assistant_msg: dict = {
+                "role": "assistant",
+                "content": response.content or "",
+                "tool_calls": [
                     {
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": [
-                            {
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.name,
-                                    "arguments": json.dumps(tc.arguments),
-                                },
-                            }
-                        ],
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
                     }
+                    for tc in response.tool_calls
+                ],
+            }
+            messages.append(assistant_msg)
+
+            for tc in response.tool_calls:
+                logger.info(
+                    "ask_tool_call",
+                    iteration=iteration,
+                    tool=tc.name,
+                    args=tc.arguments,
                 )
 
                 if tc.name == "list_children":

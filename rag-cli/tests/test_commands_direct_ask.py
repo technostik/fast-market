@@ -8,15 +8,51 @@ from storage.models import SourceType
 from pathlib import Path
 
 
-class FakeTreeNode:
-    def __init__(self, id, node_id, parent_id, title, summary="", start_index=0, end_index=0):
-        self.id = id
-        self.node_id = node_id
-        self.parent_id = parent_id
-        self.title = title
-        self.summary = summary
-        self.start_index = start_index
-        self.end_index = end_index
+def test_direct_ask_pipeline_persists_text_and_links(sample_md_path: Path):
+    engine = create_memory_engine()
+    sf = make_session_factory(engine)
+    store = RagStore(sf)
+
+    extracted = extract_markdown(sample_md_path)
+    tree = build_md_tree(extracted.full_text)
+
+    doc = store.upsert_document(
+        handle="pipeline-test",
+        source_type=SourceType.local_file,
+        source_ref=str(sample_md_path),
+        content_hash=extracted.content_hash,
+        title=extracted.title,
+    )
+    node_count = store.persist_tree(doc.id, tree)
+    assert node_count > 0
+
+    tree_nodes = store.get_tree_nodes_for_document(doc.id)
+    assert len(tree_nodes) > 0
+
+    for tn in tree_nodes:
+        assert hasattr(tn, "text"), f"TreeNode {tn.node_id} missing text attribute"
+        assert isinstance(tn.text, str)
+
+    tree_by_id, nid_map = _build_flat_tree(tree_nodes)
+
+    assert len(tree_by_id) == len(tree_nodes)
+    assert len(nid_map) == len(tree_nodes)
+
+    root_nodes = [n for n in tree_by_id.values() if n["parent_node_id"] is None]
+    assert len(root_nodes) == 1
+    assert root_nodes[0]["title"] == "Sample Document"
+
+    root_data = root_nodes[0]
+    assert len(root_data["child_node_ids"]) >= 3
+
+    for child_nid in root_data["child_node_ids"]:
+        child = tree_by_id[child_nid]
+        assert child["parent_node_id"] == root_data["node_id"]
+
+    for nid, data in tree_by_id.items():
+        if data["parent_node_id"]:
+            parent = tree_by_id[data["parent_node_id"]]
+            assert nid in parent["child_node_ids"]
 
 
 def test_direct_ask_leaves_no_rows_without_keep(sample_md_path: Path):

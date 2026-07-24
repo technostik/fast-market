@@ -68,6 +68,7 @@ def upgrade() -> None:
             node_id TEXT NOT NULL,
             parent_id INTEGER REFERENCES tree_nodes(id) ON DELETE SET NULL,
             title TEXT NOT NULL DEFAULT '',
+            text TEXT NOT NULL DEFAULT '',
             start_index INTEGER NOT NULL DEFAULT 0,
             end_index INTEGER NOT NULL DEFAULT 0,
             summary TEXT NOT NULL DEFAULT '',

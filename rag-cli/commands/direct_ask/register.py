@@ -63,10 +63,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             tree_by_id, nid_map = _build_flat_tree(tree_nodes)
 
             system_prompt = (
-                "You are a document analysis assistant. You have access to a single document "
-                "organized as a hierarchical tree. Use list_children to navigate, read_node to "
-                "read content, and search_keyword to find topics.\n\n"
-                f"Document: {extracted.title}\n"
+                f"Document: {extracted.title}"
             )
 
             answer = run_agentic_search(

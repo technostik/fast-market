@@ -43,6 +43,7 @@ rag-cli/
 | `rag collection show <name>` | Show collection members and scopes |
 | `rag collection delete <name>` | Delete collection (not documents) |
 | `rag index <path>` | Index a local PDF/Markdown file |
+| `rag index cleanup --all --force` | Drop and recreate all index data |
 | `rag index <path> --tag <name>` | Add sub-scope tag to indexed doc |
 | `rag index <path> --mode reindex` | Regenerate summaries only |
 | `rag ask "<question>"` | Ask about collection documents |

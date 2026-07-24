@@ -49,9 +49,6 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         docs_overview = "\n".join(doc_summaries)
         system_prompt = (
-            "You are a document analysis assistant. You have access to a collection of documents "
-            "organized as hierarchical trees. Use list_children to navigate the tree, read_node to "
-            "read content, and search_keyword to find specific topics.\n\n"
             "Always cite your source by including the document handle and node_id in your answer.\n\n"
             f"Documents in collection '{collection_name}':\n{docs_overview}"
         )

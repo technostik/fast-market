@@ -105,6 +105,30 @@ class RagStore:
 
     def ensure_tables(self, engine):
         Base.metadata.create_all(engine)
+        self._migrate_missing_columns(engine)
+
+    def _migrate_missing_columns(self, engine):
+        from sqlalchemy import inspect, text
+
+        inspector = inspect(engine)
+        existing_tables = set(inspector.get_table_names())
+
+        expected_columns = {
+            "tree_nodes": {"text"},
+        }
+
+        for table_name, required_cols in expected_columns.items():
+            if table_name not in existing_tables:
+                continue
+            existing = {col["name"] for col in inspector.get_columns(table_name)}
+            missing = required_cols - existing
+            if not missing:
+                continue
+            with engine.begin() as conn:
+                for col_name in sorted(missing):
+                    if table_name == "tree_nodes" and col_name == "text":
+                        conn.execute(text("ALTER TABLE tree_nodes ADD COLUMN text TEXT NOT NULL DEFAULT ''"))
+                        logger.info("schema_migration", table=table_name, column=col_name)
 
     # ── Collection CRUD ──────────────────────────────────────────────────────
 
@@ -271,6 +295,7 @@ class RagStore:
                         node_id=node["node_id"],
                         parent_id=parent_id,
                         title=node.get("title", ""),
+                        text=node.get("text", ""),
                         start_index=node.get("start_index", 0),
                         end_index=node.get("end_index", 0),
                         summary=node.get("summary", ""),
