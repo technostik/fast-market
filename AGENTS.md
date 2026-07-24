@@ -17,6 +17,7 @@ Tool with pluggable input and output to help market content for web creators
 | `skill` | `skill-cli/` | Skill management |
 | `toolsetup` | `toolsetup-cli/` | Tool configuration |
 | `websearch` | `websearch-cli/` | Web search via pluggable providers (Google News, Reddit, Hacker News) |
+| `rag` | `rag-cli/` | Vectorless reasoning-based RAG with hierarchical document trees |
 
 # Coding rules
 

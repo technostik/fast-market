@@ -1,0 +1,3 @@
+[submodule "rag-cli/_vendor/pageindex-upstream"]
+	path = rag-cli/_vendor/pageindex-upstream
+	url = https://github.com/VectifyAI/PageIndex.git

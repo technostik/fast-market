@@ -1,0 +1,102 @@
+# rag-cli
+
+Vectorless, reasoning-based RAG tool for fast-market.
+
+No vector database. No similarity chunking. A hierarchical tree (table-of-contents style) is built per document, with LLM-generated summaries per node, and retrieval is done through **agentic reasoning** — the LLM navigates the tree via tool calls.
+
+## Install
+
+```bash
+cd rag-cli
+pip install -e .
+```
+
+## Quick Start
+
+```bash
+# Create a collection
+rag collection create research
+rag collection use research
+
+# Index a document
+rag index ./paper.pdf --collection research
+rag index ./notes.md --collection research
+
+# Ask a question
+rag ask "What are the main findings?"
+
+# One-shot ask (no collection needed)
+rag direct-ask ./paper.pdf "Summarize section 3"
+rag direct-ask ./notes.md "What is the roadmap?" --keep
+```
+
+## Commands
+
+### Collections
+
+```bash
+rag collection create <name> [--description TEXT]
+rag collection use <name>
+rag collection list [--format json|text]
+rag collection show <name>
+rag collection delete <name>
+```
+
+### Indexing
+
+```bash
+rag index <path> [--collection NAME] [--tag NAME] [--mode new|reindex]
+```
+
+- `--mode new` (default): full extraction + tree building + summaries
+- `--mode reindex`: regenerate summaries only (no re-extraction)
+- `--tag`: assign a sub-scope tag based on heading matching
+
+### Querying
+
+```bash
+rag ask "<question>" [--collection NAME] [--model NAME] [--format json|text]
+rag direct-ask <path> "<question>" [--model NAME] [--format json|text] [--keep]
+```
+
+### Management
+
+```bash
+rag list [--collection NAME] [--format json|text]
+rag show <handle> --tree
+rag delete <handle> --collection <name>
+rag delete <handle> --purge
+```
+
+### Setup
+
+```bash
+rag setup run    # Run toolsetup wizard
+rag setup edit   # Open config in editor
+```
+
+## How It Works
+
+1. **Extract**: PDF pages via `pypdf`, Markdown via heading hierarchy
+2. **Build**: Hierarchical tree with node IDs (ported from PageIndex algorithm)
+3. **Enrich**: LLM-generated summaries per node
+4. **Persist**: Atomic SQLAlchemy transaction (incomplete tree = rollback)
+5. **Retrieve**: LLM agent navigates tree via `list_children`/`read_node` tool calls
+
+## Configuration
+
+Uses the standard fast-market LLM config:
+
+```yaml
+# ~/.config/fast-market/profiles/<profile>/common/llm/config.yaml
+default_provider: anthropic
+providers:
+  anthropic:
+    type: anthropic
+    model: claude-sonnet-4-20250514
+    api_key_env: ANTHROPIC_API_KEY
+```
+
+## Architecture
+
+See [AGENTS.md](AGENTS.md) for architecture details.

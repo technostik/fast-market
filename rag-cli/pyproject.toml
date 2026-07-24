@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-agent"
+version = "0.1.0"
+description = "Vectorless reasoning-based RAG with hierarchical document trees"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "structlog>=24.2",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pypdf>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+rag = "rag_entry:main"
+
+[tool.setuptools]
+packages = [
+    "rag_entry",
+    "cli",
+    "core",
+    "storage",
+    "storage.migrations",
+    "storage.migrations.versions",
+    "plugins",
+    "plugins.corpus",
+    "commands",
+    "commands.collection",
+    "commands.index",
+    "commands.ask",
+    "commands.direct_ask",
+    "commands.list",
+    "commands.show",
+    "commands.delete",
+    "commands.setup",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
