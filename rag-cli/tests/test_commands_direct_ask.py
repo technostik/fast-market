@@ -111,3 +111,50 @@ def test_direct_ask_keep_leaves_document(sample_md_path: Path):
         member_count = conn.execute(Base.metadata.tables["collection_members"].select()).fetchall()
     assert len(doc_count) == 1
     assert len(member_count) == 0
+
+
+def test_headingless_markdown_builds_single_root_node():
+    content = (
+        "Mes preceptes sont simples.\n"
+        "Toujours rester curieux.\n"
+        "Jamais abandonner.\n"
+    )
+    tree = build_md_tree(content)
+
+    assert len(tree) == 1
+    node = tree[0]
+    assert node["node_id"] == "0001"
+    assert node["title"] == "Document"
+    assert "Mes preceptes" in node["text"]
+
+
+def test_headingless_markdown_list_children_returns_root():
+    from core.tree_search import _build_flat_tree, _execute_list_children
+
+    content = (
+        "Mes preceptes sont simples.\n"
+        "Toujours rester curieux.\n"
+    )
+    tree = build_md_tree(content)
+
+    engine = create_memory_engine()
+    sf = make_session_factory(engine)
+    store = RagStore(sf)
+
+    doc = store.upsert_document(
+        handle="no-headings",
+        source_type=SourceType.local_file,
+        source_ref="/tmp/no-headings.md",
+        content_hash="abc123",
+        title="no-headings",
+    )
+    store.persist_tree(doc.id, tree)
+
+    tree_nodes = store.get_tree_nodes_for_document(doc.id)
+    tree_by_id, nid_map = _build_flat_tree(tree_nodes)
+
+    result = _execute_list_children("root", tree_by_id, nid_map)
+    import json
+    data = json.loads(result)
+    assert len(data["children"]) == 1
+    assert data["children"][0]["node_id"] == "0001"

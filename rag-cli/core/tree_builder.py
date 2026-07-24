@@ -174,6 +174,16 @@ def build_md_tree(content: str, summary_provider=None, model: str | None = None)
     tree = _build_tree_from_md_nodes(nodes_with_content)
     tree = _clean_tree_for_output(tree)
 
+    if not tree:
+        node = {
+            "title": "Document",
+            "node_id": "0001",
+            "text": content,
+            "line_num": 1,
+            "summary": content[:200] if content else "",
+        }
+        tree = [node]
+
     if summary_provider:
         _add_summaries(tree, summary_provider, model)
 

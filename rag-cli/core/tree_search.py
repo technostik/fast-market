@@ -109,6 +109,8 @@ def _execute_list_children(
         child_count = len(child.get("child_node_ids", []))
         if child_count > 0:
             entry["child_count"] = child_count
+        else:
+            entry["hint"] = "No children. Use read_node to get content."
         result.append(entry)
 
     return json.dumps({"children": result}, ensure_ascii=False)
@@ -217,10 +219,12 @@ def run_agentic_search(
         "MANDATORY workflow:\n"
         "1. Start by calling list_children with node_id='root' to see the document structure.\n"
         "2. Use list_children to navigate into the most relevant sections.\n"
-        "3. Use read_node to read the actual content of promising sections.\n"
-        "4. Use search_keyword to find specific terms or topics.\n"
-        "5. Only after gathering information from the document, provide your final answer.\n\n"
-        "NEVER answer from memory or guess. Always read the document content first.\n"
+        "3. IMPORTANT: When list_children returns no children (leaf node), you MUST "
+        "call read_node on that node to read its actual content.\n"
+        "4. Use read_node to read the full text content of sections before answering.\n"
+        "5. Use search_keyword to find specific terms or topics.\n"
+        "6. Only after reading actual content from the document, provide your final answer.\n\n"
+        "NEVER answer from memory or guess. NEVER answer without calling read_node at least once.\n"
         "When you have enough information, give a clear, comprehensive final answer "
         "without making any more tool calls.\n\n"
         f"{system_prompt}"
