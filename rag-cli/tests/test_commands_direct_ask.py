@@ -158,3 +158,43 @@ def test_headingless_markdown_list_children_returns_root():
     data = json.loads(result)
     assert len(data["children"]) == 1
     assert data["children"][0]["node_id"] == "0001"
+
+
+def test_direct_ask_directory_combines_trees(tmp_path):
+    (tmp_path / "doc1.md").write_text("# Doc One\n\nContent one.")
+    (tmp_path / "doc2.md").write_text("# Doc Two\n\nContent two.")
+
+    from core.extractors import discover_files
+
+    files = discover_files(tmp_path)
+    assert len(files) == 2
+
+    engine = create_memory_engine()
+    sf = make_session_factory(engine)
+    store = RagStore(sf)
+
+    all_tree_by_id = {}
+    all_nid_map = {}
+    for idx, f in enumerate(files):
+        prefix = f"doc{idx}_"
+        from core.extractors import extract_local_file
+        extracted = extract_local_file(f)
+        tree = build_md_tree(extracted.full_text)
+        doc = store.upsert_document(
+            handle=f"test:{f.name}:{f.stat().st_size}",
+            source_type=SourceType.local_file,
+            source_ref=str(f),
+            content_hash=extracted.content_hash,
+            title=extracted.title,
+        )
+        store.persist_tree(doc.id, tree)
+        tree_nodes = store.get_tree_nodes_for_document(doc.id)
+        tree_by_id, nid_map = _build_flat_tree(tree_nodes, node_id_prefix=prefix)
+        all_tree_by_id.update(tree_by_id)
+        all_nid_map.update(nid_map)
+
+    root_nodes = [n for n in all_tree_by_id.values() if n.get("parent_node_id") is None]
+    assert len(root_nodes) == 2
+    titles = {n["title"] for n in root_nodes}
+    assert "Doc One" in titles
+    assert "Doc Two" in titles

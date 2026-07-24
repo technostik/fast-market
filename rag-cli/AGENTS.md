@@ -12,7 +12,7 @@ rag-cli/
 ├── rag_entry/          # CLI entry point
 ├── cli/                # Click group + command discovery
 ├── core/
-│   ├── extractors.py   # PDF (pypdf) + Markdown text extraction
+│   ├── extractors.py   # PDF (pypdf) + Markdown text extraction + file discovery
 │   ├── tree_builder.py # Tree construction (ported from PageIndex)
 │   ├── tree_search.py  # Agentic retrieval: list_children, read_node tools
 │   └── collection_pointer.py # Active collection pointer
@@ -42,13 +42,14 @@ rag-cli/
 | `rag collection list` | List all collections |
 | `rag collection show <name>` | Show collection members and scopes |
 | `rag collection delete <name>` | Delete collection (not documents) |
-| `rag index <path>` | Index a local PDF/Markdown file |
+| `rag index <path>` | Index a local PDF/Markdown file or directory recursively |
 | `rag index cleanup --all --force` | Drop and recreate all index data |
 | `rag index <path> --tag <name>` | Add sub-scope tag to indexed doc |
 | `rag index <path> --mode reindex` | Regenerate summaries only |
 | `rag ask "<question>"` | Ask about collection documents |
-| `rag direct-ask <path> "<question>"` | One-shot ask on single file |
+| `rag direct-ask <path> "<question>"` | One-shot ask on file or directory |
 | `rag direct-ask <path> "<question>"` --keep | Keep document after asking |
+| `rag direct-ask <path> "<question>"` --verbose | Show agent tool call reflections |
 | `rag list` | List indexed documents |
 | `rag show <handle> --tree` | ASCII tree render |
 | `rag delete <handle> --collection <name>` | Remove from collection |

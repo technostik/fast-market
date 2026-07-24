@@ -22,12 +22,18 @@ rag collection use research
 rag index ./paper.pdf --collection research
 rag index ./notes.md --collection research
 
+# Index a directory recursively
+rag index ./docs/ --collection research
+
 # Ask a question
 rag ask "What are the main findings?"
 
 # One-shot ask (no collection needed)
 rag direct-ask ./paper.pdf "Summarize section 3"
 rag direct-ask ./notes.md "What is the roadmap?" --keep
+
+# Ask about all documents in a directory
+rag direct-ask ./docs/ "What are the main topics covered?" --verbose
 ```
 
 ## Commands
@@ -49,6 +55,7 @@ rag index <path> [--collection NAME] [--tag NAME] [--mode new|reindex]
 rag index cleanup --all --force
 ```
 
+- `<path>`: A single file (`.pdf`, `.md`, `.markdown`) or a directory (recursive)
 - `--mode new` (default): full extraction + tree building + summaries
 - `--mode reindex`: regenerate summaries only (no re-extraction)
 - `--tag`: assign a sub-scope tag based on heading matching
@@ -58,8 +65,12 @@ rag index cleanup --all --force
 
 ```bash
 rag ask "<question>" [--collection NAME] [--model NAME] [--format json|text]
-rag direct-ask <path> "<question>" [--model NAME] [--format json|text] [--keep]
+rag direct-ask <path> "<question>" [--model NAME] [--format json|text] [--keep] [--verbose]
 ```
+
+- `<path>`: A single file or directory (recursive)
+- `--keep`: Preserve indexed documents after answering
+- `--verbose`: Show agent tool call reflections during search
 
 ### Management
 

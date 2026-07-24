@@ -46,3 +46,21 @@ def test_tree_has_correct_depth(sample_md_content):
     child_titles = [c["title"] for c in intro["nodes"]]
     assert "Section 1.1: Background" in child_titles
     assert "Section 1.2: Goals" in child_titles
+
+
+def test_handle_for_path_single_file(tmp_path):
+    from commands.index.register import _handle_for_path
+    f = tmp_path / "test.md"
+    f.write_text("hello")
+    handle = _handle_for_path(f)
+    assert handle == f"local:test.md:{f.stat().st_size}"
+
+
+def test_handle_for_path_with_base_dir(tmp_path):
+    from commands.index.register import _handle_for_path
+    sub = tmp_path / "docs"
+    sub.mkdir()
+    f = sub / "test.md"
+    f.write_text("hello")
+    handle = _handle_for_path(f, base_dir=tmp_path)
+    assert handle == f"local:docs/test.md:{f.stat().st_size}"

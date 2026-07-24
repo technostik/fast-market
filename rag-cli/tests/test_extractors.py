@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.extractors import extract_markdown, _content_hash
+from core.extractors import extract_markdown, _content_hash, discover_files
 from pathlib import Path
 
 
@@ -32,3 +32,54 @@ def test_extract_unsupported_filetype(tmp_path: Path):
     bad_file.write_text("hello")
     with pytest.raises(ValueError, match="Unsupported file type"):
         extract_local_file(bad_file)
+
+
+def test_discover_files_single_file(sample_md_path: Path):
+    files = discover_files(sample_md_path)
+    assert files == [sample_md_path]
+
+
+def test_discover_files_unsupported_file(tmp_path: Path):
+    bad_file = tmp_path / "test.xyz"
+    bad_file.write_text("hello")
+    files = discover_files(bad_file)
+    assert files == []
+
+
+def test_discover_files_directory(tmp_path: Path):
+    (tmp_path / "a.md").write_text("# A")
+    (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4 fake")
+    (tmp_path / "c.txt").write_text("skip me")
+    (tmp_path / ".hidden.md").write_text("# Hidden")
+
+    files = discover_files(tmp_path)
+    names = [f.name for f in files]
+    assert "a.md" in names
+    assert "b.pdf" in names
+    assert "c.txt" not in names
+    assert ".hidden.md" not in names
+
+
+def test_discover_files_recursive(tmp_path: Path):
+    sub = tmp_path / "subdir"
+    sub.mkdir()
+    (tmp_path / "root.md").write_text("# Root")
+    (sub / "nested.md").write_text("# Nested")
+
+    files = discover_files(tmp_path)
+    names = [f.name for f in files]
+    assert "root.md" in names
+    assert "nested.md" in names
+
+
+def test_discover_files_empty_directory(tmp_path: Path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    files = discover_files(empty)
+    assert files == []
+
+
+def test_discover_files_nonexistent_path(tmp_path: Path):
+    import pytest
+    with pytest.raises(ValueError, match="Path not found"):
+        discover_files(tmp_path / "nope")

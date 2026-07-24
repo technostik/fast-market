@@ -166,14 +166,16 @@ def _execute_search_keyword(
 
 def _build_flat_tree(
     tree_nodes: list,
+    node_id_prefix: str = "",
 ) -> tuple[dict[str, dict], dict[str, int]]:
     tree_by_id: dict[str, dict] = {}
     node_id_to_db_id: dict[str, int] = {}
 
     for tn in tree_nodes:
+        prefixed_id = f"{node_id_prefix}{tn.node_id}" if node_id_prefix else tn.node_id
         node_data = {
             "db_id": tn.id,
-            "node_id": tn.node_id,
+            "node_id": prefixed_id,
             "title": tn.title,
             "text": tn.text or "",
             "summary": tn.summary,
@@ -182,15 +184,16 @@ def _build_flat_tree(
             "parent_node_id": None,
             "child_node_ids": [],
         }
-        tree_by_id[tn.node_id] = node_data
-        node_id_to_db_id[tn.node_id] = tn.id
+        tree_by_id[prefixed_id] = node_data
+        node_id_to_db_id[prefixed_id] = tn.id
 
     for tn in tree_nodes:
+        prefixed_id = f"{node_id_prefix}{tn.node_id}" if node_id_prefix else tn.node_id
         if tn.parent_id:
             for nid, data in tree_by_id.items():
                 if data["db_id"] == tn.parent_id:
-                    tree_by_id[tn.node_id]["parent_node_id"] = nid
-                    data["child_node_ids"].append(tn.node_id)
+                    tree_by_id[prefixed_id]["parent_node_id"] = nid
+                    data["child_node_ids"].append(prefixed_id)
                     break
 
     return tree_by_id, node_id_to_db_id
@@ -205,6 +208,7 @@ def run_agentic_search(
     node_id_to_db_id: dict[str, int],
     reachable_ids: set[str] | None = None,
     max_iterations: int = 15,
+    on_tool_call: callable | None = None,
 ) -> str:
     tools = [
         _build_list_children_tool(),
@@ -292,6 +296,9 @@ def run_agentic_search(
                     )
                 else:
                     result = json.dumps({"error": f"Unknown tool: {tc.name}"})
+
+                if on_tool_call:
+                    on_tool_call(tc.name, tc.arguments, result)
 
                 messages.append(
                     {"role": "tool", "tool_call_id": tc.id, "content": result}

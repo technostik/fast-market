@@ -104,6 +104,9 @@ def extract_markdown(path: Path) -> ExtractedDocument:
     return doc
 
 
+SUPPORTED_EXTENSIONS = {".pdf", ".md", ".markdown"}
+
+
 def extract_local_file(path: Path) -> ExtractedDocument:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
@@ -114,3 +117,15 @@ def extract_local_file(path: Path) -> ExtractedDocument:
         raise ValueError(
             f"Unsupported file type {suffix!r}. Supported: .pdf, .md, .markdown"
         )
+
+
+def discover_files(path: Path) -> list[Path]:
+    if not path.exists():
+        raise ValueError(f"Path not found: {path}")
+    if path.is_file():
+        return [path] if path.suffix.lower() in SUPPORTED_EXTENSIONS else []
+    files: list[Path] = []
+    for item in sorted(path.rglob("*")):
+        if item.is_file() and not item.name.startswith(".") and item.suffix.lower() in SUPPORTED_EXTENSIONS:
+            files.append(item)
+    return files

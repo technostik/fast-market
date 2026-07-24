@@ -7,7 +7,7 @@ import click
 from commands.base import CommandManifest
 from commands.helpers import get_rag_store, out, resolve_provider_and_model
 from core.collection_pointer import resolve_collection_name
-from core.extractors import extract_local_file
+from core.extractors import extract_local_file, discover_files
 from core.tree_builder import build_pdf_tree, build_md_tree
 from storage.models import SourceType, IndexRunStatus
 
@@ -75,9 +75,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
             raise click.ClickException("PATH is required for local_file source.")
         p = Path(path).expanduser().resolve()
         if not p.exists():
-            raise click.ClickException(f"File not found: {p}")
+            raise click.ClickException(f"Path not found: {p}")
 
-        _index_local_file(store, engine, coll, llm, model_name, p, mode, tag, fmt)
+        if p.is_dir():
+            files = discover_files(p)
+            if not files:
+                raise click.ClickException(f"No supported files found in {p}")
+            _index_directory(store, engine, coll, llm, model_name, p, files, mode, tag, fmt)
+        else:
+            _index_local_file(store, engine, coll, llm, model_name, p, mode, tag, fmt)
 
     @index_group.command("cleanup", help="Drop and recreate all RAG index data.")
     @click.option("--all", "all_flag", is_flag=True, default=False, help="Clean all collections.")
@@ -118,7 +124,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     return CommandManifest(name="index", click_command=index_group)
 
 
-def _handle_for_path(path: Path) -> str:
+def _handle_for_path(path: Path, base_dir: Path | None = None) -> str:
+    if base_dir:
+        rel = path.relative_to(base_dir)
+        return f"local:{rel}:{path.stat().st_size}"
     return f"local:{path.name}:{path.stat().st_size}"
 
 
@@ -140,9 +149,9 @@ def drop_and_recreate(engine):
     Base.metadata.create_all(engine)
 
 
-def _index_local_file(store, engine, coll, llm, model_name, path, mode, tags, fmt):
+def _index_local_file(store, engine, coll, llm, model_name, path, mode, tags, fmt, base_dir=None):
     extracted = extract_local_file(path)
-    handle = _handle_for_path(path)
+    handle = _handle_for_path(path, base_dir=base_dir)
 
     existing = store.get_document_by_handle(handle)
     if mode == "new" and existing and existing.content_hash == extracted.content_hash:
@@ -203,6 +212,36 @@ def _index_local_file(store, engine, coll, llm, model_name, path, mode, tags, fm
     except Exception as exc:
         store.finish_index_run(run.id, IndexRunStatus.failed.value, error=str(exc))
         raise
+
+
+def _index_directory(store, engine, coll, llm, model_name, base_dir, files, mode, tags, fmt):
+    results = {"indexed": 0, "skipped": 0, "failed": 0, "errors": []}
+    total = len(files)
+
+    for i, f in enumerate(files, 1):
+        rel = f.relative_to(base_dir)
+        click.echo(f"[{i}/{total}] {rel}")
+
+        try:
+            _index_local_file(store, engine, coll, llm, model_name, f, mode, tags, fmt, base_dir=base_dir)
+            results["indexed"] += 1
+        except Exception as exc:
+            results["failed"] += 1
+            results["errors"].append({"file": str(rel), "error": str(exc)})
+            click.echo(f"  FAILED: {exc}")
+
+    out(
+        {
+            "status": "directory_indexed",
+            "directory": str(base_dir),
+            "total": total,
+            "indexed": results["indexed"],
+            "skipped": results["skipped"],
+            "failed": results["failed"],
+            "errors": results["errors"],
+        },
+        fmt,
+    )
 
 
 def _assign_tags_recursive(tree, tags, tags_by_node):
