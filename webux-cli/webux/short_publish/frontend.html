@@ -1149,12 +1149,16 @@ async function refreshPool() {
     const rerunCheckBtn = isDone
       ? `<button title="Rerun content check" onclick="poolRerunCheck('${item.source}')">🔍</button>`
       : '';
+    const retryBtn = (st === 'error' || st === 'stopped')
+      ? `<button title="Retry from failed step" onclick="poolRetryItem('${item.source}')">🔁</button>`
+      : '';
     const actions = `<span class="pool-actions">` +
       redoPostPublishBtn +
       infoBtn +
       transcriptBtn +
       rerunCheckBtn +
       `<button title="Redo" onclick="poolRedoItem('${item.source}')">🔄</button>` +
+      retryBtn +
       `<button title="Remove" onclick="poolRemove('${item.source}')">✕</button>` +
       `</span>`;
     html += actions;
@@ -1178,6 +1182,15 @@ async function refreshPool() {
 
 async function poolRedoItem(source) {
   await fetch('/api/short_publish/pool/redo-item', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source })
+  });
+  refreshPool();
+}
+
+async function poolRetryItem(source) {
+  await fetch('/api/short_publish/pool/retry-item', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ source })

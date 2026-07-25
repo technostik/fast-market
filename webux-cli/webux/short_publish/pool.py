@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .models import DEFAULT_VIDEO_SOURCE_PATH
+from .models import DEFAULT_VIDEO_SOURCE_PATH, STEP_NAMES
 from .utils import _load_publish_cfg, _load_meta
 
 
@@ -34,6 +34,7 @@ class PoolItem:
     check_result: Optional[str] = None
     charisma_score: str = ""
     charisma_notes: str = ""
+    retry_from_step: Optional[int] = None
 
 
 _pool: list[PoolItem] = []
@@ -176,6 +177,37 @@ def redo_item(source: str) -> bool:
     return False
 
 
+def retry_item(source: str) -> bool:
+    """Requeue an error/stopped pool item, resuming from the first failed step."""
+    src = str(Path(source).expanduser().resolve())
+    for it in _pool:
+        if it.source == src and it.status in ("error", "stopped"):
+            meta = _load_meta(src)
+            completed = set(meta.get("completed_steps", []))
+            skipped = set(meta.get("skipped_steps", []))
+            passed = completed | skipped
+            # First step not yet completed or skipped is the retry entry point
+            from_step = 0
+            for i in range(len(STEP_NAMES)):
+                if i not in passed:
+                    from_step = i
+                    break
+            else:
+                # All steps passed — shouldn't happen for error/stopped, but fallback to 0
+                from_step = 0
+            it.status = "queued"
+            it.finished_at = None
+            it.elapsed_seconds = None
+            it.error_message = ""
+            it.job_id = None
+            it.retry_from_step = from_step
+            _update_meta_status(src, "queued")
+            _save_pool_to_disk()
+            start_pool()
+            return True
+    return False
+
+
 def remove_from_pool(source: str) -> bool:
     src = str(Path(source).expanduser().resolve())
     global _pool
@@ -277,7 +309,9 @@ async def _pool_worker():
             _save_pool_to_disk()
 
             from .pipeline import _run_pipeline_from, _run_job_safely
-            await _run_job_safely(_run_pipeline_from(job, 0), job)
+            from_step = next_item.retry_from_step if next_item.retry_from_step is not None else 0
+            next_item.retry_from_step = None
+            await _run_job_safely(_run_pipeline_from(job, from_step), job)
 
             if job.status == "error":
                 next_item.status = "error"
