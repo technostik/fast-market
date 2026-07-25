@@ -299,6 +299,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         if _elapsed >= _llm_call_warn:
             click.echo(f"Warning: LLM call took {_elapsed:.1f}s (warn threshold: {_llm_call_warn}s)", err=True)
 
+        if not response.content or not response.content.strip():
+            click.echo("Error: LLM returned an empty response.", err=True)
+            click.echo(f"Provider: {provider_name}, Model: {response.model}", err=True)
+            click.echo("Possible causes: API rate limit, model issue, or upstream proxy error.", err=True)
+            click.echo("Check 'toolsetup diagnose' for provider health.", err=True)
+            sys.exit(1)
+
         # Record execution (only for saved prompts or with a meaningful identifier)
         execution_name = prompt_name_or_content if not is_direct_prompt else "<direct>"
         store = PromptStore()

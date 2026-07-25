@@ -172,6 +172,12 @@ def check_llm_health(provider: str | None = None) -> DiagnosticResult:
                     "provider": test_provider,
                     "model": response.model if response else None,
                 },
+                [
+                    "Check if the provider proxy/server is running correctly",
+                    "Try a different model or provider",
+                    "Check provider logs for upstream errors",
+                    "Run with --verbose to see the raw request/response",
+                ],
             )
 
     except Exception as e:

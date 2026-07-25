@@ -7,6 +7,26 @@ import click
 from click.shell_completion import get_completion_class
 
 
+class DefaultCommandGroup(click.Group):
+    """A Click Group that redirects unrecognized subcommands to a default command.
+
+    When the first positional argument does not match any registered subcommand,
+    it is prepended with the default command name so that e.g. ``prompt "hello"``
+    behaves like ``prompt apply "hello"``.
+    """
+
+    default_command_name: str | None = None
+
+    def resolve_command(self, ctx: click.Context, args: list[str]):
+        if (
+            args
+            and self.default_command_name
+            and self.get_command(ctx, args[0]) is None
+        ):
+            args = [self.default_command_name] + args
+        return super().resolve_command(ctx, args)
+
+
 def create_cli_group(
     tool_name: str,
     description: str | None = None,
@@ -34,7 +54,14 @@ def create_cli_group(
             os.environ["FASTMARKET_PROFILE"] = value
         return value
 
-    @click.group(invoke_without_command=True, help=description)
+    if default_command:
+        class _DefaultGroup(DefaultCommandGroup):
+            default_command_name = default_command
+        group_cls = _DefaultGroup
+    else:
+        group_cls = None
+
+    @click.group(cls=group_cls, invoke_without_command=True, help=description)
     @click.option(
         "--profile",
         "-P",

@@ -12,7 +12,8 @@ requires_common_config("prompt", ["llm"])
 
 main = create_cli_group(
     "prompt",
-    description="Manage reusable LLM prompt templates with placeholder substitution."
+    description="Manage reusable LLM prompt templates with placeholder substitution.",
+    default_command="apply",
 )
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 
