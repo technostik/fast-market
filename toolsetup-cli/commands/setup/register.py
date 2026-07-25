@@ -474,7 +474,23 @@ def register():
         "provider",
         help="LLM provider to test (overrides default)",
     )
-    def diagnose_cmd(fmt, provider):
+    @click.option(
+        "--test",
+        "-t",
+        "tests",
+        multiple=True,
+        help="Run only specific tests (repeatable). "
+        "Available: workdir, llm, youtube, groq_transcription, "
+        "modal_connectivity, modal_groq_transcription",
+    )
+    @click.option(
+        "--verbose",
+        "-v",
+        is_flag=True,
+        default=False,
+        help="Show raw LLM request/response on stderr",
+    )
+    def diagnose_cmd(fmt, provider, tests, verbose):
         """Run diagnostic tests on workdir, LLM, YouTube, Groq, and Modal.
 
         Performs health checks on:
@@ -484,13 +500,23 @@ def register():
         - Groq API transcription (local) via test fixture clip
         - Modal connectivity and environment
         - Groq API transcription via Modal
+
+        Use --test to run specific checks:
+          toolsetup diagnose -t llm
+          toolsetup diagnose -t youtube -t workdir
+
+        Use --verbose to see raw LLM request/response:
+          toolsetup diagnose -t llm --verbose
         """
         from commands.setup.diagnose import (
             run_all_diagnostics,
             print_diagnostic_results,
         )
 
-        results = run_all_diagnostics(provider=provider)
+        test_list = list(tests) if tests else None
+        results = run_all_diagnostics(
+            provider=provider, tests=test_list, verbose=verbose,
+        )
         print_diagnostic_results(results, fmt)
 
     return setup_cmd

@@ -77,7 +77,7 @@ def check_workdir_health() -> DiagnosticResult:
     )
 
 
-def check_llm_health(provider: str | None = None) -> DiagnosticResult:
+def check_llm_health(provider: str | None = None, verbose: bool = False) -> DiagnosticResult:
     """Check LLM connectivity by attempting a simple request."""
     try:
         llm_config = load_llm_config()
@@ -141,6 +141,9 @@ def check_llm_health(provider: str | None = None) -> DiagnosticResult:
             )
 
         test_llm_provider = discovered_providers[test_provider]
+
+        if verbose:
+            test_llm_provider.set_debug(True)
 
         # Simple test request
         test_request = LLMRequest(
@@ -591,27 +594,52 @@ def check_modal_groq_transcription_health() -> DiagnosticResult:
         )
 
 
-def run_all_diagnostics(provider: str | None = None) -> list[DiagnosticResult]:
-    """Run all diagnostic checks."""
+AVAILABLE_TESTS = [
+    "workdir",
+    "llm",
+    "youtube",
+    "groq_transcription",
+    "modal_connectivity",
+    "modal_groq_transcription",
+]
+
+
+def run_all_diagnostics(
+    provider: str | None = None,
+    tests: list[str] | None = None,
+    verbose: bool = False,
+) -> list[DiagnosticResult]:
+    """Run diagnostic checks, optionally filtered by test name.
+
+    Args:
+        provider: LLM provider to test (overrides default).
+        tests: List of test names to run.  ``None`` means all tests.
+               ``"youtube"`` matches any ``youtube_*`` result.
+        verbose: Print raw LLM request/response to stderr.
+    """
+    run = lambda name: tests is None or name in tests or any(
+        t + "_" == name[: len(t) + 1] for t in tests
+    )
+
     results = []
 
-    # Workdir check
-    results.append(check_workdir_health())
+    if run("workdir"):
+        results.append(check_workdir_health())
 
-    # LLM check
-    results.append(check_llm_health(provider=provider))
+    if run("llm"):
+        results.append(check_llm_health(provider=provider, verbose=verbose))
 
-    # YouTube checks
-    results.extend(check_youtube_health())
+    if run("youtube"):
+        results.extend(check_youtube_health())
 
-    # Groq transcription check (local)
-    results.append(check_groq_transcription_health())
+    if run("groq_transcription"):
+        results.append(check_groq_transcription_health())
 
-    # Modal connectivity check
-    results.append(check_modal_connectivity_health())
+    if run("modal_connectivity"):
+        results.append(check_modal_connectivity_health())
 
-    # Modal Groq transcription check
-    results.append(check_modal_groq_transcription_health())
+    if run("modal_groq_transcription"):
+        results.append(check_modal_groq_transcription_health())
 
     return results
 
