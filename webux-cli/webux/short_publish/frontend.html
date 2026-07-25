@@ -1150,7 +1150,7 @@ async function refreshPool() {
       ? `<button title="Rerun content check" onclick="poolRerunCheck('${item.source}')">🔍</button>`
       : '';
     const retryBtn = (st === 'error' || st === 'stopped')
-      ? `<button title="Retry from failed step" onclick="poolRetryItem('${item.source}')">🔁</button>`
+      ? `<button title="${item.retry_count > 0 ? 'Retry #' + (item.retry_count + 1) + ' (go back ' + item.retry_count + ' step' + (item.retry_count > 1 ? 's' : '') + ')' : 'Retry from failed step'}" onclick="poolRetryItem('${item.source}')">🔁</button>`
       : '';
     const actions = `<span class="pool-actions">` +
       redoPostPublishBtn +

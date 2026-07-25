@@ -35,6 +35,7 @@ class PoolItem:
     charisma_score: str = ""
     charisma_notes: str = ""
     retry_from_step: Optional[int] = None
+    retry_count: int = 0
 
 
 _pool: list[PoolItem] = []
@@ -79,6 +80,7 @@ def _load_pool_from_disk():
                 check_result=item.get("check_result"),
                 charisma_score=item.get("charisma_score", ""),
                 charisma_notes=item.get("charisma_notes", ""),
+                retry_count=item.get("retry_count", 0),
             )
             for item in data.get("items", [])
         ]
@@ -109,6 +111,7 @@ def _save_pool_to_disk():
                 "check_result": it.check_result,
                 "charisma_score": it.charisma_score,
                 "charisma_notes": it.charisma_notes,
+                "retry_count": it.retry_count,
             }
             for it in _pool
         ]
@@ -170,6 +173,7 @@ def redo_item(source: str) -> bool:
             it.elapsed_seconds = None
             it.error_message = ""
             it.job_id = None
+            it.retry_count = 0
             _update_meta_status(src, "queued")
             _save_pool_to_disk()
             start_pool()
@@ -178,7 +182,8 @@ def redo_item(source: str) -> bool:
 
 
 def retry_item(source: str) -> bool:
-    """Requeue an error/stopped pool item, resuming from the first failed step."""
+    """Requeue an error/stopped pool item, resuming from the first failed step.
+    Each subsequent retry goes back one more step (progressive rollback)."""
     src = str(Path(source).expanduser().resolve())
     for it in _pool:
         if it.source == src and it.status in ("error", "stopped"):
@@ -187,14 +192,16 @@ def retry_item(source: str) -> bool:
             skipped = set(meta.get("skipped_steps", []))
             passed = completed | skipped
             # First step not yet completed or skipped is the retry entry point
-            from_step = 0
+            base_from_step = 0
             for i in range(len(STEP_NAMES)):
                 if i not in passed:
-                    from_step = i
+                    base_from_step = i
                     break
             else:
                 # All steps passed — shouldn't happen for error/stopped, but fallback to 0
-                from_step = 0
+                base_from_step = 0
+            it.retry_count += 1
+            from_step = max(0, base_from_step - it.retry_count)
             it.status = "queued"
             it.finished_at = None
             it.elapsed_seconds = None
@@ -247,6 +254,7 @@ def get_pool_state() -> dict:
             "check_result": it.check_result,
             "charisma_score": it.charisma_score,
             "charisma_notes": it.charisma_notes,
+            "retry_count": it.retry_count,
         }
         # If processing and we have a job_id, attach live job status
         if it.job_id and it.status == "processing":
@@ -334,6 +342,7 @@ async def _pool_worker():
             else:
                 next_item.status = "finished"
                 next_item.finished_at = time.time()
+                next_item.retry_count = 0
                 next_item.video_url = job.video_url or ""
                 next_item.studio_url = job.studio_url or ""
                 next_item.title = job.title or ""
@@ -405,6 +414,7 @@ def redo_unfinished():
             it.elapsed_seconds = None
             it.error_message = ""
             it.job_id = None
+            it.retry_count = 0
             _update_meta_status(it.source, "queued")
             requeued = True
     _save_pool_to_disk()
