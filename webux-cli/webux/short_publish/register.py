@@ -784,8 +784,10 @@ async def browser_start_silent():
     import subprocess
     try:
         subprocess.run(["browser", "stop"], check=False, capture_output=True)
-        subprocess.run(["browser", "start", "--hidden"], check=True, capture_output=True)
-        return {"ok": True}
+        r = subprocess.run(["browser", "start", "--hidden"], capture_output=True, text=True)
+        if r.returncode != 0:
+            return {"ok": False, "error": (r.stderr or r.stdout).strip()}
+        return {"ok": True, "log": r.stderr.strip()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -795,8 +797,10 @@ async def browser_start_visible():
     import subprocess
     try:
         subprocess.run(["browser", "stop"], check=False, capture_output=True)
-        subprocess.run(["browser", "start"], check=True, capture_output=True)
-        return {"ok": True}
+        r = subprocess.run(["browser", "start"], capture_output=True, text=True)
+        if r.returncode != 0:
+            return {"ok": False, "error": (r.stderr or r.stdout).strip()}
+        return {"ok": True, "log": r.stderr.strip()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

@@ -430,14 +430,31 @@ def start_xvfb(display: str) -> int:
 
 def start_xephyr(display: str, width: int = 1920, height: int = 1080) -> int | None:
     """Start Xephyr on the given display. Returns its PID, or None on failure."""
+    log = tempfile.NamedTemporaryFile(mode="w", suffix="_xephyr.log", delete=False)
+    log.close()
     proc = subprocess.Popen(
         ["Xephyr", display, "-screen", f"{width}x{height}"],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=open(log.name, "w"),
     )
     time.sleep(1.0)
     if proc.poll() is not None:
+        err = ""
+        try:
+            err = Path(log.name).read_text().strip()
+        except OSError:
+            pass
+        finally:
+            try:
+                os.unlink(log.name)
+            except OSError:
+                pass
+        click.echo(f"Xephyr failed on {display}: {err or '(no output -- process died silently)'}", err=True)
         return None
+    try:
+        os.unlink(log.name)
+    except OSError:
+        pass
     return proc.pid
 
 

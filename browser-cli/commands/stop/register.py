@@ -21,33 +21,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     def stop_cmd(cdp_port: int) -> None:
         """Stop the Chromium browser running on the given CDP port."""
-        if not is_cdp_available(cdp_port):
-            click.echo(f"No browser found on CDP port {cdp_port}.", err=True)
-            return
-
         state = read_browser_state()
 
-        # Find the chrome process listening on the CDP port
-        try:
-            # Use lsof to find the process
-            result = subprocess.run(
-                ["lsof", "-ti", f":{cdp_port}"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                pids = result.stdout.strip().split("\n")
-                for pid in pids:
-                    pid = pid.strip()
-                    try:
-                        os_kill(int(pid))
-                        click.echo(f"Stopped browser process (PID {pid}).", err=True)
-                    except ProcessLookupError:
-                        pass
-            else:
-                # Fallback: find chrome processes with the cdp port in args
+        if not is_cdp_available(cdp_port):
+            click.echo(f"No browser found on CDP port {cdp_port}.", err=True)
+            # The browser process may already be dead (e.g. it crashed when its
+            # Xephyr/Xvfb display died), but stale Xvfb/Xephyr processes and
+            # state can still be lingering -- always clean those up below
+            # instead of returning early.
+        else:
+            # Find the chrome process listening on the CDP port
+            try:
+                # Use lsof to find the process
                 result = subprocess.run(
-                    ["pgrep", "-f", "--", f"--remote-debugging-port={cdp_port}"],
+                    ["lsof", "-ti", f":{cdp_port}"],
                     capture_output=True,
                     text=True,
                 )
@@ -61,17 +48,33 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         except ProcessLookupError:
                             pass
                 else:
-                    click.echo(
-                        f"Could not find browser process on CDP port {cdp_port}. "
-                        f"You may need to close it manually.",
-                        err=True,
+                    # Fallback: find chrome processes with the cdp port in args
+                    result = subprocess.run(
+                        ["pgrep", "-f", "--", f"--remote-debugging-port={cdp_port}"],
+                        capture_output=True,
+                        text=True,
                     )
-        except FileNotFoundError:
-            click.echo(
-                "Neither 'lsof' nor 'pgrep' found. Cannot stop browser automatically. "
-                "Please close it manually.",
-                err=True,
-            )
+                    if result.returncode == 0 and result.stdout.strip():
+                        pids = result.stdout.strip().split("\n")
+                        for pid in pids:
+                            pid = pid.strip()
+                            try:
+                                os_kill(int(pid))
+                                click.echo(f"Stopped browser process (PID {pid}).", err=True)
+                            except ProcessLookupError:
+                                pass
+                    else:
+                        click.echo(
+                            f"Could not find browser process on CDP port {cdp_port}. "
+                            f"You may need to close it manually.",
+                            err=True,
+                        )
+            except FileNotFoundError:
+                click.echo(
+                    "Neither 'lsof' nor 'pgrep' found. Cannot stop browser automatically. "
+                    "Please close it manually.",
+                    err=True,
+                )
 
         xvfb_pid = state.get("xvfb_pid")
         if xvfb_pid:
@@ -84,7 +87,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         xephyr_pid = state.get("xephyr_pid")
         if xephyr_pid:
             # Keep Xephyr alive so the next "browser start --hidden" reuses it
-            # without popping a new window on screen.
+            # without popping a new window on screen -- but only if it's
+            # actually still alive; otherwise fall through and clear the
+            # stale state so the next start launches a fresh one.
             import os as _os
             try:
                 _os.kill(xephyr_pid, 0)  # Check it's still alive

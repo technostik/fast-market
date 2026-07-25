@@ -1352,19 +1352,33 @@ async function pollTranscriptScriptStatus() {
 }
 
 async function browserHide() {
-  await fetch('/api/short_publish/browser/hide', { method: 'POST' });
+  const r = await fetch('/api/short_publish/browser/hide', { method: 'POST' }).catch(() => null);
+  if (!r || !r.ok) { appendToConsole('Browser hide request failed'); return; }
+  const data = await r.json();
+  if (!data.ok) appendToConsole('Browser hide failed: ' + data.error);
 }
 
 async function browserShow() {
-  await fetch('/api/short_publish/browser/show', { method: 'POST' });
+  const r = await fetch('/api/short_publish/browser/show', { method: 'POST' }).catch(() => null);
+  if (!r || !r.ok) { appendToConsole('Browser show request failed'); return; }
+  const data = await r.json();
+  if (!data.ok) appendToConsole('Browser show failed: ' + data.error);
 }
 
 async function browserStartSilent() {
-  await fetch('/api/short_publish/browser/start-silent', { method: 'POST' });
+  const r = await fetch('/api/short_publish/browser/start-silent', { method: 'POST' }).catch(() => null);
+  if (!r || !r.ok) { appendToConsole('Browser start request failed'); return; }
+  const data = await r.json();
+  if (!data.ok) appendToConsole('Browser start failed: ' + data.error);
+  else appendToConsole('Browser started' + (data.log ? ' (' + data.log + ')' : ''));
 }
 
 async function browserStartVisible() {
-  await fetch('/api/short_publish/browser/start-visible', { method: 'POST' });
+  const r = await fetch('/api/short_publish/browser/start-visible', { method: 'POST' }).catch(() => null);
+  if (!r || !r.ok) { appendToConsole('Browser start request failed'); return; }
+  const data = await r.json();
+  if (!data.ok) appendToConsole('Browser start failed: ' + data.error);
+  else appendToConsole('Browser started' + (data.log ? ' (' + data.log + ')' : ''));
 }
 
 async function browserScreenshot() {
