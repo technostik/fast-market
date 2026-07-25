@@ -427,8 +427,11 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
                 if job.files.get("signature_appended") != "1":
                     safe_name = _sanitize_filename(job.title)
                     ext = Path(current_video).suffix or ".mp4"
-                    concat_out = str(Path(current_video).parent / f"with_signature_{safe_name}{ext}")
-                    concat_cmd = [_video(), "concat", current_video, str(sig_path_obj), "-o", concat_out]
+                    no_sig_path = str(Path(current_video).parent / f"no_signature_{safe_name}{ext}")
+                    if not Path(no_sig_path).exists() and Path(current_video).resolve() != Path(no_sig_path).resolve():
+                        os.rename(current_video, no_sig_path)
+                    concat_out = str(Path(current_video).parent / f"{safe_name}{ext}")
+                    concat_cmd = [_video(), "concat", no_sig_path, str(sig_path_obj), "-o", concat_out]
                     if job.use_modal:
                         concat_cmd.append("--modal")
                     s4.status = "running"

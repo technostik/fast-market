@@ -18,7 +18,7 @@ STEP_NAMES = [
 DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
 DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv"
 
-_INTERMEDIATE_RE = re.compile(r"_(nosilence|subtitled|volume_normalized|with_signature)$", re.IGNORECASE)
+_INTERMEDIATE_RE = re.compile(r"_(nosilence|subtitled|volume_normalized|no_signature)$", re.IGNORECASE)
 
 # Output file keys surfaced per step in the UI (index aligns with STEP_NAMES).
 _STEP_FILE_KEYS: list[list[str]] = [
