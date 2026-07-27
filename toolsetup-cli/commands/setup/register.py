@@ -472,6 +472,7 @@ def register():
         "--provider",
         "-P",
         "provider",
+        type=ProviderParamType(),
         help="LLM provider to test (overrides default)",
     )
     @click.option(
