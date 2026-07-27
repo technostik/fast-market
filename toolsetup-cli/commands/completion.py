@@ -48,6 +48,31 @@ class AvailableProviderParamType(click.ParamType):
         return value
 
 
+class DiagnosticTestParamType(click.ParamType):
+    name = "diagnostic_test"
+
+    AVAILABLE_TESTS = {
+        "workdir",
+        "llm",
+        "youtube",
+        "groq_transcription",
+        "modal_connectivity",
+        "modal_groq_transcription",
+    }
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> list[CompletionItem]:
+        return [
+            CompletionItem(name)
+            for name in sorted(self.AVAILABLE_TESTS)
+            if incomplete.lower() in name.lower()
+        ]
+
+    def convert(self, value, param, ctx):
+        return value
+
+
 class ShellType(click.ParamType):
     name = "shell"
 

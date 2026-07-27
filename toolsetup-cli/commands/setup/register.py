@@ -17,6 +17,7 @@ from common.core.paths import (
 )
 from commands.completion import (
     AvailableProviderParamType,
+    DiagnosticTestParamType,
     ProviderParamType,
     PathParamType,
 )
@@ -479,10 +480,9 @@ def register():
         "--test",
         "-t",
         "tests",
+        type=DiagnosticTestParamType(),
         multiple=True,
-        help="Run only specific tests (repeatable). "
-        "Available: workdir, llm, youtube, groq_transcription, "
-        "modal_connectivity, modal_groq_transcription",
+        help="Run only specific tests (repeatable). Autocomplete available.",
     )
     @click.option(
         "--verbose",

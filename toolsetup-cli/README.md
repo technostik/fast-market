@@ -84,8 +84,14 @@ Run health checks on workdir, LLM connectivity, and YouTube API.
 ```bash
 toolsetup diagnose
 toolsetup diagnose --format json
-toolsetup diagnose --provider anthropic   # Test a specific LLM provider
+toolsetup diagnose --provider anthropic       # Test a specific LLM provider (autocomplete from configured providers)
+toolsetup diagnose -t llm -t workdir          # Run only specific tests (repeatable)
+toolsetup diagnose -t llm --verbose           # Show raw LLM request/response
 ```
+
+Both `--provider` and `--test` support shell autocomplete (Tab).
+
+Available tests: `workdir`, `llm`, `youtube`, `groq_transcription`, `modal_connectivity`, `modal_groq_transcription`
 
 ---
 

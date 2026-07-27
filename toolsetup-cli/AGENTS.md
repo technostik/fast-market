@@ -13,6 +13,7 @@ Standalone CLI to configure global settings shared across all fast-market tools:
 - `commands/setup/plugins/youtube.py` — YouTube config plugin
 - `commands/setup/plugins/agent.py` — agent config plugin
 - `commands/setup/diagnose.py` — health checks for workdir, LLM connectivity, YouTube API
+- `commands/completion.py` — custom `ParamType` classes for shell autocomplete (`ProviderParamType`, `DiagnosticTestParamType`, etc.)
 - `commands/autocomplete/register.py` — `toolsetup autocomplete configure | list`
 - `commands/backup/register.py` — `toolsetup backup snapshot | restore | rollback | list | status`
 - `commands/config/register.py` — `toolsetup config clean-bak`
