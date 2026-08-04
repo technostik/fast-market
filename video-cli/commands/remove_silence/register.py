@@ -9,6 +9,13 @@ import click
 from commands.base import CommandManifest
 
 
+class SilentVideoError(RuntimeError):
+    """Raised when a video has no detectable audio (silent mic)."""
+    def __init__(self, path: str):
+        super().__init__(f"Silent video — no non-silent segments detected: {path}")
+        self.path = path
+
+
 # ── Exact port of detect_silence_segments_simple from YouTools/plugins/trimsilences.py ──
 
 def detect_silence_segments_simple(
@@ -68,7 +75,7 @@ def remove_silence_simple(
 
     if not segments:
         video.close()
-        raise RuntimeError("No non-silent segments detected — check threshold")
+        raise SilentVideoError(input_file)
 
     clips = []
     for i, (start, end) in enumerate(segments):
@@ -138,9 +145,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
             orig_dur = result.get("original_duration") or 0
             final_dur = result.get("final_duration") or 0
         else:
-            _, orig_dur, final_dur = remove_silence_simple(
-                str(input_path), str(output_path), threshold, progress_cb=None
-            )
+            try:
+                _, orig_dur, final_dur = remove_silence_simple(
+                    str(input_path), str(output_path), threshold, progress_cb=None
+                )
+            except SilentVideoError as exc:
+                raise click.ClickException(str(exc)) from exc
         if orig_dur and final_dur:
             reduction = (orig_dur - final_dur) / orig_dur * 100
             click.echo(

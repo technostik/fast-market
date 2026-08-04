@@ -8,14 +8,17 @@ import click
 def run_remote_remove_silence(input_path: Path, output_path: Path, threshold: float) -> dict:
     try:
         from modal_client.app import app, spawn_and_get
-        from modal_client.remote_steps import remote_remove_silence
+        from modal_client.remote_steps import SilentVideoError, remote_remove_silence
     except ImportError as exc:
         raise click.ClickException(f"modal not installed: {exc}") from exc
     click.echo("Running remove-silence on Modal...", err=True)
-    with app.run():
-        result = spawn_and_get(
-            remote_remove_silence, input_path.read_bytes(), input_path.name, threshold
-        )
+    try:
+        with app.run():
+            result = spawn_and_get(
+                remote_remove_silence, input_path.read_bytes(), input_path.name, threshold
+            )
+    except SilentVideoError as exc:
+        raise click.ClickException(str(exc)) from exc
     output_path.write_bytes(result["video_bytes"])
     return result
 

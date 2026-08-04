@@ -4,6 +4,13 @@ import modal
 from modal_client.app import app, base_image
 
 
+class SilentVideoError(RuntimeError):
+    """Raised when a video has no detectable audio (silent mic)."""
+    def __init__(self, path: str):
+        super().__init__(f"Silent video — no non-silent segments detected: {path}")
+        self.path = path
+
+
 def _run_media_pipeline_impl(
     video_bytes: bytes,
     video_name: str,
@@ -238,7 +245,7 @@ def _remove_silence(
     segments = _detect_silence_segments(audio_array, video.audio.fps, threshold)
     if not segments:
         video.close()
-        raise RuntimeError("No non-silent segments detected — check threshold")
+        raise SilentVideoError(input_path)
 
     clips = [video.subclipped(start, end) for start, end in segments]
     final = concatenate_videoclips(clips)
