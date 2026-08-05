@@ -53,6 +53,7 @@ class Job:
     language: str
     model: str
     privacy: str
+    title_override: str = ""
     transcript_mode: str = "normal"
     prompt_check: str = ""
     description_prefix: str = ""

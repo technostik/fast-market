@@ -258,6 +258,11 @@
         </div>
       </div>
 
+      <div class="row">
+        <label>Force title (optional — overrides prompt)</label>
+        <input type="text" id="manualTitle" placeholder="Leave empty to generate with LLM">
+      </div>
+
       <div class="options-grid">
         <div class="opt">
           <div class="checkrow">
@@ -627,6 +632,7 @@ async function startJob() {
   if (!src) { alert('Select a video'); return; }
   const body = {
     source: src,
+    title: document.getElementById('manualTitle').value,
     prompt_title: document.getElementById('promptTitle').value,
     prompt_summary: document.getElementById('promptSummary').value,
     do_remove_silence: document.getElementById('removeSilence').checked,
@@ -888,6 +894,7 @@ async function doResume() {
   const from = parseInt(document.getElementById('resumeStep').value, 10);
   const body = {
     source,
+    title: document.getElementById('manualTitle').value,
     prompt_title: document.getElementById('promptTitle').value,
     prompt_summary: document.getElementById('promptSummary').value,
     from_step: from,
@@ -1479,6 +1486,7 @@ async function addToPool() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       source: sel.value,
+      title: document.getElementById('manualTitle').value,
       description_prefix: document.getElementById('descPrefix').value,
       source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
       skip_upload: document.getElementById('skipUpload').checked,

@@ -57,7 +57,7 @@ def _is_intermediate(path: Path) -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "") -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
@@ -66,6 +66,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
     job = Job(
         job_id=job_id,
         source=source,
+        title_override=title_override,
         prompt_title=pub.get("default_title_prompt", "youtube-title"),
         prompt_summary=pub.get("default_description_prompt", "youtube-summary"),
         prompt_check=pub.get("default_check_prompt", ""),
@@ -310,6 +311,7 @@ async def upload_external(file: UploadFile = File(...)):
 
 class StartRequest(BaseModel):
     source: str
+    title: str = ""
     prompt_title: str
     prompt_summary: str
     prompt_check: str = ""
@@ -331,6 +333,7 @@ class StartRequest(BaseModel):
 
 class ResumeRequest(BaseModel):
     source: str
+    title: str = ""
     prompt_title: str
     prompt_summary: str
     prompt_check: str = ""
@@ -361,6 +364,7 @@ async def start(req: StartRequest):
     job = Job(
         job_id=job_id,
         source=source,
+        title_override=req.title,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
         prompt_check=req.prompt_check or pub.get("default_check_prompt", ""),
@@ -436,6 +440,7 @@ async def resume(req: ResumeRequest):
     job = Job(
         job_id=job_id,
         source=source,
+        title_override=req.title,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
         prompt_check=req.prompt_check or pub_cfg.get("default_check_prompt", ""),
@@ -676,6 +681,7 @@ async def pool_status():
 
 class PoolAddRequest(BaseModel):
     source: str
+    title: str = ""
     description_prefix: str = ""
     source_urls: list[str] = []
     skip_upload: bool = False
@@ -688,7 +694,7 @@ class PoolAddRequest(BaseModel):
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title)
     return {"ok": ok}
 
 

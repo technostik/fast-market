@@ -325,9 +325,13 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         s3.start_time = time.time()
         s3.status = "running"
 
-        if await _run_tracked(job, s3, _pr(), "apply", job.prompt_title, f"transcript=@{transcript_path}"):
-            return
-        title_out = (s3.output or "").strip()
+        if job.title_override:
+            title_out = job.title_override
+            s3.output = f"Manual title: {title_out}"
+        else:
+            if await _run_tracked(job, s3, _pr(), "apply", job.prompt_title, f"transcript=@{transcript_path}"):
+                return
+            title_out = (s3.output or "").strip()
 
         proc = await asyncio.create_subprocess_exec(
             _pr(), "apply", job.prompt_summary, f"transcript=@{transcript_path}",
