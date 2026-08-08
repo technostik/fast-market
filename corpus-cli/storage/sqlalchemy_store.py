@@ -29,7 +29,7 @@ from storage.models import (
 
 logger = structlog.get_logger(__name__)
 
-YOUTUBE_SHORT_MAX_SECONDS = 60
+YOUTUBE_SHORT_MAX_SECONDS = 180
 MAX_TRANSIENT_RETRIES = 3
 
 # Field names become JSON object keys written into metadata_json and are used
@@ -493,6 +493,7 @@ class SQLAlchemyStore:
             "size": "LENGTH(raw_text)",
             "duration": "COALESCE(duration_seconds, 0)",
             "title": "title COLLATE NOCASE",
+            "published": "json_extract(metadata_json, '$.published_at')",
         }
         if order_by.startswith("field:"):
             field_name = order_by.split(":", 1)[1]

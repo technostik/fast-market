@@ -48,7 +48,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             by_privacy[privacy] = by_privacy.get(privacy, 0) + 1
 
             duration = item.metadata.get("duration_seconds", 0) or 0
-            if duration <= 60:
+            if duration <= 180:
                 by_type["short"] = by_type.get("short", 0) + 1
             else:
                 by_type["long"] = by_type.get("long", 0) + 1
@@ -119,7 +119,7 @@ def _build_router() -> APIRouter:
             by_privacy[privacy] = by_privacy.get(privacy, 0) + 1
 
             duration = item.metadata.get("duration_seconds", 0) or 0
-            if duration <= 60:
+            if duration <= 180:
                 by_type["short"] = by_type.get("short", 0) + 1
             else:
                 by_type["long"] = by_type.get("long", 0) + 1

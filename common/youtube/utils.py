@@ -39,9 +39,9 @@ def format_duration(seconds: int) -> str:
 
 
 def is_short_video(duration: str) -> bool:
-    """Determine if a video is a Short based on duration (≤60 seconds)."""
+    """Determine if a video is a Short based on duration (≤180 seconds, YouTube's 3-minute Shorts limit)."""
     total_seconds = iso_duration_to_seconds(duration)
-    return total_seconds <= 60
+    return total_seconds <= 180
 
 
 def timecode_to_seconds(timecode: str) -> float:

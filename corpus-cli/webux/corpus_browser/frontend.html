@@ -82,12 +82,16 @@
     <input type="date" id="until" title="Until date"/>
     <input type="number" id="minDuration" placeholder="Min s" min="0" style="width:84px"/>
     <input type="number" id="maxDuration" placeholder="Max s" min="0" style="width:84px"/>
+    <label title="Hide videos up to 3 minutes (Shorts)">
+      <input type="checkbox" id="excludeShorts"/> exclude shorts
+    </label>
     <select id="missingFieldSelect"><option value="">Missing field…</option></select>
     <label title="Only show rows where the selected field has no value">
       <input type="checkbox" id="missingOnly"/> only missing
     </label>
     <select id="orderBy">
       <option value="date">Sort: date</option>
+      <option value="published">Published</option>
       <option value="size">Size</option>
       <option value="duration">Duration</option>
       <option value="title">Title</option>
@@ -130,12 +134,13 @@
 const API = '/api/corpus_browser';
 const PAGE_SIZE = 20;
 const QUOTA_KEY = 'corpus_browser_quota_until';
+const PREFS_KEY = 'corpus_browser_prefs';
 
 const state = {
   sources: [], fields: [], ops: [],
   items: [], results: [], mode: 'browse', total: 0, offset: 0,
   missingField: '', missingOnly: false,
-  order: 'date', orderDesc: true,
+  order: 'published', orderDesc: true,
   selected: new Set(), selectAllFiltered: false,
   currentPage: 0,
   jobs: new Map(),
@@ -151,6 +156,21 @@ function esc(v) {
 function cellText(v) {
   if (v === null || v === undefined) return '';
   return Array.isArray(v) ? v.join(', ') : String(v);
+}
+
+// ── user prefs: source + exclude-shorts survive reloads ─────────────────────
+function savePrefs() {
+  localStorage.setItem(PREFS_KEY, JSON.stringify({
+    source: $('sourceFilter').value,
+    excludeShorts: $('excludeShorts').checked,
+  }));
+}
+function restorePrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+    if (p.source && p.source !== $('sourceFilter').value) $('sourceFilter').value = p.source;
+    $('excludeShorts').checked = !!p.excludeShorts;
+  } catch (e) { /* corrupt prefs — ignore */ }
 }
 
 function showBanner(msg, type) {
@@ -249,7 +269,7 @@ function rebuildTableHeaders() {
   $('thead').innerHTML = ''
     + '<th style="width:30px" title="Select all on this page"><input type="checkbox" id="selAllPage" aria-label="Select all on page"/></th>'
     + '<th>#</th>'
-    + headerTh('date', 'Updated')
+    + headerTh('published', 'Published')
     + headerTh('size', 'Size')
     + headerTh('duration', 'Duration')
     + headerTh('title', 'Title')
@@ -284,7 +304,8 @@ function renderRows(docs) {
     let html = '<td><input type="checkbox" data-handle="' + esc(doc.handle) + '"' +
       (state.selected.has(doc.handle) ? ' checked' : '') + '/></td>';
     html += '<td class="mono">' + (state.offset + ix + 1) + '</td>';
-    html += '<td class="mono">' + esc(cellText(doc.updated_at).slice(0, 10)) + '</td>';
+    const published = cellText(meta.published_at || doc.updated_at).slice(0, 10);
+    html += '<td class="mono">' + esc(published) + '</td>';
     html += '<td class="mono">' + esc(doc.raw_text ? String(doc.raw_text).length : '') + '</td>';
     html += '<td>' + esc(doc.duration_seconds ?? '') + 's</td>';
     html += '<td><a class="title-link" data-handle="' + esc(doc.handle) + '">' +
@@ -328,6 +349,7 @@ function currentParams() {
   const until = $('until').value; if (until) p.set('until', until);
   const min = $('minDuration').value; if (min) p.set('min_duration', min);
   const max = $('maxDuration').value; if (max) p.set('max_duration', max);
+  if ($('excludeShorts').checked) p.set('video_type', 'long');
   if (state.missingOnly && state.missingField) p.set('missing_field', state.missingField);
   return p;
 }
@@ -404,7 +426,7 @@ function showPreview(handle) {
   fetch(API + '/document/' + encodeURIComponent(handle)).then(r => r.json()).then(doc => {
     $('pTitle').textContent = doc.title || 'Untitled';
     let meta = 'Source: ' + esc(doc.source_plugin) +
-      ' | Updated: ' + esc(doc.updated_at || '') +
+      ' | Published: ' + esc(cellText((doc.metadata && doc.metadata.published_at) || doc.updated_at).slice(0, 10)) +
       ' | Duration: ' + esc(cellText(doc.duration_seconds)) + 's';
     if (doc.url) meta += '<br/>Original: <a href="' + esc(doc.url) + '" target="_blank">' + esc(doc.url) + '</a>';
     $('pMeta').innerHTML = meta;
@@ -560,8 +582,9 @@ async function pollSyncJob(jobId) {
 // ── wiring ───────────────────────────────────────────────────────────────────
 $('searchBtn').onclick = search;
 $('browseBtn').onclick = () => browse(0);
-$('applyBtn').onclick = () => { loadFields(); browse(0); };
-$('sourceFilter').onchange = () => { loadFields(); browse(0); };
+$('applyBtn').onclick = () => { savePrefs(); loadFields(); browse(0); };
+$('sourceFilter').onchange = () => { savePrefs(); loadFields(); browse(0); };
+$('excludeShorts').onchange = () => { savePrefs(); browse(0); };
 $('orderBy').onchange = () => { state.order = $('orderBy').value; browse(0); };
 $('orderDesc').onchange = () => { state.orderDesc = $('orderDesc').checked; browse(0); };
 $('missingFieldSelect').onchange = () => { state.missingField = $('missingFieldSelect').value; browse(0); };
@@ -573,6 +596,7 @@ $('clearSel').onclick = clearSelection;
 
 (async function init() {
   await loadSources();
+  restorePrefs();
   await Promise.all([loadFields(), loadOps()]);
   browse(0);
 })();

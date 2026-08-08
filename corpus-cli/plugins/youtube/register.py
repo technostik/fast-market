@@ -17,7 +17,7 @@ def register(config: dict) -> PluginManifest:
                     ["--type", "video_type"],
                     type=click.Choice(["short", "long"]),
                     default=None,
-                    help="Filter by video type (short ≤60s, long >60s).",
+                    help="Filter by video type (short ≤180s, long >180s).",
                 ),
                 click.Option(
                     ["--min-duration"],
@@ -52,7 +52,7 @@ def register(config: dict) -> PluginManifest:
                     ["--type", "video_type"],
                     type=click.Choice(["short", "long"]),
                     default=None,
-                    help="Filter by video type (short ≤60s, long >60s).",
+                    help="Filter by video type (short ≤180s, long >180s).",
                 ),
                 click.Option(
                     ["--min-duration"],

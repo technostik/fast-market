@@ -194,6 +194,7 @@ def browse(
     until: Optional[str] = Query(None),
     min_duration: Optional[int] = Query(None, ge=0),
     max_duration: Optional[int] = Query(None, ge=0),
+    video_type: Optional[str] = Query(None, pattern="^(short|long)$"),
     order_by: str = Query("date"),
     order_desc: bool = Query(True),
     missing_field: Optional[str] = Query(None),
@@ -215,6 +216,7 @@ def browse(
         until=until,
         min_duration=min_duration,
         max_duration=max_duration,
+        video_type=video_type,
         missing_field=missing_field,
     )
     try:
@@ -241,6 +243,7 @@ def search(
     until: Optional[str] = Query(None),
     min_duration: Optional[int] = Query(None, ge=0),
     max_duration: Optional[int] = Query(None, ge=0),
+    video_type: Optional[str] = Query(None, pattern="^(short|long)$"),
 ):
     from core.embedder import Embedder
     from storage.sqlalchemy_store import SearchFilters
@@ -252,6 +255,7 @@ def search(
         until=until,
         min_duration=min_duration,
         max_duration=max_duration,
+        video_type=video_type,
     )
 
     if not q.strip():
