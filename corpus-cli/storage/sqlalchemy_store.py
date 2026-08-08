@@ -49,6 +49,7 @@ class SearchFilters:
         min_size: int | None = None,
         max_size: int | None = None,
         privacy_status: str | None = None,
+        missing_field: str | None = None,
     ) -> None:
         self.source = source
         self.min_duration = min_duration
@@ -59,6 +60,7 @@ class SearchFilters:
         self.min_size = min_size
         self.max_size = max_size
         self.privacy_status = privacy_status
+        self.missing_field = missing_field
 
         if video_type == "short":
             self.max_duration = min(
@@ -479,6 +481,12 @@ class SQLAlchemyStore:
                 else:
                     query += " AND privacy_status = :privacy_status"
                     params["privacy_status"] = filters.privacy_status
+            if filters.missing_field:
+                self._require_field_definition(filters.missing_field)
+                query += (
+                    f" AND json_extract(metadata_json, '$.{filters.missing_field}') "
+                    "IS NULL"
+                )
 
         order_field_map = {
             "date": "updated_at",
@@ -511,6 +519,58 @@ class SQLAlchemyStore:
             docs = filtered
 
         return docs
+
+    def count_documents(
+        self,
+        source: str | None = None,
+        filters: SearchFilters | None = None,
+    ) -> int:
+        """Count documents matching the same filters as list_documents_extended."""
+        query = "SELECT COUNT(*) FROM documents WHERE 1=1"
+        params: dict[str, object] = {}
+
+        if source:
+            query += " AND source_plugin=:source"
+            params["source"] = source
+
+        if filters:
+            if filters.since:
+                query += " AND updated_at >= :since"
+                params["since"] = f"{filters.since}T00:00:00"
+            if filters.until:
+                query += " AND updated_at <= :until"
+                params["until"] = f"{filters.until}T23:59:59"
+            if filters.min_duration is not None:
+                query += " AND duration_seconds >= :min_duration"
+                params["min_duration"] = filters.min_duration
+            if filters.max_duration is not None:
+                query += " AND duration_seconds <= :max_duration"
+                params["max_duration"] = filters.max_duration
+            if filters.privacy_status:
+                if filters.privacy_status == "non-public":
+                    query += (
+                        " AND (privacy_status IS NULL OR privacy_status != 'public')"
+                    )
+                else:
+                    query += " AND privacy_status = :privacy_status"
+                    params["privacy_status"] = filters.privacy_status
+            if filters.missing_field:
+                self._require_field_definition(filters.missing_field)
+                query += (
+                    f" AND json_extract(metadata_json, '$.{filters.missing_field}') "
+                    "IS NULL"
+                )
+
+        with self._session() as session:
+            return int(session.execute(text(query), params).scalar() or 0)
+
+    def list_sources(self) -> list[str]:
+        """Distinct source_plugin values currently present in the documents table."""
+        with self._session() as session:
+            rows = session.execute(
+                text("SELECT DISTINCT source_plugin FROM documents ORDER BY source_plugin")
+            ).all()
+        return [row[0] for row in rows]
 
     def delete_all(self) -> None:
         with self._session() as session:
@@ -1085,15 +1145,35 @@ class SQLAlchemyStore:
         field_name: str,
         source: str | None = None,
         limit: int = 1000,
+        filters: SearchFilters | None = None,
     ) -> list[dict]:
-        """Documents whose metadata_json has no value for a declared field."""
+        """Documents whose metadata_json has no value for a declared field.
+
+        Optional ``filters`` narrows by date range / duration (source is passed
+        separately so the sync engine can apply its own per-source routing).
+        """
         self._require_field_definition(field_name)
-        query = select(DocumentModel).where(
-            func.json_extract(DocumentModel.metadata_json, f"$.{field_name}").is_(None)
+        query = (
+            select(DocumentModel)
+            .where(func.json_extract(DocumentModel.metadata_json, f"$.{field_name}").is_(None))
+            .order_by(DocumentModel.updated_at.desc())
         )
         if source:
             query = query.where(DocumentModel.source_plugin == source)
-        query = query.order_by(DocumentModel.updated_at.desc()).limit(limit)
+        if filters:
+            if filters.since:
+                query = query.where(DocumentModel.updated_at >= f"{filters.since}T00:00:00")
+            if filters.until:
+                query = query.where(DocumentModel.updated_at <= f"{filters.until}T23:59:59")
+            if filters.min_duration is not None:
+                query = query.where(
+                    DocumentModel.duration_seconds >= filters.min_duration
+                )
+            if filters.max_duration is not None:
+                query = query.where(
+                    DocumentModel.duration_seconds <= filters.max_duration
+                )
+        query = query.limit(limit)
         with self._session() as session:
             rows = session.scalars(query).all()
             docs = [self._row_to_doc_dict_model(row) for row in rows]
@@ -1210,6 +1290,10 @@ def _apply_filters_dicts(
                 if privacy == "public":
                     continue
             elif privacy != filters.privacy_status:
+                continue
+        if filters.missing_field:
+            metadata = item.get("metadata") or {}
+            if filters.missing_field in metadata:
                 continue
         out.append(item)
     return out

@@ -304,6 +304,7 @@ class SyncEngine:
         source: str | None = None,
         limit: int = 1000,
         handles: list[str] | None = None,
+        filters=None,
         vault_path: str | None = None,
     ) -> SyncResult:
         """Fill a declared soft field on documents missing it.
@@ -311,9 +312,13 @@ class SyncEngine:
         For each document lacking `field_name` the operation computes a value
         which is written back via `set_document_field`. Only declared fields
         are accepted (the store fails loudly otherwise).
+
+        `handles` restricts the run to specific documents; `filters` (a
+        SearchFilters without source) narrows by date range / duration so the
+        web "sync on current filter" flow reuses this same loop.
         """
         docs = self.store.get_documents_missing_field(
-            field_name, source=source, limit=limit
+            field_name, source=source, limit=limit, filters=filters
         )
         if handles:
             wanted = set(handles)

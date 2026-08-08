@@ -1,0 +1,581 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Corpus Browser</title>
+  <style>
+    :root {
+      --bg:#1a1a2e; --surface:#16213e; --accent:#0f3460; --text:#eee;
+      --text-dim:#9ca3af; --border:#334155; --error:#f87171; --success:#10b981;
+      --warn:#f59e0b; --info:#38bdf8;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; padding:16px; background:var(--bg); color:var(--text);
+           font-family:system-ui,sans-serif; height:100vh; display:flex; flex-direction:column; }
+    .header { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
+    .header h1 { font-size:1.2em; margin:0 16px 0 0; }
+    input, select, button { padding:7px 10px; border:1px solid var(--border);
+             background:var(--surface); color:var(--text); border-radius:6px; font-size:13px; }
+    input[type="date"] { width:132px; }
+    button { cursor:pointer; }
+    button:hover { border-color:var(--accent); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; align-items:center; }
+    .banner { border-radius:8px; padding:10px 14px; margin-bottom:10px; font-size:13px;
+              border:1px solid var(--border); }
+    .banner.warn { background:#3b2f0a; border-color:var(--warn); color:var(--warn); }
+    .banner.err { background:#3b1414; border-color:var(--error); color:var(--error); }
+    .banner.ok { background:#0a3322; border-color:var(--success); color:var(--success); }
+    .banner.info { background:#0c2b38; border-color:var(--info); color:var(--info); }
+    .actionbar { display:none; gap:8px; flex-wrap:wrap; align-items:center;
+             background:var(--surface); border:1px solid var(--border); border-radius:8px;
+             padding:8px 12px; margin-bottom:10px; }
+    .actionbar.active { display:flex; }
+    .actionbar .cnt { color:var(--text-dim); font-size:13px; font-weight:600; }
+    .actionbar a { color:var(--info); cursor:pointer; font-size:13px; text-decoration:none; }
+    .actionbar a:hover { text-decoration:underline; }
+    .divider { color:var(--text-dim); margin:0 4px; }
+    .tablewrap { flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    thead { position:sticky; top:0; background:var(--accent); z-index:5; }
+    th { padding:8px 10px; text-align:left; white-space:nowrap; border-bottom:1px solid var(--border); }
+    th.sortable { cursor:pointer; user-select:none; }
+    th.sortable:hover { text-decoration:underline; }
+    th .arrow { color:var(--info); font-size:11px; margin-left:4px; }
+    td { padding:6px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+    tr:hover td { background:rgba(15,52,96,.35); }
+    tr.selected td { background:rgba(16,185,129,.08); }
+    td.cell { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    td.mono { font-family:ui-monospace,monospace; font-size:12px; color:var(--text-dim); }
+    .title-link { color:var(--info); cursor:pointer; text-decoration:none; }
+    .title-link:hover { text-decoration:underline; }
+    .pag { display:flex; justify-content:center; gap:6px; margin-top:12px; flex-wrap:wrap; }
+    .pag button { min-width:32px; }
+    .spacer { flex:1; }
+    .loading { text-align:center; padding:24px; color:var(--text-dim); }
+    .preview { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.8); display:none; z-index:1000; }
+    .preview-content { background:var(--surface); margin:5% auto; width:80%; max-height:80%; overflow-y:auto; padding:20px; border-radius:8px; }
+    .close-btn { float:right; cursor:pointer; font-size:1.5em; }
+    pre { white-space:pre-wrap; color:var(--text); }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Corpus Browser</h1>
+    <input id="q" placeholder="Search transcripts…" />
+    <select id="mode">
+      <option value="keyword">keyword</option>
+      <option value="semantic">semantic</option>
+    </select>
+    <button id="searchBtn">Search</button>
+    <button id="browseBtn">Browse All</button>
+    <span class="spacer"></span>
+    <span id="scanButtons"></span>
+  </div>
+
+  <div class="banner" id="banner" style="display:none;"></div>
+
+  <div class="filters">
+    <select id="sourceFilter"><option value="">All sources</option></select>
+    <input type="date" id="since" title="Since date"/>
+    <input type="date" id="until" title="Until date"/>
+    <input type="number" id="minDuration" placeholder="Min s" min="0" style="width:84px"/>
+    <input type="number" id="maxDuration" placeholder="Max s" min="0" style="width:84px"/>
+    <select id="missingFieldSelect"><option value="">Missing field…</option></select>
+    <label title="Only show rows where the selected field has no value">
+      <input type="checkbox" id="missingOnly"/> only missing
+    </label>
+    <select id="orderBy">
+      <option value="date">Sort: date</option>
+      <option value="size">Size</option>
+      <option value="duration">Duration</option>
+      <option value="title">Title</option>
+    </select>
+    <label><input type="checkbox" id="orderDesc" checked/> desc</label>
+    <button id="applyBtn">Apply</button>
+  </div>
+
+  <div class="actionbar" id="actionbar">
+    <span class="cnt" id="selCount"></span>
+    <select id="syncFieldSelect" title="Field to fill on the selection"></select>
+    <button id="syncBtn">Sync</button>
+    <span class="divider">|</span>
+    <input id="tagInput" placeholder="Add a tag…" style="width:130px;"/>
+    <button id="tagBtn" title="Run the tag operation on the selection">Add tag</button>
+    <span class="divider">|</span>
+    <a id="selectAllLink" title="Apply the sync to every document matching the current filter">Select all N filtered</a>
+    <a id="clearSel">clear</a>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="pag" id="pag"></div>
+
+  <div class="preview" id="preview">
+    <div class="preview-content">
+      <span class="close-btn" onclick="closePreview()">×</span>
+      <h2 id="pTitle"></h2>
+      <div id="pMeta"></div>
+      <pre id="pBody"></pre>
+    </div>
+  </div>
+
+<script>
+'use strict';
+const API = '/api/corpus_browser';
+const PAGE_SIZE = 20;
+const QUOTA_KEY = 'corpus_browser_quota_until';
+
+const state = {
+  sources: [], fields: [], ops: [],
+  items: [], results: [], mode: 'browse', total: 0, offset: 0,
+  missingField: '', missingOnly: false,
+  order: 'date', orderDesc: true,
+  selected: new Set(), selectAllFiltered: false,
+  currentPage: 0,
+  jobs: new Map(),
+};
+
+const $ = id => document.getElementById(id);
+
+function esc(v) {
+  return String(v).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+function cellText(v) {
+  if (v === null || v === undefined) return '';
+  return Array.isArray(v) ? v.join(', ') : String(v);
+}
+
+function showBanner(msg, type) {
+  const b = $('banner');
+  b.className = 'banner ' + (type || 'info');
+  b.innerHTML = '<a class="close-btn" onclick="hideBanner()">×</a>' + esc(msg);
+  b.style.display = 'block';
+  delete b.dataset.quota;
+}
+function hideBanner() { $('banner').style.display = 'none'; }
+
+// ── quota state: set server-side, re-enabled client-side at reset ───────────
+function quotaDeadline() {
+  const raw = localStorage.getItem(QUOTA_KEY);
+  if (!raw) return 0;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) && t > Date.now() ? t : 0;
+}
+function setQuotaBlock(iso, note) {
+  if (!iso) return;
+  localStorage.setItem(QUOTA_KEY, iso);
+  applyQuotaUI();
+  showBanner('YouTube API quota exceeded' + (note ? ' — ' + note : '') +
+    '. Retry possible after ' + new Date(iso).toLocaleString() +
+    ' — search, sorting and derived-field sync keep working.', 'err');
+  $('banner').dataset.quota = '1';
+}
+function applyQuotaUI() {
+  const until = quotaDeadline();
+  document.querySelectorAll('#scanButtons button[data-source]').forEach(btn => {
+    btn.disabled = until > 0;
+    btn.textContent = until > 0
+      ? 'Quota — retry after ' + new Date(until).toLocaleTimeString()
+      : 'Scan ' + btn.dataset.source;
+  });
+  const b = $('banner');
+  if (!until && b.dataset.quota) { delete b.dataset.quota; hideBanner(); }
+}
+setInterval(applyQuotaUI, 15000); // cheap client-side re-enable at reset
+
+// ── sources / fields / operations ────────────────────────────────────────────
+async function loadSources() {
+  const data = await (await fetch(API + '/sources')).json();
+  state.sources = data.sources || [];
+  $('sourceFilter').innerHTML = '<option value="">All sources</option>' +
+    state.sources.map(s => '<option value="' + esc(s) + '">' + esc(s) + '</option>').join('');
+  $('scanButtons').innerHTML = state.sources
+    .map(s => '<button data-source="' + esc(s) + '" id="scanBtn_' + esc(s) + '">Scan ' + esc(s) + '</button>')
+    .join('');
+  document.querySelectorAll('#scanButtons button').forEach(btn => {
+    btn.onclick = () => runScan(btn.dataset.source);
+  });
+  applyQuotaUI();
+  if (!state.sources.length && !state.emptyHint) {
+    state.emptyHint = true;
+    showBanner('Empty corpus: scan a source above to populate the sync pool, then `corpus sync` to index.', 'info');
+  }
+}
+
+async function loadFields() {
+  const src = $('sourceFilter').value;
+  const data = await (await fetch(API + '/fields?source=' + encodeURIComponent(src))).json();
+  state.fields = data.fields || [];
+  state.missingField = '';
+  $('missingFieldSelect').innerHTML = '<option value="">Missing field…</option>' +
+    state.fields.map(f => '<option value="' + esc(f.name) + '">' + esc(f.name) + '</option>').join('');
+  $('missingOnly').checked = false;
+  rebuildTableHeaders();
+}
+
+async function loadOps() {
+  const data = await (await fetch(API + '/operations')).json();
+  state.ops = data.operations || [];
+  $('syncFieldSelect').innerHTML = state.ops
+    .map(o => '<option value="' + esc(o.field) + '">' + esc(o.field) +
+      (o.applies_to !== 'all' ? ' (' + esc(o.applies_to) + ')' : '') + '</option>')
+    .join('') || '<option value="">no fields</option>';
+}
+
+// ── dynamic columns ──────────────────────────────────────────────────────────
+function currentSource() { return $('sourceFilter').value; }
+
+function dynamicFields() {
+  const src = currentSource();
+  return state.fields.filter(f =>
+    f.applies_to === 'all' || (src && f.applies_to === src));
+}
+
+function headerTh(orderVal, label) {
+  const active = state.order === orderVal;
+  return '<th class="sortable" data-order="' + esc(orderVal) + '">' + esc(label) +
+    '<span class="arrow">' + (active ? (state.orderDesc ? '▼' : '▲') : '') + '</span></th>';
+}
+
+function rebuildTableHeaders() {
+  $('thead').innerHTML = ''
+    + '<th style="width:30px" title="Select all on this page"><input type="checkbox" id="selAllPage" aria-label="Select all on page"/></th>'
+    + '<th>#</th>'
+    + headerTh('date', 'Updated')
+    + headerTh('size', 'Size')
+    + headerTh('duration', 'Duration')
+    + headerTh('title', 'Title')
+    + '<th>Handle</th>'
+    + dynamicFields().map(f => headerTh('field:' + f.name, f.name)).join('');
+  $('selAllPage').onchange = e => toggleSelectPage(e.target.checked);
+  document.querySelectorAll('#thead th.sortable').forEach(h => {
+    h.onclick = () => {
+      const ob = h.dataset.order;
+      if (state.order === ob) state.orderDesc = !state.orderDesc;
+      else { state.order = ob; state.orderDesc = true; }
+      $('orderBy').value = state.order;
+      $('orderDesc').checked = state.orderDesc;
+      browse(0);
+    };
+  });
+}
+
+// ── rows ─────────────────────────────────────────────────────────────────────
+function renderRows(docs) {
+  const tbody = $('tbody');
+  tbody.innerHTML = '';
+  if (!docs.length) {
+    tbody.innerHTML = '<tr><td colspan="99" class="loading">No documents.</td></tr>';
+    return;
+  }
+  const fields = dynamicFields();
+  docs.forEach((doc, ix) => {
+    const tr = document.createElement('tr');
+    const meta = doc.metadata || {};
+    if (state.selected.has(doc.handle)) tr.className = 'selected';
+    let html = '<td><input type="checkbox" data-handle="' + esc(doc.handle) + '"' +
+      (state.selected.has(doc.handle) ? ' checked' : '') + '/></td>';
+    html += '<td class="mono">' + (state.offset + ix + 1) + '</td>';
+    html += '<td class="mono">' + esc(cellText(doc.updated_at).slice(0, 10)) + '</td>';
+    html += '<td class="mono">' + esc(doc.raw_text ? String(doc.raw_text).length : '') + '</td>';
+    html += '<td>' + esc(doc.duration_seconds ?? '') + 's</td>';
+    html += '<td><a class="title-link" data-handle="' + esc(doc.handle) + '">' +
+      esc(doc.title || 'Untitled') + '</a></td>';
+    html += '<td class="mono">' + esc(doc.handle) + '</td>';
+    fields.forEach(f => { html += '<td class="cell">' + esc(cellText(meta[f.name])) + '</td>'; });
+    tr.innerHTML = html;
+    tbody.appendChild(tr);
+  });
+  tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.onchange = e => {
+      const h = e.target.dataset.handle;
+      if (e.target.checked) state.selected.add(h); else state.selected.delete(h);
+      e.target.closest('tr').classList.toggle('selected', e.target.checked);
+      updateActionBar();
+    };
+  });
+  tbody.querySelectorAll('a.title-link').forEach(a => {
+    a.onclick = () => showPreview(a.dataset.handle);
+  });
+  const all = $('selAllPage');
+  if (all) all.checked = docs.length > 0 && docs.every(d => state.selected.has(d.handle));
+}
+
+function updateActionBar() {
+  $('actionbar').classList.toggle('active', state.selected.size > 0 || state.selectAllFiltered);
+  $('selCount').textContent = state.selectAllFiltered
+    ? 'All ' + state.total + ' filtered documents selected'
+    : (state.selected.size + ' selected');
+  $('selectAllLink').textContent = state.selectAllFiltered
+    ? 'Selection = current filter (' + state.total + ' docs) — click to unselect'
+    : 'Select all ' + state.total + ' filtered documents';
+}
+
+// ── browse & search ──────────────────────────────────────────────────────────
+function currentParams() {
+  const p = new URLSearchParams();
+  const src = currentSource();
+  if (src) p.set('source', src);
+  const since = $('since').value; if (since) p.set('since', since);
+  const until = $('until').value; if (until) p.set('until', until);
+  const min = $('minDuration').value; if (min) p.set('min_duration', min);
+  const max = $('maxDuration').value; if (max) p.set('max_duration', max);
+  if (state.missingOnly && state.missingField) p.set('missing_field', state.missingField);
+  return p;
+}
+
+async function browse(offset = 0) {
+  state.mode = 'browse';
+  const p = currentParams();
+  p.set('limit', PAGE_SIZE); p.set('offset', offset);
+  p.set('order_by', state.order); p.set('order_desc', state.orderDesc);
+  $('tbody').innerHTML = '<tr><td colspan="99" class="loading">Loading…</td></tr>';
+  const r = await fetch(API + '/browse?' + p);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || !data.items) {
+    showBanner('Browse failed: ' + (data.detail || r.status) + ' — see server logs.', 'err');
+    $('tbody').innerHTML = '';
+    return;
+  }
+  state.items = data.items;
+  state.total = data.total || 0;
+  state.offset = offset;
+  renderRows(state.items);
+  renderPagination();
+  updateActionBar();
+}
+
+async function search() {
+  const q = $('q').value.trim();
+  if (!q) return browse(0);
+  state.mode = 'search';
+  state.currentPage = 0;
+  const p = currentParams();
+  p.set('q', q); p.set('mode', $('mode').value); p.set('limit', 500);
+  $('tbody').innerHTML = '<tr><td colspan="99" class="loading">Searching…</td></tr>';
+  const r = await fetch(API + '/search?' + p);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { showBanner('Search failed: ' + (data.detail || r.status), 'err'); return; }
+  state.results = data.results || [];
+  state.total = state.results.length;
+  renderSearchPage();
+}
+
+function renderSearchPage() {
+  const from = state.currentPage * PAGE_SIZE;
+  const rows = state.results.slice(from, from + PAGE_SIZE).map(r => ({
+    handle: r.handle, title: r.title, updated_at: '', duration_seconds: r.duration,
+    raw_text: r.excerpt || '', metadata: {},
+  }));
+  renderRows(rows);
+  renderPagination();
+}
+
+function renderPagination() {
+  const total = state.total;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (total <= PAGE_SIZE) { $('pag').innerHTML = ''; return; }
+  const current = state.mode === 'search' ? state.currentPage : Math.floor(state.offset / PAGE_SIZE);
+  let html = '';
+  const from = Math.max(0, current - 4);
+  const to = Math.min(pages, from + 9);
+  for (let i = from; i < to; i++) {
+    html += '<button data-p="' + i + '"' + (i === current ? ' disabled' : '') + '>' + (i + 1) + '</button>';
+  }
+  $('pag').innerHTML = html;
+  document.querySelectorAll('#pag button').forEach(b => {
+    b.onclick = () => {
+      const p = parseInt(b.dataset.p, 10);
+      if (state.mode === 'search') { state.currentPage = p; renderSearchPage(); }
+      else browse(p * PAGE_SIZE);
+    };
+  });
+}
+
+function showPreview(handle) {
+  fetch(API + '/document/' + encodeURIComponent(handle)).then(r => r.json()).then(doc => {
+    $('pTitle').textContent = doc.title || 'Untitled';
+    let meta = 'Source: ' + esc(doc.source_plugin) +
+      ' | Updated: ' + esc(doc.updated_at || '') +
+      ' | Duration: ' + esc(cellText(doc.duration_seconds)) + 's';
+    if (doc.url) meta += '<br/>Original: <a href="' + esc(doc.url) + '" target="_blank">' + esc(doc.url) + '</a>';
+    $('pMeta').innerHTML = meta;
+    $('pBody').textContent = doc.raw_text || '';
+    $('preview').style.display = 'block';
+  });
+}
+function closePreview() { $('preview').style.display = 'none'; }
+
+// ── selection ────────────────────────────────────────────────────────────────
+function visibleDocs() {
+  return state.mode === 'search'
+    ? state.results.slice(state.currentPage * PAGE_SIZE, (state.currentPage + 1) * PAGE_SIZE)
+    : state.items;
+}
+
+function toggleSelectPage(checked) {
+  visibleDocs().forEach(d => {
+    if (checked) state.selected.add(d.handle); else state.selected.delete(d.handle);
+  });
+  renderRows(visibleDocs());
+  updateActionBar();
+}
+
+function selectAllFiltered() {
+  if (state.total < 1) { showBanner('Run Browse/Search first — need to know how many documents match.', 'warn'); return; }
+  state.selectAllFiltered = !state.selectAllFiltered;
+  updateActionBar();
+}
+
+function clearSelection() {
+  state.selected.clear();
+  state.selectAllFiltered = false;
+  updateActionBar();
+}
+
+// ── job: scan (with quota handling) ──────────────────────────────────────────
+async function runScan(source) {
+  if (quotaDeadline()) return;
+  const r = await fetch(API + '/scan', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({source}),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { showBanner('Scan start failed: ' + (data.detail || r.status), 'err'); return; }
+  const btn = $('scanBtn_' + source);
+  if (btn) btn.textContent = 'Scanning ' + source + '…';
+  const timer = setInterval(() => pollScanJob(data.job_id, source), 2500);
+  state.jobs.set(data.job_id, {kind: 'scan', timer, source});
+  pollScanJob(data.job_id, source);
+}
+
+async function pollScanJob(jobId, source) {
+  const r = await fetch(API + '/scan/status/' + jobId);
+  if (!r.ok) { stopJob(jobId); return; }
+  const j = await r.json();
+  if (j.status === 'running') {
+    const done = j.result ? (j.result.processed || 0) : 0;
+    const btn = $('scanBtn_' + source);
+    if (btn) btn.textContent = 'Scanning ' + source + '… (' + done + ')';
+    return;
+  }
+  stopJob(jobId);
+  const btn = $('scanBtn_' + source);
+  if (btn) btn.textContent = 'Scan ' + source;
+  applyQuotaUI();
+  if (j.status === 'done' && j.result) {
+    showBanner('Scan done: ' + j.result.added + ' new · ' + j.result.refreshed + ' refreshed' +
+      (j.result.requeued ? ' · ' + j.result.requeued + ' re-queued' : ''), 'ok');
+    return;
+  }
+  if (j.error && j.error.type === 'quota_exceeded') {
+    setQuotaBlock(j.error.quota_reset_at,
+      j.result && j.result.processed > 0
+        ? j.result.processed + ' items processed before interruption — already-pooled items are kept'
+        : '');
+    if (j.result && j.result.processed > 0) {
+      showBanner('Quota hit after ' + j.result.processed + ' items — work done so far is kept. Re-scan manually after reset.', 'err');
+    }
+    return;
+  }
+  showBanner('Scan failed: ' + (j.error ? (j.error.message || j.error.type) : 'unknown') +
+    ' — check server logs and retry.', 'err');
+}
+
+function stopJob(jobId) {
+  const j = state.jobs.get(jobId);
+  if (j) { clearInterval(j.timer); state.jobs.delete(jobId); }
+}
+
+// ── jobs: field sync ─────────────────────────────────────────────────────────
+function syncBodyFor(field) {
+  const body = {field, source: currentSource() || null};
+  if (state.selectAllFiltered) {
+    body.since = $('since').value || null;
+    body.until = $('until').value || null;
+    body.min_duration = $('minDuration').value || null;
+    body.max_duration = $('maxDuration').value || null;
+    body.limit = Math.max(1, state.total);
+  } else {
+    body.handles = [...state.selected];
+  }
+  return body;
+}
+
+async function startSync(field) {
+  if (!field) { showBanner('No derived field registered — create one via `corpus field create` and an operation.', 'warn'); return; }
+  if (!state.selectAllFiltered && !state.selected.size) {
+    showBanner('Select documents on the page, or use "Select all N filtered".', 'warn');
+    return;
+  }
+  const r = await fetch(API + '/sync', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(syncBodyFor(field)),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { showBanner('Sync start failed: ' + (data.detail || r.status), 'err'); return; }
+  showBanner('Syncing field "' + field + '"…', 'info');
+  const timer = setInterval(() => pollSyncJob(data.job_id), 2500);
+  state.jobs.set(data.job_id, {kind: 'sync', timer, field});
+  pollSyncJob(data.job_id);
+}
+
+async function pollSyncJob(jobId) {
+  const r = await fetch(API + '/sync/status/' + jobId);
+  if (!r.ok) { stopJob(jobId); return; }
+  const j = await r.json();
+  if (j.status === 'running') return;
+  stopJob(jobId);
+  const jfield = (state.jobs.get(jobId) || {}).field || '';
+  if (j.status === 'done' && j.result) {
+    const res = j.result;
+    let msg = 'Sync "' + jfield + '" done — processed ' + res.processed +
+      ' · indexed ' + res.indexed + ' · skipped ' + (res.skipped || 0);
+    if (res.failures && res.failures.length) {
+      msg += ' · failed ' + res.failures.length + ' (use the missing-field filter to continue)';
+    }
+    showBanner(msg, res.failures && res.failures.length ? 'err' : 'ok');
+    clearSelection();
+    loadFields();
+    if (state.mode === 'search') search(); else browse(state.offset);
+    return;
+  }
+  if (j.error && j.error.type === 'quota_exceeded') {
+    setQuotaBlock(j.error.quota_reset_at,
+      j.result ? j.result.processed + ' documents processed before interruption' : '');
+    return;
+  }
+  showBanner('Sync "' + jfield + '" failed: ' + (j.error ? (j.error.message || j.error.type) : 'unknown') +
+    ' — check server logs and retry.', 'err');
+}
+
+// ── wiring ───────────────────────────────────────────────────────────────────
+$('searchBtn').onclick = search;
+$('browseBtn').onclick = () => browse(0);
+$('applyBtn').onclick = () => { loadFields(); browse(0); };
+$('sourceFilter').onchange = () => { loadFields(); browse(0); };
+$('orderBy').onchange = () => { state.order = $('orderBy').value; browse(0); };
+$('orderDesc').onchange = () => { state.orderDesc = $('orderDesc').checked; browse(0); };
+$('missingFieldSelect').onchange = () => { state.missingField = $('missingFieldSelect').value; browse(0); };
+$('missingOnly').onchange = () => { state.missingOnly = $('missingOnly').checked; browse(0); };
+$('syncBtn').onclick = () => startSync($('syncFieldSelect').value);
+$('tagBtn').onclick = () => startSync('tags');
+$('selectAllLink').onclick = selectAllFiltered;
+$('clearSel').onclick = clearSelection;
+
+(async function init() {
+  await loadSources();
+  await Promise.all([loadFields(), loadOps()]);
+  browse(0);
+})();
+</script>
+</body>
+</html>
