@@ -36,6 +36,14 @@ class _Logger:
     def warning(self, event: str, **kwargs) -> None:
         self._emit(logging.WARNING, event, **kwargs)
 
+    def exception(self, event: str, **kwargs) -> None:
+        """Log the current exception (like logging.exception) with the traceback."""
+        import traceback
+
+        kwargs = dict(kwargs)
+        kwargs["exc"] = traceback.format_exc().strip()
+        self._emit(logging.ERROR, event, **kwargs)
+
     def debug(self, event: str, **kwargs) -> None:
         self._emit(logging.DEBUG, event, **kwargs)
 

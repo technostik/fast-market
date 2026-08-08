@@ -74,6 +74,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
     )
     @click.option("--reverse", is_flag=True, default=False, help="Reverse sort order.")
     @click.option(
+        "--state",
+        type=click.Choice(["synced", "not-synced", "pending", "failed", "excluded", "all"]),
+        default="synced",
+        show_default=True,
+        help=(
+            "Which pool state to show: synced (indexed docs), pending (scanned, "
+            "not fetched), failed, excluded, not-synced (pending+failed+excluded), "
+            "or all."
+        ),
+    )
+    @click.option(
         "--format",
         "-F",
         "fmt",
@@ -81,7 +92,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default="text",
     )
     @click.pass_context
-    def list_cmd(ctx, limit, offset, source, order_by, reverse, fmt, **kwargs):
+    def list_cmd(ctx, limit, offset, source, order_by, reverse, fmt, state, **kwargs):
         """List indexed documents with filtering, sorting, and pagination."""
         if limit < 0:
             raise click.ClickException("--limit must be >= 0")
@@ -90,6 +101,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         _configure_list_logging(ctx.obj["verbose"])
         from common.core.config import load_config
+        from core.pool_rows import row_sort_key, select_pool_rows
         from storage.sqlite_store import SQLiteStore
 
         config = load_config()
@@ -99,14 +111,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
         # If limit is 0, fetch all items (use a large limit)
         effective_limit = limit if limit > 0 else 999999
 
-        all_docs = store.list_documents_extended(
-            source=source,
-            filters=filters,
-            order_by=order_by,
-            reverse=reverse,
-            limit=effective_limit + offset,
-        )
-        docs = all_docs[offset : offset + effective_limit]
+        rows: list[dict] = []
+        if state in ("synced", "all"):
+            rows += store.list_documents_extended(
+                source=source,
+                filters=filters,
+                order_by=order_by,
+                reverse=reverse,
+                limit=effective_limit + offset,
+            )
+        if state != "synced":
+            rows += select_pool_rows(store, source, state, filters)
+
+        rows.sort(key=lambda r: row_sort_key(r, order_by), reverse=not reverse)
+        docs = rows[offset : offset + effective_limit]
 
         if not docs:
             click.echo("No documents found.", err=True)
@@ -146,6 +164,10 @@ def _print_text(docs: list[dict]) -> None:
         meta_parts = []
         if date:
             meta_parts.append(f"date={date}")
+        if doc.get("pool_status"):
+            meta_parts.append(f"status={doc['pool_status']}")
+            if doc.get("scan_at"):
+                meta_parts.append(f"scanned={doc['scan_at'][:10]}")
         if doc.get("duration_seconds"):
             meta_parts.append(f"duration={fmt_duration(doc['duration_seconds'])}")
         if doc.get("privacy_status"):
@@ -175,16 +197,19 @@ def _print_table(docs: list[dict], source: str | None) -> None:
         return
 
     plugin = source or docs[0]["source_plugin"]
+    show_status = any("pool_status" in d for d in docs)
+    status_col = f"{'STATUS':<10} " if show_status else ""
 
     if plugin == "youtube":
         click.echo(
-            f"{'HANDLE':<25} {'TITLE':<30} {'CHANNEL':<12} {'DATE':<12} {'DURATION':<10} {'PRIVACY':<8} {'URL':<40}"
+            f"{'HANDLE':<25} {status_col}{'TITLE':<30} {'CHANNEL':<12} {'DATE':<12} {'DURATION':<10} {'PRIVACY':<8} {'URL':<40}"
         )
         click.echo("-" * 160)
 
         for doc in docs:
             handle = doc["handle"][:24]
             title = doc["title"][:29]
+            status = f"{(doc.get('pool_status') or '')[:9]:<10} " if show_status else ""
             channel_handle = doc.get("metadata", {}).get("channel_handle")
             channel_title = doc.get("metadata", {}).get("channel_title")
             channel = (
@@ -199,30 +224,32 @@ def _print_table(docs: list[dict], source: str | None) -> None:
             url = (doc.get("url") or "")[:39]
 
             click.echo(
-                f"{handle:<25} {title:<30} {channel:<12} {date:<12} {dur:<10} {priv:<8} {url:<40}"
+                f"{handle:<25} {status}{title:<30} {channel:<12} {date:<12} {dur:<10} {priv:<8} {url:<40}"
             )
     elif plugin == "obsidian":
-        click.echo(f"{'HANDLE':<25} {'TITLE':<40} {'DATE':<12} {'SIZE':<10}")
+        click.echo(f"{'HANDLE':<25} {status_col}{'TITLE':<40} {'DATE':<12} {'SIZE':<10}")
         click.echo("-" * 90)
 
         for doc in docs:
             handle = doc["handle"][:24]
             title = doc["title"][:39]
+            status = f"{(doc.get('pool_status') or '')[:9]:<10} " if show_status else ""
             date = doc.get("updated_at", "")[:10] if doc.get("updated_at") else ""
             size = len(doc.get("raw_text", "") or "")
 
-            click.echo(f"{handle:<25} {title:<40} {date:<12} {size:<10}")
+            click.echo(f"{handle:<25} {status}{title:<40} {date:<12} {size:<10}")
     else:
-        click.echo(f"{'HANDLE':<25} {'TITLE':<40} {'SOURCE':<12} {'DATE':<12}")
+        click.echo(f"{'HANDLE':<25} {status_col}{'TITLE':<40} {'SOURCE':<12} {'DATE':<12}")
         click.echo("-" * 92)
 
         for doc in docs:
             handle = doc["handle"][:24]
             title = doc["title"][:39]
+            status = f"{(doc.get('pool_status') or '')[:9]:<10} " if show_status else ""
             src = doc["source_plugin"][:11]
             date = doc.get("updated_at", "")[:10] if doc.get("updated_at") else ""
 
-            click.echo(f"{handle:<25} {title:<40} {src:<12} {date:<12}")
+            click.echo(f"{handle:<25} {status}{title:<40} {src:<12} {date:<12}")
 
 
 def _build_router(source_choices: list[str]) -> APIRouter:
@@ -250,6 +277,11 @@ def _build_router(source_choices: list[str]) -> APIRouter:
             None,
             description="YouTube: public|private|unlisted|members|unknown|non-public",
         ),
+        state: str | None = Query(
+            None,
+            pattern="^(synced|not-synced|pending|failed|excluded|all)$",
+            description="Pool state filter (default: synced — indexed docs only)",
+        ),
         since: str | None = Query(
             None, description="Filter by date: YYYY-MM-DD (inclusive)"
         ),
@@ -264,6 +296,7 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         ),
     ):
         from common.core.config import load_config
+        from core.pool_rows import row_sort_key, select_pool_rows
         from storage.sqlite_store import SQLiteStore, SearchFilters
 
         if source and source not in source_choices:
@@ -286,16 +319,21 @@ def _build_router(source_choices: list[str]) -> APIRouter:
         # If limit is 0, fetch all items
         effective_limit = limit if limit > 0 else 10000
 
-        all_docs = store.list_documents_extended(
-            source=source,
-            filters=filters,
-            order_by=order_by,
-            reverse=reverse,
-            limit=effective_limit + offset + 100,
-        )
+        rows: list[dict] = []
+        if state in (None, "synced", "all"):
+            rows += store.list_documents_extended(
+                source=source,
+                filters=filters,
+                order_by=order_by,
+                reverse=reverse,
+                limit=effective_limit + offset + 100,
+            )
+        if state != "synced":
+            rows += select_pool_rows(store, source, state, filters)
+        rows.sort(key=lambda r: row_sort_key(r, order_by), reverse=not reverse)
 
-        total = len(all_docs)
-        docs = all_docs[offset : offset + effective_limit]
+        total = len(rows)
+        docs = rows[offset : offset + effective_limit]
         return Response(
             content=json.dumps(docs, default=str),
             media_type="application/json",

@@ -46,6 +46,9 @@
     td { padding:6px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
     tr:hover td { background:rgba(15,52,96,.35); }
     tr.selected td { background:rgba(16,185,129,.08); }
+    tr.pool-row td { opacity:.62; }
+    tr.pool-row:hover td { opacity:1; }
+    .pool-status { color:var(--warn); font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
     td.cell { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     td.mono { font-family:ui-monospace,monospace; font-size:12px; color:var(--text-dim); }
     .title-link { color:var(--info); cursor:pointer; text-decoration:none; }
@@ -89,6 +92,14 @@
     <label title="Only show rows where the selected field has no value">
       <input type="checkbox" id="missingOnly"/> only missing
     </label>
+    <select id="viewFilter" title="Which pool state to show">
+      <option value="all">View: all</option>
+      <option value="synced">Synced (indexed)</option>
+      <option value="not-synced">Not synced</option>
+      <option value="pending">Pending (not fetched)</option>
+      <option value="failed">Failed</option>
+      <option value="excluded">Excluded</option>
+    </select>
     <select id="orderBy">
       <option value="date">Sort: date</option>
       <option value="published">Published</option>
@@ -137,7 +148,7 @@ const QUOTA_KEY = 'corpus_browser_quota_until';
 const PREFS_KEY = 'corpus_browser_prefs';
 
 const state = {
-  sources: [], fields: [], ops: [],
+  sources: [], fields: [], ops: [], columns: [],
   items: [], results: [], mode: 'browse', total: 0, offset: 0,
   missingField: '', missingOnly: false,
   order: 'published', orderDesc: true,
@@ -238,6 +249,12 @@ async function loadFields() {
   $('missingFieldSelect').innerHTML = '<option value="">Missing field…</option>' +
     state.fields.map(f => '<option value="' + esc(f.name) + '">' + esc(f.name) + '</option>').join('');
   $('missingOnly').checked = false;
+}
+
+async function loadColumns() {
+  const src = $('sourceFilter').value;
+  const data = await (await fetch(API + '/columns?source=' + encodeURIComponent(src))).json();
+  state.columns = data.columns || [];
   rebuildTableHeaders();
 }
 
@@ -254,9 +271,7 @@ async function loadOps() {
 function currentSource() { return $('sourceFilter').value; }
 
 function dynamicFields() {
-  const src = currentSource();
-  return state.fields.filter(f =>
-    f.applies_to === 'all' || (src && f.applies_to === src));
+  return state.columns || [];
 }
 
 function headerTh(orderVal, label) {
@@ -274,6 +289,8 @@ function rebuildTableHeaders() {
     + headerTh('duration', 'Duration')
     + headerTh('title', 'Title')
     + '<th>Handle</th>'
+    + '<th>Status</th>'
+    + '<th>Scan</th>'
     + dynamicFields().map(f => headerTh('field:' + f.name, f.name)).join('');
   $('selAllPage').onchange = e => toggleSelectPage(e.target.checked);
   document.querySelectorAll('#thead th.sortable').forEach(h => {
@@ -300,17 +317,22 @@ function renderRows(docs) {
   docs.forEach((doc, ix) => {
     const tr = document.createElement('tr');
     const meta = doc.metadata || {};
+    const isPool = doc.pool_status != null;
+    if (isPool) tr.className = 'pool-row';
     if (state.selected.has(doc.handle)) tr.className = 'selected';
     let html = '<td><input type="checkbox" data-handle="' + esc(doc.handle) + '"' +
-      (state.selected.has(doc.handle) ? ' checked' : '') + '/></td>';
+      (state.selected.has(doc.handle) ? ' checked' : '') +
+      (isPool ? ' disabled title="Scan first (pool item, not indexed yet)"' : '') + '/></td>';
     html += '<td class="mono">' + (state.offset + ix + 1) + '</td>';
     const published = cellText(meta.published_at || doc.updated_at).slice(0, 10);
     html += '<td class="mono">' + esc(published) + '</td>';
     html += '<td class="mono">' + esc(doc.raw_text ? String(doc.raw_text).length : '') + '</td>';
     html += '<td>' + esc(doc.duration_seconds ?? '') + 's</td>';
-    html += '<td><a class="title-link" data-handle="' + esc(doc.handle) + '">' +
-      esc(doc.title || 'Untitled') + '</a></td>';
+    html += '<td><a class="title-link' + (isPool ? ' pool-link' : '') + '" data-handle="' + esc(doc.handle) + '">' +
+      esc(doc.title || 'Untitled') + (isPool ? ' ⏳' : '') + '</a></td>';
     html += '<td class="mono">' + esc(doc.handle) + '</td>';
+    html += '<td class="mono">' + (isPool ? '<span class="pool-status">' + esc(doc.pool_status) + '</span>' : '') + '</td>';
+    html += '<td class="mono">' + (isPool ? esc(cellText(doc.scan_at).slice(0, 10)) : '') + '</td>';
     fields.forEach(f => { html += '<td class="cell">' + esc(cellText(meta[f.name])) + '</td>'; });
     tr.innerHTML = html;
     tbody.appendChild(tr);
@@ -349,6 +371,7 @@ function currentParams() {
   const until = $('until').value; if (until) p.set('until', until);
   const min = $('minDuration').value; if (min) p.set('min_duration', min);
   const max = $('maxDuration').value; if (max) p.set('max_duration', max);
+  const view = $('viewFilter').value; if (view && view !== 'all') p.set('state', view);
   if ($('excludeShorts').checked) p.set('video_type', 'long');
   if (state.missingOnly && state.missingField) p.set('missing_field', state.missingField);
   return p;
@@ -423,6 +446,24 @@ function renderPagination() {
 }
 
 function showPreview(handle) {
+  const pool = state.items.find(d => d.handle === handle && d.pool_status != null);
+  if (pool) {
+    $('pTitle').textContent = pool.title || 'Untitled';
+    const m = pool.metadata || {};
+    let metaHtml = 'Source: ' + esc(pool.source_plugin) +
+      ' | Published: ' + esc(cellText(m.published_at).slice(0, 10)) +
+      ' | Duration: ' + esc(cellText(pool.duration_seconds)) + 's' +
+      '<br/><span class="pool-status">' + esc(pool.pool_status) + '</span> — scanned ' +
+      esc((pool.scan_at || '').slice(0, 10)) + ', not synced into the corpus yet. ' +
+      'Run `corpus sync` (or a field sync on the selection) to index it.';
+    if (pool.url) metaHtml += '<br/>Original: <a href="' + esc(pool.url) + '" target="_blank">' + esc(pool.url) + '</a>';
+    $('pMeta').innerHTML = metaHtml;
+    $('pBody').textContent = m.description
+      ? ('No transcript yet (not synced).\n\nDescription:\n' + m.description)
+      : 'No transcript yet (not synced).';
+    $('preview').style.display = 'block';
+    return;
+  }
   fetch(API + '/document/' + encodeURIComponent(handle)).then(r => r.json()).then(doc => {
     $('pTitle').textContent = doc.title || 'Untitled';
     let meta = 'Source: ' + esc(doc.source_plugin) +
@@ -567,6 +608,7 @@ async function pollSyncJob(jobId) {
     showBanner(msg, res.failures && res.failures.length ? 'err' : 'ok');
     clearSelection();
     loadFields();
+    loadColumns();
     if (state.mode === 'search') search(); else browse(state.offset);
     return;
   }
@@ -582,11 +624,12 @@ async function pollSyncJob(jobId) {
 // ── wiring ───────────────────────────────────────────────────────────────────
 $('searchBtn').onclick = search;
 $('browseBtn').onclick = () => browse(0);
-$('applyBtn').onclick = () => { savePrefs(); loadFields(); browse(0); };
-$('sourceFilter').onchange = () => { savePrefs(); loadFields(); browse(0); };
+$('applyBtn').onclick = () => { savePrefs(); loadFields(); loadColumns(); browse(0); };
+$('sourceFilter').onchange = () => { savePrefs(); loadFields(); loadColumns(); browse(0); };
 $('excludeShorts').onchange = () => { savePrefs(); browse(0); };
 $('orderBy').onchange = () => { state.order = $('orderBy').value; browse(0); };
 $('orderDesc').onchange = () => { state.orderDesc = $('orderDesc').checked; browse(0); };
+  $('viewFilter').onchange = () => { browse(0); };
 $('missingFieldSelect').onchange = () => { state.missingField = $('missingFieldSelect').value; browse(0); };
 $('missingOnly').onchange = () => { state.missingOnly = $('missingOnly').checked; browse(0); };
 $('syncBtn').onclick = () => startSync($('syncFieldSelect').value);
@@ -597,7 +640,7 @@ $('clearSel').onclick = clearSelection;
 (async function init() {
   await loadSources();
   restorePrefs();
-  await Promise.all([loadFields(), loadOps()]);
+  await Promise.all([loadFields(), loadColumns(), loadOps()]);
   browse(0);
 })();
 </script>

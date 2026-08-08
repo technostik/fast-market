@@ -336,3 +336,61 @@ def test_list_command_table_format(mock_env, runner):
     assert "HANDLE" in result.output
     assert "TITLE" in result.output
     assert "---" in result.output
+
+
+def _seed_pool(config_dict):
+    from storage.sqlite_store import SQLiteStore
+
+    store = SQLiteStore(config_dict["db_path"])
+    store.upsert_pool_item(
+        "youtube", "poolvid1", "pending",
+        {"title": "Pending Video", "published_at": "2026-01-02T00:00:00Z"},
+    )
+    store.upsert_pool_item(
+        "youtube", "poolvid2", "excluded",
+        {"title": "Excluded Video", "published_at": "2026-01-03T00:00:00Z"},
+    )
+    return store
+
+
+def test_list_command_state_default_is_synced_only(mock_env, runner, config_dict):
+    _seed_pool(config_dict)
+    main = _main_with_reload()
+
+    result = runner.invoke(main, ["list", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "No documents found."  # no indexed docs → nothing listed
+
+
+def test_list_command_state_pending(mock_env, runner, config_dict):
+    _seed_pool(config_dict)
+    main = _main_with_reload()
+
+    result = runner.invoke(main, ["list", "--state", "pending", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["handle"] == "pool:youtube:poolvid1"
+    assert data[0]["pool_status"] == "pending"
+
+
+def test_list_command_state_all(mock_env, runner, config_dict):
+    _seed_pool(config_dict)
+    main = _main_with_reload()
+
+    result = runner.invoke(main, ["list", "--state", "all", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    statuses = {d["pool_status"] for d in data}
+    assert statuses == {"pending", "excluded"}
+
+
+def test_list_command_state_text_marks_pool(mock_env, runner, config_dict):
+    _seed_pool(config_dict)
+    main = _main_with_reload()
+
+    result = runner.invoke(main, ["list", "--state", "excluded", "--format", "text"])
+    assert result.exit_code == 0, result.output
+    assert "Excluded Video" in result.output
+    assert "status=excluded" in result.output
+    assert "scanned=" in result.output

@@ -25,6 +25,17 @@ Replaces the need for separate get-last command (use --limit 1).
 - `--source obsidian` — Obsidian notes only
 - No flag — all sources
 
+### State Filtering (pool)
+- `--state synced` — indexed documents only (default)
+- `--state pending` — scanned pool items whose content was not fetched yet
+- `--state failed` — pool items whose fetch/sync failed
+- `--state excluded` — pool items the user excluded
+- `--state not-synced` — pending + failed + excluded together
+- `--state all` — indexed documents + every non-synced pool item
+- Pool rows are prefixed `pool:` in the handle and carry `pool_status`/`scan_at`.
+- Row conversion, filtering and sorting are shared with the corpus_browser
+  webux plugin via `core/pool_rows.py` — keep both surfaces in sync.
+
 ### YouTube-Specific Filters
 - `--type short` — videos ≤60s
 - `--type long` — videos >60s

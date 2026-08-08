@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 import threading
 import uuid
@@ -11,11 +10,13 @@ from typing import Any, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
+from common import structlog
+
 router = APIRouter()
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 # ─── In-memory background job registry ────────────────────────────────────────
@@ -141,11 +142,11 @@ def _operation_list() -> list[dict[str, Any]]:
     ]
 
 
-def _scan_source_worker(backend: dict[str, Any], plugin, debug: bool = False):
+def _scan_source_worker(store: Any, plugin, debug: bool = False):
     """Thin wrapper over core.scan — tests fake quota mid-walk through this."""
     from core.scan import scan_source
 
-    return scan_source(plugin, backend["store"], debug=debug)
+    return scan_source(plugin, store, debug=debug)
 
 
 # ─── API: fields, operations, sources ─────────────────────────────────────────
@@ -184,6 +185,58 @@ def get_sources():
 
 # ─── browse / search / document / stats ───────────────────────────────────────
 
+# Pool rows (scanned but not yet indexed) reuse the doc row shape; the row
+# conversion, filtering and sorting live in core.pool_rows, shared with the CLI.
+from core.pool_rows import select_pool_rows
+
+# Metadata keys already surfaced as first-class columns — never repeated as
+# extra per-source columns.
+_CORE_META_COLUMNS = {
+    "id", "title", "url", "duration_seconds", "published_at", "updated_at",
+}
+
+
+def _source_extra_meta_keys(store: Any, source: str) -> set[str]:
+    """Metadata keys present on docs/pool items of one source (column candidates)."""
+    keys: set[str] = set()
+    try:
+        docs = store.list_documents_extended(
+            source=source, order_by="date", limit=120
+        )
+        for doc in docs:
+            keys |= set(doc.get("metadata", {}).keys())
+    except Exception as exc:  # malformed metadata must not break the column list
+        logger.warning("extra_meta_keys_scan_failed", error=str(exc))
+    try:
+        for item in store.get_pool_items(source, status=None):
+            keys |= set((item.get("metadata") or {}).keys())
+    except Exception as exc:
+        logger.warning("extra_meta_keys_pool_failed", error=str(exc))
+    return keys - _CORE_META_COLUMNS
+
+
+@router.get("/columns")
+def columns(
+    source: Optional[str] = Query(None, description="Columns for one source, or common ones"),
+):
+    """Extra table columns.
+
+    Without a source: only common declared fields (applies_to=all).
+    With a source: all declared fields applicable to that source plus every
+    metadata key this source's plugin stores (documents + scanned pool).
+    """
+    all_fields = _backend_factory()["store"].list_field_definitions()
+    if source:
+        applicable = [f for f in all_fields if f.get("applies_to") in ("all", source)]
+        declared = [{"name": f["name"], "kind": "field"} for f in applicable]
+        meta_keys = sorted(_source_extra_meta_keys(_backend_factory()["store"], source))
+        return {
+            "source": source,
+            "columns": [{"name": k, "kind": "meta"} for k in meta_keys] + declared,
+        }
+    common = [f for f in all_fields if f.get("applies_to") == "all"]
+    return {"source": None, "columns": [{"name": f["name"], "kind": "field"} for f in common]}
+
 
 @router.get("/browse")
 def browse(
@@ -198,7 +251,14 @@ def browse(
     order_by: str = Query("date"),
     order_desc: bool = Query(True),
     missing_field: Optional[str] = Query(None),
+    state: Optional[str] = Query(
+        None,
+        pattern="^(all|synced|not-synced|pending|failed|excluded)$",
+        description="Which pool state to show: all (default), synced (indexed "
+        "docs only), not-synced (pending/failed/excluded), or one state.",
+    ),
 ):
+    from core.pool_rows import row_sort_key
     from storage.sqlalchemy_store import SearchFilters
 
     if order_by.startswith("field:"):
@@ -220,17 +280,23 @@ def browse(
         missing_field=missing_field,
     )
     try:
-        total = store.count_documents(source=source, filters=filters)
-        docs = store.list_documents_extended(
-            source=source,
-            filters=filters,
-            order_by=order_by,
-            reverse=not order_desc,
-            limit=offset + limit,
-        )
+        docs = []
+        if state != "not-synced":
+            docs = store.list_documents_extended(
+                source=source,
+                filters=filters,
+                order_by=order_by,
+                reverse=not order_desc,
+                limit=200000,
+            )
+        pool_rows = select_pool_rows(store, source, state, filters)
+        total = len(docs) + len(pool_rows)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"items": docs[offset: offset + limit], "total": total}
+
+    rows = docs + pool_rows
+    rows.sort(key=lambda r: row_sort_key(r, order_by), reverse=order_desc)
+    return {"items": rows[offset: offset + limit], "total": total}
 
 
 @router.get("/search")
@@ -358,6 +424,7 @@ def _run_scan_job(job_id: str) -> None:
             _update_job(job_id, result=result)
         _update_job(job_id, status="done", result=result, finished_at=_now_iso())
     except Exception as exc:
+        logger.exception("corpus_browser_scan_job_failed", job_id=job_id, source=source_req)
         _update_job(job_id, status="error", error=_map_error(exc), result=result)
 
 
@@ -467,6 +534,11 @@ def _run_sync_job(job_id: str) -> None:
         }
         _update_job(job_id, status="done", result=result, finished_at=_now_iso())
     except Exception as exc:
+        logger.exception(
+            "corpus_browser_sync_job_failed",
+            job_id=job_id,
+            field=payload.get("field"),
+        )
         _update_job(job_id, status="error", error=_map_error(exc), result=result)
 
 
