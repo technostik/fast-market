@@ -7,15 +7,15 @@ from common.core.profile import SHARED, resolve_profile
 
 
 def _xdg_config_home() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")).expanduser()
 
 
 def _xdg_data_home() -> Path:
-    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")).expanduser()
 
 
 def _xdg_cache_home() -> Path:
-    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")).expanduser()
 
 
 # ─── Profile-scoped roots ─────────────────────────────────────────────────────

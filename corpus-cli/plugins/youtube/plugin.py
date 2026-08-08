@@ -4,13 +4,16 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from googleapiclient.errors import HttpError
+
 from common import structlog
 from common.youtube.transport import RSSPlaylistTransport, Transport
-from common.youtube.client import YouTubeClient
+from common.youtube.client import YouTubeClient, _is_quota_exceeded_error
 from common.youtube.auth import YouTubeOAuth
 
 from core.models import Document
 from core.sync_errors import (
+    APIRateLimitError,
     NetworkError,
     TranscriptUnavailableError,
     VideoBlockedError,
@@ -22,6 +25,15 @@ logger = structlog.get_logger(__name__)
 _PUBLIC_STATUSES = {"public"}
 
 
+def _retry_after_seconds(e: HttpError) -> int | None:
+    """Extract Retry-After (seconds) from a googleapiclient HttpError, if present."""
+    try:
+        value = e.resp.get("Retry-After")
+        return int(value) if value else None
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def _format_duration(seconds: int) -> str:
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
@@ -30,6 +42,7 @@ def _format_duration(seconds: int) -> str:
 
 class YouTubePlugin(SourcePlugin):
     name = "youtube"
+    requeue_on = "public"  # failed pool item → pending when privacy_status becomes this
 
     def __init__(
         self, config: dict[str, object], transport: Transport | None = None
@@ -131,8 +144,6 @@ class YouTubePlugin(SourcePlugin):
         scan_all: bool = False,
         debug: bool = False,
     ) -> list[ItemMeta]:
-        from googleapiclient.errors import HttpError
-
         known = set(known_id_dates or {})
         all_new: list[ItemMeta] = []
         skipped_known = 0
@@ -208,10 +219,11 @@ class YouTubePlugin(SourcePlugin):
                     logger.info("youtube_api_public_fetch", returned=len(videos))
 
         except HttpError as e:
-            if e.resp.status == 403 and "quota" in str(e).lower():
+            if _is_quota_exceeded_error(e):
                 logger.error("youtube_api_quota_exceeded", channel_id=self.channel_id)
-                raise RuntimeError(
-                    "YouTube API quota exceeded. Try again later or use RSS mode."
+                raise APIRateLimitError(
+                    "YouTube API quota exceeded. Try again later or use RSS mode.",
+                    retry_after_seconds=_retry_after_seconds(e),
                 ) from e
             raise
 
@@ -473,10 +485,17 @@ class YouTubePlugin(SourcePlugin):
                 logger.info("whisper_failed", video_id=video_id, error=str(exc)[:100])
                 last_error = exc
 
-        # If all fallbacks failed
+        # If all fallbacks failed, classify as permanent (transcript genuinely
+        # unavailable) unless the cause was transient (IP block, quota, network).
         if transcript is None:
-            raise VideoBlockedError(
-                f"All transcript methods failed for {video_id}: {last_error}"
+            if isinstance(
+                last_error, (VideoBlockedError, APIRateLimitError, NetworkError)
+            ):
+                raise VideoBlockedError(
+                    f"All transcript methods failed for {video_id}: {last_error}"
+                )
+            raise TranscriptUnavailableError(
+                f"No transcript available for {video_id}"
             )
 
         raw_text = (

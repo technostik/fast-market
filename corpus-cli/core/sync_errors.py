@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 
 class SyncError(Exception):
     """Base sync error with retry policy."""
@@ -22,7 +24,26 @@ class VideoBlockedError(SyncError):
 
 
 class APIRateLimitError(SyncError):
+    """YouTube API quota/rate limit exceeded — transient, retry after reset."""
+
     permanent = False
+
+    def __init__(
+        self, message: str, retry_after_seconds: int | None = None
+    ) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        self.quota_reset_at: str | None = None
+        if retry_after_seconds is not None:
+            self.quota_reset_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=retry_after_seconds)
+            ).isoformat()
+
+
+class MissingInputFieldError(SyncError):
+    """An operation requires an input field that is missing/undeclared."""
+
+    permanent = True
 
 
 class NetworkError(SyncError):

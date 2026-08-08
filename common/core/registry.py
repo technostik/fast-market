@@ -52,6 +52,42 @@ def discover_plugins(
     return manifests
 
 
+def discover_operations(
+    config: dict,
+    *,
+    tool_root: str | Path | None,
+    operation_package: str = "operations",
+) -> dict[str, "OperationManifest"]:
+    """Discover operation manifests for the given tool root."""
+    from operations.base import OperationManifest
+
+    operations_dir = _resolve_tool_root(tool_root) / "operations"
+    if not operations_dir.exists():
+        return {}
+    manifests: dict[str, OperationManifest] = {}
+
+    for entry in sorted(operations_dir.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("_"):
+            continue
+        if not (entry / "register.py").exists():
+            continue
+        mod_path = f"{operation_package}.{entry.name}.register"
+        mod = importlib.import_module(mod_path)
+        if not hasattr(mod, "register"):
+            raise RuntimeError(
+                f"FAIL LOUDLY: {mod_path} exists but has no register() function"
+            )
+        manifest: OperationManifest = mod.register(config)
+        if not isinstance(manifest, OperationManifest):
+            raise TypeError(
+                f"FAIL LOUDLY: {mod_path}.register() must return OperationManifest, "
+                f"got {type(manifest)}"
+            )
+        manifests[manifest.name] = manifest
+
+    return manifests
+
+
 def discover_commands(
     plugin_manifests: dict | None = None,
     *,

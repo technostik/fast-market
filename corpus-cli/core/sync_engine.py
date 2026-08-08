@@ -183,15 +183,6 @@ class SyncEngine:
 
         if processed == 0 and len(items) == 0:
             last_error = self._last_error
-            if last_error and "quota" in str(last_error).lower():
-                logger.error(
-                    "sync_quota_error",
-                    source=plugin.name,
-                    message=f"YouTube API quota exceeded: {last_error}",
-                )
-                raise RuntimeError(
-                    f"YouTube API quota exceeded. {last_error}. Try again later or use --non-public (RSS mode)."
-                )
             if last_error:
                 logger.warning(
                     "sync_no_items_with_error",
@@ -305,6 +296,86 @@ class SyncEngine:
             warning = f"All {len(pool_items)} pool items skipped (permanent failures)."
 
         return SyncResult(plugin.name, processed, indexed, skipped, failures, warning=warning)
+
+    def sync_field(
+        self,
+        field_name: str,
+        operation,
+        source: str | None = None,
+        limit: int = 1000,
+        handles: list[str] | None = None,
+        vault_path: str | None = None,
+    ) -> SyncResult:
+        """Fill a declared soft field on documents missing it.
+
+        For each document lacking `field_name` the operation computes a value
+        which is written back via `set_document_field`. Only declared fields
+        are accepted (the store fails loudly otherwise).
+        """
+        docs = self.store.get_documents_missing_field(
+            field_name, source=source, limit=limit
+        )
+        if handles:
+            wanted = set(handles)
+            docs = [d for d in docs if d.get("handle") in wanted]
+
+        processed = indexed = skipped = 0
+        failures: list[SyncFailure] = []
+        for doc in docs:
+            source_id = doc.get("source_id", "?")
+            plugin_name = doc.get("source_plugin", "?")
+            processed += 1
+            try:
+                value = operation.run(doc)
+            except SyncError as exc:
+                error_type = "permanent" if exc.permanent else "transient"
+                self.store.record_failure(
+                    plugin_name, source_id, str(exc), error_type, vault_path
+                )
+                logger.error(
+                    "sync_field_failed",
+                    source=plugin_name,
+                    source_id=source_id,
+                    field=field_name,
+                    error_type=error_type,
+                    error=str(exc),
+                )
+                failures.append(SyncFailure(source_id=source_id, error=str(exc)))
+                continue
+            except Exception as exc:
+                self.store.record_failure(
+                    plugin_name, source_id, str(exc), "transient", vault_path
+                )
+                logger.error(
+                    "sync_field_failed",
+                    source=plugin_name,
+                    source_id=source_id,
+                    field=field_name,
+                    error_type="transient",
+                    error=str(exc),
+                )
+                failures.append(SyncFailure(source_id=source_id, error=str(exc)))
+                continue
+
+            updated = self.store.set_document_field(
+                plugin_name, source_id, field_name, value
+            )
+            if updated:
+                indexed += 1
+            else:
+                skipped += 1
+
+        warning: str | None = None
+        if processed == 0:
+            warning = f"No documents missing field '{field_name}'."
+        return SyncResult(
+            source or "all",
+            processed,
+            indexed,
+            skipped,
+            failures,
+            warning=warning,
+        )
 
     def reindex(self, plugin: SourcePlugin) -> ReindexResult:
         rows = self.store.get_documents_raw(plugin.name)

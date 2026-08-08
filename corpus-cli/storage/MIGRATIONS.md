@@ -17,6 +17,15 @@
 - Store startup runs `alembic upgrade head` automatically for file-backed DBs.
 - If migration fails, code must fail loudly and raise.
 
+## Pre-migration backups
+
+Before an existing file-backed DB is migrated, `run_alembic_migrations`
+(see `common/storage/base.py`) writes a consistent snapshot to
+`<db_dir>/backups/<name>.pre-migration-<timestamp>.db` using the sqlite3
+online backup API. The newest 5 are kept. No backup is created when the DB
+is already at the head revision or does not exist yet. If the snapshot
+cannot be written, migration is not attempted (FAIL LOUDLY).
+
 Create a new migration:
 
 1. Add model changes in `storage/models.py`.

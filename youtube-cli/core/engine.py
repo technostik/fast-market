@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from common import structlog
-from common.youtube.auth import YouTubeOAuth, get_client_secret_path
+from common.youtube.auth import YouTubeOAuth, resolve_client_secret_path
 from common.core.config import load_tool_config, load_youtube_config
 from common.youtube import YouTubeClient
 
@@ -36,20 +36,11 @@ def build_youtube_client(config: Optional[dict] = None) -> YouTubeClient:
         if quota_limit is None:
             quota_limit = common_cfg.get("quota_limit", 10000)
 
-    if not client_secret:
-        client_secret = get_client_secret_path()
-        if not Path(client_secret).exists():
-            raise FileNotFoundError(
-                f"client_secret.json not found at {client_secret}. "
-                "Download from Google Cloud Console."
-            )
-    else:
-        client_secret = str(Path(client_secret).expanduser())
-
+    client_secret = resolve_client_secret_path(client_secret)
     if not Path(client_secret).exists():
         raise FileNotFoundError(
-            f"Client secret not found: {client_secret}. "
-            "Download from Google Cloud Console and place in config directory."
+            f"client_secret.json not found at {client_secret}. "
+            "Download from Google Cloud Console."
         )
 
     auth = YouTubeOAuth(client_secret)

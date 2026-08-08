@@ -32,6 +32,7 @@ corpus-agent/
 | `corpus status` | Show corpus statistics |
 | `corpus serve` | Start web server |
 | `corpus embed-server` | Start embedding server |
+| `corpus field` | Declare/manage soft fields (create, list, delete, missing, set) |
 
 ### Sync Modes
 

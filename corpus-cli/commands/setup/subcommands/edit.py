@@ -24,7 +24,7 @@ def register(plugin_manifests: dict) -> click.Command:
             # Only edit shared youtube config
             yt_cfg_path.parent.mkdir(parents=True, exist_ok=True)
             if not yt_cfg_path.exists():
-                yt_cfg_path.write_text("# Shared YouTube configuration\nchannel_id: \"\"\n# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json\nquota_limit: 10000\n")
+                yt_cfg_path.write_text("# Shared YouTube configuration\nchannel_id: \"\"\n# client_secret_path: ~/.config/fast-market/profiles/<profile>/common/youtube/client_secret.json\nquota_limit: 10000\n")
             click.echo(f"Opening shared youtube config: {yt_cfg_path}")
             open_editor(yt_cfg_path)
         else:
@@ -39,7 +39,7 @@ def register(plugin_manifests: dict) -> click.Command:
             click.echo(f"Opening shared youtube config: {yt_cfg_path}")
             yt_cfg_path.parent.mkdir(parents=True, exist_ok=True)
             if not yt_cfg_path.exists():
-                yt_cfg_path.write_text("# Shared YouTube configuration\nchannel_id: \"\"\n# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json\nquota_limit: 10000\n")
+                yt_cfg_path.write_text("# Shared YouTube configuration\nchannel_id: \"\"\n# client_secret_path: ~/.config/fast-market/profiles/<profile>/common/youtube/client_secret.json\nquota_limit: 10000\n")
             open_editor(yt_cfg_path)
 
     return edit_cmd

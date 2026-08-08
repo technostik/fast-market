@@ -8,6 +8,13 @@ from click.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# Manual diagnostic scripts that hit the real YouTube API/yt-dlp/OAuth/network.
+# Run directly (python tests/test_member_video.py), not collected by pytest.
+collect_ignore = [
+    "test_member_video.py",
+    "test_member_video_bndvzwbgNSE.py",
+]
+
 from core.embedder import Embedder
 from plugins.youtube.plugin import Transport
 from storage.sqlite_store import SQLiteStore

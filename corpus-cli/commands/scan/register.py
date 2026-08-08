@@ -4,10 +4,11 @@ import click
 
 from commands.base import CommandManifest
 from commands.helpers import build_engine, out
+from core.sync_errors import APIRateLimitError
 
-# Scan always attempts to get the full channel inventory.
-# The YouTube API caps at 10 pages × 100 videos = 1 000 videos per call.
-_YT_SCAN_LIMIT = 9999  # effectively "all pages"
+# Scan always attempts to get the full inventory.
+# YouTube API caps at 10 pages × 100 videos = 1 000 videos per call.
+_SCAN_LIMIT = 9999  # effectively "all pages"
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -17,10 +18,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "scan",
         help=(
             "Discover new items and add them to the sync pool.\n\n"
-            "YouTube: fetches the full channel inventory via API and stores every "
-            "video (public, private, unlisted, members-only) with its current privacy "
-            "status. Re-running scan refreshes that status so videos that became public "
-            "are automatically routed to the public sync path on the next 'corpus sync'.\n\n"
+            "Plugins with a full-inventory discovery path (scan_all) are walked "
+            "generically: every item is added to the pool with its current "
+            "metadata. Re-running scan refreshes that metadata so e.g. YouTube "
+            "videos that became public are automatically routed to the public "
+            "sync path on the next 'corpus sync'.\n\n"
             "Obsidian: opens an interactive TUI to browse the vault and select "
             "files/folders to include, remove, or exclude."
         ),
@@ -28,8 +30,17 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--source", type=click.Choice(source_choices), default="all")
     @click.option("--silent", "-s", is_flag=True, default=False)
     @click.option("--debug", is_flag=True, default=False)
+    @click.option(
+        "--auto",
+        is_flag=True,
+        default=False,
+        help=(
+            "Non-interactive: use the generic full-inventory scan for every "
+            "source, skipping the interactive Obsidian TUI."
+        ),
+    )
     @click.pass_context
-    def scan_cmd(ctx, source, silent, debug, **kwargs):
+    def scan_cmd(ctx, source, silent, debug, auto, **kwargs):
         verbose = ctx.obj.get("verbose", True) and not silent
         _engine, plugins, store = build_engine(verbose)
 
@@ -37,34 +48,38 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         for name in targets:
             plugin = plugins[name]
-            if name == "youtube":
-                _scan_youtube(plugin, store, debug)
-            elif name == "obsidian":
+            strategy = getattr(plugin, "scan_strategy", "generic")
+            if strategy == "tui" and not auto:
                 _scan_obsidian(plugin, store)
             else:
-                click.echo(f"scan: no discovery strategy for plugin '{name}'", err=True)
+                _scan_source(plugin, store, debug)
 
     return CommandManifest(name="scan", click_command=scan_cmd)
 
 
-def _scan_youtube(plugin, store, debug: bool) -> None:
-    """Full-channel scan: discovers new videos and refreshes privacy status of
-    existing pending/failed pool items.
+def _scan_source(plugin, store, debug: bool) -> None:
+    """Generic full-inventory scan for any plugin whose list_items supports
+    scan_all=True.
 
-    Only synced/excluded IDs are passed as 'known' so the API returns fresh
-    metadata for pending/failed items too — allowing detection of privacy changes.
+    Adds genuinely new items to the pool as 'pending' and refreshes the pool
+    metadata of existing pending/failed items so status changes are detected.
+    Synced/excluded/indexed IDs are passed as 'known' so the plugin skips them.
+
+    Plugins that re-queue on a state change (e.g. YouTube: a 'failed' item that
+    became 'public' is reset to 'pending') can declare `requeue_on` describing
+    the new-state value; defaults to nothing.
     """
     import inspect
     from datetime import datetime
 
     # Load current pool and document state upfront
-    all_pool = store.get_pool_items("youtube", status=None)
+    all_pool = store.get_pool_items(plugin.name, status=None)
     pool_by_id: dict[str, dict] = {item["source_id"]: item for item in all_pool}
-    indexed_ids: set[str] = set(store.get_indexed_id_dates("youtube").keys())
+    indexed_ids: set[str] = set(store.get_indexed_id_dates(plugin.name).keys())
 
     # Pass synced/excluded/indexed IDs as "known" so the API skips them.
     # pending/failed IDs are NOT in known → the API returns them so we can
-    # refresh their privacy status.
+    # refresh their metadata.
     skip_ids: set[str] = (
         {sid for sid, item in pool_by_id.items() if item["status"] in ("synced", "excluded")}
         | indexed_ids
@@ -72,7 +87,7 @@ def _scan_youtube(plugin, store, debug: bool) -> None:
     known_id_dates = {sid: None for sid in skip_ids}
 
     list_kwargs: dict = {
-        "limit": _YT_SCAN_LIMIT,
+        "limit": _SCAN_LIMIT,
         "known_id_dates": known_id_dates,
         "scan_all": True,
         "debug": debug,
@@ -80,61 +95,63 @@ def _scan_youtube(plugin, store, debug: bool) -> None:
     # scan_all is the new param; fall back gracefully if the plugin doesn't have it yet
     sig = inspect.signature(plugin.list_items)
     if "scan_all" not in sig.parameters:
-        list_kwargs.pop("scan_all")
+        raise click.ClickException(
+            f"scan: plugin '{plugin.name}' has no scan_all discovery path"
+        )
 
     try:
         items = plugin.list_items(**list_kwargs)
-    except RuntimeError as e:
-        if "quota" in str(e).lower():
-            raise click.ClickException(
-                "YouTube API quota exceeded. Try again later."
-            )
-        raise
+    except APIRateLimitError as e:
+        raise click.ClickException(str(e)) from e
 
     now = datetime.utcnow().isoformat()
     added = refreshed = requeued = 0
 
+    # Plugin hook: which metadata state change re-queues a failed pool item.
+    requeue_on = getattr(plugin, "requeue_on", None)
+
     for item in items:
         sid = item.source_id
-        new_privacy = (item.metadata or {}).get("privacy_status", "unknown")
+        new_meta = _item_meta(item)
 
         if sid in pool_by_id:
             existing = pool_by_id[sid]
-            old_privacy = (existing.get("metadata") or {}).get("privacy_status", "unknown")
             pool_status = existing["status"]
 
-            if old_privacy != new_privacy:
-                # Privacy changed — update metadata in pool
+            if existing.get("metadata") != new_meta:
+                # Metadata changed — update metadata in pool
                 store.upsert_pool_item(
-                    "youtube", sid, pool_status,
-                    _yt_meta(item),
+                    plugin.name, sid, pool_status,
+                    new_meta,
                     added_at=existing["added_at"],
                 )
                 refreshed += 1
-                # Re-queue failed items that are now public so the next sync
-                # can fetch their transcript without API captions
-                if new_privacy == "public" and pool_status == "failed":
-                    store.mark_pool_item("youtube", sid, "pending")
+                # Re-queue failed items whose state changed to the requeue-on
+                # state (e.g. YouTube: failed → now public → pending).
+                if pool_status == "failed" and requeue_on and new_meta.get(
+                    "privacy_status"
+                ) == requeue_on:
+                    store.mark_pool_item(plugin.name, sid, "pending")
                     requeued += 1
         elif sid not in indexed_ids:
-            # Genuinely new video — not yet in pool or indexed
-            store.upsert_pool_item("youtube", sid, "pending", _yt_meta(item), added_at=now)
+            # Genuinely new item — not yet in pool or indexed
+            store.upsert_pool_item(plugin.name, sid, "pending", new_meta, added_at=now)
             added += 1
 
     pool_stats = store.pool_stats()
-    yt_pool = next((p for p in pool_stats if p["source_plugin"] == "youtube"), {})
+    src_pool = next((p for p in pool_stats if p["source_plugin"] == plugin.name), {})
 
     click.echo(
-        f"youtube: {added} new · {refreshed} status refreshed "
-        f"({requeued} re-queued public)  "
-        f"[pool  pending={yt_pool.get('pending', 0)}  "
-        f"synced={yt_pool.get('synced', 0)}  "
-        f"failed={yt_pool.get('failed', 0)}]"
+        f"{plugin.name}: {added} new · {refreshed} metadata refreshed "
+        f"({requeued} re-queued)  "
+        f"[pool  pending={src_pool.get('pending', 0)}  "
+        f"synced={src_pool.get('synced', 0)}  "
+        f"failed={src_pool.get('failed', 0)}]"
     )
 
 
-def _yt_meta(item) -> dict:
-    """Pool metadata for a YouTube ItemMeta — always includes updated_at so
+def _item_meta(item) -> dict:
+    """Pool metadata for an ItemMeta — always includes updated_at so
     sync_pool_items can reconstruct the publication date from the pool."""
     meta = dict(item.metadata or {})
     if item.updated_at and "updated_at" not in meta:

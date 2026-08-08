@@ -23,6 +23,13 @@ The `since` parameter is accepted for interface compatibility but intentionally 
 
 Tests inject a fake `Transport` to avoid real API calls.
 
+## Quota errors
+
+API calls that hit the daily quota raise `APIRateLimitError` (from
+`core/sync_errors`) with `retry_after_seconds` / `quota_reset_at` when the
+`Retry-After` header is present. Commands convert it to a clean
+`click.ClickException` — never string-match on `"quota"` in errors.
+
 ## Privacy status
 
 `privacyStatus` is fetched via the `status` part of `videos.list`.

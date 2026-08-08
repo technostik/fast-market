@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
 from common import structlog
-from sqlalchemy import text, select, delete
+from sqlalchemy import text, select, delete, func
 from sqlalchemy.orm import Session
 
 from core.models import Chunk, Document, SearchResult
@@ -18,12 +19,22 @@ from common.storage.base import (
     run_alembic_migrations,
     session_scope,
 )
-from storage.models import ChunkModel, DocumentModel, PoolItemModel, SyncFailureModel
+from storage.models import (
+    ChunkModel,
+    DocumentModel,
+    FieldDefinitionModel,
+    PoolItemModel,
+    SyncFailureModel,
+)
 
 logger = structlog.get_logger(__name__)
 
 YOUTUBE_SHORT_MAX_SECONDS = 60
 MAX_TRANSIENT_RETRIES = 3
+
+# Field names become JSON object keys written into metadata_json and are used
+# inside json_extract(metadata_json, '$.<name>') paths — keep them safe.
+_FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class SearchFilters:
@@ -475,7 +486,12 @@ class SQLAlchemyStore:
             "duration": "COALESCE(duration_seconds, 0)",
             "title": "title COLLATE NOCASE",
         }
-        order_field = order_field_map.get(order_by, "updated_at")
+        if order_by.startswith("field:"):
+            field_name = order_by.split(":", 1)[1]
+            self._require_field_definition(field_name)
+            order_field = f"json_extract(metadata_json, '$.{field_name}')"
+        else:
+            order_field = order_field_map.get(order_by, "updated_at")
         order_dir = "ASC" if reverse else "DESC"
         query += f" ORDER BY {order_field} {order_dir} LIMIT :limit"
 
@@ -977,6 +993,167 @@ class SQLAlchemyStore:
                 }
             merged[plugin][row["status"]] = int(row["cnt"] or 0)
         return [merged[k] for k in sorted(merged)]
+
+    # ── Field definition (soft column) methods ──────────────────────────────
+
+    @staticmethod
+    def _validate_field_name(name: str) -> None:
+        if not _FIELD_NAME_RE.match(name):
+            raise ValueError(
+                f"Invalid field name '{name}': must match {_FIELD_NAME_RE.pattern}"
+            )
+
+    def _get_field_row(self, session, name: str):
+        return (
+            session.execute(
+                text(
+                    "SELECT id, name, applies_to, description, created_at "
+                    "FROM field_definitions WHERE name=:name"
+                ),
+                {"name": name},
+            )
+            .mappings()
+            .first()
+        )
+
+    def create_field_definition(
+        self,
+        name: str,
+        applies_to: str = "all",
+        description: str | None = None,
+    ) -> dict:
+        """Declare a new soft field. Raises ValueError on invalid or duplicate name."""
+        self._validate_field_name(name)
+        with self._session() as session:
+            existing = session.execute(
+                text("SELECT 1 FROM field_definitions WHERE name=:name"),
+                {"name": name},
+            ).first()
+            if existing:
+                raise ValueError(f"Field '{name}' already defined")
+            session.execute(
+                text(
+                    "INSERT INTO field_definitions (name, applies_to, description, created_at) "
+                    "VALUES (:name, :applies_to, :description, :created_at)"
+                ),
+                {
+                    "name": name,
+                    "applies_to": applies_to,
+                    "description": description,
+                    "created_at": datetime.utcnow().isoformat(),
+                },
+            )
+        return self.get_field_definition(name)
+
+    def get_field_definition(self, name: str) -> dict | None:
+        with self._session() as session:
+            row = self._get_field_row(session, name)
+        return dict(row) if row else None
+
+    def list_field_definitions(self) -> list[dict]:
+        with self._session() as session:
+            rows = (
+                session.execute(
+                    text(
+                        "SELECT id, name, applies_to, description, created_at "
+                        "FROM field_definitions ORDER BY name"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [dict(row) for row in rows]
+
+    def delete_field_definition(self, name: str) -> bool:
+        """Remove a field declaration. Existing metadata_json values are kept."""
+        with self._session() as session:
+            res = session.execute(
+                text("DELETE FROM field_definitions WHERE name=:name"),
+                {"name": name},
+            )
+        return bool(res.rowcount)
+
+    def _require_field_definition(self, name: str) -> None:
+        if self.get_field_definition(name) is None:
+            raise ValueError(
+                f"Field '{name}' is not defined. Declare it with "
+                f"`corpus field create --name {name}`."
+            )
+
+    def get_documents_missing_field(
+        self,
+        field_name: str,
+        source: str | None = None,
+        limit: int = 1000,
+    ) -> list[dict]:
+        """Documents whose metadata_json has no value for a declared field."""
+        self._require_field_definition(field_name)
+        query = select(DocumentModel).where(
+            func.json_extract(DocumentModel.metadata_json, f"$.{field_name}").is_(None)
+        )
+        if source:
+            query = query.where(DocumentModel.source_plugin == source)
+        query = query.order_by(DocumentModel.updated_at.desc()).limit(limit)
+        with self._session() as session:
+            rows = session.scalars(query).all()
+            docs = [self._row_to_doc_dict_model(row) for row in rows]
+        return docs
+
+    def set_document_field(
+        self,
+        source_plugin: str,
+        source_id: str,
+        field_name: str,
+        value: object,
+    ) -> bool:
+        """Write a declared field into a document's metadata_json.
+
+        Raises ValueError for undeclared field names. Returns False when the
+        document does not exist.
+        """
+        self._require_field_definition(field_name)
+        with self._session() as session:
+            row = (
+                session.execute(
+                    text(
+                        "SELECT metadata_json FROM documents "
+                        "WHERE source_plugin=:source_plugin AND source_id=:source_id"
+                    ),
+                    {"source_plugin": source_plugin, "source_id": source_id},
+                )
+                .scalar_one_or_none()
+            )
+            if row is None:
+                return False
+            metadata = json.loads(row or "{}")
+            metadata[field_name] = value
+            session.execute(
+                text(
+                    "UPDATE documents SET metadata_json=:metadata_json "
+                    "WHERE source_plugin=:source_plugin AND source_id=:source_id"
+                ),
+                {
+                    "metadata_json": json.dumps(metadata),
+                    "source_plugin": source_plugin,
+                    "source_id": source_id,
+                },
+            )
+            return True
+
+    @staticmethod
+    def _row_to_doc_dict_model(row: DocumentModel) -> dict:
+        return {
+            "handle": row.handle,
+            "source_plugin": row.source_plugin,
+            "source_id": row.source_id,
+            "title": row.title,
+            "raw_text": row.raw_text,
+            "url": row.url,
+            "updated_at": row.updated_at,
+            "duration_seconds": row.duration_seconds,
+            "privacy_status": row.privacy_status,
+            "metadata": json.loads(row.metadata_json or "{}"),
+        }
 
 
 def _apply_filters(

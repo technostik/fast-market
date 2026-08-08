@@ -33,6 +33,13 @@ def build_engine(verbose: bool):
     return engine, plugins, store
 
 
+def build_operations(config: dict):
+    """Discover operation manifests for the corpus tool root."""
+    from common.core.registry import discover_operations
+
+    return discover_operations(config, tool_root=_TOOL_ROOT)
+
+
 def fmt_duration(seconds: int | None) -> str:
     if not seconds:
         return ""
@@ -77,7 +84,7 @@ def _configure_logging(verbose: bool) -> None:
         logging.getLogger(name).setLevel(level)
 
     try:
-        from common import structlog as _structlog
+        import structlog as _structlog
 
         _structlog.configure(
             wrapper_class=_structlog.make_filtering_bound_logger(level),

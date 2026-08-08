@@ -39,6 +39,7 @@ Provides the persistence layer for document storage, chunk management, and sync 
 - Return `bool` from upsert operations to indicate whether changes occurred
 - Use ID-based cursors for YouTube, date-based for file plugins
 - Make privacy_status nullable (NULL for Obsidian, populated for YouTube)
+- Soft fields: `field_definitions` only *declares* fields; values live in `documents.metadata_json` under the field name (never add a column per field)
 
 ## ❌ Don'ts
 - Don't use raw SQLite store directly (SQLiteStore is deprecated)
@@ -56,6 +57,7 @@ Provides the persistence layer for document storage, chunk management, and sync 
 - To add new cursor strategy: Add method to store (e.g., `get_indexed_timestamps()`)
 - To add document metadata: Update `DocumentModel`, create migration, update `_row_to_doc_dict()`
 - To support new filter types: Add to `SearchFilters` and implement in relevant methods
+- To add a soft field: add a row via `create_field_definition()` (no migration); read/write through `get_documents_missing_field()` / `set_document_field()` and `order_by="field:<name>"`
 
 ## 📚 Related Documentation
 - See `AGENTS.md` (root) for sync cursor strategy and privacy_status semantics

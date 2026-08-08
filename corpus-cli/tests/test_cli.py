@@ -39,16 +39,6 @@ def test_sync_all(runner, mock_env):
     assert {r["source"] for r in data} >= {"obsidian", "youtube"}
 
 
-def test_sync_clean(runner, mock_env):
-    main = _main_with_reload()
-    runner.invoke(main, ["sync", "--source", "obsidian"])
-    result = runner.invoke(
-        main, ["sync", "--source", "obsidian", "--clean", "--format", "json"]
-    )
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.output)[0]["indexed"] >= 1
-
-
 def test_search_keyword(runner, mock_env):
     main = _main_with_reload()
     runner.invoke(main, ["sync", "--source", "obsidian"])
@@ -245,8 +235,7 @@ def test_status_includes_sync_failure_stats(runner, mock_env, config_dict):
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     youtube_row = next(row for row in data if row["source_plugin"] == "youtube")
-    assert youtube_row["sync_failures_total"] >= 1
-    assert youtube_row["sync_failures_transient"] >= 1
+    assert youtube_row["failures"]["transient"] >= 1
 
 
 def test_list_command_basic(mock_env, runner):

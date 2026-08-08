@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -29,6 +30,63 @@ def _roots() -> dict[str, Path]:
         "data": _xdg("XDG_DATA_HOME", home / ".local" / "share") / "fast-market",
         "cache": _xdg("XDG_CACHE_HOME", home / ".cache") / "fast-market",
     }
+
+
+_TEXT_EXTENSIONS = {
+    ".yaml",
+    ".yml",
+    ".json",
+    ".txt",
+    ".md",
+    ".ini",
+    ".toml",
+    ".cfg",
+    ".conf",
+    ".bash",
+    ".sh",
+    ".zsh",
+    ".env",
+    ".list",
+    ".csv",
+}
+
+
+def _rewrite_profile_paths(profile_dir: Path, into: str, roots: dict[str, Path]) -> None:
+    """Rewrite legacy (pre-profile) root references inside config files.
+
+    A legacy reference such as ``~/.config/fast-market/common/youtube/...``
+    becomes ``~/.config/fast-market/profiles/<into>/common/youtube/...``.
+    Paths already under ``profiles/`` are left untouched.
+    """
+    home = Path.home()
+    pairs: list[tuple[str, str]] = []
+    for legacy in roots.values():
+        profile = legacy / "profiles" / into
+        pairs.append((str(legacy), str(profile)))
+        rel = str(legacy).replace(str(home), "", 1)
+        if rel and rel != str(legacy):
+            pairs.append(("~" + rel, "~" + str(profile).replace(str(home), "", 1)))
+
+    for path in profile_dir.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in _TEXT_EXTENSIONS:
+            continue
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if b"\x00" in raw[:4096]:
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        original = text
+        for legacy, profile in pairs:
+            pattern = re.escape(legacy) + r"(?!/profiles/)"
+            text = re.sub(pattern, profile, text)
+        if text != original:
+            path.write_text(text, encoding="utf-8")
+            click.echo(f"  rewrote {path.relative_to(profile_dir)}")
 
 
 def _profiles_dir(root: Path) -> Path:
@@ -239,6 +297,9 @@ def register():
         if not moved_any:
             click.echo("No legacy layout found to migrate.")
             return
+        for target in {_profiles_dir(root) / into for root in _roots().values()}:
+            if target.exists():
+                _rewrite_profile_paths(target, into, roots)
         write_active_pointer(into)
         click.echo(f"\nMigrated legacy layout into profile '{into}' and set it active.")
         click.echo("Tip: promote shared things (e.g. the Anthropic key, workdir) into the "

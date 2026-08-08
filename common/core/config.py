@@ -506,7 +506,7 @@ def split_and_save_config(tool_name: str, config: dict) -> None:
 #       api_key_env: OPENAI_COMPATIBLE_API_KEY
 #
 # YouTube config schema (~/.config/fast-market/common/youtube/config.yaml):
-#   client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json
+#   client_secret_path: ~/.config/fast-market/profiles/<profile>/common/youtube/client_secret.json
 #   channel_id: UC...
 #   quota_limit: 10000
 #

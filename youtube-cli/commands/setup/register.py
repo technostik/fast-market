@@ -53,7 +53,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         yt_cfg_path = get_youtube_config_path()
         yt_cfg_path.parent.mkdir(parents=True, exist_ok=True)
         if not yt_cfg_path.exists():
-            yt_cfg_path.write_text("# Shared YouTube configuration\nchannel_id: \"\"\n# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json\nquota_limit: 10000\nvideo_cache_dir: ~/.cache/youtube-videos\n")
+            yt_cfg_path.write_text("# Shared YouTube configuration\nchannel_id: \"\"\n# client_secret_path: ~/.config/fast-market/profiles/<profile>/common/youtube/client_secret.json\nquota_limit: 10000\nvideo_cache_dir: ~/.cache/youtube-videos\n")
         click.echo(f"Opening YouTube config: {yt_cfg_path}")
         open_editor(yt_cfg_path)
 
@@ -244,7 +244,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             shutil.copy2(str(yt_cfg_path), str(backup_path))
             click.echo(f"Backed up existing shared config to {backup_path}")
         yt_cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        yt_cfg_path.write_text("# YouTube shared configuration\nchannel_id: \"\"\nquota_limit: 10000\n# client_secret_path: ~/.config/fast-market/common/youtube/client_secret.json\nvideo_cache_dir: ~/.cache/youtube-videos\n")
+        yt_cfg_path.write_text("# YouTube shared configuration\nchannel_id: \"\"\nquota_limit: 10000\n# client_secret_path: ~/.config/fast-market/profiles/<profile>/common/youtube/client_secret.json\nvideo_cache_dir: ~/.cache/youtube-videos\n")
         click.echo(f"Reset shared configuration to defaults at {yt_cfg_path}")
 
     @setup_group.command("refresh-auth")

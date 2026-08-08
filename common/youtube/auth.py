@@ -31,14 +31,35 @@ def get_client_secret_path() -> str:
     return str(get_youtube_auth_dir() / "client_secret.json")
 
 
+def resolve_client_secret_path(configured: str | None = None) -> str:
+    """Resolve the effective client_secret.json path.
+
+    Prefers the configured path when it exists; otherwise falls back to the
+    profile-scoped default. This absorbs stale legacy paths that a pre-profile
+    migration left behind in config files.
+    """
+    if configured:
+        path = Path(configured).expanduser()
+        if path.exists():
+            return str(path)
+        default = Path(get_client_secret_path())
+        if default.exists():
+            logger.info(
+                "oauth_client_secret_fallback",
+                configured=str(path),
+                using=str(default),
+            )
+            return str(default)
+        return str(path)
+    return get_client_secret_path()
+
+
 class YouTubeOAuth(AuthProvider):
     """Shared YouTube OAuth client builder for fast-market tools."""
 
     def __init__(self, client_secret_path: str | None = None):
-        if client_secret_path is None:
-            client_secret_path = get_client_secret_path()
-        self.client_secret_path = client_secret_path
-        self.token_path = Path(client_secret_path).expanduser().parent / "token.json"
+        self.client_secret_path = resolve_client_secret_path(client_secret_path)
+        self.token_path = Path(self.client_secret_path).expanduser().parent / "token.json"
 
     def _headless_oauth_flow(self, flow):
         """Run OAuth without a browser: alert with URL, wait up to 5 min for token."""

@@ -15,6 +15,7 @@ logger = structlog.get_logger(__name__)
 
 class ObsidianPlugin(SourcePlugin):
     name = "obsidian"
+    scan_strategy = "tui"  # interactive vault selection; generic scan_all also supported
 
     def __init__(self, config: dict[str, object]) -> None:
         try:
@@ -46,6 +47,7 @@ class ObsidianPlugin(SourcePlugin):
         self,
         limit: int,
         known_id_dates: dict[str, datetime | None] | None = None,
+        scan_all: bool = False,
         debug: bool = False,
     ) -> list[ItemMeta]:
         """Walk all vault .md files (recursively) newest-mtime-first.
@@ -53,6 +55,9 @@ class ObsidianPlugin(SourcePlugin):
         Returns up to `limit` items that are either:
         - new: source_id (vault-relative path) not in known_id_dates, or
         - modified: mtime has advanced past the indexed updated_at.
+
+        With scan_all=True, returns the full vault inventory: every .md file,
+        ignoring known_id_dates (equivalent to the YouTube full-channel scan).
 
         Excludes directories listed in obsidian.exclude_dirs (config) plus
         the built-in defaults: .obsidian, .trash, .git.
@@ -73,7 +78,7 @@ class ObsidianPlugin(SourcePlugin):
             source_id = file.relative_to(self.vault).as_posix()
             mtime = datetime.fromtimestamp(file.stat().st_mtime)
 
-            if source_id in known:
+            if not scan_all and source_id in known:
                 indexed_at = known[source_id]
                 # Skip only when mtime has not advanced (content unchanged).
                 # Truncate to second precision to absorb filesystem float rounding.

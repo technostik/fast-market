@@ -6,7 +6,7 @@ from typing import ClassVar
 import yaml
 
 from common.core.yaml_utils import dump_yaml
-from common.core.paths import get_youtube_config_path
+from common.core.paths import get_youtube_config_path, get_youtube_auth_dir
 from commands.setup.plugins import ConfigPlugin, register_plugin
 
 
@@ -36,7 +36,7 @@ class YouTubePlugin(ConfigPlugin):
         return {
             "channel_id": "",
             "quota_limit": 10000,
-            "client_secret_path": "~/.config/fast-market/common/youtube/client_secret.json",
+            "client_secret_path": str(get_youtube_auth_dir() / "client_secret.json"),
         }
 
 
