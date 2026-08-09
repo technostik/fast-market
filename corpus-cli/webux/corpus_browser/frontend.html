@@ -363,6 +363,11 @@ function fixedColumnDefs() {
      }},
     {key: 'transcript', label: 'Transcript', order: null,
      render: d => d.raw_text ? String(d.raw_text).slice(0, 80) : ''},
+    {key: 'description', label: 'Description', order: null,
+     render: d => {
+       const t = (d.metadata && d.metadata.description) || '';
+       return t ? t.slice(0, 80) : '';
+     }},
     {key: 'handle', label: 'Handle', order: null,
      render: d => esc(d.handle)},
     {key: 'status', label: 'Status', order: null,
@@ -477,7 +482,12 @@ function renderRows(docs) {
     html += '<td class="mono">' + (state.offset + ix + 1) + '</td>';
     cells.forEach(c => {
       if (c.key === 'thumb') html += '<td class="thumb">' + c.render(doc) + '</td>';
-      else if (c.key === 'transcript') html += '<td class="transcript" title="' + esc(doc.raw_text ? String(doc.raw_text) : '') + '">' + esc(c.render(doc)) + '</td>';
+      else if (c.key === 'transcript' || c.key === 'description') {
+        const full = c.key === 'description'
+          ? ((doc.metadata && doc.metadata.description) || '')
+          : (doc.raw_text || '');
+        html += '<td class="transcript" title="' + esc(full) + '">' + esc(c.render(doc)) + '</td>';
+      }
       else if (c.key === 'handle') html += '<td class="mono">' + c.render(doc) + '</td>';
       else html += '<td>' + c.render(doc) + '</td>';
     });

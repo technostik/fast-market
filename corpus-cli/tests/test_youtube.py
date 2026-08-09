@@ -32,6 +32,9 @@ def test_youtube_fetch():
     item = plugin.list_items(1)[0]
     doc = plugin.fetch(item)
     assert "hello" in doc.raw_text
+    assert doc.raw_text == "hello"
+    assert "desc" not in doc.raw_text  # transcript only, description stays in metadata
+    assert doc.metadata["description"] == "desc"
 
 
 class NoTranscriptTransport(MockTransport):

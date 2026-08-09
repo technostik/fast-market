@@ -498,9 +498,9 @@ class YouTubePlugin(SourcePlugin):
                 f"No transcript available for {video_id}"
             )
 
-        raw_text = (
-            f"{description}\n\n{transcript}".strip() if description else transcript
-        )
+        # raw_text is the raw transcript only — the description stays in
+        # metadata so content search never mixes prose into transcript matches.
+        raw_text = transcript
 
         return Document(
             source_plugin=self.name,
