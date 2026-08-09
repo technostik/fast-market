@@ -245,6 +245,90 @@ def columns(
     return {"source": None, "columns": [{"name": f["name"], "kind": "field"} for f in common]}
 
 
+# ─── column visibility prefs, persisted in the corpus tool config ─────────────
+#
+# The browser stores which fixed columns / dynamic fields are hidden in the
+# tool config (browser_columns key) so the selection survives sessions and is
+# shared across devices/terminals, not locked to one browser's localStorage.
+
+_COLUMN_PREFS_KEY = "browser_columns"
+
+
+def _column_prefs_path() -> Path:
+    from common.core.config import get_tool_config_path
+
+    return get_tool_config_path("corpus")
+
+
+def _read_raw_tool_config() -> dict[str, Any]:
+    import yaml
+
+    path = _column_prefs_path()
+    if not path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        logger.warning("corpus_browser_tool_config_unreadable", error=str(exc))
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _read_column_prefs() -> dict[str, list[str]]:
+    prefs = _read_raw_tool_config().get(_COLUMN_PREFS_KEY) or {}
+    if not isinstance(prefs, dict):
+        prefs = {}
+    return {
+        "fixedOff": [str(k) for k in prefs.get("fixedOff", []) if isinstance(k, str)],
+        "fieldsOff": [str(k) for k in prefs.get("fieldsOff", []) if isinstance(k, str)],
+    }
+
+
+def _write_column_prefs(fixed_off: list[str], fields_off: list[str]) -> None:
+    from common.core.yaml_utils import dump_yaml
+
+    data = _read_raw_tool_config()
+    data[_COLUMN_PREFS_KEY] = {"fixedOff": list(fixed_off), "fieldsOff": list(fields_off)}
+    _column_prefs_path().write_text(dump_yaml(data, sort_keys=False), encoding="utf-8")
+
+
+class _ColumnPrefsBody(BaseModel):
+    fixedOff: list[str] = []
+    fieldsOff: list[str] = []
+
+
+@router.get("/columns/prefs")
+def get_column_prefs() -> dict[str, list[str]]:
+    """Hidden columns, persisted in the corpus tool config."""
+    return _read_column_prefs()
+
+
+@router.post("/columns/prefs")
+def save_column_prefs(body: _ColumnPrefsBody) -> dict[str, bool]:
+    """Persist hidden columns in the corpus tool config."""
+    _write_column_prefs(body.fixedOff, body.fieldsOff)
+    return {"ok": True}
+
+
+def _count_shorts_hidden(
+    store: Any,
+    source: str | None,
+    state: str | None,
+    video_type: str | None,
+) -> int:
+    """Count pool candidates the short/long filter hides (known durations only)."""
+    from core.pool_rows import select_pool_rows
+    from storage.sqlalchemy_store import SearchFilters, YOUTUBE_SHORT_MAX_SECONDS
+
+    if video_type not in ("short", "long") or state == "synced":
+        return 0
+    no_short_filter = SearchFilters(source=source, video_type=None)
+    rows = select_pool_rows(store, source, state or "all", no_short_filter)
+    if video_type == "long":
+        return sum(1 for r in rows if (r["duration_seconds"] or 0) <= YOUTUBE_SHORT_MAX_SECONDS)
+    return sum(1 for r in rows if (r["duration_seconds"] or 0) > YOUTUBE_SHORT_MAX_SECONDS)
+
+
 @router.get("/browse")
 def browse(
     limit: int = Query(20, ge=1, le=100),
@@ -287,8 +371,11 @@ def browse(
         missing_field=missing_field,
     )
     try:
+        # Docs are only merged in for the "all"/"synced" views. The pending /
+        # failed / excluded / not-synced states show the sync queue only, so
+        # they stay consistent with `corpus list --state ...`.
         docs = []
-        if state != "not-synced":
+        if state in (None, "all", "synced"):
             docs = store.list_documents_extended(
                 source=source,
                 filters=filters,
@@ -299,13 +386,16 @@ def browse(
         # "View all" (no state / state=all) shows indexed documents AND every
         # not-synced pool item in one merged table.
         pool_rows = select_pool_rows(store, source, state or "all", filters)
+        # How many pool candidates the short/long filter hid (explains an empty
+        # queue: "everything pending is a Short").
+        shorts_hidden = _count_shorts_hidden(store, source, state, video_type)
         total = len(docs) + len(pool_rows)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     rows = docs + pool_rows
     rows.sort(key=lambda r: row_sort_key(r, order_by), reverse=order_desc)
-    return {"items": rows[offset: offset + limit], "total": total}
+    return {"items": rows[offset: offset + limit], "total": total, "shorts_hidden": shorts_hidden}
 
 
 @router.get("/search")

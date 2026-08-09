@@ -44,14 +44,21 @@ def pool_row(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def pool_matches(row: dict[str, Any], filters) -> bool:
-    """Apply the browse filters to a pool row (they have no raw_text/size)."""
+    """Apply the browse filters to a pool row (they have no raw_text/size).
+
+    Duration filters (explicit min/max and the short/long `video_type` filter)
+    only apply when the row has a known duration — an item we cannot classify
+    is never hidden by a duration filter, so the not-synced queue is not
+    silently emptied (e.g. non-video sources carry no duration_seconds).
+    """
     if filters is None:
         return True
-    duration = row["duration_seconds"] or 0
-    if filters.min_duration is not None and duration < filters.min_duration:
-        return False
-    if filters.max_duration is not None and duration > filters.max_duration:
-        return False
+    duration = row["duration_seconds"]
+    if duration is not None:
+        if filters.min_duration is not None and duration < filters.min_duration:
+            return False
+        if filters.max_duration is not None and duration > filters.max_duration:
+            return False
     date = row["updated_at"] or ""
     if filters.since and date < f"{filters.since}T00:00:00":
         return False

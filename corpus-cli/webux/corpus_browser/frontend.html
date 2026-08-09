@@ -78,6 +78,10 @@
     .lightbox img { max-width:90vw; max-height:90vh; border-radius:8px; box-shadow:0 0 40px rgba(0,0,0,.6); }
     .lightbox-close { position:fixed; top:16px; right:24px; cursor:pointer; font-size:2.2em; color:var(--text);
              line-height:1; user-select:none; }
+    .tooltip { position:fixed; z-index:1200; max-width:420px; max-height:300px; overflow:auto;
+             background:var(--accent); border:1px solid var(--info); border-radius:6px;
+             padding:8px 10px; font-size:12px; line-height:1.45; white-space:pre-wrap;
+             color:var(--text); box-shadow:0 4px 20px rgba(0,0,0,.5); pointer-events:none; }
   </style>
 </head>
 <body>
@@ -171,6 +175,8 @@
     <img id="lightboxImg" alt="Thumbnail preview"/>
   </div>
 
+  <div class="tooltip" id="tooltip" style="display:none;"></div>
+
 <script>
 'use strict';
 const API = '/api/corpus_browser';
@@ -201,12 +207,11 @@ function cellText(v) {
   return Array.isArray(v) ? v.join(', ') : String(v);
 }
 
-// ── user prefs: source + exclude-shorts + columns survive reloads ────────────
+// ── user prefs: source + exclude-shorts survive reloads via localStorage ─────
 function savePrefs() {
   localStorage.setItem(PREFS_KEY, JSON.stringify({
     source: $('sourceFilter').value,
     excludeShorts: $('excludeShorts').checked,
-    colPrefs: state.colPrefs,
   }));
 }
 function restorePrefs() {
@@ -214,8 +219,24 @@ function restorePrefs() {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
     if (p.source && p.source !== $('sourceFilter').value) $('sourceFilter').value = p.source;
     $('excludeShorts').checked = !!p.excludeShorts;
-    if (p.colPrefs && p.colPrefs.fixedOff && p.colPrefs.fieldsOff) state.colPrefs = p.colPrefs;
   } catch (e) { /* corrupt prefs — ignore */ }
+}
+
+// ── column visibility: persisted server-side in the corpus tool config ───────
+async function loadColumnPrefs() {
+  try {
+    const r = await fetch(API + '/columns/prefs');
+    if (r.ok) {
+      const p = await r.json();
+      state.colPrefs = {fixedOff: p.fixedOff || [], fieldsOff: p.fieldsOff || []};
+    }
+  } catch (e) { /* keep defaults if server unreachable */ }
+}
+function saveColumnPrefs() {
+  fetch(API + '/columns/prefs', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(state.colPrefs),
+  }).catch(() => {});
 }
 
 function showBanner(msg, type) {
@@ -335,7 +356,9 @@ function fixedColumnDefs() {
     {key: 'title', label: 'Title', order: 'title',
      render: d => {
        const isPool = d.pool_status != null;
-       return '<a class="title-link' + (isPool ? ' pool-link' : '') + '" data-handle="' + esc(d.handle) + '">' +
+       const desc = (d.metadata && d.metadata.description) || '';
+       return '<a class="title-link' + (isPool ? ' pool-link' : '') + '" data-handle="' + esc(d.handle) + '"' +
+         (desc ? ' data-desc="' + esc(desc) + '"' : '') + '>' +
          esc(d.title || 'Untitled') + (isPool ? ' ⏳' : '') + '</a>';
      }},
     {key: 'transcript', label: 'Transcript', order: null,
@@ -415,7 +438,7 @@ function renderColumnPanel() {
     cb.onchange = () => {
       if (cb.dataset.col) setColumnEnabled(cb.dataset.col, cb.checked);
       else if (cb.dataset.field) setFieldColumnEnabled(cb.dataset.field, cb.checked);
-      savePrefs();
+      saveColumnPrefs();
       rebuildTableHeaders();
       renderCurrentRows();
     };
@@ -473,6 +496,11 @@ function renderRows(docs) {
   tbody.querySelectorAll('a.title-link').forEach(a => {
     a.onclick = () => showPreview(a.dataset.handle);
   });
+  tbody.querySelectorAll('a.title-link[data-desc]').forEach(a => {
+    a.addEventListener('mouseenter', showDescTooltip);
+    a.addEventListener('mousemove', moveDescTooltip);
+    a.addEventListener('mouseleave', hideDescTooltip);
+  });
   tbody.querySelectorAll('img.thumb-img').forEach(im => {
     im.onclick = () => openLightbox(im.dataset.big);
   });
@@ -529,6 +557,11 @@ async function browse(offset = 0) {
   renderRows(state.items);
   renderPagination();
   updateActionBar();
+  const hidden = data.shorts_hidden || 0;
+  if (state.total === 0 && hidden > 0 && $('excludeShorts').checked) {
+    showBanner(hidden + ' not-synced item(s) are Shorts and hidden by "exclude shorts". ' +
+      'Uncheck the box to see them in this view.', 'warn');
+  }
 }
 
 async function search() {
@@ -619,8 +652,22 @@ function openLightbox(src) {
 }
 function closeLightbox() { $('lightbox').style.display = 'none'; }
 $('lightbox').onclick = e => { if (e.target !== $('lightboxImg')) closeLightbox(); };
+
+// ── tooltip: full description on hover over a title ──────────────────────────
+function showDescTooltip(e) {
+  const tip = $('tooltip');
+  tip.textContent = e.target.dataset.desc;
+  tip.style.display = 'block';
+  moveDescTooltip(e);
+}
+function moveDescTooltip(e) {
+  const tip = $('tooltip');
+  tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 440) + 'px';
+  tip.style.top = Math.min(e.clientY + 14, window.innerHeight - 320) + 'px';
+}
+function hideDescTooltip() { $('tooltip').style.display = 'none'; }
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeLightbox(); closePreview(); }
+  if (e.key === 'Escape') { closeLightbox(); closePreview(); hideDescTooltip(); }
 });
 
 // ── selection ────────────────────────────────────────────────────────────────
@@ -928,7 +975,7 @@ $('clearSel').onclick = clearSelection;
 (async function init() {
   await loadSources();
   restorePrefs();
-  await Promise.all([loadFields(), loadColumns(), loadOps()]);
+  await Promise.all([loadFields(), loadColumns(), loadOps(), loadColumnPrefs()]);
   browse(0);
 })();
 </script>

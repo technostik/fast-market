@@ -107,7 +107,22 @@ def test_select_pool_rows_filters(store):
     rows = select_pool_rows(
         store, None, "not-synced", _FakeFilters(min_duration=1)
     )
-    assert len(rows) == 0  # no durations set → 0s < 1s, filtered out
+    # durations are unknown (None) → not classifiable, so they stay visible.
+    assert len(rows) == 3
+
+
+def test_pool_matches_duration_filter_only_when_known(store):
+    from core.pool_rows import pool_matches
+
+    known_short = pool_row(_item("v7", "pending", duration_seconds="30"))
+    known_long = pool_row(_item("v8", "pending", duration_seconds="600"))
+    unknown = pool_row(_item("v9", "pending"))
+
+    # "exclude shorts" → min_duration 181s
+    f = _FakeFilters(min_duration=181)
+    assert not pool_matches(known_short, f)   # short → hidden
+    assert pool_matches(known_long, f)        # long → shown
+    assert pool_matches(unknown, f)           # unknown → shown, not emptied
 
 
 def test_row_sort_key(store):
