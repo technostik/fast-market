@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import click
 
 from commands.base import CommandManifest
@@ -90,16 +92,40 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         from core.pool_enrich import enrich_pool_items
 
-        result = enrich_pool_items(
-            store,
-            source,
-            source_ids=source_ids,
-            cookies=cookies,
-            concurrency=concurrency,
-            limit=limit,
-        )
+        if verbose and fmt == "text":
+            bar = click.progressbar(
+                length=len(source_ids),
+                label=f"enrich {source}",
+                file=sys.stderr,
+                show_pos=True,
+            )
+        else:
+            bar = None
+
+        def _progress(done: int, total: int) -> None:
+            if bar is not None:
+                bar.length = total
+                bar.pos = done
+
+        try:
+            result = enrich_pool_items(
+                store,
+                source,
+                source_ids=source_ids,
+                cookies=cookies,
+                concurrency=concurrency,
+                limit=limit,
+                progress_cb=_progress,
+            )
+        finally:
+            if bar is not None:
+                bar.render_finish()
+
         if verbose:
             _echo_progress(result)
+        if result.aborted:
+            click.echo(click.style(f"\n{result.abort_reason}", fg="red"), err=True)
+            ctx.exit(2)
         out(result.to_dict(), fmt)
         if result.failed:
             ctx.exit(1)
@@ -120,6 +146,7 @@ def _select_pool_ids(store, name: str, state: str) -> list[str]:
 def _echo_progress(result) -> None:
     click.echo(
         f"{result.source}: {result.enriched} enriched · {result.skipped} unchanged "
-        f"· {result.failed} failed ({result.processed} attempted)",
+        f"· {result.failed} failed ({result.processed} attempted)"
+        + (" · PAUSED (bot challenge)" if result.aborted else ""),
         err=True,
     )

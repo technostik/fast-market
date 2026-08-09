@@ -22,7 +22,7 @@ corpus-agent/
 
 | Command | Description |
 |---------|-------------|
-| `corpus sync` | Fetch content and index into corpus |
+| `corpus sync` | Fetch and index pending items from the pool. `--handles pool:<source>:<id>` syncs only the selected not-synced items |
 | `corpus search` | Search indexed documents |
 | `corpus list` | List indexed documents |
 | `corpus get-from-id` | Get document by handle |
@@ -33,7 +33,7 @@ corpus-agent/
 | `corpus serve` | Start web server |
 | `corpus embed-server` | Start embedding server |
 | `corpus field` | Declare/manage soft fields (create, list, delete, missing, set) |
-| `corpus enrich` | Bulk-fill metadata (duration, views, tags, ...) for non-synced pool items via yt-dlp (no API quota) |
+| `corpus enrich` | Bulk-fill metadata (duration, views, tags, ...) for non-synced pool items via yt-dlp (no API quota). Progress bar + bot-challenge auto-pause |
 
 ### Sync Modes
 

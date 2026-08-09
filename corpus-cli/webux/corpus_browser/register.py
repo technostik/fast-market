@@ -296,7 +296,9 @@ def browse(
                 reverse=not order_desc,
                 limit=200000,
             )
-        pool_rows = select_pool_rows(store, source, state, filters)
+        # "View all" (no state / state=all) shows indexed documents AND every
+        # not-synced pool item in one merged table.
+        pool_rows = select_pool_rows(store, source, state or "all", filters)
         total = len(docs) + len(pool_rows)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -513,6 +515,89 @@ def _run_enrich_job(job_id: str) -> None:
         _update_job(job_id, status="done", result=result, finished_at=_now_iso())
     except Exception as exc:
         logger.exception("corpus_browser_enrich_job_failed", job_id=job_id, source=payload.get("source"))
+        _update_job(job_id, status="error", error=_map_error(exc), result=result)
+
+
+# ─── POST /sync-pool + GET /sync-pool/status (index selected pool items) ──────
+
+
+class _SyncPoolRequest(BaseModel):
+    source: str
+    handles: list[str]
+
+
+@router.post("/sync-pool")
+def start_sync_pool(req: _SyncPoolRequest, background_tasks: BackgroundTasks):
+    """Fetch and index the given not-synced pool items into the corpus.
+    ``handles`` are pool handles (pool:<source>:<id>). Syncing a pool item is
+    an operation like any other: select videos in the browser, then Sync."""
+    backend = _backend_factory()
+    if req.source not in backend["plugins"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown source plugin: {req.source}. "
+                   f"Available: {sorted(backend['plugins'])}",
+        )
+    if not req.handles:
+        raise HTTPException(status_code=400, detail="No pool handles provided.")
+    payload = {"source": req.source, "handles": req.handles}
+    job_id = _new_job("sync-pool", payload)
+    background_tasks.add_task(_run_sync_pool_job, job_id)
+    return {"job_id": job_id, "status": "running", "source": req.source}
+
+
+@router.get("/sync-pool/status/{job_id}")
+def sync_pool_status(job_id: str):
+    return _job_response(job_id)
+
+
+def _sync_pool_worker(store: Any, engine: Any, plugin, pool_items, vault_path=None):
+    """Thin wrapper over SyncEngine.sync_pool_items — tests replace this."""
+    return engine.sync_pool_items(plugin, pool_items, vault_path=vault_path)
+
+
+def _run_sync_pool_job(job_id: str) -> None:
+    payload = _get_job(job_id).get("payload", {})
+    result: dict[str, Any] | None = None
+    try:
+        backend = _backend_factory()
+        store = backend["store"]
+        source = payload["source"]
+        wanted = set(payload.get("handles") or [])
+        pool_items = [
+            i for i in store.get_pool_items(source, status=None)
+            if f"pool:{source}:{i['source_id']}" in wanted
+        ]
+        if not pool_items:
+            raise HTTPException(
+                status_code=400,
+                detail="None of the given handles matched pool items.",
+            )
+        sync_result = _sync_pool_worker(
+            backend["store"],
+            backend["engine"],
+            backend["plugins"][source],
+            pool_items,
+            vault_path=None,
+        )
+        result = {
+            "source": sync_result.source,
+            "processed": sync_result.processed,
+            "indexed": sync_result.indexed,
+            "skipped": sync_result.skipped,
+            "failures": [
+                {"source_id": f.source_id, "error": f.error}
+                for f in sync_result.failures
+            ],
+            "warning": sync_result.warning,
+        }
+        _update_job(job_id, status="done", result=result, finished_at=_now_iso())
+    except Exception as exc:
+        logger.exception(
+            "corpus_browser_sync_pool_job_failed",
+            job_id=job_id,
+            source=payload.get("source"),
+        )
         _update_job(job_id, status="error", error=_map_error(exc), result=result)
 
 

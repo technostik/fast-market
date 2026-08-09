@@ -48,3 +48,11 @@ class MissingInputFieldError(SyncError):
 
 class NetworkError(SyncError):
     permanent = False
+
+
+class BotDetectionError(SyncError):
+    """YouTube challenged the IP for bot behavior (yt-dlp: "Sign in to confirm
+    you're not a bot"). Permanent until cookies are provided; enrichment must
+    pause immediately instead of hammering the extractor."""
+
+    permanent = True

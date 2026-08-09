@@ -87,3 +87,28 @@ def test_enrich_source_defaults_to_youtube(runner, mock_env, config_dict, monkey
     result = runner.invoke(main, ["enrich", "--format", "json"])
     assert result.exit_code == 0, result.output
     assert captured["source"] == "youtube"
+
+
+def test_enrich_aborted_exits_2(runner, mock_env, config_dict, monkeypatch):
+    store = SQLiteStore(config_dict["db_path"])
+    store.upsert_pool_item("youtube", "v1", "pending", {}, added_at="2026-08-01T00:00:00")
+
+    import core.pool_enrich as penrich
+
+    monkeypatch.setattr(
+        penrich,
+        "enrich_pool_items",
+        lambda store, source, **kw: EnrichResult(
+            source=source,
+            processed=0,
+            aborted=True,
+            abort_reason="YouTube bot challenge — paused.",
+        ),
+    )
+
+    main = _main_with_reload()
+    result = runner.invoke(
+        main, ["enrich", "--source", "youtube", "--format", "json"]
+    )
+    assert result.exit_code == 2
+    assert "bot" in result.output.lower()

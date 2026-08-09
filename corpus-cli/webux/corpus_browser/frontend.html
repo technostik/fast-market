@@ -114,8 +114,10 @@
 
   <div class="actionbar" id="actionbar">
     <span class="cnt" id="selCount"></span>
+    <button id="syncPoolBtn" title="Index the selected not-synced (pool) videos into the corpus">Sync</button>
+    <span class="divider">|</span>
     <select id="syncFieldSelect" title="Field to fill on the selection"></select>
-    <button id="syncBtn">Sync</button>
+    <button id="syncBtn" title="Run the selected derived-field operation on the selection">Fill field</button>
     <span class="divider">|</span>
     <input id="tagInput" placeholder="Add a tag…" style="width:130px;"/>
     <button id="tagBtn" title="Run the tag operation on the selection">Add tag</button>
@@ -323,7 +325,7 @@ function renderRows(docs) {
     if (state.selected.has(doc.handle)) tr.className = 'selected';
     let html = '<td><input type="checkbox" data-handle="' + esc(doc.handle) + '"' +
       (state.selected.has(doc.handle) ? ' checked' : '') +
-      (isPool ? ' disabled title="Scan first (pool item, not indexed yet)"' : '') + '/></td>';
+      (isPool ? ' title="Pool item — not indexed yet. Select it, then Sync to index."' : '') + '/></td>';
     html += '<td class="mono">' + (state.offset + ix + 1) + '</td>';
     const published = cellText(meta.published_at || doc.updated_at).slice(0, 10);
     html += '<td class="mono">' + esc(published) + '</td>';
@@ -591,6 +593,12 @@ async function pollEnrichJob(jobId) {
   resetEnrichBtn();
   if (j.status === 'done' && j.result) {
     const res = j.result;
+    if (res.aborted) {
+      showBanner('Enrich paused: ' + (res.abort_reason || 'YouTube bot challenge') +
+        ' Provide cookies (--cookies / config) and retry later.', 'err');
+      resetEnrichBtn();
+      return;
+    }
     showBanner('Enrich "' + res.source + '" done — processed ' + res.processed +
       ' · enriched ' + res.enriched + ' · unchanged ' + res.skipped +
       (res.failed ? ' · failed ' + res.failed : ''),
@@ -607,6 +615,72 @@ async function pollEnrichJob(jobId) {
 function resetEnrichBtn() {
   $('enrichBtn').disabled = false;
   $('enrichBtn').textContent = 'Enrich';
+}
+
+// ── jobs: index selected pool items (Sync) ───────────────────────────────────
+function selectedPoolHandles() {
+  const sel = [...state.selected].filter(h => h.startsWith('pool:'));
+  if (state.selectAllFiltered) {
+    for (const it of state.items) {
+      if (it.pool_status && it.handle && it.handle.startsWith('pool:') && !sel.includes(it.handle)) {
+        sel.push(it.handle);
+      }
+    }
+  }
+  return sel;
+}
+
+function inferSourceFromHandles(handles) {
+  for (const h of handles) {
+    const m = /^pool:([^:]+):/.exec(h);
+    if (m) return m[1];
+  }
+  return '';
+}
+
+async function startSyncPool() {
+  const handles = selectedPoolHandles();
+  if (!handles.length) {
+    showBanner('Select not-synced (pool) videos first, then Sync to index them into the corpus.', 'warn');
+    return;
+  }
+  const source = currentSource() || inferSourceFromHandles(handles);
+  const poolHandles = handles.filter(h => h.startsWith('pool:' + source + ':'));
+  if (!source || !poolHandles.length) {
+    showBanner('No not-synced videos of a known source in the selection.', 'warn');
+    return;
+  }
+  const r = await fetch(API + '/sync-pool', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({source, handles: poolHandles}),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { showBanner('Sync start failed: ' + (data.detail || r.status), 'err'); return; }
+  showBanner('Syncing ' + poolHandles.length + ' selected video(s) into the corpus…', 'info');
+  const timer = setInterval(() => pollSyncPoolJob(data.job_id), 2500);
+  state.jobs.set(data.job_id, {kind: 'sync-pool', timer});
+  pollSyncPoolJob(data.job_id);
+}
+
+async function pollSyncPoolJob(jobId) {
+  const r = await fetch(API + '/sync-pool/status/' + jobId);
+  if (!r.ok) { stopJob(jobId); return; }
+  const j = await r.json();
+  if (j.status === 'running') return;
+  stopJob(jobId);
+  if (j.status === 'done' && j.result) {
+    const res = j.result;
+    showBanner('Sync done — processed ' + res.processed + ' · indexed ' + res.indexed +
+      ' · skipped ' + res.skipped +
+      (res.failures.length ? ' · failed ' + res.failures.length : ''),
+      res.failures.length ? 'err' : 'ok');
+    clearSelection();
+    loadColumns();
+    if (state.mode === 'search') search(); else browse(state.offset);
+    return;
+  }
+  showBanner('Sync failed: ' + (j.error ? (j.error.message || j.error.type) : 'unknown') +
+    ' — check server logs and retry.', 'err');
 }
 
 // ── jobs: field sync ─────────────────────────────────────────────────────────
@@ -685,6 +759,7 @@ $('missingFieldSelect').onchange = () => { state.missingField = $('missingFieldS
 $('missingOnly').onchange = () => { state.missingOnly = $('missingOnly').checked; browse(0); };
 $('syncBtn').onclick = () => startSync($('syncFieldSelect').value);
 $('tagBtn').onclick = () => startSync('tags');
+$('syncPoolBtn').onclick = startSyncPool;
 $('enrichBtn').onclick = startEnrich;
 $('selectAllLink').onclick = selectAllFiltered;
 $('clearSel').onclick = clearSelection;

@@ -81,7 +81,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "handles",
         multiple=True,
         default=None,
-        help="Restrict --field sync to specific document handles (repeatable).",
+        help="Restrict the sync to specific items (repeatable). With --field this "
+             "fills the field on the given document handles; without --field it "
+             "fetches and indexes the given pool items (e.g. pool:youtube:<id>).",
     )
     @click.option(
         "--non-public",
@@ -184,36 +186,61 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 continue
 
             # mode == "new": consume pending pool items
-            effective_limit = limit if limit is not None else _DEFAULT_LIMITS.get(name)
+            if handles:
+                # Explicit pool-handle selection: sync exactly those items,
+                # whatever their pool status (pending/failed/excluded).
+                wanted = set(handles)
+                all_pool = store.get_pool_items(plugin_name=name, status=None)
+                pool_items = [
+                    i for i in all_pool
+                    if f"pool:{name}:{i['source_id']}" in wanted
+                ]
+            else:
+                effective_limit = limit if limit is not None else _DEFAULT_LIMITS.get(name)
 
-            # For YouTube the privacy filter runs in Python (privacy_status lives in
-            # metadata_json, not a first-class column), so we must fetch all pending
-            # items first and apply the limit only after filtering.
-            db_limit = None if name == "youtube" else (effective_limit or None)
-            pool_items = store.get_pool_items(
-                plugin_name=name,
-                status="pending",
-                limit=db_limit,
-            )
+                # For YouTube the privacy filter runs in Python (privacy_status lives in
+                # metadata_json, not a first-class column), so we must fetch all pending
+                # items first and apply the limit only after filtering.
+                db_limit = None if name == "youtube" else (effective_limit or None)
+                pool_items = store.get_pool_items(
+                    plugin_name=name,
+                    status="pending",
+                    limit=db_limit,
+                )
 
-            # YouTube: route public vs non-public to different transcript methods.
-            # Public videos use RSS/youtube-transcript-api (no API quota for fetching).
-            # Non-public videos require YouTube API captions (needs OAuth).
-            if name == "youtube":
-                if non_public:
-                    pool_items = [
-                        i for i in pool_items
-                        if (i.get("metadata") or {}).get("privacy_status", "unknown") != "public"
-                    ]
-                else:
-                    pool_items = [
-                        i for i in pool_items
-                        if (i.get("metadata") or {}).get("privacy_status", "public") == "public"
-                    ]
-                if effective_limit:
-                    pool_items = pool_items[:effective_limit]
+                # YouTube: route public vs non-public to different transcript methods.
+                # Public videos use RSS/youtube-transcript-api (no API quota for fetching).
+                # Non-public videos require YouTube API captions (needs OAuth).
+                if name == "youtube":
+                    if non_public:
+                        pool_items = [
+                            i for i in pool_items
+                            if (i.get("metadata") or {}).get("privacy_status", "unknown") != "public"
+                        ]
+                    else:
+                        pool_items = [
+                            i for i in pool_items
+                            if (i.get("metadata") or {}).get("privacy_status", "public") == "public"
+                        ]
+                    if effective_limit:
+                        pool_items = pool_items[:effective_limit]
 
             if not pool_items:
+                if handles:
+                    results.append(
+                        {
+                            "source": name,
+                            "indexed": 0,
+                            "skipped": 0,
+                            "failures": 0,
+                            "errors": [],
+                            "warning": (
+                                "No matching pool items for the given --handles."
+                            ),
+                        }
+                    )
+                    has_warning = True
+                    continue
                 # No pending pool items: fall back to a direct incremental sync
                 # so `corpus sync` keeps working without a prior `corpus scan`.
                 # Pool-based workflows still take precedence when the pool has
