@@ -5,6 +5,7 @@ import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from common import structlog
 from sqlalchemy import text, select, delete, func
@@ -274,6 +275,42 @@ class SQLAlchemyStore:
                 .first()
             )
             return self._row_to_doc_dict(row) if row else None
+
+    def update_document_enrichment(
+        self, source_plugin: str, source_id: str, meta: dict[str, Any]
+    ) -> bool:
+        """Merge yt-dlp-enriched metadata into an indexed document's row.
+
+        Merges ``meta`` into ``metadata_json`` and mirrors richer ``title`` /
+        ``duration_seconds`` values into their columns so sorting stays
+        consistent. Content (raw_text / chunks) is untouched. Returns True when
+        anything changed.
+        """
+        with self._session() as session:
+            row = session.execute(
+                select(DocumentModel).where(
+                    DocumentModel.source_plugin == source_plugin,
+                    DocumentModel.source_id == source_id,
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+            existing_meta = json.loads(row.metadata_json or "{}")
+            merged = dict(existing_meta)
+            merged.update(meta)
+            changed = False
+            if json.dumps(merged) != json.dumps(existing_meta):
+                row.metadata_json = json.dumps(merged)
+                changed = True
+            new_title = meta.get("title")
+            if new_title and str(new_title) != (row.title or ""):
+                row.title = str(new_title)
+                changed = True
+            new_duration = meta.get("duration_seconds")
+            if new_duration and int(new_duration) > 0 and int(new_duration) != (row.duration_seconds or 0):
+                row.duration_seconds = int(new_duration)
+                changed = True
+            return changed
 
     def delete_document(self, source_plugin: str, source_id: str) -> bool:
         with self._session() as session:

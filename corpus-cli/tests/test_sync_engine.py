@@ -184,3 +184,77 @@ def test_sync_field_records_failure(store, embedder):
     assert len(res.failures) == 2
     failures = store.list_failures("obsidian")
     assert all(f["error_type"] == "permanent" for f in failures)
+
+
+# ── sync_documents: transcript resync of already-indexed docs ─────────────────
+
+
+class ResyncPlugin(SourcePlugin):
+    name = "youtube"
+
+    def __init__(self, texts):
+        self.texts = texts  # source_id -> list of transcript contents, in order
+        self.calls = {}
+
+    def list_items(self, limit, known_id_dates=None, debug=False):
+        return []
+
+    def fetch(self, item_meta):
+        sid = item_meta.source_id
+        self.calls[sid] = self.calls.get(sid, 0) + 1
+        pool = self.texts[sid]
+        raw = pool[min(self.calls[sid] - 1, len(pool) - 1)]
+        return Document(
+            source_plugin="youtube",
+            source_id=sid,
+            title=item_meta.metadata.get("title", sid),
+            raw_text=raw,
+            metadata=item_meta.metadata,
+        )
+
+
+def test_sync_documents_refetches_changed_transcript(store, embedder):
+    store.upsert_document(
+        Document(source_plugin="youtube", source_id="v1", handle="yt-v1",
+                 title="V1", raw_text="old transcript"),
+        "hash-old",
+    )
+    plugin = ResyncPlugin({"v1": ["new transcript"]})
+    engine = SyncEngine(store, embedder)
+
+    res = engine.sync_documents(plugin, ["yt-v1"])
+
+    assert res.processed == 1
+    assert res.indexed == 1
+    assert store.get_document("youtube", "v1")["raw_text"] == "new transcript"
+
+
+def test_sync_documents_skips_unchanged_transcript(store, embedder):
+    same = "identical transcript"
+    store.upsert_document(
+        Document(source_plugin="youtube", source_id="v1", handle="yt-v1",
+                 title="V1", raw_text=same),
+        embedder.hash_text(same),
+    )
+    plugin = ResyncPlugin({"v1": [same]})
+    engine = SyncEngine(store, embedder)
+
+    res = engine.sync_documents(plugin, ["yt-v1"])
+
+    assert res.indexed == 0
+    assert res.skipped == 1
+
+
+def test_sync_documents_ignores_handles_of_other_sources(store, embedder):
+    store.upsert_document(
+        Document(source_plugin="obsidian", source_id="a", handle="ob-a",
+                 title="A", raw_text="note"),
+        "hash-note",
+    )
+    plugin = ResyncPlugin({"v1": ["transcript"]})
+    engine = SyncEngine(store, embedder)
+
+    res = engine.sync_documents(plugin, ["ob-a", "missing-handle"])
+
+    assert res.processed == 0
+    assert res.indexed == 0

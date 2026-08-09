@@ -212,6 +212,96 @@ def _bot_pause_reason() -> str | None:
     return None
 
 
+def _run_enrich_loop(
+    source: str,
+    target_ids: list[str],
+    fetch_one: Callable[[str, str | None], dict],
+    cookies: str | None,
+    concurrency: int,
+    progress_cb: Callable[[int, int], None] | None,
+    existing_by_id: dict[str, dict],
+    writeback: Callable[[str, dict, dict], bool],
+) -> EnrichResult:
+    """Shared yt-dlp bulk-enrich loop used for pool items and indexed documents.
+
+    For each id, ``fetch_one`` returns the yt-dlp metadata; it is merged over
+    the existing metadata (yt-dlp wins, but a 0/None ``duration_seconds`` never
+    overwrites a real value) and ``writeback(sid, merged, existing)`` persists
+    it, returning True when something changed. On a bot challenge the run
+    aborts early and a cooldown is persisted.
+    """
+    failures: list[SyncFailure] = []
+    enriched = skipped = failed = done = 0
+    aborted = False
+    abort_reason: str | None = None
+    total = len(target_ids)
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = {pool.submit(fetch_one, sid, cookies): sid for sid in target_ids}
+        for future in as_completed(futures):
+            if aborted:
+                future.cancel()
+                continue
+            sid = futures[future]
+            try:
+                meta = future.result()
+            except BotDetectionError as exc:
+                aborted = True
+                abort_reason = str(exc)
+                _save_bot_pause(
+                    datetime.now(timezone.utc) + timedelta(seconds=_bot_cooldown_seconds())
+                )
+                logger.error("enrich_bot_challenge", video_id=sid, error=str(exc))
+                for pending in futures:
+                    if not pending.done():
+                        pending.cancel()
+                continue
+            except Exception as exc:  # yt-dlp raised on this single video
+                failed += 1
+                failures.append(SyncFailure(source_id=sid, error=str(exc)))
+                logger.warning("enrich_item_failed", video_id=sid, error=str(exc))
+                done += 1
+                if progress_cb:
+                    progress_cb(done, total)
+                continue
+
+            if not meta:
+                failed += 1
+                failures.append(SyncFailure(source_id=sid, error="no metadata returned"))
+                logger.info("enrich_empty", video_id=sid)
+                done += 1
+                if progress_cb:
+                    progress_cb(done, total)
+                continue
+
+            existing = existing_by_id.get(sid) or {}
+            merged = dict(existing.get("metadata") or {})
+            merged.update(meta)
+            if not merged.get("duration_seconds") and existing.get("metadata", {}).get("duration_seconds"):
+                merged["duration_seconds"] = existing["metadata"]["duration_seconds"]
+            if merged == existing.get("metadata"):
+                skipped += 1
+            elif writeback(sid, merged, existing):
+                enriched += 1
+                logger.info("enriched", video_id=sid, duration=merged.get("duration_seconds"))
+            else:
+                skipped += 1
+            done += 1
+            if progress_cb:
+                progress_cb(done, total)
+
+    return EnrichResult(
+        source=source,
+        processed=done,
+        enriched=enriched,
+        skipped=skipped,
+        failed=failed,
+        failures=failures,
+        aborted=aborted,
+        abort_reason=abort_reason,
+    )
+
+
 def enrich_pool_items(
     store: Any,
     source: str,
@@ -264,81 +354,82 @@ def enrich_pool_items(
     if cookies is None:
         cookies = _config_cookies()
 
-    failures: list[SyncFailure] = []
-    enriched = skipped = failed = done = 0
-    aborted = False
-    abort_reason: str | None = None
-    total = len(target_ids)
-
-    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        futures = {pool.submit(fetch_one, sid, cookies): sid for sid in target_ids}
-        for future in as_completed(futures):
-            if aborted:
-                future.cancel()
-                continue
-            sid = futures[future]
-            try:
-                meta = future.result()
-            except BotDetectionError as exc:
-                aborted = True
-                abort_reason = str(exc)
-                _save_bot_pause(datetime.now(timezone.utc) + timedelta(seconds=_bot_cooldown_seconds()))
-                logger.error("pool_enrich_bot_challenge", video_id=sid, error=str(exc))
-                for pending in futures:
-                    if not pending.done():
-                        pending.cancel()
-                continue
-            except Exception as exc:  # yt-dlp raised on this single video
-                failed += 1
-                failures.append(SyncFailure(source_id=sid, error=str(exc)))
-                logger.warning("pool_enrich_item_failed", video_id=sid, error=str(exc))
-                done += 1
-                if progress_cb:
-                    progress_cb(done, total)
-                continue
-
-            if not meta:
-                failed += 1
-                failures.append(SyncFailure(source_id=sid, error="no metadata returned"))
-                logger.info("pool_enrich_empty", video_id=sid)
-                done += 1
-                if progress_cb:
-                    progress_cb(done, total)
-                continue
-
-            existing = pool_by_id[sid]
-            merged = dict(existing.get("metadata") or {})
-            merged.update(meta)
-            if not merged.get("duration_seconds") and existing.get("metadata", {}).get("duration_seconds"):
-                merged["duration_seconds"] = existing["metadata"]["duration_seconds"]
-            if merged == existing.get("metadata"):
-                skipped += 1
-            else:
-                store.upsert_pool_item(
-                    source,
-                    sid,
-                    existing["status"],
-                    merged,
-                    added_at=existing["added_at"],
-                    synced_at=existing.get("synced_at"),
-                )
-                enriched += 1
-                logger.info(
-                    "pool_enriched",
-                    video_id=sid,
-                    duration=merged.get("duration_seconds"),
-                )
-            done += 1
-            if progress_cb:
-                progress_cb(done, total)
-
-    return EnrichResult(
+    return _run_enrich_loop(
         source=source,
-        processed=done,
-        enriched=enriched,
-        skipped=skipped,
-        failed=failed,
-        failures=failures,
-        aborted=aborted,
-        abort_reason=abort_reason,
+        target_ids=target_ids,
+        fetch_one=fetch_one,
+        cookies=cookies,
+        concurrency=concurrency,
+        progress_cb=progress_cb,
+        existing_by_id=pool_by_id,
+        writeback=lambda sid, merged, existing: _write_pool_item(store, source, existing, merged),
+    )
+
+
+def _write_pool_item(store: Any, source: str, existing: dict, merged: dict) -> bool:
+    store.upsert_pool_item(
+        source,
+        existing["source_id"],
+        existing["status"],
+        merged,
+        added_at=existing["added_at"],
+        synced_at=existing.get("synced_at"),
+    )
+    return True
+
+
+def enrich_documents(
+    store: Any,
+    source: str,
+    source_ids: list[str] | None = None,
+    cookies: str | None = None,
+    concurrency: int = DEFAULT_CONCURRENCY,
+    limit: int | None = None,
+    fetch_one: Callable[[str, str | None], dict] | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> EnrichResult:
+    """Bulk-enrich already-indexed documents of one source with yt-dlp metadata.
+
+    Mirrors :func:`enrich_pool_items` but writes the merged metadata back into
+    the documents table (``metadata_json`` plus the ``title`` / ``duration_seconds``
+    columns) instead of the scan pool. Content (raw_text / chunks) is untouched,
+    so no re-embedding happens. ``source_ids`` restricts to specific documents;
+    None means every indexed document of the source.
+    """
+    doc_by_id: dict[str, dict] = {}
+    for row in store.get_documents_raw(source):
+        doc = store.get_document(source, row["source_id"])
+        if doc is not None:
+            doc_by_id[row["source_id"]] = doc
+
+    if source_ids is None:
+        target_ids = sorted(doc_by_id.keys())
+    else:
+        target_ids = [sid for sid in source_ids if sid in doc_by_id]
+
+    if limit is not None:
+        target_ids = target_ids[:limit]
+
+    if not target_ids:
+        logger.info("doc_enrich_no_items", source=source)
+        return EnrichResult(source=source)
+
+    pause_reason = _bot_pause_reason()
+    if pause_reason:
+        logger.warning("doc_enrich_paused", source=source, reason=pause_reason)
+        return EnrichResult(source=source, aborted=True, abort_reason=pause_reason)
+
+    fetch_one = fetch_one or extract_ytdlp_info
+    if cookies is None:
+        cookies = _config_cookies()
+
+    return _run_enrich_loop(
+        source=source,
+        target_ids=target_ids,
+        fetch_one=fetch_one,
+        cookies=cookies,
+        concurrency=concurrency,
+        progress_cb=progress_cb,
+        existing_by_id=doc_by_id,
+        writeback=lambda sid, merged, existing: store.update_document_enrichment(source, sid, merged),
     )

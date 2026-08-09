@@ -12,6 +12,8 @@ from pydantic import BaseModel
 
 from common import structlog
 
+from core.pool_enrich import EnrichResult
+
 router = APIRouter()
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
@@ -154,6 +156,13 @@ def _enrich_worker(store: Any, source: str, **kwargs):
     from core.pool_enrich import enrich_pool_items
 
     return enrich_pool_items(store, source, **kwargs)
+
+
+def _enrich_docs_worker(store: Any, source: str, **kwargs):
+    """Thin wrapper over core.pool_enrich.enrich_documents — tests replace this."""
+    from core.pool_enrich import enrich_documents
+
+    return enrich_documents(store, source, **kwargs)
 
 
 # ─── API: fields, operations, sources ─────────────────────────────────────────
@@ -539,8 +548,13 @@ class _EnrichRequest(BaseModel):
 
 @router.post("/enrich")
 def start_enrich(req: _EnrichRequest, background_tasks: BackgroundTasks):
-    """Bulk-fill metadata (duration, views, tags, ...) for non-synced pool
-    items via yt-dlp — no YouTube API quota involved. Mirrors `corpus enrich`."""
+    """Bulk-fill metadata (duration, views, tags, ...) via yt-dlp — no YouTube
+    API quota involved. Mirrors `corpus enrich`.
+
+    Without ``handles`` it targets every non-synced pool item of the source.
+    With ``handles`` it enriches the selected items regardless of sync state:
+    ``pool:<source>:<id>`` handles address pool (not-synced) items, any other
+    handle (a document handle) addresses an already-indexed document."""
     backend = _backend_factory()
     plugins = backend["plugins"]
     source = req.source
@@ -570,6 +584,38 @@ def enrich_status(job_id: str):
     return _job_response(job_id)
 
 
+def _partition_enrich_handles(store: Any, source: str, handles: list[str]) -> tuple[list[str], list[str]]:
+    """Split enrich handles into pool source_ids and document source_ids.
+
+    ``pool:<source>:<id>`` handles map to pool (not-synced) items; any other
+    handle is looked up as an indexed document of the requested source.
+    """
+    pool_ids: list[str] = []
+    doc_ids: list[str] = []
+    for h in handles:
+        if h.startswith(f"pool:{source}:") and len(h.split(":", 2)) == 3:
+            pool_ids.append(h.split(":", 2)[2])
+        else:
+            doc = store.get_document_by_handle(h)
+            if doc and doc.get("source_plugin") == source:
+                doc_ids.append(doc["source_id"])
+    return pool_ids, doc_ids
+
+
+def _merge_enrich_results(source: str, *results: EnrichResult) -> EnrichResult:
+    merged = EnrichResult(source=source)
+    for res in results:
+        merged.processed += res.processed
+        merged.enriched += res.enriched
+        merged.skipped += res.skipped
+        merged.failed += res.failed
+        merged.failures += res.failures
+        if res.aborted:
+            merged.aborted = True
+            merged.abort_reason = merged.abort_reason or res.abort_reason
+    return merged
+
+
 def _run_enrich_job(job_id: str) -> None:
     payload = _get_job(job_id).get("payload", {})
     result: dict[str, Any] | None = None
@@ -582,25 +628,25 @@ def _run_enrich_job(job_id: str) -> None:
                 status_code=400,
                 detail="No source plugin available to enrich.",
             )
-        source_ids = None
-        if payload.get("handles"):
-            source_ids = [
-                h.split(":", 2)[2]
-                for h in payload["handles"]
-                if h.startswith(f"pool:{source}:") and len(h.split(":", 2)) == 3
-            ]
-            if not source_ids:
+        concurrency = int(payload.get("concurrency") or 4)
+        handles = payload.get("handles")
+        if handles:
+            pool_ids, doc_ids = _partition_enrich_handles(store, source, handles)
+            if not pool_ids and not doc_ids:
                 raise HTTPException(
                     status_code=400,
-                    detail="No pool handles matched the requested source.",
+                    detail="No pool or synced handles matched the requested source.",
                 )
-        summary = _enrich_worker(
-            store,
-            source,
-            source_ids=source_ids,
-            limit=payload.get("limit"),
-            concurrency=int(payload.get("concurrency") or 4),
-        )
+            pool_result = _enrich_worker(store, source, source_ids=pool_ids, concurrency=concurrency)
+            doc_result = _enrich_docs_worker(store, source, source_ids=doc_ids, concurrency=concurrency)
+        else:
+            # Bulk "Enrich all": non-synced pool items only (unchanged behaviour).
+            pool_result = _enrich_worker(
+                store, source, source_ids=None, limit=payload.get("limit"),
+                concurrency=concurrency,
+            )
+            doc_result = EnrichResult(source=source)
+        summary = _merge_enrich_results(source, pool_result, doc_result)
         result = summary.to_dict()
         _update_job(job_id, status="done", result=result, finished_at=_now_iso())
     except Exception as exc:
@@ -685,6 +731,70 @@ def _run_sync_pool_job(job_id: str) -> None:
     except Exception as exc:
         logger.exception(
             "corpus_browser_sync_pool_job_failed",
+            job_id=job_id,
+            source=payload.get("source"),
+        )
+        _update_job(job_id, status="error", error=_map_error(exc), result=result)
+
+
+# ─── POST /resync + GET /resync/status (re-fetch transcripts of synced docs) ──
+
+
+class _ResyncRequest(BaseModel):
+    source: str
+    handles: list[str]
+
+
+@router.post("/resync")
+def start_resync(req: _ResyncRequest, background_tasks: BackgroundTasks):
+    """Re-fetch the content (transcript) of already-indexed documents.
+
+    ``handles`` are document handles (not pool handles). Documents whose content
+    changed are re-chunked and re-embedded; unchanged ones are skipped. Stored
+    metadata is preserved."""
+    backend = _backend_factory()
+    if req.source not in backend["plugins"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown source plugin: {req.source}. "
+                   f"Available: {sorted(backend['plugins'])}",
+        )
+    if not req.handles:
+        raise HTTPException(status_code=400, detail="No document handles provided.")
+    job_id = _new_job("resync", {"source": req.source, "handles": req.handles})
+    background_tasks.add_task(_run_resync_job, job_id)
+    return {"job_id": job_id, "status": "running", "source": req.source}
+
+
+@router.get("/resync/status/{job_id}")
+def resync_status(job_id: str):
+    return _job_response(job_id)
+
+
+def _run_resync_job(job_id: str) -> None:
+    payload = _get_job(job_id).get("payload", {})
+    result: dict[str, Any] | None = None
+    try:
+        backend = _backend_factory()
+        source = payload["source"]
+        sync_result = backend["engine"].sync_documents(
+            backend["plugins"][source], payload.get("handles") or []
+        )
+        result = {
+            "source": sync_result.source,
+            "processed": sync_result.processed,
+            "indexed": sync_result.indexed,
+            "skipped": sync_result.skipped,
+            "failures": [
+                {"source_id": f.source_id, "error": f.error}
+                for f in sync_result.failures
+            ],
+            "warning": sync_result.warning,
+        }
+        _update_job(job_id, status="done", result=result, finished_at=_now_iso())
+    except Exception as exc:
+        logger.exception(
+            "corpus_browser_resync_job_failed",
             job_id=job_id,
             source=payload.get("source"),
         )

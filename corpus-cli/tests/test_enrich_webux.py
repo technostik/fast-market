@@ -24,6 +24,12 @@ class _FakeStore:
             and (status is None or it["status"] == status)
         ]
 
+    def get_document_by_handle(self, handle):
+        for d in self.docs:
+            if d.get("handle") == handle:
+                return d
+        return None
+
     def list_documents_extended(self, source=None, filters=None, order_by="date",
                                 reverse=False, limit=100):
         return self.docs
@@ -49,6 +55,13 @@ def client(monkeypatch):
         "_enrich_worker",
         lambda store, source, **kw: EnrichResult(
             source=source, processed=2, enriched=2, skipped=0
+        ),
+    )
+    monkeypatch.setattr(
+        mod,
+        "_enrich_docs_worker",
+        lambda store, source, **kw: EnrichResult(
+            source=source, processed=1, enriched=1, skipped=0
         ),
     )
     monkeypatch.setattr(
@@ -91,6 +104,64 @@ def test_enrich_unknown_source_400(client):
     assert "bogus" in resp.json()["detail"]
 
 
+def test_enrich_selection_with_synced_doc_handle(client, monkeypatch):
+    import webux.corpus_browser.register as mod
+
+    store = _FakeStore(docs=[
+        {"handle": "yt-one", "source_plugin": "youtube", "source_id": "v1",
+         "title": "Doc One", "raw_text": "...", "updated_at": "2026-08-01T00:00:00",
+         "metadata": {}},
+    ])
+    backend = {"config": {}, "store": store, "engine": None,
+               "plugins": {"youtube": object(), "obsidian": object()}}
+    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+
+    resp = client.post("/api/corpus_browser/enrich",
+                       json={"source": "youtube", "handles": ["yt-one"]})
+    assert resp.status_code == 200, resp.text
+    job = client.get(f"/api/corpus_browser/enrich/status/{resp.json()['job_id']}").json()
+    assert job["status"] == "done"
+    assert job["result"]["source"] == "youtube"
+    assert job["result"]["enriched"] == 3  # 2 pool + 1 synced doc
+
+
+def test_enrich_selection_mixed_pool_and_synced(client, monkeypatch):
+    import webux.corpus_browser.register as mod
+
+    store = _FakeStore(
+        pool=[
+            {"source_plugin": "youtube", "source_id": "p1", "status": "pending",
+             "metadata": {}, "added_at": "2026-08-01T00:00:00", "synced_at": None},
+        ],
+        docs=[
+            {"handle": "yt-one", "source_plugin": "youtube", "source_id": "v1",
+             "title": "Doc One", "raw_text": "...", "updated_at": "2026-08-01T00:00:00",
+             "metadata": {}},
+        ],
+    )
+    backend = {"config": {}, "store": store, "engine": None,
+               "plugins": {"youtube": object(), "obsidian": object()}}
+    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+
+    resp = client.post("/api/corpus_browser/enrich",
+                       json={"source": "youtube",
+                             "handles": ["pool:youtube:p1", "yt-one"]})
+    assert resp.status_code == 200, resp.text
+    job = client.get(f"/api/corpus_browser/enrich/status/{resp.json()['job_id']}").json()
+    assert job["status"] == "done"
+    assert job["result"]["enriched"] == 3
+
+
+def test_enrich_selection_no_matching_handles_400(client):
+    # Handles from another source match neither pool nor synced docs of "youtube".
+    resp = client.post("/api/corpus_browser/enrich",
+                       json={"source": "youtube", "handles": ["pool:obsidian:x", "yt-ghost"]})
+    assert resp.status_code == 200, resp.text
+    job = client.get(f"/api/corpus_browser/enrich/status/{resp.json()['job_id']}").json()
+    assert job["status"] == "error"
+    assert "matched the requested source" in job["error"]["message"]
+
+
 def test_enrich_status_unknown_job_404(client):
     resp = client.get("/api/corpus_browser/enrich/status/nope")
     assert resp.status_code == 404
@@ -128,6 +199,53 @@ def test_sync_pool_requires_source_plugin(client):
 
 def test_sync_pool_requires_handles(client):
     resp = client.post("/api/corpus_browser/sync-pool",
+                       json={"source": "youtube", "handles": []})
+    assert resp.status_code == 400
+
+
+# ── resync: re-fetch transcripts of already-indexed documents ─────────────────
+
+
+class _FakeEngine:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def sync_documents(self, plugin, handles, vault_path=None):
+        self.calls.append((plugin, handles))
+        return self.result
+
+
+def test_resync_refetches_selected_docs(client, monkeypatch):
+    import webux.corpus_browser.register as mod
+
+    engine = _FakeEngine(SyncResult(
+        source="youtube", processed=1, indexed=1, skipped=0, failures=[]
+    ))
+    backend = {"config": {}, "store": _FakeStore(), "engine": engine,
+               "plugins": {"youtube": object(), "obsidian": object()}}
+    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+
+    resp = client.post("/api/corpus_browser/resync",
+                       json={"source": "youtube", "handles": ["yt-one", "yt-two"]})
+    assert resp.status_code == 200, resp.text
+    job_id = resp.json()["job_id"]
+    assert len(engine.calls) == 1
+    assert engine.calls[0][1] == ["yt-one", "yt-two"]
+
+    job = client.get(f"/api/corpus_browser/resync/status/{job_id}").json()
+    assert job["status"] == "done"
+    assert job["result"]["indexed"] == 1
+
+
+def test_resync_unknown_source_400(client):
+    resp = client.post("/api/corpus_browser/resync",
+                       json={"source": "bogus", "handles": ["yt-one"]})
+    assert resp.status_code == 400
+
+
+def test_resync_requires_handles(client):
+    resp = client.post("/api/corpus_browser/resync",
                        json={"source": "youtube", "handles": []})
     assert resp.status_code == 400
 

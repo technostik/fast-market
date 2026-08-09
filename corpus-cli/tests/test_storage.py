@@ -15,6 +15,41 @@ def test_upsert_idempotent(store):
     assert store.upsert_document(doc, "h1") is False
 
 
+def test_update_document_enrichment_merges_metadata_and_columns(store):
+    store.upsert_document(
+        Document(
+            source_plugin="youtube", source_id="v1", title="Old", raw_text="t",
+            duration_seconds=60, metadata={"description": "d", "published_at": "x"},
+        ),
+        "h1",
+    )
+    changed = store.update_document_enrichment(
+        "youtube", "v1",
+        {"description": "new desc", "view_count": 123, "title": "New", "duration_seconds": 330},
+    )
+    assert changed is True
+    doc = store.get_document("youtube", "v1")
+    assert doc["metadata"]["description"] == "new desc"
+    assert doc["metadata"]["view_count"] == 123
+    assert doc["metadata"]["published_at"] == "x"  # existing keys preserved
+    assert doc["metadata"]["title"] == "New"
+    assert doc["title"] == "New"  # title column synced
+    assert doc["duration_seconds"] == 330  # duration column synced
+    assert doc["raw_text"] == "t"  # content untouched
+
+
+def test_update_document_enrichment_noop_returns_false(store):
+    store.upsert_document(
+        Document(
+            source_plugin="youtube", source_id="v1", title="T", raw_text="t",
+            duration_seconds=60, metadata={"description": "d"},
+        ),
+        "h1",
+    )
+    assert store.update_document_enrichment("youtube", "v1", {"description": "d"}) is False
+    assert store.update_document_enrichment("youtube", "missing", {"description": "d"}) is False
+
+
 def test_keyword_search(store):
     doc = Document(
         source_plugin="obsidian", source_id="1", title="t", raw_text="hello world"

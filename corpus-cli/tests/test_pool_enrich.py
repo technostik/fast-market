@@ -11,6 +11,7 @@ from core.pool_enrich import (
     _extract_bot_challenge,
     _load_bot_pause,
     _save_bot_pause,
+    enrich_documents,
     enrich_pool_items,
 )
 from core.sync_errors import BotDetectionError
@@ -234,3 +235,92 @@ def test_bot_pause_roundtrip(monkeypatch, tmp_path):
     assert _load_bot_pause() is not None
     _save_bot_pause(datetime.now(timezone.utc) - timedelta(hours=1))
     assert _load_bot_pause() is None
+
+
+# ── enrich_documents: already-indexed (synced) videos ─────────────────────────
+
+
+class _DocFakeStore:
+    """In-memory stand-in for SQLAlchemyStore document operations."""
+
+    def __init__(self, docs):
+        self.docs = docs
+
+    def get_documents_raw(self, source):
+        return [
+            {"source_id": d["source_id"]}
+            for d in self.docs
+            if d["source_plugin"] == source
+        ]
+
+    def get_document(self, source, source_id):
+        for d in self.docs:
+            if d["source_plugin"] == source and d["source_id"] == source_id:
+                return d
+        return None
+
+    def update_document_enrichment(self, source_plugin, source_id, meta):
+        for d in self.docs:
+            if d["source_plugin"] == source_plugin and d["source_id"] == source_id:
+                merged = dict(d["metadata"])
+                merged.update(meta)
+                changed = merged != d["metadata"]
+                d["metadata"] = merged
+                return changed
+        return False
+
+
+def _doc(sid, **meta):
+    return {
+        "handle": f"yt-{sid}",
+        "source_plugin": "youtube",
+        "source_id": sid,
+        "title": f"Title {sid}",
+        "raw_text": "hello",
+        "metadata": {"description": f"desc {sid}", **meta},
+    }
+
+
+@pytest.fixture
+def doc_store():
+    return _DocFakeStore([_doc("v1"), _doc("v2"), _doc("v3", view_count=99)])
+
+
+def test_doc_enrich_enriches_all_docs(doc_store):
+    result = enrich_documents(doc_store, "youtube", fetch_one=_meta)
+    assert result.processed == 3
+    assert result.enriched == 3
+    assert result.failed == 0
+    by_id = {d["source_id"]: d for d in doc_store.docs}
+    assert by_id["v1"]["metadata"]["view_count"] == 1234
+    assert by_id["v3"]["metadata"]["view_count"] == 1234  # yt-dlp wins on merge
+    assert by_id["v3"]["metadata"]["description"] == "desc v3"
+
+
+def test_doc_enrich_restricts_to_source_ids(doc_store):
+    result = enrich_documents(doc_store, "youtube", source_ids=["v2"], fetch_one=_meta)
+    assert result.processed == 1
+    assert result.enriched == 1
+    by_id = {d["source_id"]: d for d in doc_store.docs}
+    assert "view_count" not in by_id["v1"]["metadata"]
+
+
+def test_doc_enrich_unknown_ids_ignored(doc_store):
+    result = enrich_documents(doc_store, "youtube", source_ids=["ghost", "v1"], fetch_one=_meta)
+    assert result.processed == 1
+
+
+def test_doc_enrich_unchanged_metadata_skipped(doc_store):
+    def same(sid, cookies=None):
+        return dict(next(d for d in doc_store.docs if d["source_id"] == sid)["metadata"])
+
+    result = enrich_documents(doc_store, "youtube", fetch_one=same)
+    assert result.enriched == 0
+    assert result.skipped == 3
+
+
+def test_doc_enrich_no_docs():
+    store = _DocFakeStore([])
+    result = enrich_documents(store, "youtube", fetch_one=_meta)
+    assert result.processed == 0
+    assert result.enriched == 0

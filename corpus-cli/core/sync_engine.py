@@ -297,6 +297,100 @@ class SyncEngine:
 
         return SyncResult(plugin.name, processed, indexed, skipped, failures, warning=warning)
 
+    def sync_documents(
+        self,
+        plugin: SourcePlugin,
+        handles: list[str],
+        vault_path: str | None = None,
+    ) -> SyncResult:
+        """Re-fetch content for already-indexed documents (transcript resync).
+
+        For each handle, rebuilds ItemMeta from the stored document's metadata
+        and re-runs ``plugin.fetch``, updating raw_text + chunks when the
+        content actually changed (content-hash comparison). Metadata produced by
+        a previous enrichment is preserved because fetch echoes the stored
+        metadata back unchanged.
+        """
+        from datetime import datetime as _dt
+
+        from plugins.base import ItemMeta
+
+        permanent_failures = self.store.get_permanent_failures(plugin.name)
+        processed = indexed = skipped = 0
+        failures: list[SyncFailure] = []
+
+        for handle in handles:
+            doc = self.store.get_document_by_handle(handle)
+            if not doc or doc.get("source_plugin") != plugin.name:
+                continue
+            source_id = doc["source_id"]
+            if source_id in permanent_failures:
+                skipped += 1
+                continue
+
+            meta = doc.get("metadata") or {}
+            updated_raw = meta.get("updated_at") or doc.get("updated_at")
+            try:
+                updated_at = _dt.fromisoformat(updated_raw) if updated_raw else None
+            except (ValueError, TypeError):
+                updated_at = None
+
+            item_meta = ItemMeta(source_id=source_id, updated_at=updated_at, metadata=meta)
+            processed += 1
+            try:
+                document = plugin.fetch(item_meta)
+                document.handle = make_handle(
+                    document.source_plugin, document.source_id, document.title
+                )
+                content_hash = self.embedder.hash_text(document.raw_text)
+                changed = self.store.upsert_document(document, content_hash)
+
+                if not changed:
+                    skipped += 1
+                    _log_item(plugin.name, document, "skipped")
+                    continue
+
+                chunks = self._build_chunks(document)
+                self.store.replace_chunks(
+                    document.source_plugin, document.source_id, chunks
+                )
+                self.store.clear_failure(plugin.name, source_id)
+                indexed += 1
+                _log_item(plugin.name, document, "indexed", chunks=len(chunks))
+
+            except SyncError as exc:
+                error_type = "permanent" if exc.permanent else "transient"
+                self.store.record_failure(
+                    plugin.name, source_id, str(exc), error_type, vault_path
+                )
+                logger.error(
+                    "resync_item_failed",
+                    source=plugin.name,
+                    source_id=source_id,
+                    error_type=error_type,
+                    error=str(exc),
+                )
+                failures.append(SyncFailure(source_id=source_id, error=str(exc)))
+            except Exception as exc:
+                self.store.record_failure(
+                    plugin.name, source_id, str(exc), "transient", vault_path
+                )
+                logger.error(
+                    "resync_item_failed",
+                    source=plugin.name,
+                    source_id=source_id,
+                    error_type="transient",
+                    error=str(exc),
+                )
+                failures.append(SyncFailure(source_id=source_id, error=str(exc)))
+
+        warning: str | None = None
+        if processed == 0:
+            warning = f"No indexed documents of source {plugin.name} matched the given handles."
+        return SyncResult(
+            plugin.name, processed, indexed, skipped, failures, warning=warning
+        )
+
     def sync_field(
         self,
         field_name: str,
