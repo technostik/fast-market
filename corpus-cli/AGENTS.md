@@ -33,6 +33,7 @@ corpus-agent/
 | `corpus serve` | Start web server |
 | `corpus embed-server` | Start embedding server |
 | `corpus field` | Declare/manage soft fields (create, list, delete, missing, set) |
+| `corpus enrich` | Bulk-fill metadata (duration, views, tags, ...) for non-synced pool items via yt-dlp (no API quota) |
 
 ### Sync Modes
 

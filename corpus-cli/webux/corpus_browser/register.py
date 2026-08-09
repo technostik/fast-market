@@ -149,6 +149,13 @@ def _scan_source_worker(store: Any, plugin, debug: bool = False):
     return scan_source(plugin, store, debug=debug)
 
 
+def _enrich_worker(store: Any, source: str, **kwargs):
+    """Thin wrapper over core.pool_enrich — tests replace this wholesale."""
+    from core.pool_enrich import enrich_pool_items
+
+    return enrich_pool_items(store, source, **kwargs)
+
+
 # ─── API: fields, operations, sources ─────────────────────────────────────────
 
 
@@ -425,6 +432,87 @@ def _run_scan_job(job_id: str) -> None:
         _update_job(job_id, status="done", result=result, finished_at=_now_iso())
     except Exception as exc:
         logger.exception("corpus_browser_scan_job_failed", job_id=job_id, source=source_req)
+        _update_job(job_id, status="error", error=_map_error(exc), result=result)
+
+
+# ─── POST /enrich + GET /enrich/status (yt-dlp pool metadata enrichment) ─────
+
+
+class _EnrichRequest(BaseModel):
+    source: Optional[str] = None
+    handles: Optional[list[str]] = None
+    limit: Optional[int] = None
+    concurrency: int = 4
+
+
+@router.post("/enrich")
+def start_enrich(req: _EnrichRequest, background_tasks: BackgroundTasks):
+    """Bulk-fill metadata (duration, views, tags, ...) for non-synced pool
+    items via yt-dlp — no YouTube API quota involved. Mirrors `corpus enrich`."""
+    backend = _backend_factory()
+    plugins = backend["plugins"]
+    source = req.source
+    if source is None:
+        # Mirror `corpus enrich`: default to the YouTube plugin when present,
+        # else the first plugin (enrichment is yt-dlp/YouTube specific).
+        source = "youtube" if "youtube" in plugins else next(iter(plugins), None)
+    if source and source not in plugins:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown source plugin: {source}. "
+                   f"Available: {sorted(plugins)}",
+        )
+    payload = {
+        "source": source,
+        "handles": req.handles,
+        "limit": req.limit,
+        "concurrency": req.concurrency or 4,
+    }
+    job_id = _new_job("enrich", payload)
+    background_tasks.add_task(_run_enrich_job, job_id)
+    return {"job_id": job_id, "status": "running", "source": source}
+
+
+@router.get("/enrich/status/{job_id}")
+def enrich_status(job_id: str):
+    return _job_response(job_id)
+
+
+def _run_enrich_job(job_id: str) -> None:
+    payload = _get_job(job_id).get("payload", {})
+    result: dict[str, Any] | None = None
+    try:
+        backend = _backend_factory()
+        store = backend["store"]
+        source = payload.get("source")
+        if not source:
+            raise HTTPException(
+                status_code=400,
+                detail="No source plugin available to enrich.",
+            )
+        source_ids = None
+        if payload.get("handles"):
+            source_ids = [
+                h.split(":", 2)[2]
+                for h in payload["handles"]
+                if h.startswith(f"pool:{source}:") and len(h.split(":", 2)) == 3
+            ]
+            if not source_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No pool handles matched the requested source.",
+                )
+        summary = _enrich_worker(
+            store,
+            source,
+            source_ids=source_ids,
+            limit=payload.get("limit"),
+            concurrency=int(payload.get("concurrency") or 4),
+        )
+        result = summary.to_dict()
+        _update_job(job_id, status="done", result=result, finished_at=_now_iso())
+    except Exception as exc:
+        logger.exception("corpus_browser_enrich_job_failed", job_id=job_id, source=payload.get("source"))
         _update_job(job_id, status="error", error=_map_error(exc), result=result)
 
 

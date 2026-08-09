@@ -75,6 +75,7 @@
     <button id="browseBtn">Browse All</button>
     <span class="spacer"></span>
     <span id="scanButtons"></span>
+    <button id="enrichBtn" title="Fill metadata for non-synced items via yt-dlp (no API quota)">Enrich</button>
   </div>
 
   <div class="banner" id="banner" style="display:none;"></div>
@@ -558,6 +559,56 @@ function stopJob(jobId) {
   if (j) { clearInterval(j.timer); state.jobs.delete(jobId); }
 }
 
+// ── jobs: yt-dlp enrichment ──────────────────────────────────────────────────
+async function startEnrich() {
+  const body = {source: currentSource() || null, concurrency: 4};
+  const selHandles = [...state.selected].filter(h => h.startsWith('pool:'));
+  if (state.selectAllFiltered && state.total > 0) {
+    body.limit = Math.max(1, state.total);
+  } else if (selHandles.length) {
+    body.handles = selHandles;
+  }
+  const r = await fetch(API + '/enrich', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { showBanner('Enrich start failed: ' + (data.detail || r.status), 'err'); return; }
+  $('enrichBtn').disabled = true;
+  $('enrichBtn').textContent = 'Enriching…';
+  showBanner('Enriching non-synced items via yt-dlp…', 'info');
+  const timer = setInterval(() => pollEnrichJob(data.job_id), 2500);
+  state.jobs.set(data.job_id, {kind: 'enrich', timer});
+  pollEnrichJob(data.job_id);
+}
+
+async function pollEnrichJob(jobId) {
+  const r = await fetch(API + '/enrich/status/' + jobId);
+  if (!r.ok) { stopJob(jobId); resetEnrichBtn(); return; }
+  const j = await r.json();
+  if (j.status === 'running') return;
+  stopJob(jobId);
+  resetEnrichBtn();
+  if (j.status === 'done' && j.result) {
+    const res = j.result;
+    showBanner('Enrich "' + res.source + '" done — processed ' + res.processed +
+      ' · enriched ' + res.enriched + ' · unchanged ' + res.skipped +
+      (res.failed ? ' · failed ' + res.failed : ''),
+      res.failed ? 'err' : 'ok');
+    loadColumns();
+    clearSelection();
+    if (state.mode === 'search') search(); else browse(state.offset);
+    return;
+  }
+  showBanner('Enrich failed: ' + (j.error ? (j.error.message || j.error.type) : 'unknown') +
+    ' — check server logs and retry.', 'err');
+}
+
+function resetEnrichBtn() {
+  $('enrichBtn').disabled = false;
+  $('enrichBtn').textContent = 'Enrich';
+}
+
 // ── jobs: field sync ─────────────────────────────────────────────────────────
 function syncBodyFor(field) {
   const body = {field, source: currentSource() || null};
@@ -634,6 +685,7 @@ $('missingFieldSelect').onchange = () => { state.missingField = $('missingFieldS
 $('missingOnly').onchange = () => { state.missingOnly = $('missingOnly').checked; browse(0); };
 $('syncBtn').onclick = () => startSync($('syncFieldSelect').value);
 $('tagBtn').onclick = () => startSync('tags');
+$('enrichBtn').onclick = startEnrich;
 $('selectAllLink').onclick = selectAllFiltered;
 $('clearSel').onclick = clearSelection;
 
