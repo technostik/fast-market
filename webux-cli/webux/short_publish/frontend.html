@@ -658,6 +658,7 @@ async function startJob() {
   if (!r.ok) { alert('Failed to start'); return; }
   const data = await r.json();
   currentJob = data.job_id;
+  document.getElementById('manualTitle').value = '';
   document.getElementById('resumeArea').style.display = 'none';
   pollStatus();
 }
@@ -1498,6 +1499,7 @@ async function addToPool() {
     })
   });
   refreshPool();
+  document.getElementById('manualTitle').value = '';
 }
 
 let lastConsoleContent = '';
