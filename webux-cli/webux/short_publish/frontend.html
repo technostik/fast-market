@@ -335,6 +335,11 @@
         <textarea id="sourceUrls" rows="2" placeholder="https://..."></textarea>
       </div>
 
+      <div class="row">
+        <label>Cut time (optional — trims the video tail at this point before processing)</label>
+        <input type="text" id="cutTime" placeholder="MM:SS (e.g. 1:30) — leave empty to skip">
+      </div>
+
       <div style="display:flex; gap:8px; margin-top:8px;">
         <button class="btn-go" onclick="startJob()" id="goBtn">Publish (immediate)</button>
         <button class="btn-sec" onclick="addToPool()" id="addPoolBtn">Add to pool</button>
@@ -547,10 +552,14 @@ function onFileSelected() {
     } else {
       srcUrlsEl.value = '';
     }
+
+    // cut time
+    document.getElementById('cutTime').value = data.cut_time || '';
   }).catch(() => {
     // no meta or error → clean fields
     document.getElementById('descPrefix').value = '';
     document.getElementById('sourceUrls').value = '';
+    document.getElementById('cutTime').value = '';
   });
 }
 
@@ -646,7 +655,8 @@ async function startJob() {
     ignore_post_publish: document.getElementById('ignorePostPublish').checked,
     privacy: document.getElementById('privacy').value,
     description_prefix: document.getElementById('descPrefix').value,
-    source_urls: (document.getElementById('sourceUrls').value || '').split('\n')
+    source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
+    cut_time: document.getElementById('cutTime').value
   };
   // Immediate publish (only if pool not running)
   const poolState = await fetch('/api/short_publish/pool').then(r => r.json()).catch(() => ({}));
@@ -659,6 +669,7 @@ async function startJob() {
   const data = await r.json();
   currentJob = data.job_id;
   document.getElementById('manualTitle').value = '';
+  document.getElementById('cutTime').value = '';
   document.getElementById('resumeArea').style.display = 'none';
   pollStatus();
 }
@@ -1495,11 +1506,13 @@ async function addToPool() {
       do_normalize_volume: document.getElementById('normalizeVolume').checked,
       do_charisma: document.getElementById('doCharisma').checked,
       do_add_signature: (!document.getElementById('addSignature').disabled && document.getElementById('addSignature').checked),
-      ignore_post_publish: document.getElementById('ignorePostPublish').checked
+      ignore_post_publish: document.getElementById('ignorePostPublish').checked,
+      cut_time: document.getElementById('cutTime').value
     })
   });
   refreshPool();
   document.getElementById('manualTitle').value = '';
+  document.getElementById('cutTime').value = '';
 }
 
 let lastConsoleContent = '';

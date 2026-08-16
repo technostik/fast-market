@@ -19,7 +19,7 @@ STEP_NAMES = [
 DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
 DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv"
 
-_INTERMEDIATE_RE = re.compile(r"_(nosilence|subtitled|no_signature)$", re.IGNORECASE)
+_INTERMEDIATE_RE = re.compile(r"_(nosilence|cut|subtitled|no_signature)$", re.IGNORECASE)
 
 _STEP_FILE_KEYS: list[list[str]] = [
     ["no_silence", "audio"],
@@ -63,6 +63,7 @@ class Job:
     do_charisma: bool = True
     do_add_signature: bool = True
     do_ignore_post_publish: bool = False
+    cut_time: str = ""
     source_urls: list[str] = field(default_factory=list)
     stop_requested: bool = False
     steps: list[Step] = field(default_factory=list)

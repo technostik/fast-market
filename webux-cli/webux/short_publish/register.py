@@ -57,7 +57,7 @@ def _is_intermediate(path: Path) -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "") -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "") -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
@@ -83,6 +83,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_charisma=do_charisma,
         do_add_signature=do_add_signature,
         do_ignore_post_publish=do_ignore_post_publish,
+        cut_time=cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -329,6 +330,7 @@ class StartRequest(BaseModel):
     do_charisma: bool = True
     do_add_signature: bool = True
     ignore_post_publish: bool = False
+    cut_time: str = ""
 
 
 class ResumeRequest(BaseModel):
@@ -382,6 +384,7 @@ async def start(req: StartRequest):
         do_charisma=req.do_charisma,
         do_add_signature=req.do_add_signature,
         do_ignore_post_publish=req.ignore_post_publish,
+        cut_time=req.cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -503,6 +506,7 @@ async def check_resume(body: dict):
         "description": meta.get("description", ""),
         "source_urls": meta.get("source_urls", []),
         "description_prefix": meta.get("description_prefix", ""),
+        "cut_time": meta.get("cut_time", ""),
     }
 
 
@@ -690,11 +694,12 @@ class PoolAddRequest(BaseModel):
     do_charisma: bool = True
     do_add_signature: bool = True
     ignore_post_publish: bool = False
+    cut_time: str = ""
 
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time)
     return {"ok": ok}
 
 

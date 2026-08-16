@@ -19,11 +19,13 @@ from .utils import (
     _get_video_duration,
     _sanitize_filename,
     _effective_limit_seconds,
+    _parse_timestamp,
     SHORTS_MAX_SECONDS,
     _run,
     _extract_video_id,
 )
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
+from .pool import clear_pool_cut_time
 
 
 async def _run_job_safely(coro, job: Job) -> None:
@@ -127,10 +129,37 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         s0.status = "running"
         s0.progress = 0.0
 
+        # ── Cut video tail (optional, one-time, before any other step) ──
+        if job.cut_time:
+            seconds = _parse_timestamp(job.cut_time)
+            if seconds is None:
+                s0.end_time = time.time()
+                s0.status = "error"
+                s0.output = f"[error] Invalid cut time: {job.cut_time!r} (use MM:SS or seconds)"
+                job.status = "error"
+                job.end_time = time.time()
+                _save_meta(job)
+                return
+            cut_path = str(d / f"{stem}_cut.mp4")
+            cmd = [_video(), "cut", job.source, "-o", cut_path, "-t", job.cut_time]
+            if await _run_tracked(job, s0, *cmd):
+                return
+            current_video = cut_path
+            job.files["cut"] = cut_path
+            s0.output += f"\n✂ Cut at {job.cut_time}"
+            # One-time cut done — clear the field everywhere so resume/re-run won't re-cut
+            job.cut_time = ""
+            _save_meta(job)
+            clear_pool_cut_time(job.source)
+        elif job.files.get("cut", "") and Path(job.files["cut"]).exists():
+            # Re-entering step 0 after a prior cut already ran (e.g. pool retry):
+            # reuse the existing cut file instead of the untouched original.
+            current_video = job.files["cut"]
+
         # ── Remove silence (optional, modal-aware) ──
         if job.do_remove_silence:
             out_path = str(d / f"{stem}_nosilence.mp4")
-            cmd = [_video(), "remove-silence", job.source, "-o", out_path]
+            cmd = [_video(), "remove-silence", current_video, "-o", out_path]
             if job.use_modal:
                 cmd.append("--modal")
             if await _run_tracked(job, s0, *cmd):
@@ -238,6 +267,8 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         nv = job.files.get("no_silence", "")
         if nv and Path(nv).exists():
             current_video = nv
+        elif job.files.get("cut", "") and Path(job.files["cut"]).exists():
+            current_video = job.files["cut"]
 
     ass_path = str(d / f"{stem}.ass")
     txt_path = str(d / f"{stem}_transcript.txt")

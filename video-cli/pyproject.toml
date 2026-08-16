@@ -27,6 +27,7 @@ packages = [
     "cli",
     "commands",
     "commands.remove_silence",
+    "commands.cut",
     "commands.extract_transcript",
     "commands.burn_subtitles",
     "commands.modal_diagnose",

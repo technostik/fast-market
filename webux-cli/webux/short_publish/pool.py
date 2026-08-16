@@ -23,6 +23,7 @@ class PoolItem:
     do_charisma: bool = True
     do_add_signature: bool = True
     do_ignore_post_publish: bool = False
+    cut_time: str = ""
     status: str = "queued"  # queued | processing | finished | skipped | error
     added_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
@@ -72,6 +73,7 @@ def _load_pool_from_disk():
                 do_charisma=item.get("do_charisma", True),
                 do_add_signature=item.get("do_add_signature", True),
                 do_ignore_post_publish=item.get("do_ignore_post_publish", False),
+                cut_time=item.get("cut_time", ""),
                 # processing items were interrupted by server restart — reset them
                 status="queued" if item.get("status") == "processing" else item.get("status", "queued"),
                 added_at=item.get("added_at", time.time()),
@@ -105,6 +107,7 @@ def _save_pool_to_disk():
                 "do_charisma": it.do_charisma,
                 "do_add_signature": it.do_add_signature,
                 "do_ignore_post_publish": it.do_ignore_post_publish,
+                "cut_time": it.cut_time,
                 "status": it.status,
                 "added_at": it.added_at,
                 "finished_at": it.finished_at,
@@ -154,12 +157,12 @@ def _update_meta_status(source: str, status: str):
         pass
 
 
-def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "") -> bool:
+def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "") -> bool:
     src = str(Path(source).expanduser().resolve())
     if any(item.source == src for item in _pool):
         return False
     source_urls = source_urls or []
-    item = PoolItem(source=src, title_override=title_override, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish)
+    item = PoolItem(source=src, title_override=title_override, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish, cut_time=cut_time)
     _pool.append(item)
     _create_meta(src, description_prefix, source_urls)
     _save_pool_to_disk()
@@ -225,6 +228,17 @@ def remove_from_pool(source: str) -> bool:
     _pool = [it for it in _pool if it.source != src]
     _save_pool_to_disk()
     return len(_pool) < before
+
+
+def clear_pool_cut_time(source: str) -> None:
+    """Reset the one-time cut_time on a pool item so the video is not re-cut on
+    a later resume/requeue. No-op when the item has no pending cut_time."""
+    src = str(Path(source).expanduser().resolve())
+    for it in _pool:
+        if it.source == src and it.cut_time:
+            it.cut_time = ""
+            _save_pool_to_disk()
+            return
 
 
 def get_pool_state() -> dict:
@@ -317,6 +331,7 @@ async def _pool_worker():
                 do_add_signature=next_item.do_add_signature,
                 do_ignore_post_publish=next_item.do_ignore_post_publish,
                 title_override=next_item.title_override,
+                cut_time=next_item.cut_time,
             )
             next_item.job_id = job.job_id
             _save_pool_to_disk()

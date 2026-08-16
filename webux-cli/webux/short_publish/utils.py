@@ -47,6 +47,8 @@ def _save_meta(job) -> None:
         meta["description"] = job.description
     if job.source_urls:
         meta["source_urls"] = job.source_urls
+    if job.cut_time:
+        meta["cut_time"] = job.cut_time
     if job.description_prefix:
         meta["description_prefix"] = job.description_prefix
     if job.transcript_text:
@@ -97,6 +99,32 @@ def _stem(p: str) -> str:
 
 def _dir(p: str) -> Path:
     return Path(p).resolve().parent
+
+
+def _parse_timestamp(ts: str) -> float | None:
+    """Parse a cut point into seconds. Accepts ``MM:SS``, ``HH:MM:SS`` or a bare
+    number of seconds. Returns ``None`` for an empty/unparseable value."""
+    ts = (ts or "").strip()
+    if not ts:
+        return None
+    if ":" in ts:
+        parts: list[float] = []
+        for p in ts.split(":"):
+            try:
+                parts.append(float(p))
+            except ValueError:
+                return None
+        if not parts:
+            return None
+        parts.reverse()
+        seconds = 0.0
+        for i, v in enumerate(parts):
+            seconds += v * (60 ** i)
+        return seconds
+    try:
+        return float(ts)
+    except ValueError:
+        return None
 
 
 def _extract_video_id(url: str) -> str:
