@@ -17,6 +17,7 @@ from .utils import (
     _stem,
     _ass_to_plain_text,
     _get_video_duration,
+    _get_video_duration_cli,
     _sanitize_filename,
     _effective_limit_seconds,
     _parse_timestamp,
@@ -25,7 +26,7 @@ from .utils import (
     _extract_video_id,
 )
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
-from .pool import clear_pool_cut_time
+from .pool import clear_pool_cut_time, set_item_upload_duration
 
 
 async def _run_job_safely(coro, job: Job) -> None:
@@ -71,6 +72,19 @@ def _finish_step(job: Job, step, rc: int) -> bool:
         _save_meta(job)
         return True
     return False
+
+
+def _duration_label(seconds: float) -> str:
+    return f"{seconds:.0f}s ≈ {int(seconds // 60)}:{int(seconds % 60):02d}"
+
+
+async def _record_processed_duration(job: Job, video_path: str) -> float:
+    """Probe the renamed/concatenated file that will be uploaded, and expose
+    that duration on the job (and its pool item) before the upload step runs."""
+    seconds = await _get_video_duration_cli(video_path)
+    job.upload_duration_seconds = seconds
+    set_item_upload_duration(job.source, seconds)
+    return seconds
 
 
 def _abort_if_stopped(job: Job, step) -> bool:
@@ -477,11 +491,13 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             else:
                 check_line = f"\n\n⚠ Check: {job.check_result}"
 
+        processed_duration = await _record_processed_duration(job, final_video)
         s3.output = (
             f"Title: {job.title}\n\n"
             f"Description:\n{job.description}\n\n"
             f"Transcript:\n{transcript_text}"
             + check_line
+            + f"\n\n⏱ Processed duration: {_duration_label(processed_duration)}"
         )
         s3.end_time = time.time(); s3.status = "done"
         _save_meta(job)
@@ -494,6 +510,8 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             job.steps[4].status = "skipped"
     elif job.skip_upload:
         job.steps[4].status = "skipped"
+        if job.upload_duration_seconds is None:
+            await _record_processed_duration(job, final_video)
         _save_meta(job)
     else:
         s4 = job.steps[4]
@@ -511,7 +529,10 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             job.end_time = time.time()
             _save_meta(job)
             return
-        final_duration = await _get_video_duration(final_video)
+        if job.upload_duration_seconds is None:
+            await _record_processed_duration(job, final_video)
+        final_duration = job.upload_duration_seconds or 0.0
+        s4.output += f"⏱ Uploading video (duration {_duration_label(final_duration)})\n"
         if final_duration > SHORTS_MAX_SECONDS:
             s4.end_time = time.time()
             s4.status = "error"

@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -59,6 +60,8 @@ def _save_meta(job) -> None:
         meta["studio_url"] = job.studio_url
     if job.check_result is not None:
         meta["check_result"] = job.check_result
+    if getattr(job, "upload_duration_seconds", None) is not None:
+        meta["upload_duration_seconds"] = job.upload_duration_seconds
     try:
         with open(_meta_path(job.source), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
@@ -165,6 +168,34 @@ async def _get_video_duration(path: str) -> float:
         return float(result.stdout.strip())
     except ValueError:
         return 0.0
+
+
+_duration_cache: dict[str, tuple[float, float]] = {}  # path -> (mtime, seconds)
+
+
+def _get_video_duration_cli_sync(path: str) -> float:
+    """Duration in seconds via the ``video duration`` CLI, cached by (path, mtime)."""
+    try:
+        mtime = Path(path).stat().st_mtime
+    except OSError:
+        return 0.0
+    cached = _duration_cache.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    result = subprocess.run(
+        [_video(), "duration", path],
+        capture_output=True, text=True,
+    )
+    try:
+        seconds = float(result.stdout.strip())
+    except ValueError:
+        return 0.0
+    _duration_cache[path] = (mtime, seconds)
+    return seconds
+
+
+async def _get_video_duration_cli(path: str) -> float:
+    return await asyncio.to_thread(_get_video_duration_cli_sync, path)
 
 
 SHORTS_MAX_SECONDS = 180.0

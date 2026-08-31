@@ -73,6 +73,7 @@ Each `register(config: dict) -> WebuxPluginManifest` must provide:
 - **yt_poster subprocess path**: calls `youtube` and `prompt` CLIs — they must be in `PATH` and configured. Missing CLI → HTTP 500 with the subprocess error in the response.
 - **workdir not configured**: `yt_poster` and `fileviewer` return HTTP 404 when `workdir` is absent from `~/.config/fast-market/common/config.yaml`. Run `toolsetup workdir init <path>` first.
 - **plugin order**: `order` in `WebuxPluginManifest` controls tab position; lower numbers appear leftmost. Default ordering: fileviewer=30, skill_runner=20, yt_poster=40, monitor=20.
+- **short_publish pool duration is the processed file**: the pool row must show the renamed/concatenated clip (`upload_duration_seconds`, measured after step 3) — never the source-file length (`duration_seconds`). Source length belongs on the file picker only.
 
 ## 🧪 Tests
 - Test files: `tests/`

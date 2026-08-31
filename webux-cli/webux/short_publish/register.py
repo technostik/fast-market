@@ -20,6 +20,7 @@ from .models import (
     DEFAULT_VIDEO_EXTENSIONS,
     _INTERMEDIATE_RE,
     _STEP_FILE_KEYS,
+    is_no_signature_source,
 )
 from .utils import (
     _load_publish_cfg,
@@ -29,6 +30,7 @@ from .utils import (
     _stem,
     _ass_to_plain_text,
     _validate_urls,
+    _get_video_duration_cli,
 )
 from .pool import (
     add_to_pool,
@@ -63,6 +65,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
     """
     pub = _load_publish_cfg()
     job_id = str(uuid.uuid4())
+    meta = _load_meta(source)
     job = Job(
         job_id=job_id,
         source=source,
@@ -85,6 +88,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_ignore_post_publish=do_ignore_post_publish,
         cut_time=cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
+        upload_duration_seconds=meta.get("upload_duration_seconds"),
     )
     _jobs[job_id] = job
     return job
@@ -184,6 +188,7 @@ async def list_videos(
             f for f in d.iterdir()
             if f.suffix.lower() in exts
             and not _is_intermediate(f)
+            and not is_no_signature_source(f)
             and str(f.resolve()) not in pipeline_outputs
         ],
         key=lambda f: f.stat().st_mtime,
@@ -213,7 +218,8 @@ async def list_videos(
 
     return {
         "videos": [
-            {"name": f.name, "path": str(f), "mtime": f.stat().st_mtime, "resumable": resumable}
+            {"name": f.name, "path": str(f), "mtime": f.stat().st_mtime, "resumable": resumable,
+             "duration": await _get_video_duration_cli(str(f))}
             for f, resumable in visible
         ]
     }
@@ -360,6 +366,8 @@ async def start(req: StartRequest):
     source = str(Path(req.source).expanduser().resolve())
     if not Path(source).exists():
         raise HTTPException(status_code=400, detail=f"File not found: {source}")
+    if is_no_signature_source(Path(source)):
+        raise HTTPException(status_code=400, detail="Cannot publish a no_signature_* intermediate file as source")
 
     pub = _load_publish_cfg()
     job_id = str(uuid.uuid4())
@@ -466,6 +474,7 @@ async def resume(req: ResumeRequest):
         title=meta.get("title", ""),
         description=meta.get("description", ""),
         transcript_text=meta.get("transcript_text", ""),
+        upload_duration_seconds=meta.get("upload_duration_seconds"),
     )
     for i in completed_before:
         if i < from_step:

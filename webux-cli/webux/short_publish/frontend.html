@@ -472,6 +472,24 @@ let pollTimer = null;
 
 function _isCheckOk(s) { return s.trim().replace(/[.!]+$/, '').toUpperCase() === 'OK'; }
 
+const SHORTS_MAX_SECONDS = 180;
+const videoDurations = {};  // path -> seconds (from /list-videos)
+
+function fmtDuration(secs) {
+  if (secs == null || secs <= 0) return '';
+  const total = Math.round(secs);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function fmtDurationChip(secs) {
+  const label = fmtDuration(secs);
+  if (!label) return '';
+  const over = secs > SHORTS_MAX_SECONDS ? ' ⚠️' : '';
+  return `<span style="font-size:11px;color:var(--dim);${secs > SHORTS_MAX_SECONDS ? 'color:#e06c75;' : ''}">⏱ ${label}${over}</span>`;
+}
+
 async function loadVideos() {
   const sel = document.getElementById('fileSelect');
   sel.innerHTML = '<option value="">— select —</option>';
@@ -479,9 +497,11 @@ async function loadVideos() {
   if (!r || !r.ok) return;
   const data = await r.json();
   for (const v of data.videos || []) {
+    videoDurations[v.path] = v.duration;
     const opt = document.createElement('option');
+    const durLabel = fmtDuration(v.duration);
     opt.value = v.path;
-    opt.textContent = v.resumable ? '↩ ' + v.name : v.name;
+    opt.textContent = (v.resumable ? '↩ ' : '') + v.name + (durLabel ? ` · ⏱ ${durLabel}` : '');
     sel.appendChild(opt);
   }
   sel.onchange = onFileSelected;
@@ -504,7 +524,7 @@ function previewFile(path) {
   const nameEl = document.getElementById('videoName');
   wrap.style.display = 'block';
   vid.src = '/api/short_publish/video-preview?file=' + encodeURIComponent(path);
-  nameEl.textContent = path.split('/').pop();
+  nameEl.innerHTML = path.split('/').pop() + ' ' + fmtDurationChip(videoDurations[path]);
 }
 
 function previewSource() {
@@ -515,7 +535,7 @@ function previewSource() {
   const nameEl = document.getElementById('videoName');
   wrap.style.display = 'block';
   vid.src = '/api/short_publish/video-preview?file=' + encodeURIComponent(sel.value);
-  nameEl.textContent = sel.options[sel.selectedIndex].textContent;
+  nameEl.innerHTML = sel.options[sel.selectedIndex].textContent.split(' · ')[0] + ' ' + fmtDurationChip(videoDurations[sel.value]);
 }
 
 function onFileSelected() {
@@ -1105,7 +1125,15 @@ async function refreshPool() {
     const name = item.source.split('/').pop();
     const st = item.status;
     const isDone = st === 'finished' || st === 'error' || st === 'stopped';
-    let html = `<span>${name} <small style="color:var(--dim)">(${st})</small></span>`;
+    // Processed (renamed/concatenated) video duration — known after step 3, before upload.
+    // Never fall back to the source-file length: that is a different clip.
+    const uploadDur = (item.job && item.job.upload_duration_seconds != null)
+      ? item.job.upload_duration_seconds
+      : (item.upload_duration_seconds != null ? item.upload_duration_seconds : null);
+    const mainDur = uploadDur != null
+      ? ' ' + fmtDurationChip(uploadDur)
+      : '';
+    let html = `<span>${name} <small style="color:var(--dim)">(${st})</small>${mainDur}</span>`;
     if (item.check_result !== null && item.check_result !== undefined) {
       const isOk = _isCheckOk(item.check_result);
       const detail = isOk ? 'Content check: OK' : `Content check: ${item.check_result}`;
@@ -1122,7 +1150,10 @@ async function refreshPool() {
       html += '<div style="font-size:11px;color:var(--dim);margin-top:2px;">';
       item.job.steps.forEach(s => {
         const icon = s.status === 'done' ? '✅' : (s.status === 'running' ? '⏳' : (s.status === 'error' ? '❌' : '○'));
-        html += `${icon} ${s.name} `;
+        const durTag = (s.name === 'Upload to YouTube' && uploadDur != null)
+          ? ` ⏱ ${fmtDuration(uploadDur)}`
+          : '';
+        html += `${icon} ${s.name}${durTag} `;
       });
       if (startTs) {
         html += `— <span class="pool-elapsed" data-start="${startTs}"></span>`;

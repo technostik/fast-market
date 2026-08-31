@@ -21,6 +21,16 @@ DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv"
 
 _INTERMEDIATE_RE = re.compile(r"_(nosilence|cut|subtitled|no_signature)$", re.IGNORECASE)
 
+# Files produced by the "append signature" step: `no_signature_<title>.mp4`. These
+# must never be used as a source video (see pipeline.concat step 3).
+_NO_SIGNATURE_RE = re.compile(r"^no_signature_", re.IGNORECASE)
+
+
+def is_no_signature_source(path) -> bool:
+    """True when a path is a `no_signature_*` intermediate file that must not be
+    treated as an original source video."""
+    return bool(_NO_SIGNATURE_RE.search(Path(path).name))
+
 _STEP_FILE_KEYS: list[list[str]] = [
     ["no_silence", "audio"],
     ["transcript", "transcript_txt"],
@@ -78,6 +88,9 @@ class Job:
     modal_url: str = ""
     start_time: float = field(default_factory=time.time)
     end_time: float | None = None
+    # Duration (seconds) of the final video that will be uploaded to YouTube,
+    # measured right before the upload step runs.
+    upload_duration_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         now = time.time()
@@ -96,6 +109,7 @@ class Job:
             "files": self.files,
             "start_time": self.start_time,
             "elapsed_seconds": round(job_elapsed, 1),
+            "upload_duration_seconds": self.upload_duration_seconds,
             "steps": [
                 {
                     "name": s.name,
