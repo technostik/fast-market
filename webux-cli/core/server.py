@@ -195,7 +195,14 @@ def _make_page_handler(
             _mount_plugin_router(app, plugin, mounted)
             logger.info("webux_plugin_lazy_mounted", name=plugin.name)
         nav = _build_nav(manifests, active=plugin.name)
-        return HTMLResponse(_inject_nav(plugin.frontend_html, nav))
+        return HTMLResponse(
+            _inject_nav(plugin.frontend_html, nav),
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     return _render_page
 

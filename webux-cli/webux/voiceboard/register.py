@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -42,6 +45,32 @@ def _load_state(config: dict) -> VoiceboardState | None:
 async def get_config():
     cfg = load_voiceboard_config()
     return cfg
+
+
+@router.get("/engines")
+async def get_engines():
+    """Return the image engines the `image` CLI supports, plus the configured default."""
+    cmd = shutil.which("image") or "image"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            cmd, "setup", "engine", "list", "-f", "json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to list image engines: {exc}")
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"image setup engine list failed: {stderr.decode(errors='replace')[:500]}")
+    try:
+        data = json.loads(stdout.decode(errors="replace"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Bad engine list output: {exc}")
+    return {
+        "engines": data.get("engines", []),
+        "configured": data.get("configured", []),
+        "default": data.get("default", ""),
+    }
 
 
 class ConfigSaveRequest(BaseModel):
@@ -293,8 +322,8 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
 .s-error { background:var(--red); color:#fff; }
 .s-partial { background:var(--yellow); color:#1e1e2e; }
 .workdir-label { color:var(--text-dim); font-size:11px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.main { flex:1; display:flex; overflow:hidden; }
-.side { width:230px; background:var(--bg2); border-right:1px solid var(--border); overflow-y:auto; padding:10px; flex-shrink:0; }
+.main { flex:1; min-height:0; display:flex; overflow:hidden; }
+.side { width:230px; background:var(--bg2); border-right:1px solid var(--border); overflow-y:auto; padding:10px; flex-shrink:0; min-height:0; }
 .side h3 { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin:8px 0 4px; }
 .side input, .side select, .side textarea { width:100%; background:var(--bg3); border:1px solid var(--surface2); border-radius:4px; padding:4px 6px; color:var(--text); font-size:12px; margin-bottom:6px; }
 .side .row { display:flex; gap:6px; }
@@ -306,20 +335,27 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
 .config-toggle:hover { filter:brightness(1.1); }
 .config-body { display:none; }
 .config-body.open { display:block; }
-.content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-.error-banner { display:none; background:var(--red); color:#fff; padding:6px 12px; font-size:12px; font-weight:600; }
+.content { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.error-banner { display:none; background:var(--red); color:#fff; padding:6px 12px; font-size:12px; font-weight:600; flex-shrink:0; }
 .error-banner.visible { display:block; }
-.matrix { flex:1; overflow-y:auto; padding:10px; display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px; align-content:start; }
+.matrix { flex:1 1 0; min-height:0; overflow-y:auto; padding:14px; display:grid; grid-template-columns:repeat(auto-fill,minmax(460px,1fr)); gap:16px; align-content:start; align-items:start; }
+.matrix::-webkit-scrollbar { width:10px; }
+.matrix::-webkit-scrollbar-thumb { background:var(--surface2); border-radius:5px; }
+.matrix::-webkit-scrollbar-track { background:transparent; }
+.matrix-count { grid-column:1 / -1; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:2px; }
 .scene { background:var(--bg2); border:1px solid var(--border); border-radius:6px; overflow:hidden; display:flex; flex-direction:column; }
-.scene-head { display:flex; align-items:center; gap:6px; padding:5px 8px; background:var(--surface); font-size:11px; font-weight:600; }
+.scene-head { display:flex; align-items:center; gap:6px; padding:6px 10px; background:var(--surface); font-size:12px; font-weight:600; }
 .scene-head .idx { color:var(--accent); }
-.scene-body { padding:8px; display:flex; flex-direction:column; gap:6px; }
-.scene img { width:100%; height:140px; object-fit:cover; background:var(--bg3); border-radius:4px; }
-.scene .ph { width:100%; height:140px; background:var(--bg3); border-radius:4px; display:flex; align-items:center; justify-content:center; color:var(--text-dim); font-size:11px; }
-.scene textarea { width:100%; background:var(--bg3); border:1px solid var(--surface2); border-radius:4px; color:var(--text); font-size:11px; padding:4px; resize:vertical; min-height:46px; }
+.scene-body { padding:10px; display:flex; flex-direction:column; gap:8px; }
+.scene img { width:100%; height:240px; object-fit:cover; background:var(--bg3); border-radius:4px; }
+.scene .ph { width:100%; height:240px; background:var(--bg3); border-radius:4px; display:flex; align-items:center; justify-content:center; color:var(--text-dim); font-size:13px; }
+.scene textarea { width:100%; background:var(--bg3); border:1px solid var(--surface2); border-radius:4px; color:var(--text); font-size:13px; padding:6px; resize:vertical; min-height:60px; }
 .scene audio { width:100%; }
+.audio-lazy { }
+.btn-play { width:100%; text-align:center; padding:6px; font-size:12px; background:var(--surface); }
+.btn-play:hover { filter:brightness(1.1); }
 .scene .acts { display:flex; gap:4px; flex-wrap:wrap; }
-.scene .acts .btn { padding:3px 6px; font-size:10px; border-radius:3px; }
+.scene .acts .btn { padding:4px 8px; font-size:11px; border-radius:3px; }
 .console { height:160px; background:var(--bg3); border-top:1px solid var(--border); overflow-y:auto; padding:6px 8px; font-family:monospace; font-size:11px; }
 .console-entry { margin-bottom:3px; }
 .console-ts { color:var(--text-dim); }
@@ -333,6 +369,7 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
 <body>
 <div class="topbar">
   <strong>🎙 Voiceboard</strong>
+  <span class="workdir-label" title="frontend build">build 5</span>
   <span id="statusBadge" class="status-badge s-idle">idle</span>
   <button id="btnSegment" class="btn btn-primary" onclick="initAndSegment()">1. Segment &amp; Ingest</button>
   <button id="btnImages" class="btn btn-primary" onclick="runFrom('image_prompt')">2. Generate Images</button>
@@ -374,7 +411,7 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
     <div class="config-toggle" onclick="toggleConfig()">⚙ Config <span id="configCaret">▸</span></div>
     <div class="config-body" id="configBody">
       <h3>Image &amp; animation</h3>
-      <label>Engine</label><input type="text" id="imageEngine" value="flux2cloud" />
+      <label>Engine</label><select id="imageEngine"><option value="flux2cloud">flux2cloud</option></select>
       <label>Size</label>
       <select id="imageSize">
         <option>landscape</option><option>square</option><option>portrait</option><option>youtube</option><option>wide</option>
@@ -451,6 +488,14 @@ async function loadConfig(){
   document.getElementById('segmentMin').value = c.segment_min??10;
   document.getElementById('segmentMax').value = c.segment_max??30;
   document.getElementById('imageEngine').value = c.image_engine||'flux2cloud';
+  try {
+    const er = await api('/engines'); const eld = await er.json();
+    const sel = document.getElementById('imageEngine');
+    const cur = sel.value;
+    const known = (eld.engines||[]);
+    if (known.length){ sel.innerHTML = known.map(e=>`<option value="${e}">${e}</option>`).join(''); }
+    if (cur) sel.value = cur;
+  } catch (e) { /* keep default */ }
   document.getElementById('imageSize').value = c.image_size||'landscape';
   document.getElementById('imageStyle').value = c.image_style||'';
   document.getElementById('kenBurnsMotion').value = c.ken_burns_motion||'random';
@@ -540,10 +585,13 @@ function renderMatrix(){
   const scenes = [];
   state.chapters.forEach(ch => (ch.scenes||[]).forEach(sc => scenes.push(sc)));
   if (!scenes.length){ document.getElementById('matrix').innerHTML = '<div style="color:var(--text-dim)">No scenes yet — run "Segment &amp; Ingest".</div>'; return; }
-  document.getElementById('matrix').innerHTML = scenes.map(sc => {
+  const countHdr = `<div class="matrix-count">${scenes.length} scene${scenes.length===1?'':'s'} — scrollable</div>`;
+  document.getElementById('matrix').innerHTML = countHdr + scenes.map(sc => {
     const st = sc.steps||{};
-    const img = sc.image_file ? `<img src="${previewUrl(sc.image_file)}" />` : `<div class="ph">no image</div>`;
-    const aud = sc.audio_file ? `<audio controls src="${previewUrl(sc.audio_file)}"></audio>` : '';
+    const img = sc.image_file ? `<img loading="lazy" src="${previewUrl(sc.image_file)}" />` : `<div class="ph">no image yet</div>`;
+    const aud = sc.audio_file
+      ? `<div class="audio-lazy"><button class="btn btn-neutral btn-play" onclick="playAudio('${sc.id}')">▶ play audio</button></div>`
+      : '';
     const dur = sc.audio_duration!=null ? sc.audio_duration+'s' : '';
     return `<div class="scene" id="scene_${sc.id}">
       <div class="scene-head"><span class="idx">${esc(sc.id)}</span>
@@ -564,6 +612,13 @@ function renderMatrix(){
       </div>
     </div>`;
   }).join('');
+}
+
+function playAudio(id){
+  const sc = (state.chapters||[]).flatMap(ch=>(ch.scenes||[])).find(s=>s.id===id);
+  const wrap = document.querySelector(`#scene_${id} .audio-lazy`);
+  if (!sc || !sc.audio_file || !wrap) return;
+  wrap.innerHTML = `<audio controls autoplay src="${previewUrl(sc.audio_file)}"></audio>`;
 }
 
 function renderConsole(entries){
@@ -622,7 +677,19 @@ async function poll(){
   if (state && state.running) schedulePoll(1200); else schedulePoll(2500);
 }
 
-(async ()=>{ await loadConfig(); const r = await api('/state'); const d = await r.json(); applyState(d); restoreSourceFromState(); schedulePoll(1500); })();
+// Force the scene matrix to a bounded height so it scrolls internally instead of
+// growing to fit every card (a smaller-card, one-page layout). Kept robust to any
+// flex-chain quirk by clamping explicitly to the viewport minus the console.
+function fitMatrix(){
+  const m = document.getElementById('matrix');
+  if (!m) return;
+  const top = m.getBoundingClientRect().top;
+  const h = window.innerHeight - top - 200; // leave room for console + final-wrap
+  m.style.maxHeight = Math.max(240, h) + 'px';
+}
+window.addEventListener('resize', fitMatrix);
+
+(async ()=>{ await loadConfig(); const r = await api('/state'); const d = await r.json(); applyState(d); restoreSourceFromState(); fitMatrix(); schedulePoll(1500); })();
 </script>
 </body>
 </html>"""
