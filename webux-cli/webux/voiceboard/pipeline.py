@@ -263,8 +263,8 @@ async def _ingest_voice(state: ProjectState, state_path: Path, config: dict) -> 
     segs_dir = workdir / "segments"
     segs_dir.mkdir(parents=True, exist_ok=True)
 
-    if config.get("segments_json"):
-        sj = Path(config["segments_json"]).expanduser()
+    if state.segments_json:
+        sj = Path(state.segments_json).expanduser()
         if not sj.exists():
             s.status = "error"
             s.output = f"[error] segments_json not found: {sj}"
@@ -276,10 +276,10 @@ async def _ingest_voice(state: ProjectState, state_path: Path, config: dict) -> 
         s.output = f"Using provided segments: {sj}"
         state.save(state_path)
     else:
-        voice = config.get("voice_file", "")
+        voice = state.voice_file
         if not voice or not Path(voice).expanduser().exists():
             s.status = "error"
-            s.output = "[error] No voice_file configured — set one in Config or provide segments_json."
+            s.output = "[error] No voice file present — pick one or provide segments.json."
             s.end_time = time.time()
             state.save(state_path)
             return

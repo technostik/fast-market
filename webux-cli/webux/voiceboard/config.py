@@ -30,8 +30,6 @@ def load_voiceboard_config() -> dict:
     base.setdefault("segment_min", 10.0)     # target min scene duration (s)
     base.setdefault("segment_max", 30.0)     # hard max scene duration (s)
     base.setdefault("segment_silence", 0.6)  # pause threshold that prefers a cut
-    base.setdefault("voice_file", "")
-    base.setdefault("segments_json", "")
     prompts = base.setdefault("prompts", {})
     prompts.setdefault("scene_image_prompt", DEFAULT_PROMPT_NAMES["scene_image_prompt"])
     return base
@@ -46,7 +44,7 @@ def save_voiceboard_config(updates: dict) -> None:
         "draft_mode", "draft_steps", "chapter_transition",
         "chapter_transition_duration", "language", "transcript_engine",
         "transcript_model", "segment_min", "segment_max", "segment_silence",
-        "voice_file", "segments_json", "prompts",
+        "prompts",
     }
     merged = {k: v for k, v in current.items() if k in voiceboard_keys}
     for k, v in updates.items():

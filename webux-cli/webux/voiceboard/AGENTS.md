@@ -36,8 +36,11 @@ timed scenes. The transcript and audio are then treated as the already-done
 
 ## Configuration (relevant keys)
 
-Voice ingestion:
-- `voice_file` — path to the source voice (.ogg/.mp3/.mp4/.wav). Alternatively set `segments_json` to reuse an existing `sound segment` output.
+Config holds only what does **not** change between sessions. The voice source
+(`voice_file` / `segments_json`) is deliberately **not** in config — it is
+per-project/session, stored on the `VoiceboardState` in `state.json` (see below).
+
+Voice ingestion (cross-session defaults):
 - `transcript_engine` — `whisperx` (local word-aligned; uses whisperx if installed else faster-whisper) or `groq` (hosted whisper-large-v3, needs `GROQ_API_KEY`).
 - `transcript_model` — model size (e.g. `medium`).
 - `language` — language code or `en`.
@@ -46,6 +49,21 @@ Voice ingestion:
 Image / animation (mirrors storyboard): `image_engine`, `image_size`,
 `image_style`, `narrative_style`, `ken_burns_zoom_from/to`, `ken_burns_motion`,
 `fps`, `draft_mode`, `chapter_transition`, `chapter_transition_duration`, `prompts`.
+
+### Voice source flow (UI + upload)
+
+The voice source is chosen in the UI via a **native file picker** and uploaded to
+the workdir, not typed as a config path.
+
+- `POST /api/voiceboard/upload?kind=voice|segments` (multipart `file`) copies the
+  picked file into `{workdir}/voiceboard/sources/` and returns its absolute path.
+- That path is passed to `POST /init` (`voice_file` or `segments_json`) and stored
+  on `VoiceboardState` in `state.json`. It is **not** written to global config.
+- `_ingest_voice` reads the source from `state.voice_file` / `state.segments_json`,
+  not from config.
+
+`VoiceboardState` (in `voiceboard/models.py`) is a `ProjectState` subclass adding
+`voice_file` and `segments_json` (both `""` by default, persisted with state.json).
 
 ## `sound segment` (the cutting command)
 
@@ -70,7 +88,8 @@ Outputs `<output-dir>/segments.json` (list of `{index,start,end,text,audio}`),
 ## API endpoints (under `/api/voiceboard/`)
 
 `GET /config`, `POST /config`, `GET /state`, `POST /init` (voice file or
-segments.json + segmentation params), `POST /run`, `POST /stop`, `GET /job`,
+segments.json + segmentation params), `POST /upload` (multipart voice/segments),
+`POST /run`, `POST /stop`, `GET /job`,
 `POST /scene/{id}`, `GET /preview`, `GET /download`.
 
 ## Adding the tab

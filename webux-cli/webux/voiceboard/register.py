@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from common.webux.base import WebuxPluginManifest
 
 from .config import load_voiceboard_config, save_voiceboard_config
-from .models import ProjectState
+from .models import VoiceboardState
 from .pipeline import (
     start_pipeline, stop_pipeline, is_running,
     get_current_state, _find_scene,
@@ -26,12 +26,12 @@ def _state_path(config: dict) -> Path:
     return Path(workdir).expanduser() / "voiceboard" / "state.json"
 
 
-def _load_state(config: dict) -> ProjectState | None:
+def _load_state(config: dict) -> VoiceboardState | None:
     sp = _state_path(config)
     if not sp.exists():
         return None
     try:
-        return ProjectState.load(sp)
+        return VoiceboardState.load(sp)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to load state: {exc}")
 
@@ -66,8 +66,6 @@ class ConfigSaveRequest(BaseModel):
     segment_min: float = 10.0
     segment_max: float = 30.0
     segment_silence: float = 0.6
-    voice_file: str = ""
-    segments_json: str = ""
     prompts: dict = {}
 
 
@@ -86,6 +84,32 @@ async def get_state():
     return {"initialized": True, **state.to_dict(), "global_steps": state.global_step_summary()}
 
 
+@router.post("/upload")
+async def upload_source(
+    file: UploadFile = File(...),
+    kind: str = Query("voice", pattern="^(voice|segments)$"),
+):
+    """Save a native-picked voice file or segments.json into the workdir so the
+    pipeline can reach it. Returns the stored absolute path for /init."""
+    cfg = load_voiceboard_config()
+    sp = _state_path(cfg)
+    workdir = Path(sp).parent
+    sources_dir = workdir / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+
+    if kind == "segments":
+        fname = "segments.json"
+    else:
+        fname = Path(file.filename or "voice").name or "voice"
+        if fname == "voice":
+            fname = "voice"
+
+    dest = sources_dir / fname
+    content = await file.read()
+    dest.write_bytes(content)
+    return {"kind": kind, "path": str(dest)}
+
+
 class InitRequest(BaseModel):
     voice_file: str = ""
     segments_json: str = ""
@@ -102,10 +126,10 @@ async def init_project(req: InitRequest):
     if not req.voice_file.strip() and not req.segments_json.strip():
         raise HTTPException(status_code=400, detail="Provide a voice_file or a segments_json path")
 
-    # Persist ingestion params so /run can read them back.
+    # Persist segmentation params so /run can read them back.
+    # The voice source is NOT global config — it is stored on the per-project
+    # state (state.json), since it is session/project scoped, not a constant.
     save_voiceboard_config({
-        "voice_file": req.voice_file.strip(),
-        "segments_json": req.segments_json.strip(),
         "transcript_engine": req.transcript_engine,
         "transcript_model": req.transcript_model,
         "language": req.language,
@@ -119,7 +143,9 @@ async def init_project(req: InitRequest):
     workdir = str(sp.parent)
     Path(workdir).mkdir(parents=True, exist_ok=True)
 
-    state = ProjectState(script_text="", workdir=workdir)
+    state = VoiceboardState(script_text="", workdir=workdir)
+    state.voice_file = req.voice_file.strip()
+    state.segments_json = req.segments_json.strip()
     state.save(sp)
     return {"initialized": True, **state.to_dict(), "global_steps": state.global_step_summary()}
 
@@ -273,6 +299,13 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
 .side input, .side select, .side textarea { width:100%; background:var(--bg3); border:1px solid var(--surface2); border-radius:4px; padding:4px 6px; color:var(--text); font-size:12px; margin-bottom:6px; }
 .side .row { display:flex; gap:6px; }
 .side .row > * { flex:1; }
+.source-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+.source-row .btn { flex-shrink:0; padding:4px 8px; font-size:11px; }
+.source-name { flex:1; color:var(--text-muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.config-toggle { display:flex; align-items:center; justify-content:space-between; cursor:pointer; padding:6px 8px; margin:8px 0 4px; background:var(--surface); border:1px solid var(--border); border-radius:4px; font-size:12px; font-weight:600; user-select:none; }
+.config-toggle:hover { filter:brightness(1.1); }
+.config-body { display:none; }
+.config-body.open { display:block; }
 .content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
 .error-banner { display:none; background:var(--red); color:#fff; padding:6px 12px; font-size:12px; font-weight:600; }
 .error-banner.visible { display:block; }
@@ -287,8 +320,6 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
 .scene audio { width:100%; }
 .scene .acts { display:flex; gap:4px; flex-wrap:wrap; }
 .scene .acts .btn { padding:3px 6px; font-size:10px; border-radius:3px; }
-.config-body { display:none; }
-.config-body.open { display:block; }
 .console { height:160px; background:var(--bg3); border-top:1px solid var(--border); overflow-y:auto; padding:6px 8px; font-family:monospace; font-size:11px; }
 .console-entry { margin-bottom:3px; }
 .console-ts { color:var(--text-dim); }
@@ -316,9 +347,17 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
   <div class="side">
     <h3>Voice source</h3>
     <label>Voice file (.ogg/.mp3/.mp4/.wav)</label>
-    <input type="text" id="voiceFile" placeholder="/path/to/voice.mp4" />
+    <div class="source-row">
+      <button class="btn btn-neutral" onclick="document.getElementById('voicePicker').click()">Choose…</button>
+      <span class="source-name" id="voiceName">none selected</span>
+    </div>
     <label>…or existing segments.json</label>
-    <input type="text" id="segmentsJson" placeholder="/path/to/segments.json" />
+    <div class="source-row">
+      <button class="btn btn-neutral" onclick="document.getElementById('segmentsPicker').click()">Choose…</button>
+      <span class="source-name" id="segmentsName">none selected</span>
+    </div>
+    <input type="file" id="voicePicker" accept=".ogg,.mp3,.mp4,.wav,.mpeg,.m4a" style="display:none" />
+    <input type="file" id="segmentsPicker" accept=".json" style="display:none" />
     <div class="row">
       <div><label>Engine</label><select id="transcriptEngine"><option value="whisperx">whisperx</option><option value="groq">groq</option></select></div>
       <div><label>Model</label><input type="text" id="transcriptModel" value="medium" /></div>
@@ -332,29 +371,32 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
       <div><label>Max seg (s)</label><input type="text" id="segmentMax" value="30" /></div>
     </div>
 
-    <h3>Image &amp; animation</h3>
-    <label>Engine</label><input type="text" id="imageEngine" value="flux2cloud" />
-    <label>Size</label>
-    <select id="imageSize">
-      <option>landscape</option><option>square</option><option>portrait</option><option>youtube</option><option>wide</option>
-    </select>
-    <label>Image style</label><textarea id="imageStyle" rows="2"></textarea>
-    <label>Motion</label>
-    <select id="kenBurnsMotion">
-      <option>random</option><option>zoom_in</option><option>zoom_out</option><option>pan_right</option><option>pan_left</option><option>pan_up</option><option>pan_down</option>
-    </select>
-    <div class="row">
-      <div><label>Zoom from</label><input type="text" id="kbZoomFrom" value="1.0" /></div>
-      <div><label>Zoom to</label><input type="text" id="kbZoomTo" value="1.3" /></div>
-    </div>
-    <div class="row">
-      <div><label>FPS</label><input type="text" id="fps" value="24" /></div>
-      <div><label>Transition</label>
-        <select id="chapterTransition"><option>none</option><option>fade</option><option>crossfade</option><option>random</option></select>
+    <div class="config-toggle" onclick="toggleConfig()">⚙ Config <span id="configCaret">▸</span></div>
+    <div class="config-body" id="configBody">
+      <h3>Image &amp; animation</h3>
+      <label>Engine</label><input type="text" id="imageEngine" value="flux2cloud" />
+      <label>Size</label>
+      <select id="imageSize">
+        <option>landscape</option><option>square</option><option>portrait</option><option>youtube</option><option>wide</option>
+      </select>
+      <label>Image style</label><textarea id="imageStyle" rows="2"></textarea>
+      <label>Motion</label>
+      <select id="kenBurnsMotion">
+        <option>random</option><option>zoom_in</option><option>zoom_out</option><option>pan_right</option><option>pan_left</option><option>pan_up</option><option>pan_down</option>
+      </select>
+      <div class="row">
+        <div><label>Zoom from</label><input type="text" id="kbZoomFrom" value="1.0" /></div>
+        <div><label>Zoom to</label><input type="text" id="kbZoomTo" value="1.3" /></div>
       </div>
+      <div class="row">
+        <div><label>FPS</label><input type="text" id="fps" value="24" /></div>
+        <div><label>Transition</label>
+          <select id="chapterTransition"><option>none</option><option>fade</option><option>crossfade</option><option>random</option></select>
+        </div>
+      </div>
+      <label class="chk"><input type="checkbox" id="draftMode" /> Draft mode (fast)</label>
+      <button class="btn btn-neutral" style="width:100%;margin-top:6px" onclick="saveConfig()">Save config</button>
     </div>
-    <label class="chk"><input type="checkbox" id="draftMode" /> Draft mode (fast)</label>
-    <button class="btn btn-neutral" style="width:100%;margin-top:6px" onclick="saveConfig()">Save config</button>
   </div>
 
   <div class="content">
@@ -371,16 +413,37 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
 <script>
 let state = null, configOpen = false, _consoleClear = 0;
 let _lastMatrixJson = null, _matrixBusy = false;
+let _uploaded = {voice:'', segments:''};
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function api(p, opts){ return fetch('/api/voiceboard'+p, opts); }
 function previewUrl(p){ return '/api/voiceboard/preview?file='+encodeURIComponent(p); }
 function statusClass(s){ return ({pending:'s-idle',running:'s-running',done:'s-done',error:'s-error',skipped:'s-idle',partial:'s-partial'})[s]||'s-idle'; }
 
+function toggleConfig(){
+  configOpen = !configOpen;
+  document.getElementById('configBody').className = 'config-body' + (configOpen ? ' open' : '');
+  document.getElementById('configCaret').textContent = configOpen ? '▾' : '▸';
+}
+
+async function uploadSource(kind){
+  const input = kind === 'voice' ? document.getElementById('voicePicker') : document.getElementById('segmentsPicker');
+  const file = input.files && input.files[0];
+  if (!file) return null;
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await api('/upload?kind='+kind, {method:'POST', body:fd});
+  if (!r.ok){ alert('Upload failed: '+r.status); return null; }
+  const d = await r.json();
+  _uploaded[kind] = d.path;
+  document.getElementById(kind==='voice'?'voiceName':'segmentsName').textContent = file.name;
+  if (kind === 'voice'){ _uploaded.segments=''; document.getElementById('segmentsName').textContent = 'none selected'; }
+  else { _uploaded.voice=''; document.getElementById('voiceName').textContent = 'none selected'; }
+  return d.path;
+}
+
 async function loadConfig(){
   const r = await api('/config'); const c = await r.json();
-  document.getElementById('voiceFile').value = c.voice_file||'';
-  document.getElementById('segmentsJson').value = c.segments_json||'';
   document.getElementById('transcriptEngine').value = c.transcript_engine||'whisperx';
   document.getElementById('transcriptModel').value = c.transcript_model||'medium';
   document.getElementById('language').value = c.language||'en';
@@ -398,10 +461,14 @@ async function loadConfig(){
   document.getElementById('draftMode').checked = !!c.draft_mode;
 }
 
+function restoreSourceFromState(){
+  if (!state) return;
+  if (!_uploaded.segments && state.segments_json){ _uploaded.segments = state.segments_json; document.getElementById('segmentsName').textContent = 'segments.json'; }
+  if (!_uploaded.voice && state.voice_file){ _uploaded.voice = state.voice_file; document.getElementById('voiceName').textContent = state.voice_file.split('/').pop(); }
+}
+
 async function saveConfig(){
   const body = {
-    voice_file: document.getElementById('voiceFile').value,
-    segments_json: document.getElementById('segmentsJson').value,
     transcript_engine: document.getElementById('transcriptEngine').value,
     transcript_model: document.getElementById('transcriptModel').value,
     language: document.getElementById('language').value,
@@ -423,9 +490,13 @@ async function saveConfig(){
 }
 
 async function initAndSegment(){
+  for (const kind of ['voice','segments']){
+    const input = document.getElementById(kind==='voice'?'voicePicker':'segmentsPicker');
+    if (input.files && input.files[0]) await uploadSource(kind);
+  }
   const body = {
-    voice_file: document.getElementById('voiceFile').value,
-    segments_json: document.getElementById('segmentsJson').value,
+    voice_file: _uploaded.voice,
+    segments_json: _uploaded.segments,
     transcript_engine: document.getElementById('transcriptEngine').value,
     transcript_model: document.getElementById('transcriptModel').value,
     language: document.getElementById('language').value,
@@ -438,6 +509,7 @@ async function initAndSegment(){
   await api('/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({only_global_step:'segment'})});
   schedulePoll(200);
 }
+
 
 async function runFull(){ await api('/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})}); schedulePoll(200); }
 async function runFrom(step){ await api('/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({from_global_step:step})}); schedulePoll(200); }
@@ -550,7 +622,7 @@ async function poll(){
   if (state && state.running) schedulePoll(1200); else schedulePoll(2500);
 }
 
-(async ()=>{ await loadConfig(); const r = await api('/state'); const d = await r.json(); applyState(d); schedulePoll(1500); })();
+(async ()=>{ await loadConfig(); const r = await api('/state'); const d = await r.json(); applyState(d); restoreSourceFromState(); schedulePoll(1500); })();
 </script>
 </body>
 </html>"""
