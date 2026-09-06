@@ -159,3 +159,9 @@ pytest tests/ -v
 ```
 
 See [AGENTS.md](AGENTS.md) for plugin architecture, security rules, and extension points.
+
+# As a service
+```bash
+systemctl --user status webux.service
+systemctl --user restart webux.service
+```
