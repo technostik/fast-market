@@ -19,6 +19,15 @@ Tool with pluggable input and output to help market content for web creators
 | `websearch` | `websearch-cli/` | Web search via pluggable providers (Google News, Reddit, Hacker News) |
 | `rag` | `rag-cli/` | Vectorless reasoning-based RAG with hierarchical document trees |
 
+# Code quality
+
+Do not vendor the tools here. Clone the private sibling repo next to this project
+(`../agent-dev-tools`) or set `AGENT_DEV_TOOLS`.
+
+Skill: [`../agent-dev-tools/skills/evaluate-code-quality/SKILL.md`](../agent-dev-tools/skills/evaluate-code-quality/SKILL.md)
+
+GOLDEN_RULES **MEASURABILITY**: track complexity × churn on touched files.
+
 # Coding rules
 
 See .doc/GOLDEN_RULES.md

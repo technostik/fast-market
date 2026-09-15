@@ -171,7 +171,6 @@
       <hr>
       <div class="row">
         <label>🖼 Regenerate thumbnail (already published video)</label>
-        <select id="thumbVidSel"><option value="">— select video —</option></select>
       </div>
       <div class="row" id="thumbCurWrap" style="display:none;">
         <label>Current thumbnail</label>
@@ -191,6 +190,10 @@
         <div class="row"><label>Drop offset (% down) <span class="hint">e.g. 10 = band + text +10%</span></label><input id="regenOffset" type="number" min="-50" max="80" step="1" placeholder="0 = default"></div>
       </div>
       <div class="cols2">
+        <div class="row">
+          <label>Select video (optional) — only needed to update YouTube</label>
+          <select id="thumbVidSel"><option value="">— select video (optional) —</option></select>
+        </div>
         <div class="row" style="align-self:flex-end; gap:8px;">
           <button class="btn-sec" id="regenImgBtn">🖼 Regenerate image</button>
           <button class="btn-sec" id="regenOverlayBtn">🏷 Regenerate overlay</button>
@@ -474,37 +477,53 @@ async function loadThumbVideos(){
   const path = el('cfgSourcePath').value || '';
   const ext = el('cfgExt').value || '';
   const r = await fetch(API+'/list-thumbnails?path='+encodeURIComponent(path)+'&extensions='+encodeURIComponent(ext)).catch(()=>null);
-  const data = r ? await r.json() : {videos:[]};
+  const data = r ? await r.json() : {videos:[], draft:null};
   const videos = (data.videos||[]).filter(v=>v.has_thumbnail);
   const sel = el('thumbVidSel');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— select video —</option>' + videos.map(v=>`<option value="${v.path}">${v.name}</option>`).join('');
+  sel.innerHTML = '<option value="">— select video (optional) —</option>' + videos.map(v=>`<option value="${v.path}">${v.name}</option>`).join('');
   if (cur) sel.value = cur;
+  applyDraftThumb(data.draft);
+}
+function applyDraftThumb(draft){
+  if (el('thumbVidSel').value) return;
+  if (draft && draft.thumbnail){
+    el('thumbCur').src = API+'/download?file='+encodeURIComponent(draft.thumbnail)+'&t='+Date.now();
+    el('thumbCurWrap').style.display='block';
+    el('pushYtBtn').dataset.thumbnail = draft.thumbnail;
+    el('pushYtBtn').disabled = false;
+  } else {
+    el('thumbCurWrap').style.display='none';
+    el('pushYtBtn').dataset.thumbnail = '';
+    el('pushYtBtn').disabled = true;
+  }
 }
 el('thumbVidSel').addEventListener('change', ()=>{
   const path = el('thumbVidSel').value;
   el('pushYtBtn').disabled = true;
-  if (!path){ el('thumbCurWrap').style.display='none'; return; }
-  const opt = el('thumbVidSel').selectedOptions[0];
-  const r = fetch(API+'/list-thumbnails?path='+encodeURIComponent(el('cfgSourcePath').value||'')+'&extensions='+encodeURIComponent(el('cfgExt').value||'')).then(x=>x.json()).catch(()=>({videos:[]}));
-  r.then(data=>{
-    const v = (data.videos||[]).find(x=>x.path===path);
-    if (v && v.thumbnail){
-      el('thumbCurWrap').style.display='block';
-      el('thumbCur').src = API+'/download?file='+encodeURIComponent(v.thumbnail)+'&t='+Date.now();
-      el('pushYtBtn').dataset.thumbnail = v.thumbnail;
-      el('pushYtBtn').disabled = false;
-    } else {
-      el('thumbCurWrap').style.display='none';
-      el('pushYtBtn').dataset.thumbnail = '';
-      el('pushYtBtn').disabled = true;
-    }
-  });
+  fetch(API+'/list-thumbnails?path='+encodeURIComponent(el('cfgSourcePath').value||'')+'&extensions='+encodeURIComponent(el('cfgExt').value||''))
+    .then(x=>x.json()).catch(()=>({videos:[], draft:null})).then(data=>{
+      const v = (data.videos||[]).find(x=>x.path===path);
+      if (v && v.thumbnail){
+        el('thumbCurWrap').style.display='block';
+        el('thumbCur').src = API+'/download?file='+encodeURIComponent(v.thumbnail)+'&t='+Date.now();
+        el('pushYtBtn').dataset.thumbnail = v.thumbnail;
+        el('pushYtBtn').disabled = false;
+      } else if (data.draft && data.draft.thumbnail){
+        el('thumbCurWrap').style.display='block';
+        el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.draft.thumbnail)+'&t='+Date.now();
+        el('pushYtBtn').dataset.thumbnail = data.draft.thumbnail;
+        el('pushYtBtn').disabled = false;
+      } else {
+        el('thumbCurWrap').style.display='none';
+        el('pushYtBtn').dataset.thumbnail = '';
+        el('pushYtBtn').disabled = true;
+      }
+    });
 });
 function regenThumbnail(mode){
   return async ()=>{
     const source = el('thumbVidSel').value;
-    if (!source){ alert('Select a video'); return; }
     const title = el('regenOverlayTitle').value;
     const imagePrompt = el('regenImagePrompt').value;
     if (mode === 'image' && !imagePrompt.trim()){ alert('Enter an image prompt for "Regenerate image"'); return; }
@@ -540,7 +559,6 @@ el('regenImgBtn').addEventListener('click', regenThumbnail('image'));
 el('regenOverlayBtn').addEventListener('click', regenThumbnail('overlay'));
 el('replaceBaseBtn').addEventListener('click', async ()=>{
   const source = el('thumbVidSel').value;
-  if (!source){ alert('Select a video'); return; }
   const f = el('baseFile').files[0];
   if (!f){ alert('Choose an image file first'); return; }
   el('regenOut').style.display='block';
@@ -560,7 +578,7 @@ el('replaceBaseBtn').addEventListener('click', async ()=>{
 });
 el('pushYtBtn').addEventListener('click', async ()=>{
   const source = el('thumbVidSel').value;
-  if (!source) return;
+  if (!source){ alert('Select a video to push the thumbnail to'); return; }
   el('pushYtBtn').disabled = true;
   const body = { source, thumbnail: el('pushYtBtn').dataset.thumbnail||'' };
   el('regenOut').textContent = 'Updating YouTube…';
