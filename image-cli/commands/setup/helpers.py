@@ -10,7 +10,7 @@ from common.core.paths import get_tool_config
 from common.core.yaml_utils import dump_yaml
 from core.config import get_default_config
 
-_SUPPORTED_ENGINES = {"flux2"}
+_SUPPORTED_ENGINES = {"flux2", "qwen21"}
 
 
 def get_config_path() -> Path:

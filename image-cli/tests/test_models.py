@@ -61,6 +61,12 @@ class TestEngineConfig:
         assert result["torch_dtype"] == "float16"
         assert result["local_files_only"] is False
 
+    def test_quantization_round_trip(self):
+        config = EngineConfig.from_dict({"quantization": "int8"})
+        assert config.quantization == "int8"
+        assert config.to_dict()["quantization"] == "int8"
+        assert EngineConfig().quantization is None
+
 
 class TestImageGenRequest:
     def test_defaults(self):

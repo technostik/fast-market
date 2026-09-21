@@ -173,6 +173,10 @@ class EngineConfig:
     torch_dtype: str = "bfloat16"
     local_files_only: bool = True
     force_device: str | None = None
+    # Optional weight quantization (used by the qwen21 plugin).
+    # None/"none" = full precision, "int8" = quanto int8 for transformer +
+    # text encoder (~2x less RAM/VRAM, near-lossless).
+    quantization: str | None = None
     # Cloudflare Workers AI fields (used by flux2cloud plugin)
     account_id: str = ""
     api_token: str = ""
@@ -187,6 +191,7 @@ class EngineConfig:
             torch_dtype=data.get("torch_dtype", cls().torch_dtype),
             local_files_only=data.get("local_files_only", cls().local_files_only),
             force_device=data.get("force_device", cls().force_device),
+            quantization=data.get("quantization", cls().quantization),
             account_id=data.get("account_id", ""),
             api_token=data.get("api_token", ""),
             cf_model=data.get("cf_model", "@cf/black-forest-labs/flux-2-klein-4b"),
@@ -198,6 +203,7 @@ class EngineConfig:
             "torch_dtype": self.torch_dtype,
             "local_files_only": self.local_files_only,
             "force_device": self.force_device,
+            "quantization": self.quantization,
             "account_id": self.account_id,
             "api_token": self.api_token,
             "cf_model": self.cf_model,

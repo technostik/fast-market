@@ -6,6 +6,7 @@ import click
 
 from commands.helpers import _configure_logging
 from commands.setup.helpers import (
+    _SUPPORTED_ENGINES,
     add_engine,
     get_config_path,
     load_config,
@@ -58,11 +59,11 @@ def register(plugin_manifests: dict) -> click.Command:
             suffix = f" ({', '.join(marks)})" if marks else ""
             click.echo(f"  - {name}{suffix}")
 
-    @group.command("add", help="Add an engine (flux2).")
+    @group.command("add", help=f"Add an engine ({'/'.join(sorted(_SUPPORTED_ENGINES))}).")
     @click.option(
         "--engine",
         "-e",
-        type=click.Choice(["flux2"]),
+        type=click.Choice(sorted(_SUPPORTED_ENGINES)),
         required=True,
         help="Engine to add",
     )

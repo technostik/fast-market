@@ -1,6 +1,6 @@
 # image-agent
 
-AI image generation CLI tool with FLUX.2 support. Generate images from text prompts using multiple engine plugins, with both CLI and API interfaces.
+AI image generation CLI tool with FLUX.2 and Qwen-Image-2.1 support. Generate images from text prompts using multiple engine plugins, with both CLI and API interfaces.
 
 ## Installation
 
@@ -34,7 +34,7 @@ image setup
 ```
 
 The wizard guides you through:
-- Adding image generation engines (FLUX.2)
+- Adding image generation engines (FLUX.2, Qwen-Image-2.1)
 - Setting model paths
 - Configuring default generation parameters
 - Setting output directory
@@ -51,6 +51,12 @@ engines:
     model_path: /path/to/flux2-klein-4b  # Required: path to model
     torch_dtype: bfloat16                 # bfloat16, float16, or float32
     local_files_only: true                 # Don't try to download
+  qwen21:
+    model_path: Qwen/Qwen-Image-2.1      # Hub ID, downloaded on first use
+    torch_dtype: bfloat16
+    local_files_only: false
+    quantization: null                   # null = full precision (~32GB RAM);
+                                         # "int8" = 8-bit (~16GB), "int4" = NF4 (~9GB)
 
 default_width: 1024
 default_height: 1024
@@ -108,6 +114,37 @@ FLUX.2 Klein model files must be downloaded separately:
 2. Download the model files to a local directory
 3. Set `model_path` in config to that directory
 
+Qwen-Image-2.1 weights download automatically from the Hub
+(`Qwen/Qwen-Image-2.1`, ~7B params) on first use. Requirements:
+`transformers>=5.17`, `accelerate`, and a CUDA GPU
+with ample VRAM — plus **pre-release diffusers from git main**
+(`pip install git+https://github.com/huggingface/diffusers`), because
+`QwenImage21Pipeline` is not yet in any PyPI release (checked up to 0.40).
+The model is under the Qwen Research license, which may
+require accepting terms on HuggingFace and `hf auth login`.
+
+#### VRAM / RAM footprint
+
+The full-precision pipeline is ~32GB (7B DiT + large Qwen3-VL text encoder
+in BF16) — it needs ~32GB system RAM but runs on 8GB VRAM cards: on CUDA
+the plugin enables sequential CPU offload (layer-by-layer streaming) plus
+attention slicing and VAE tiling. Verified on an 8GB RTX 4060 Laptop
+(512px/4 steps in ~50s, 1024px/40 steps in ~11min).
+
+Optional weight quantization (`quantization: int8` = 8-bit, `int4` = NF4)
+lowers RAM to ~16GB/~9GB. Backend is picked automatically: bitsandbytes on
+CUDA (`pip install bitsandbytes`), quanto on CPU (`pip install
+optimum-quanto`). Two hard lessons encoded in the loader, don't regress:
+- the pipeline-level device map places *whole components* — a 7GB
+  transformer never fits a small GPU that way; components must be handled
+  individually or streamed with offload hooks;
+- quanto tensors cannot be rebuilt from the meta device used by offload
+  hooks or device maps (hence bnb, not quanto, on CUDA);
+- bitsandbytes refuses CPU/disk-dispatched modules without fp32 CPU
+  offload, and its quantization runs on GPU — so bnb components load
+  plainly and are streamed with sequential offload, never statically
+  dispatched to CPU.
+
 ## CLI Reference
 
 ### `image generate`
@@ -120,11 +157,11 @@ image generate "a serene mountain landscape at sunset" [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-e, --engine` | Engine to use (flux2) | from config |
+| `-e, --engine` | Engine to use (flux2/flux2cloud/qwen21) | from config |
 | `-s, --size` | Size preset (square/portrait/landscape/youtube/wide/tall/custom) | from config (`default_width`/`default_height`) |
 | `-w, --width` | Image width (overrides size) | from config |
 | `-h, --height` | Image height (overrides size) | from config |
-| `-g, --guidance-scale` | Guidance scale | from config |
+| `-g, --guidance-scale` | Guidance scale (qwen21 maps this to `true_cfg_scale`, default 4.0) | from config |
 | `-S, --steps` | Number of inference steps | from config |
 | `-d, --seed` | Random seed for reproducibility | random |
 | `-i, --init-image` | Path to initial image for img2img | None |
@@ -157,6 +194,9 @@ image generate "abstract art" --seed 42 --width 768 --height 768
 
 # Generate variation from existing image
 image generate "make it sunset" --init-image photo.jpg --strength 0.7
+
+# Generate with Qwen-Image-2.1 (uses true_cfg_scale 4.0 / 40 steps)
+image generate "a neon shop sign, rainy night" -e qwen21 -g 4.0 -S 40
 
 # JSON output for scripting
 image generate "minimalist logo" -F json | jq '.path'
@@ -432,7 +472,8 @@ image-agent/
 │   └── config.py         # Config loading
 ├── plugins/               # Image engine plugins
 │   ├── base.py           # Plugin ABC and manifest
-│   └── flux2/            # FLUX.2 implementation
+│   ├── flux2/            # FLUX.2 implementation
+│   └── qwen21/           # Qwen-Image-2.1 implementation
 ├── commands/              # CLI commands
 │   ├── generate/         # image generate
 │   ├── setup/            # image setup

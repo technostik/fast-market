@@ -22,7 +22,16 @@ def get_default_config() -> dict:
                 "model_path": "./flux2-klein-4b",
                 "torch_dtype": "bfloat16",
                 "local_files_only": True,
-            }
+            },
+            "qwen21": {
+                "model_path": "Qwen/Qwen-Image-2.1",
+                "torch_dtype": "bfloat16",
+                "local_files_only": False,
+                # null = full precision (~32GB RAM); "int8" = quanto int8
+                # for transformer + text encoder (~16GB RAM). Recommended
+                # for GPUs with <24GB VRAM / machines with <64GB RAM.
+                "quantization": None,
+            },
         },
         "default_width": 1024,
         "default_height": 1024,

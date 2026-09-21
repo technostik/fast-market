@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "image-agent"
 version = "0.1.0"
-description = "AI image generation CLI tool with FLUX.2 support"
+description = "AI image generation CLI tool with FLUX.2 and Qwen-Image-2.1 support"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
@@ -14,8 +14,10 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "torch",
-    "diffusers",
-    "transformers",
+    "diffusers>=0.40",
+    "transformers>=5.17",
+    "accelerate",
+    "optimum-quanto>=0.2.6",  # quanto int8 backend for qwen21
     "Pillow",
 ]
 

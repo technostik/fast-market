@@ -33,6 +33,8 @@ image-agent/
 | `base.py` | `ImageEnginePlugin` ABC, `PluginManifest` |
 | `flux2/plugin.py` | `Flux2EnginePlugin` - FLUX.2 Klein implementation |
 | `flux2/register.py` | Declares flux2 plugin to the system |
+| `qwen21/plugin.py` | `Qwen21EnginePlugin` - Qwen-Image-2.1 implementation (`QwenImage21Pipeline`; `guidance_scale` maps to `true_cfg_scale`, default 4.0/40 steps) |
+| `qwen21/register.py` | Declares qwen21 plugin to the system |
 
 ### Commands (`commands/`)
 
@@ -88,6 +90,11 @@ engines:
     model_path: ./flux2-klein-4b  # Configurable!
     torch_dtype: bfloat16
     local_files_only: true
+  qwen21:
+    model_path: Qwen/Qwen-Image-2.1  # Hub ID; downloads on first use
+    torch_dtype: bfloat16
+    local_files_only: false
+    quantization: null  # null = BF16 (~32GB RAM); "int8" = quanto (~16GB)
 
 default_width: 1024
 default_height: 1024
