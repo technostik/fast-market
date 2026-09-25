@@ -11,6 +11,7 @@ Tool with pluggable input and output to help market content for web creators
 | `youtube` | `youtube-cli/` | YouTube Data API operations |
 | `image` | `image-cli/` | AI image generation |
 | `sound` | `sound-cli/` | TTS and music generation |
+| `video` | `video-cli/` | Video processing and publishing pipeline |
 | `message` | `message-cli/` | Telegram messaging |
 | `prompt` | `prompt-cli/` | LLM prompt management |
 | `task` | `task-cli/` | Agentic task execution |

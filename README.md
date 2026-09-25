@@ -9,6 +9,7 @@ Fast Market provides a collection of pluggable CLI tools that help you:
 - **Monitor sources** — Watch YouTube channels, RSS feeds, and search keywords for new content
 - **Generate images** — AI-powered image generation with FLUX.2
 - **Generate sound** — Text-to-speech and music generation with Kokoro, Qwen3-TTS, MusicGen
+- **Process videos** — Silence removal, transcription, subtitles, trimming, concatenation, and assembly
 - **Send messages** — Alert and interact via Telegram
 - **Execute prompts** — Reusable LLM prompt templates with multiple providers
 - **Run agentic tasks** — LLM-driven iterative CLI execution
@@ -31,6 +32,7 @@ fast-market/
 ├── youtube-cli/               # YouTube Data API operations
  ├── image-cli/                 # AI image generation
  ├── sound-cli/                 # TTS and music generation
+ ├── video-cli/                 # Video processing and publishing pipeline
  ├── message-cli/               # Messaging (Telegram)
  ├── prompt-cli/                # LLM prompt management
  ├── task-cli/                  # Agentic task execution
@@ -53,6 +55,7 @@ pip install -e './monitor-cli[youtube]'
 pip install -e './youtube-cli'
 pip install -e './image-cli'
 pip install -e './sound-cli[kokoro]'
+pip install -e './video-cli'
 pip install -e './message-cli'
 pip install -e './prompt-cli[openai]'
 pip install -e './task-cli'
@@ -68,6 +71,7 @@ pip install -e './corpus-cli[ml,youtube]' \
                -e './youtube-cli' \
                -e './image-cli' \
                -e './sound-cli[kokoro]' \
+               -e './video-cli' \
                -e './message-cli' \
                -e './prompt-cli[openai]' \
                -e './task-cli' \
@@ -317,6 +321,24 @@ sound setup reset                                               # Reset to defau
 - `musicgen` — Text-to-music generation (GPU recommended)
 
 **Config location:** `~/.config/fast-market/sound/config.yaml`
+
+---
+
+### video — Video Processing
+
+Prepare video assets locally or with Modal.
+
+```bash
+video remove-silence input.mp4
+video extract-transcript input.mp4 -f ass -l auto
+video burn-subtitles input.mp4 input.ass
+video cut input.mp4 -t 1:30 --keep head
+video concat part-01.mp4 part-02.mp4 -o episode.mp4
+video pipeline input.mp4
+video modal-diagnose
+```
+
+See [`video-cli/README.md`](video-cli/README.md) for installation, configuration, all command options, examples, and troubleshooting.
 
 ---
 
