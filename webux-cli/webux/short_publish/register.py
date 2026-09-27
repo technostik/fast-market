@@ -66,6 +66,13 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
     pub = _load_publish_cfg()
     job_id = str(uuid.uuid4())
     meta = _load_meta(source)
+    restored_files: dict[str, str] = {}
+    try:
+        for k, v in (meta.get("files") or {}).items():
+            if v and Path(str(v)).expanduser().exists():
+                restored_files[str(k)] = str(v)
+    except Exception:
+        restored_files = {}
     job = Job(
         job_id=job_id,
         source=source,
@@ -89,6 +96,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         cut_time=cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
         upload_duration_seconds=meta.get("upload_duration_seconds"),
+        files=restored_files,
     )
     _jobs[job_id] = job
     return job

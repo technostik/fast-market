@@ -81,7 +81,7 @@ def _duration_label(seconds: float) -> str:
 async def _record_processed_duration(job: Job, video_path: str) -> float:
     """Probe the renamed/concatenated file that will be uploaded, and expose
     that duration on the job (and its pool item) before the upload step runs."""
-    seconds = await _get_video_duration_cli(video_path)
+    seconds = await _get_video_duration(video_path)
     job.upload_duration_seconds = seconds
     set_item_upload_duration(job.source, seconds)
     return seconds
@@ -135,6 +135,29 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             job.steps[i].status = "skipped"
 
     current_video = job.source
+    if from_step > 0:
+        # Retry with no usable processed files: fall back to step 0 so silence
+        # removal re-runs instead of measuring the original source at upload.
+        _known = [v for v in (job.files or {}).values() if v and Path(str(v)).expanduser().exists()]
+        if not _known:
+            _cands = [
+                d / f"{stem}_nosilence.mp4",
+                d / f"{stem}_subtitled.mp4",
+                d / f"{stem}_cut.mp4",
+            ]
+            _found: str | None = None
+            for _c in _cands:
+                if _c.exists():
+                    _found = str(_c)
+                    break
+            if _found:
+                job.files["no_silence"] = _found
+                current_video = _found
+            else:
+                from_step = 0
+                for _s in job.steps:
+                    if _s.status == "skipped":
+                        _s.status = "pending"
 
     # ── Video CLI path for steps 0-2 ──────────────────────────────────────────
     if from_step <= 0:
@@ -529,16 +552,22 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             job.end_time = time.time()
             _save_meta(job)
             return
-        if job.upload_duration_seconds is None:
-            await _record_processed_duration(job, final_video)
-        final_duration = job.upload_duration_seconds or 0.0
+        # Always re-probe the actual upload file with ffprobe (same probe as
+        # step 0): a retried job may carry a stale duration measured on the
+        # original source before silence removal.
+        final_duration = await _get_video_duration(final_video)
+        job.upload_duration_seconds = final_duration
+        set_item_upload_duration(job.source, final_duration)
+        _save_meta(job)
         s4.output += f"⏱ Uploading video (duration {_duration_label(final_duration)})\n"
         if final_duration > SHORTS_MAX_SECONDS:
             s4.end_time = time.time()
             s4.status = "error"
+            src_duration = await _get_video_duration(job.source)
             s4.output = (
                 f"Upload blocked: video duration {final_duration:.0f}s exceeds "
-                f"the {SHORTS_MAX_SECONDS:.0f}s Shorts limit."
+                f"the {SHORTS_MAX_SECONDS:.0f}s Shorts limit "
+                f"(source {src_duration:.0f}s → upload file {Path(final_video).name})."
             )
             job.status = "error"
             job.end_time = time.time()

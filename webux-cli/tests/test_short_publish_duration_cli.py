@@ -165,6 +165,7 @@ def test_record_processed_duration_probes_given_path_not_source(tmp_path, monkey
         probed.append(path)
         return 63.0
 
+    monkeypatch.setattr(sp_pipeline, "_get_video_duration", fake_cli)
     monkeypatch.setattr(sp_pipeline, "_get_video_duration_cli", fake_cli)
     monkeypatch.setattr(sp_pipeline, "set_item_upload_duration", lambda *a, **k: None)
     seconds = asyncio.run(sp_pipeline._record_processed_duration(job, str(processed)))
