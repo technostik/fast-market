@@ -11,7 +11,7 @@ sound-cli/
 │   └── __init__.py        # Imports main from cli.main
 ├── core/                  # Core logic (models, config)
 ├── plugins/               # Engine plugins (kokoro, qwen3, musicgen)
-├── commands/              # CLI commands (speak, music, prosody, charisma, normalize-volume)
+├── commands/              # CLI commands (speak, music, prosody, charisma, normalize-volume, segment, transcribe)
 └── common/                # Symlink to shared utilities
 ```
 
@@ -47,6 +47,8 @@ sound-cli/
 | `prosody/` | `sound prosody` command - `analysis.py` (signal processing/scoring) + `register.py` (CLI wiring) |
 | `charisma/` | `sound charisma` command - reuses `prosody.analysis` + adds intonation/voice-quality proxies |
 | `normalize_volume/` | `sound normalize-volume` command - dynamic (compressor-based) volume normalization against a cached reference level |
+| `segment/` | `sound segment` command - word-aligned transcription (whisperx/faster-whisper or Groq) + scene cutting |
+| `transcribe/` | `sound transcribe` command - `analysis.py` (local faster-whisper, Groq + Cloudflare hosted) + `register.py` (CLI wiring) |
 | `scoring.py` | Shared `target_band_score()` / `inverse_band_score()` curves used by both `prosody` and `charisma` |
 
 ## Core Responsibilities
@@ -89,6 +91,13 @@ sound-cli/
 - **Closed-loop correction pass (`residual_correction_gain`/`apply_flat_gain` in `commands/normalize_volume/analysis.py`)**: `compute_makeup_gain()` is an *open-loop* estimate from a single before/after mean-volume gap — it can't predict how much the compressor's own ratio-based attenuation (on any content above `THRESHOLD_DB`) will additionally reduce the mean. For files with a wide dynamic range (quiet overall but with loud passages), that reduction can outweigh the makeup boost entirely, landing the result further from the target than the input was (real case: -25.2dB input, -16.0dB target, single-pass output only reached -23.3dB). Fix: after the compressor pass, `apply` measures the real output and — if it's off target by more than `CORRECTION_TOLERANCE_DB` (0.5dB) — runs one more flat-gain pass (`volume=XdB` only, no further compression) to close the exact residual, printed as a `Correction:` line. This preserves the compressor's per-section dynamic shaping (verified: a mixed quiet/loud test file still ends up with its two sections ~18dB apart post-normalization, not flattened to one number) while guaranteeing the *overall* file lands within tolerance of the reference regardless of its dynamic profile.
   - The correction pass includes `alimiter=limit=0.891:level=false` as a safety ceiling (~-1dBTP, a standard margin for lossy-codec encode overshoot) — a positive correction can push already-loud peaks toward 0dBFS/clipping, and a real test case did land at `max_volume: 0.0 dB` (borderline) before this was added. **Gotcha discovered here**: `alimiter`'s `level` option defaults to `true` ("auto level"), which re-optimizes output gain back up toward full scale regardless of what `limit=` is set to — `level=false` is required for `limit` to actually act as a hard ceiling
 
+### Transcription
+- `sound transcribe FILE [-o out.txt -F json|text|srt --language --model --engine --modal]` transcribes an audio or video file (video audio extracted via `ffmpeg`) to text + timestamped segments
+- Engines: `local` (faster-whisper, `pip install 'sound-agent[transcribe]'`), `modal` (same model on Modal remote infra, `--modal` flag or `--engine modal`), `groq` (hosted `whisper-large-v3-turbo`, needs `GROQ_API_KEY`), `cloudflare` (hosted `@cf/openai/whisper-large-v3-turbo`, needs `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`)
+- `--engine auto` (default) resolves to groq if `GROQ_API_KEY` is set, else cloudflare if its credentials are set (env first, `transcribe.cloudflare` config fallback), else local — Modal is never auto, it requires `--modal`
+- `.env` is loaded best-effort from the repo root and cwd so keys work without exporting
+- Cloudflare returns text only (no word timestamps), so its `segments` fall back to one segment spanning the `ffprobe` duration
+
 ### Plugin System
 - Auto-discover plugins from `plugins/*/register.py`
 - Two distinct plugin types: `TTSPlugin` and `MusicGenPlugin`
@@ -124,6 +133,14 @@ qwen3:
 musicgen:
   model: facebook/musicgen-medium
   duration: 5.0
+
+transcribe:
+  model: medium            # faster-whisper size for local/modal
+  language: auto
+  cloudflare:
+    account_id: null      # or CLOUDFLARE_ACCOUNT_ID env
+    api_token: null       # or CLOUDFLARE_API_TOKEN env
+    model: "@cf/openai/whisper-large-v3-turbo"
 
 output_format: wav
 ```
@@ -206,6 +223,10 @@ base_model.generate_voice_clone(text=user_text, ref_audio=ref_path, ref_text=REF
 | `sound normalize-volume set-reference good_take.mp4` | Analyze and cache the reference volume level once |
 | `sound normalize-volume set-reference https://youtu.be/VIDEO_ID` | Same, but download only the first 60s of a YouTube video (`-d` to change) |
 | `sound normalize-volume apply quiet.mp4` | Dynamically normalize a video's volume against the cached reference → `quiet_normalized.mp4` |
+| `sound transcribe speech.wav` | Transcribe with auto engine (groq > cloudflare > local) |
+| `sound transcribe talk.mp4 -F srt -o subs.srt` | Transcribe a video's audio track to SRT |
+| `sound transcribe speech.wav -e local -m small` | Local faster-whisper with explicit model size |
+| `sound transcribe speech.wav --modal` | faster-whisper on Modal remote infra |
 | `sound normalize-volume apply quiet.mp4 -o out.mp4` | Normalize to an explicit output path |
 | `sound --show-completion` | Print shell completion script |
 | `sound --install-completion` | Install shell completion |
@@ -254,6 +275,9 @@ If weights are omitted, they are normalized equally. If only some have weights, 
 - `soundfile` - audio file I/O
 - `librosa` - prosody/charisma analysis (pitch, energy, rhythm, voice quality)
 - `ffmpeg` (system binary) - audio extraction from video for `prosody`/`charisma`; `volumedetect`/`acompressor` audio filters for `normalize-volume`
+- `faster-whisper` - local + Modal transcription (`transcribe` extra); Modal image pre-downloads the `medium` model
+- `requests` - Groq + Cloudflare hosted transcription (`transcribe` extra)
+- `python-dotenv` - repo-root `.env` loading for API keys (`transcribe` extra)
 - `kokoro` - Kokoro TTS engine (optional)
 - `qwen-tts` - Qwen3-TTS engine (optional)
 - `transformers` - MusicGen model (core dep)

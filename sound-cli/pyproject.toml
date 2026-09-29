@@ -21,6 +21,7 @@ dependencies = [
 kokoro = ["kokoro>=0.9,<1.0"]
 qwen3 = ["qwen-tts>=0.1"]
 musicgen = ["transformers"]
+transcribe = ["faster-whisper>=1.0", "requests>=2.28", "python-dotenv"]
 youtube = ["yt-dlp>=2024.1"]
 dev = ["pytest>=8.0"]
 
@@ -33,7 +34,7 @@ include = [
     "common*", "cli*", "core*",
     "plugins*", "plugins.kokoro*", "plugins.qwen3*", "plugins.musicgen*",
     "commands*", "commands.speak*", "commands.music*", "commands.setup*", "commands.prosody*", "commands.charisma*",
-    "commands.normalize_volume*",
+    "commands.normalize_volume*", "commands.segment*", "commands.transcribe*",
     "modal_client*",
     "sound_entry*",
 ]

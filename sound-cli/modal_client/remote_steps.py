@@ -378,7 +378,39 @@ def _apply_flat_gain(input_path: Path, output_path: Path, gain_db: float) -> Non
         raise RuntimeError(f"ffmpeg gain correction failed: {result.stderr[-800:]}")
 
 
+# ── Transcription (faster-whisper) ────────────────────────────────────────────
+
+
+def _transcribe_local_impl(path: str, model_size: str, language: str) -> dict:
+    """Self-contained faster-whisper transcription (duplicated from
+    commands/transcribe/analysis.py — Modal workers have no local source)."""
+    from faster_whisper import WhisperModel
+
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    lang = None if language in ("auto", "", None) else language
+    segments_iter, info = model.transcribe(path, language=lang)
+    segments = [
+        {"start": float(seg.start), "end": float(seg.end), "text": (seg.text or "").strip()}
+        for seg in segments_iter
+        if (seg.text or "").strip()
+    ]
+    detected = getattr(info, "language", "en") or "en"
+    text = " ".join(s["text"] for s in segments).strip()
+    return {"language": detected, "text": text, "segments": segments}
+
+
 # ── Remote entry points ───────────────────────────────────────────────────────
+
+
+@app.function(image=base_image, timeout=1800)
+def remote_transcribe(
+    file_bytes: bytes, file_name: str, model_size: str = "medium", language: str = "auto"
+) -> dict:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, file_name)
+        with open(input_path, "wb") as f:
+            f.write(file_bytes)
+        return _transcribe_local_impl(input_path, model_size, language)
 
 
 @app.function(image=base_image, timeout=600)

@@ -5,6 +5,20 @@ from pathlib import Path
 import click
 
 
+def run_remote_transcribe(input_path: Path, model: str = "medium", language: str = "auto") -> dict:
+    try:
+        from modal_client.app import app, spawn_and_get
+        from modal_client.remote_steps import remote_transcribe
+    except ImportError as exc:
+        raise click.ClickException(f"modal not installed: {exc}") from exc
+    click.echo("Running transcribe on Modal...", err=True)
+    with app.run():
+        result = spawn_and_get(
+            remote_transcribe, input_path.read_bytes(), input_path.name, model, language
+        )
+    return result
+
+
 def run_remote_charisma(input_path: Path) -> dict:
     try:
         from modal_client.app import app, spawn_and_get

@@ -28,6 +28,15 @@ def load_sound_config(path: str | None = None) -> dict:
             "model": "facebook/musicgen-medium",
             "duration": 5.0,
         },
+        "transcribe": {
+            "model": "medium",
+            "language": "auto",
+            "cloudflare": {
+                "account_id": None,
+                "api_token": None,
+                "model": "@cf/openai/whisper-large-v3-turbo",
+            },
+        },
         "output_format": "wav",
     }
 
@@ -56,6 +65,15 @@ def get_default_config() -> dict:
         "musicgen": {
             "model": "facebook/musicgen-medium",
             "duration": 5.0,
+        },
+        "transcribe": {
+            "model": "medium",
+            "language": "auto",
+            "cloudflare": {
+                "account_id": None,
+                "api_token": None,
+                "model": "@cf/openai/whisper-large-v3-turbo",
+            },
         },
         "output_format": "wav",
     }

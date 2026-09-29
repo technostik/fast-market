@@ -10,7 +10,7 @@ cd sound-agent
 pip install -e .
 
 # Install with all engines
-pip install -e ".[kokoro,qwen3,musicgen,dev]"
+pip install -e ".[kokoro,qwen3,musicgen,transcribe,dev]"
 
 # Install with only specific engines
 pip install -e ".[kokoro]"       # just kokoro TTS
@@ -54,6 +54,14 @@ qwen3:
 musicgen:
   model: facebook/musicgen-medium
   duration: 5.0
+
+transcribe:
+  model: medium            # faster-whisper size for local/modal
+  language: auto
+  cloudflare:
+    account_id: null      # or CLOUDFLARE_ACCOUNT_ID env
+    api_token: null       # or CLOUDFLARE_API_TOKEN env
+    model: "@cf/openai/whisper-large-v3-turbo"
 
 output_format: wav
 ```
@@ -143,6 +151,9 @@ sound speak "こんにちは" -L ja
 | `sound prosody clip.mp4 --format json` | Prosody analysis of a video's audio track |
 | `sound charisma speech.wav` | Estimate vocal charisma, print a global 0-100 score |
 | `sound charisma clip.mp4 --format json` | Charisma analysis of a video's audio track |
+| `sound transcribe speech.wav` | Transcribe audio to text (auto: groq > cloudflare > local) |
+| `sound transcribe talk.mp4 -F srt -o subs.srt` | Transcribe a video's audio track to SRT |
+| `sound transcribe speech.wav --modal` | Transcribe with faster-whisper on Modal |
 
 ### `sound speak [TEXT]`
 
@@ -250,6 +261,36 @@ sound charisma interview.wav
 sound charisma keynote.mp4 --format json -o report.json
 ```
 
+### `sound transcribe <FILE>`
+
+Transcribe an audio or video file to text with timestamped segments.
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--output` | `-o` | Also write the transcript to this path |
+| `--format` | `-F` | Output format: `json`, `text`, or `srt` (default: `text`) |
+| `--language` | `-l` | Language code or `auto` (default: `auto`) |
+| `--model` | `-m` | faster-whisper model size for `local`/`modal` (default: `medium`) |
+| `--engine` | `-e` | `auto`, `local`, `groq`, `cloudflare`, `modal` (default: `auto`) |
+| `--modal` | — | Run faster-whisper on Modal (ignores `--engine`) |
+
+**Engine resolution for `--engine auto`:** Groq if `GROQ_API_KEY` is set, else Cloudflare if `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` are set (env first, `transcribe.cloudflare` config fallback), else local faster-whisper. Modal is never auto — pass `--modal` explicitly.
+
+| Engine | Backend | Credentials |
+|--------|---------|-------------|
+| `local` | faster-whisper (`pip install 'sound-agent[transcribe]'`) | none |
+| `modal` | faster-whisper on Modal remote infra | `modal` setup |
+| `groq` | hosted `whisper-large-v3-turbo` (free API) | `GROQ_API_KEY` in env or repo `.env` |
+| `cloudflare` | hosted `@cf/openai/whisper-large-v3-turbo` (free API) | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` in env/`.env` or sound config |
+
+**Examples:**
+```bash
+sound transcribe interview.wav
+sound transcribe talk.mp4 -F srt -o subs.srt
+sound transcribe speech.wav -e local -m small
+sound transcribe speech.wav --modal --format json
+```
+
 ## Engines
 
 ### Kokoro (TTS)
@@ -344,6 +385,8 @@ sound-cli/
 │   ├── music/             # sound music command
 │   ├── prosody/           # sound prosody command (analysis.py + register.py)
 │   ├── charisma/          # sound charisma command (analysis.py + register.py)
+│   ├── segment/           # sound segment command (transcribe + scene cutting)
+│   ├── transcribe/        # sound transcribe command (analysis.py + register.py)
 │   └── scoring.py         # shared target_band_score()/inverse_band_score() curves
 └── common/                # Symlink to shared utilities
 ```
@@ -356,12 +399,13 @@ sound-cli/
 - `soundfile>=0.12` - audio file I/O
 - `torch>=2.0` - tensor operations
 - `librosa>=0.10` - prosody/charisma analysis (pitch, energy, rhythm, voice quality)
-- `ffmpeg` (system binary) - audio extraction from video for `sound prosody` / `sound charisma`
+- `ffmpeg` (system binary) - audio extraction from video for `sound prosody` / `sound charisma` / `sound transcribe`
 
 ### Optional Engines
 - `kokoro>=0.9` - Kokoro TTS (lightweight)
 - `qwen-tts>=0.1` - Qwen3-TTS VoiceDesign
 - `transformers` - MusicGen (included in core deps)
+- `transcribe` extra (`faster-whisper`, `requests`, `python-dotenv`) - local faster-whisper + Groq (`whisper-large-v3-turbo`, needs `GROQ_API_KEY`) + Cloudflare (`@cf/openai/whisper-large-v3-turbo`, needs `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`)
 
 ## Development
 

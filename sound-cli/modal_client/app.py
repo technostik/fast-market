@@ -4,14 +4,24 @@ APP_NAME = "fast-market"
 
 app = modal.App(APP_NAME)
 
+
+def _download_whisper_model():
+    """Runs during image build — bakes faster-whisper weights into the image cache."""
+    from faster_whisper import WhisperModel
+
+    WhisperModel("medium", device="cpu", compute_type="int8")
+
+
 base_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg")
     .pip_install(
+        "faster-whisper>=1.0",
         "librosa>=0.10",
         "numpy>=1.24",
         "soundfile>=0.12",
     )
+    .run_function(_download_whisper_model)
 )
 
 
