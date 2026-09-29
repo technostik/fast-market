@@ -724,7 +724,9 @@ async def pool_add(req: PoolAddRequest):
 async def pool_remove(body: dict):
     src = body.get("source", "")
     ok = remove_from_pool(src)
-    return {"ok": ok}
+    if not ok:
+        return {"ok": False, "error": f"Pool item not found: {src}"}
+    return {"ok": True}
 
 
 @router.post("/pool/redo-item")

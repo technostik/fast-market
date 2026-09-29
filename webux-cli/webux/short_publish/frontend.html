@@ -735,13 +735,17 @@ function renderSteps(job) {
     if (s.output_files && s.output_files.length) {
       html += '<div class="step-dl">' + s.output_files.map(f => {
         const dl = `<a href="/api/short_publish/download?file=${encodeURIComponent(f.path)}" download>⬇ ${f.name}</a>`;
+        // data-attribute + listener (below) so apostrophes/quotes in paths can't break inline JS.
         const preview = f.path.match(/\.(mp4|mkv|mov|webm)$/i)
-          ? `<button class="btn-sec" style="padding:1px 5px;font-size:10px;" onclick="previewFile('${f.path}')">👁</button>`
+          ? `<button class="btn-sec" style="padding:1px 5px;font-size:10px;" data-preview="${String(f.path).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">👁</button>`
           : '';
         return dl + preview;
       }).join(' ') + '</div>';
     }
     el.innerHTML = html;
+    el.querySelectorAll('button[data-preview]').forEach(b => {
+      b.addEventListener('click', () => previewFile(b.getAttribute('data-preview')));
+    });
     container.appendChild(el);
   }
 }
@@ -1187,32 +1191,33 @@ async function refreshPool() {
       }
     }
 
-    const redoPostPublishBtn = isDone
-      ? `<button title="Redo post-publish only" onclick="poolRedoPostPublish('${item.source}')">📮</button>`
-      : '';
-    const infoBtn = isDone
-      ? `<button title="Show info" onclick="poolShowInfo('${item.source}')">📋</button>`
-      : '';
-    const transcriptBtn = isDone
-      ? `<button title="Run transcript script" onclick="poolRunTranscriptScript('${item.source}')">📜</button>`
-      : '';
-    const rerunCheckBtn = isDone
-      ? `<button title="Rerun content check" onclick="poolRerunCheck('${item.source}')">🔍</button>`
-      : '';
-    const retryBtn = (st === 'error' || st === 'stopped')
-      ? `<button title="${item.retry_count > 0 ? 'Retry #' + (item.retry_count + 1) + ' (go back ' + item.retry_count + ' step' + (item.retry_count > 1 ? 's' : '') + ')' : 'Retry from failed step'}" onclick="poolRetryItem('${item.source}')">🔁</button>`
-      : '';
-    const actions = `<span class="pool-actions">` +
-      redoPostPublishBtn +
-      infoBtn +
-      transcriptBtn +
-      rerunCheckBtn +
-      `<button title="Redo" onclick="poolRedoItem('${item.source}')">🔄</button>` +
-      retryBtn +
-      `<button title="Remove" onclick="poolRemove('${item.source}')">✕</button>` +
-      `</span>`;
-    html += actions;
+    // Pool action buttons: built via DOM + addEventListener so sources with
+    // quotes/apostrophes (e.g. "qu'il ... !.mp4") can't break inline onclick JS.
+    const mkPoolBtn = (title, text, fn) => {
+      const b = document.createElement('button');
+      b.title = title;
+      b.textContent = text;
+      b.addEventListener('click', () => fn(item.source));
+      return b;
+    };
+    const actionsEl = document.createElement('span');
+    actionsEl.className = 'pool-actions';
+    if (isDone) {
+      actionsEl.appendChild(mkPoolBtn('Redo post-publish only', '📮', poolRedoPostPublish));
+      actionsEl.appendChild(mkPoolBtn('Show info', '📋', poolShowInfo));
+      actionsEl.appendChild(mkPoolBtn('Run transcript script', '📜', poolRunTranscriptScript));
+      actionsEl.appendChild(mkPoolBtn('Rerun content check', '🔍', poolRerunCheck));
+    }
+    actionsEl.appendChild(mkPoolBtn('Redo', '🔄', poolRedoItem));
+    if (st === 'error' || st === 'stopped') {
+      const retryTitle = item.retry_count > 0
+        ? `Retry #${item.retry_count + 1} (go back ${item.retry_count} step${item.retry_count > 1 ? 's' : ''})`
+        : 'Retry from failed step';
+      actionsEl.appendChild(mkPoolBtn(retryTitle, '🔁', poolRetryItem));
+    }
+    actionsEl.appendChild(mkPoolBtn('Remove', '✕', poolRemove));
     row.innerHTML = html;
+    row.appendChild(actionsEl);
     list.appendChild(row);
   });
 
@@ -1274,11 +1279,27 @@ async function poolRedoPostPublish(source) {
 }
 
 async function poolRemove(source) {
-  await fetch('/api/short_publish/pool/remove', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source })
-  });
+  let r = null;
+  try {
+    r = await fetch('/api/short_publish/pool/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source })
+    });
+  } catch (e) {
+    alert('Remove failed: ' + (e && e.message ? e.message : e));
+    return;
+  }
+  if (!r || !r.ok) {
+    const data = r ? await r.json().catch(() => ({})) : {};
+    alert(data.detail || data.error || 'Remove failed');
+    return;
+  }
+  const data = await r.json().catch(() => ({}));
+  if (data.ok === false) {
+    alert(data.error || data.detail || 'Remove failed: item not found');
+    return;
+  }
   refreshPool();
 }
 

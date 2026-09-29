@@ -235,14 +235,35 @@ def retry_item(source: str) -> bool:
 
 def remove_from_pool(source: str) -> bool:
     src = str(Path(source).expanduser().resolve())
+    # Fallback identity when the file was deleted/moved: compare the raw
+    # expanded path too, so resolve() symlink/cwd differences can't strand
+    # an error entry in the pool.
+    src_raw = str(Path(source).expanduser())
     global _pool
     before = len(_pool)
-    _pool = [it for it in _pool if it.source != src]
+    removed_sources: list[str] = []
+    kept: list[PoolItem] = []
+    for it in _pool:
+        if it.source == src or it.source == src_raw:
+            removed_sources.append(it.source)
+        else:
+            kept.append(it)
+    if len(kept) == before:
+        # Last resort: match by basename so a stale entry whose parent dir
+        # moved/renamed (or a differently-resolved but same-file path) can
+        # still be deleted from the UI instead of being stuck in error state.
+        base = Path(src).name
+        kept = [it for it in _pool if Path(it.source).name != base]
+        removed_sources = [it.source for it in _pool if Path(it.source).name == base]
+    _pool = kept
     if len(_pool) < before:
         # A processed (finished) item keeps its meta marked "finished", which hides
         # it from the source list. On removal we reset that state so the video can
         # be selected and added to the pool again (re-processed fresh).
         _reset_meta_for_requeue(src)
+        for rs in removed_sources:
+            if rs != src:
+                _reset_meta_for_requeue(rs)
         _save_pool_to_disk()
         return True
     return False
