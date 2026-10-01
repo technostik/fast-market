@@ -12,8 +12,14 @@ class DBnomicsProvider:
   if not docs: raise ProviderError('DBnomics returned no series')
   return docs[0]
  def _obs(self,s):
-  d=self._series(s); periods=d.get('period',[]); values=d.get('value',[]); pairs=[(p,v) for p,v in zip(periods,values) if v is not None]
-  return [Observation('',date.fromisoformat(p[:10]+'-01' if len(p)==7 else p),float(v),'','dbnomics',datetime.now(timezone.utc)) for p,v in pairs]
+  d=self._series(s); periods=d.get('period',[]); values=d.get('value',[]); out=[]
+  for p,v in zip(periods,values):
+   if v is None or v=='' or v=='NA': continue
+   try: value=float(v)
+   except (TypeError,ValueError): continue
+   out.append(Observation('',date.fromisoformat(p[:10]+'-01' if len(p)==7 else p),value,'','dbnomics',datetime.now(timezone.utc)))
+  if not out: raise ProviderError(f'DBnomics returned no usable observations for {s!r}')
+  return out
  def fetch_latest(self,s): return self._obs(s)[-1]
  def fetch_history(self,s,start,end): return [o for o in self._obs(s) if start<=o.date<=end]
  def search(self,query):

@@ -20,12 +20,13 @@ def emit(data,json_output):
  else: click.echo(data if isinstance(data,str) else json.dumps(data,default=iso,indent=2))
 def results_payload(results): return {'generated_at':datetime.now(timezone.utc).isoformat(),'variables':[asdict(x) for x in results]}
 def human_results(results):
- lines=['ID        VALUE                 CHANGE          AS OF       SOURCE']
+ lines=['ID        VALUE             CHANGE          AS OF       SOURCE']
  for r in results:
   if r.error: lines.append(f'{r.id:<10} ERROR: {r.error}')
   else:
-   change='—' if r.change_abs is None else f'{r.change_abs:+.4g} ({r.change_pct:+.2f}%)'; stale=' STALE' if r.stale else ''
-   lines.append(f'{r.id:<10} {r.value:>12.4g} {r.unit:<10} {change:<15} {r.as_of} {r.source}{stale}')
+   unit='%' if r.unit=='percent' else f' {r.unit}'
+   change='—' if r.change_abs is None else f'{round(r.change_abs,6):+} ({r.change_pct:+.2f}%)'; stale=' STALE' if r.stale else ''
+   lines.append(f'{r.id:<10} {f"{r.value!r}{unit}":<18} {change:<17} {r.as_of} {r.source}{stale}')
  return '\n'.join(lines)
 def parse_since(text):
  import re

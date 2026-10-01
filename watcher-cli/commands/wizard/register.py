@@ -20,7 +20,7 @@ def register(plugin_manifests):
    provider=providers[item['provider']]
    try: provider.fetch_latest(item['symbol'])
    except Exception as exc:
-    click.echo(f'Test fetch failed: {exc}',err=True)
+    click.echo(f"Test fetch failed for {item['provider']}/{item['symbol']}: {exc}",err=True)
     if not click.confirm('Save it anyway?',default=False): return
    raw['variables'].append(item)
   elif action=='remove-variable':

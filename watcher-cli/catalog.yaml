@@ -1,5 +1,5 @@
 variables:
-  - {id: oat_10y, label: "France 10-year government yield (daily indicative)", provider: stooq, symbol: "10yfr", unit: "percent", max_age: 5d, news_topics: [france_debt_ecb]}
+  - {id: oat_10y, label: "France 10-year constant maturity rate (TEC10, daily, Banque de France)", provider: bdf, symbol: "FM.D.FR.EUR.FR2.BB.FRMOYTEC10.HSTA", unit: "percent", max_age: 5d, news_topics: [france_debt_ecb]}
   - {id: brent, label: "Brent crude oil futures", provider: stooq, symbol: "co.f", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
   - {id: wti, label: "WTI crude oil futures", provider: stooq, symbol: "cl.f", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
   - {id: gold, label: "Gold spot", provider: stooq, symbol: "xauusd", unit: "USD/oz", max_age: 5d, news_topics: [gold_central_banks]}
