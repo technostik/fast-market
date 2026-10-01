@@ -54,6 +54,14 @@ def test_catalog_oat_uses_daily_bdf():
  catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
  oat=next(v for v in catalog['variables'] if v['id']=='oat_10y')
  assert oat['provider']=='bdf' and oat['symbol']=='FM.D.FR.EUR.FR2.BB.FRMOYTEC10.HSTA'
+def test_catalog_oil_uses_fred_and_bitcoin_coingecko():
+ import yaml
+ catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
+ by_id={v['id']:v for v in catalog['variables']}
+ assert by_id['brent']['provider']=='fred' and by_id['brent']['symbol']=='DCOILBRENTEU'
+ assert by_id['wti']['provider']=='fred' and by_id['wti']['symbol']=='DCOILWTICO'
+ assert by_id['bitcoin']['provider']=='coingecko'
+ assert by_id['bitcoin_usd']['provider']=='coingecko' and by_id['bitcoin_usd']['symbol']=='bitcoin:usd'
 def test_bdf_parses_decimal_comma_newest_first(monkeypatch):
  from plugins.bdf.plugin import BdfProvider
  import plugins.bdf.plugin as bdf_mod

@@ -1,9 +1,10 @@
 variables:
   - {id: oat_10y, label: "France 10-year constant maturity rate (TEC10, daily, Banque de France)", provider: bdf, symbol: "FM.D.FR.EUR.FR2.BB.FRMOYTEC10.HSTA", unit: "percent", max_age: 5d, news_topics: [france_debt_ecb]}
-  - {id: brent, label: "Brent crude oil futures", provider: stooq, symbol: "co.f", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
-  - {id: wti, label: "WTI crude oil futures", provider: stooq, symbol: "cl.f", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
+  - {id: brent, label: "Brent crude oil spot", provider: fred, symbol: "DCOILBRENTEU", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
+  - {id: wti, label: "WTI crude oil spot", provider: fred, symbol: "DCOILWTICO", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
   - {id: gold, label: "Gold spot", provider: stooq, symbol: "xauusd", unit: "USD/oz", max_age: 5d, news_topics: [gold_central_banks]}
   - {id: bitcoin, label: "Bitcoin (EUR)", provider: coingecko, symbol: "bitcoin:eur", unit: "EUR", max_age: 1d, news_topics: [bitcoin_regulation]}
+  - {id: bitcoin_usd, label: "Bitcoin (USD)", provider: coingecko, symbol: "bitcoin:usd", unit: "USD", max_age: 1d, news_topics: [bitcoin_regulation]}
 news_topics:
   - {id: france_debt_ecb, label: "French public debt & ECB", query: "France public debt ECB", lang: en}
   - {id: oil_opec, label: "Oil & OPEC", query: "oil price OPEC", lang: en}
