@@ -21,5 +21,8 @@ Network egress in the build environment was blocked by the proxy (`CONNECT tunne
 ## Template conflicts
 The requested `watcher.yaml` conflicts with the template's conventional tool file name `config.yaml`. Behavior requires a clearly named watchlist YAML, so it is stored beside template config at `watcher/watcher.yaml`; the template's XDG/profile paths, entry point, registry, logging and test isolation are retained. The prompt refers to `.doc/GOLDEN_RULES.md`, but that file is absent in this checkout; `_doc/BUILD_NEW_AGENT_CLI.md` was followed.
 
+## Webux tab
+`webux/watcher/register.py` contributes the **Watcher** tab to `webux serve` (entry point `watcher` in `pyproject.toml`). It shells out to the `watcher` CLI (`dashboard --json`, `history --json`) over subprocess — never import watcher `core.*`/`commands.*` in the webux process (namespace collision with webux-cli's own packages). Endpoints: `GET /api/watcher/dashboard?last=&profile=`, `GET /api/watcher/history?variable=&since=&profile=`. Partial provider errors still return HTTP 200 with per-variable `error` fields (parsed from CLI stdout despite exit 1); total CLI failure → 502, missing binary → 503.
+
 ## Do not
 Do not add presentation/UI, alerting, LLM news summaries, intraday storage, or provider-specific conditionals to commands. Do not make a source failure omit a configured variable.

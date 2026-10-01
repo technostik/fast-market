@@ -147,3 +147,21 @@ def test_human_results_full_precision_percent():
  r2=VariableResult('gold','Gold',2648.125,'USD/oz',date(2026,9,30),'stooq',None,None,False,None)
  line2=[l for l in human_results([r2]).splitlines() if l.startswith('gold')][0]
  assert '2648.125 USD/oz' in line2
+def test_news_variable_filter(monkeypatch):
+ import json
+ import commands.news.register as news_mod
+ from core.models import Variable as Var
+ items=[NewsItem('bitcoin_regulation','BTC up','CoinDesk',datetime(2026,9,30,12,tzinfo=timezone.utc),'https://x/btc'),
+  NewsItem('france_debt_ecb','OAT watch','FT',datetime(2026,9,30,11,tzinfo=timezone.utc),'https://x/oat')]
+ class News:
+  def fetch(self,topic): return [i for i in items if i.topic==topic.id]
+ variables=[Var('bitcoin','Bitcoin','coingecko','bitcoin:eur','EUR',1,('bitcoin_regulation',)),Var('oat_10y','OAT','bdf','X','percent',5,('france_debt_ecb',))]
+ topics=[Topic('bitcoin_regulation','BTC','bitcoin regulation','en'),Topic('france_debt_ecb','OAT','France debt','en')]
+ monkeypatch.setattr(news_mod,'context',lambda: ({'google_news':News()},variables,topics,[],None))
+ cmd=news_mod.register({}).click_command
+ out=json.loads(CliRunner().invoke(cmd,['--variable','bitcoin','--json']).output)
+ assert [n['topic'] for n in out['news']]==['bitcoin_regulation']
+ r=CliRunner().invoke(cmd,['--variable','nope'])
+ assert r.exit_code!=0 and 'Unknown variable' in r.output
+ r=CliRunner().invoke(cmd,['--variable','bitcoin','--topic','bitcoin_regulation'])
+ assert r.exit_code!=0 and 'mutually exclusive' in r.output
