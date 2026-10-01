@@ -5,7 +5,7 @@ from typing import Any, Protocol
 class ProviderError(Exception): pass
 class RateLimitError(ProviderError): pass
 class MissingCredentialsError(ProviderError):
-    def __init__(self, env_var: str): self.env_var=env_var; super().__init__(f"Missing credentials: set {env_var} in the watch .env file.")
+    def __init__(self, env_var: str): self.env_var=env_var; super().__init__(f"Missing credentials: set {env_var} in the watcher .env file.")
 class HistoryNotSupported(ProviderError): pass
 @dataclass(frozen=True, slots=True)
 class Observation:

@@ -39,7 +39,7 @@ class WatchFile(BaseModel):
   if missing: raise ValueError('unknown news topic reference(s): '+', '.join(sorted(missing)))
   if len({v.id for v in self.variables}) != len(self.variables): raise ValueError('variable ids must be unique')
   return self
-def config_path()->Path: return get_tool_config_path('watch').with_name('watch.yaml')
+def config_path()->Path: return get_tool_config_path('watcher').with_name('watcher.yaml')
 def env_path()->Path: return config_path().with_name('.env')
 def load_env()->None:
  p=env_path()
@@ -49,10 +49,10 @@ def load_env()->None:
     key,value=line.split('=',1); os.environ.setdefault(key.strip(),value.strip())
 def default_text()->str:
  catalog=Path(__file__).resolve().parents[1]/'catalog.yaml'
- data=yaml.safe_load(catalog.read_text()); return '# Add catalog variables with `watch wizard`, or edit this file.\n'+yaml.safe_dump({'version': 1, 'variables': [], 'news_topics': data['news_topics'], 'feeds': []}, sort_keys=False)
+ data=yaml.safe_load(catalog.read_text()); return '# Add catalog variables with `watcher wizard`, or edit this file.\n'+yaml.safe_dump({'version': 1, 'variables': [], 'news_topics': data['news_topics'], 'feeds': []}, sort_keys=False)
 def load_config(registry: dict, path:Path|None=None)->tuple[list[Variable],list[Topic],list[FeedFile]]:
  p=path or config_path()
- if not p.exists(): raise ValueError(f'Configuration does not exist: {p}. Run watch setup or watch wizard.')
+ if not p.exists(): raise ValueError(f'Configuration does not exist: {p}. Run watcher setup or watcher wizard.')
  try: raw=yaml.safe_load(p.read_text()) or {}; parsed=WatchFile.model_validate(raw)
  except (yaml.YAMLError,ValidationError) as exc:
   line = getattr(getattr(exc, 'problem_mark', None), 'line', None)
