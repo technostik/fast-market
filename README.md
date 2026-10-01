@@ -29,6 +29,7 @@ fast-market/
 │
 ├── corpus-cli/                # Content indexing and search
 ├── monitor-cli/               # Rule-based source monitoring
+├── watch-cli/                 # Personal market and macro watchlist
 ├── youtube-cli/               # YouTube Data API operations
  ├── image-cli/                 # AI image generation
  ├── sound-cli/                 # TTS and music generation
@@ -52,6 +53,7 @@ Install all tools:
 ```bash
 pip install -e './corpus-cli[ml,youtube]'
 pip install -e './monitor-cli[youtube]'
+pip install -e './watch-cli'
 pip install -e './youtube-cli'
 pip install -e './image-cli'
 pip install -e './sound-cli[kokoro]'
@@ -68,6 +70,7 @@ Or install everything at once:
 ```bash
 pip install -e './corpus-cli[ml,youtube]' \
                -e './monitor-cli[youtube]' \
+               -e './watch-cli' \
                -e './youtube-cli' \
                -e './image-cli' \
                -e './sound-cli[kokoro]' \
