@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Corpus Browser</title>
   <style>
-    :root {
-      --bg:#1a1a2e; --surface:#16213e; --accent:#0f3460; --text:#eee;
-      --text-dim:#9ca3af; --border:#334155; --error:#f87171; --success:#10b981;
-      --warn:#f59e0b; --info:#38bdf8;
-    }
+    /* Theme vars (:root) are injected by the webux hub (see /theme.css).
+       Do not redeclare :root here — use var(--*) only. */
     * { box-sizing:border-box; }
-    body { margin:0; padding:16px; background:var(--bg); color:var(--text);
-           font-family:system-ui,sans-serif; height:100vh; display:flex; flex-direction:column; }
+    /* Page padding/flex live on main.webux-page (hub keeps body padding at 0
+       so the tab bar is full-bleed and identical on every tab). */
+    body { margin:0; padding:0; background:var(--bg); color:var(--text);
+           font-family:system-ui,sans-serif; }
+    main.webux-page { height:calc(100vh - 60px); display:flex; flex-direction:column;
+           box-sizing:border-box; }
     .header { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
     .header h1 { font-size:1.2em; margin:0 16px 0 0; }
     input, select, button { padding:7px 10px; border:1px solid var(--border);
@@ -27,7 +28,7 @@
     .banner.warn { background:#3b2f0a; border-color:var(--warn); color:var(--warn); }
     .banner.err { background:#3b1414; border-color:var(--error); color:var(--error); }
     .banner.ok { background:#0a3322; border-color:var(--success); color:var(--success); }
-    .banner.info { background:#0c2b38; border-color:var(--info); color:var(--info); }
+    .banner.info { background:var(--bg3); border-color:var(--info); color:var(--info); }
     .actionbar { display:none; gap:8px; flex-wrap:wrap; align-items:center;
              background:var(--surface); border:1px solid var(--border); border-radius:8px;
              padding:8px 12px; margin-bottom:10px; }
@@ -88,6 +89,7 @@
   </style>
 </head>
 <body>
+<main class="webux-page">
   <div class="header">
     <h1>Corpus Browser</h1>
     <input id="q" placeholder="Search transcripts…" />
@@ -183,6 +185,7 @@
   </div>
 
   <div class="tooltip" id="tooltip" style="display:none;"></div>
+</main>
 
 <script>
 'use strict';

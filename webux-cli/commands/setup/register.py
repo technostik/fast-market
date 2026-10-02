@@ -6,7 +6,9 @@ import click
 import yaml
 
 from commands.base import CommandManifest
+from common.core.config import load_tool_config, save_tool_config
 from common.core.paths import get_tool_config_path
+from common.webux.theme import DEFAULT_THEME, THEME_NAMES, resolve_theme
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -41,5 +43,27 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def show_path_cmd() -> None:
         """Print the config file path."""
         click.echo(str(get_tool_config_path("webux")))
+
+    @setup_group.group("theme")
+    def theme_group() -> None:
+        """Manage the default webux theme (dark|light|blue)."""
+        pass
+
+    @theme_group.command("show")
+    def theme_show_cmd() -> None:
+        """Print the configured default theme and available themes."""
+        config = load_tool_config("webux")
+        click.echo(f"theme: {resolve_theme(config)}")
+        click.echo(f"available: {', '.join(THEME_NAMES)}")
+        click.echo(f"config_path: {get_tool_config_path('webux')}")
+
+    @theme_group.command("set")
+    @click.argument("name", type=click.Choice(list(THEME_NAMES)))
+    def theme_set_cmd(name: str) -> None:
+        """Persist the default theme (used on first paint; browser can override)."""
+        config = load_tool_config("webux")
+        config["theme"] = name
+        save_tool_config("webux", config)
+        click.echo(f"theme set to {name} (default was {DEFAULT_THEME})")
 
     return CommandManifest(name="setup", click_command=setup_group)

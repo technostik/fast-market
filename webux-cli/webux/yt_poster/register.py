@@ -11,38 +11,29 @@ _YT_POSTER_HTML = """<!doctype html>
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
   <title>Webux YT Poster</title>
   <style>
-    :root {
-      --bg: #1a1a2e;
-      --bg-secondary: #16213e;
-      --text: #eee;
-      --text-dim: #888;
-      --accent: #0f3460;
-      --success: #4ade80;
-      --error: #f87171;
-      --warning: #fbbf24;
-      --border: #333;
-      --link: #7dd3fc;
-      --link-hover: #bae6fd;
-    }
-    body { margin:0; padding:16px; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+    /* Theme vars (:root) are injected by the webux hub (see /theme.css).
+       Do not redeclare :root here — use var(--*) only. */
+    /* Page padding lives on main.webux-page (hub keeps body padding at 0
+       so the tab bar is full-bleed and identical on every tab). */
+    body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
     .topbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
     input, button { padding:8px 10px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text); border-radius:6px; }
     input { flex:1; }
     button { cursor:pointer; }
     button:hover { background:var(--accent); }
     .locked { background:var(--error); color:#fff; }
-    .unlocked { background:var(--success); color:#000; }
+    .unlocked { background:var(--success); color:var(--bg); }
     .error { color:var(--error); min-height:20px; margin-bottom:6px; }
     .table-wrap { display:none; border:1px solid var(--border); border-radius:8px; overflow:auto; }
     table { border-collapse:collapse; width:100%; min-width:1100px; }
     th, td { border-bottom:1px solid var(--border); padding:8px; vertical-align:top; font-size:13px; }
     th { background:var(--bg-secondary); position:sticky; top:0; }
-    .clickable { cursor:pointer; color:#9ecbff; }
+    .clickable { cursor:pointer; color:var(--link); }
     .controls { display:none; margin:10px 0; gap:8px; }
     .footer { display:none; margin-top:12px; }
     .spinner { display:none; margin-top:12px; }
     .output { margin-top:10px; display:none; }
-    pre { background:#0f172a; border:1px solid var(--border); border-radius:8px; padding:10px; overflow:auto; white-space:pre-wrap; }
+    pre { background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:10px; overflow:auto; white-space:pre-wrap; }
     .badge { display:inline-block; border:1px solid var(--border); border-radius:999px; padding:1px 6px; font-size:11px; margin-right:4px; color:var(--text-dim); }
     .video-link { color:var(--link); text-decoration:none; font-weight:500; }
     .video-link:hover { color:var(--link-hover); text-decoration:underline; }
@@ -60,20 +51,21 @@ _YT_POSTER_HTML = """<!doctype html>
     .modal-edit-area { width:100%; min-height:120px; padding:10px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); font-family:inherit; font-size:13px; resize:vertical; }
     .modal-footer { display:flex; gap:8px; justify-content:flex-end; }
     .modal-footer button { padding:8px 16px; }
-    .btn-save { background:var(--success); color:#000; border:none; font-weight:600; }
+    .btn-save { background:var(--success); color:var(--bg); border:none; font-weight:600; }
     .btn-save:hover { opacity:0.85; }
     .btn-cancel { background:var(--accent); color:var(--text); }
   </style>
   <!-- Regeneration history panel (per-comment, client-side) -->
   <style>
-    #regenPanel { display:none; margin:8px 0; padding:8px; border:1px solid var(--border); border-radius:6px; background:#111; }
+    #regenPanel { display:none; margin:8px 0; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg3); }
     #regenPanel h4 { margin:0 0 6px 0; font-size:12px; color:var(--text-dim); }
-    #regenPanel .regenRow { font-family: monospace; font-size:12px; color:#9ecbff; white-space:pre-wrap; word-break:break-all; }
+    #regenPanel .regenRow { font-family: monospace; font-size:12px; color:var(--link); white-space:pre-wrap; word-break:break-all; }
     #regenPanel .regen-json-toggle { cursor:pointer; font-size:12px; color:var(--text-dim); margin-top:4px; }
-    #regenPanel .regen-json-content { display:none; font-family: monospace; font-size:12px; color:#9ecbff; white-space:pre-wrap; word-break:break-all; margin-top:2px; padding:4px; background:#0f172a; border-radius:4px; }
+    #regenPanel .regen-json-content { display:none; font-family: monospace; font-size:12px; color:var(--link); white-space:pre-wrap; word-break:break-all; margin-top:2px; padding:4px; background:var(--bg3); border-radius:4px; }
   </style>
 </head>
 <body>
+<main class="webux-page">
   <!-- Regeneration history panel -->
   <div id="regenPanel" aria-live="polite">
     <h4>Regeneration (last per-comment)</h4>
@@ -160,6 +152,7 @@ _YT_POSTER_HTML = """<!doctype html>
       </div>
     </div>
   </div>
+</main>
 
 <script>
 let rows = [];
@@ -642,7 +635,7 @@ async function loadFile(){
   if (modeBadge) {
     modeBadge.textContent = postMode === 'comment' ? '💬 Replying to comment' : '🎬 Replying to video';
     modeBadge.style.background = postMode === 'comment' ? 'var(--success)' : 'var(--warning)';
-    modeBadge.style.color = '#000';
+    modeBadge.style.color = 'var(--bg)';
   }
   controls.style.display = 'flex';
   tableWrap.style.display = 'block';

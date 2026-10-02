@@ -300,11 +300,8 @@ _HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Voiceboard</title>
 <style>
-:root {
-  --bg:#1e1e2e; --bg2:#181825; --bg3:#11111b; --surface:#313244; --surface2:#45475a;
-  --text:#cdd6f4; --text-dim:#6c7086; --text-muted:#9399b2;
-  --accent:#89b4fa; --green:#a6e3a1; --red:#f38ba8; --yellow:#f9e2af; --border:#313244;
-}
+/* Theme vars (:root) are injected by the webux hub (see /theme.css).
+   Do not redeclare :root here — use var(--*) only. */
 * { box-sizing:border-box; margin:0; padding:0; }
 body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-serif; font-size:13px; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
 .topbar { display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--bg2); border-bottom:1px solid var(--border); flex-shrink:0; flex-wrap:wrap; }
@@ -318,9 +315,9 @@ body { background:var(--bg3); color:var(--text); font-family:system-ui,sans-seri
 .status-badge { font-size:11px; padding:3px 8px; border-radius:12px; font-weight:600; }
 .s-idle { background:var(--surface); color:var(--text-muted); }
 .s-running { background:var(--accent); color:#fff; }
-.s-done { background:var(--green); color:#1e1e2e; }
+.s-done { background:var(--green); color:var(--bg); }
 .s-error { background:var(--red); color:#fff; }
-.s-partial { background:var(--yellow); color:#1e1e2e; }
+.s-partial { background:var(--yellow); color:var(--bg); }
 .workdir-label { color:var(--text-dim); font-size:11px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .main { flex:1; min-height:0; display:flex; overflow:hidden; }
 .side { width:230px; background:var(--bg2); border-right:1px solid var(--border); overflow-y:auto; padding:10px; flex-shrink:0; min-height:0; }

@@ -3,26 +3,31 @@ from __future__ import annotations
 from typing import Callable
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from common import structlog
 from common.webux.base import WebuxPluginManifest
+from common.webux.theme import (
+    DEFAULT_THEME,
+    THEME_NAMES,
+    codemirror_theme,
+    render_all_themes_css,
+    render_root_css,
+    resolve_theme,
+)
 
 logger = structlog.get_logger(__name__)
 
 
-_NAV_CSS = """
-:root {
-  --bg: #1a1a2e;
-  --bg-secondary: #16213e;
-  --text: #eee;
-  --text-dim: #888;
-  --accent: #0f3460;
-  --success: #4ade80;
-  --error: #f87171;
-  --warning: #fbbf24;
-  --border: #333;
-}
+# Base font shared by the hub chrome and every plugin page body.
+# The hub stylesheet is injected AFTER each plugin's own <style>, so on equal
+# specificity these hub rules win — plugin `body` fonts cannot leak into the nav.
+_WEBUX_BASE_FONT = (
+    "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+)
+
+_NAV_LAYOUT = (
+    """
 .webux-nav {
   display: flex;
   gap: 8px;
@@ -32,6 +37,17 @@ _NAV_CSS = """
   position: sticky;
   top: 0;
   z-index: 999;
+  align-items: center;
+  font-family: __WEBUX_BASE_FONT__;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+/* Isolate the nav from plugin resets (e.g. `* { box-sizing }`) and generic
+   element rules (e.g. `button { font-weight: 600 }`, `select { width: 100% }`). */
+.webux-nav, .webux-nav *, .webux-nav *::before, .webux-nav *::after {
+  box-sizing: border-box;
+  margin: 0;
 }
 .webux-nav a {
   color: var(--text-dim);
@@ -39,22 +55,57 @@ _NAV_CSS = """
   padding: 8px 12px;
   border-radius: 6px;
   background: transparent;
+  font: inherit;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: none;
 }
-.webux-nav a:hover { color: var(--text); background: #1d2a4a; }
+.webux-nav a:hover { color: var(--text); background: var(--surface); }
 .webux-nav a.active { color: var(--text); background: var(--accent); }
-.webux-nav .exit-btn {
+.webux-nav .theme-select {
   margin-left: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  width: auto;
+  max-width: 170px;
+  flex-shrink: 0;
+}
+.webux-nav .exit-btn {
+  margin-left: 8px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--error);
   padding: 8px 12px;
   border-radius: 6px;
   cursor: pointer;
+  font: inherit;
+  width: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
-.webux-nav .exit-btn:hover { background: #4a1d2a; color: #fff; }
+.webux-nav .exit-btn:hover { background: var(--surface); color: var(--text); }
 .webux-shell { margin: 18px; color: var(--text); }
-body { background: var(--bg); color: var(--text); margin: 0; }
-"""
+/* Unified base font for every tab. Injected after plugin styles, so this wins
+   over per-plugin `body` font rules (same specificity, later in cascade). */
+body {
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 0;
+  font-family: __WEBUX_BASE_FONT__;
+  font-size: 14px;
+  line-height: 1.4;
+}
+/* Page-content wrapper for tabs that need the legacy 16px page padding.
+   Body padding stays 0 so the tab bar is full-bleed and identical on every tab. */
+.webux-page { padding: 16px; }
+""".replace("__WEBUX_BASE_FONT__", _WEBUX_BASE_FONT)
+)
 
 _WEBUX_EXIT_SCRIPT = """
 <script>
@@ -78,8 +129,87 @@ async function webuxExit() {
 </script>
 """
 
+_WEBUX_THEME_BOOT_SCRIPT = """
+<script>
+/* Apply persisted per-browser theme before first paint (avoids FOUC). */
+(function () {
+  try {
+    var t = localStorage.getItem('webux-theme');
+    if (t === 'dark' || t === 'light' || t === 'blue') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch (_) { /* storage unavailable */ }
+})();
+</script>
+"""
+
+_WEBUX_THEME_SCRIPT = """
+<script>
+var WEBUX_THEMES = ['dark', 'light', 'blue'];
+var WEBUX_CODEMIRROR = { dark: 'dracula', light: 'default', blue: 'dracula' };
+function webuxGetTheme() {
+  var t = null;
+  try { t = localStorage.getItem('webux-theme'); } catch (_) {}
+  if (WEBUX_THEMES.indexOf(t) === -1) {
+    t = document.documentElement.getAttribute('data-theme') || 'dark';
+  }
+  if (WEBUX_THEMES.indexOf(t) === -1) t = 'dark';
+  return t;
+}
+function webuxApplyEditorTheme(theme) {
+  var cmTheme = WEBUX_CODEMIRROR[theme] || 'dracula';
+  try {
+    if (window.editor && window.editor.setOption) {
+      window.editor.setOption('theme', cmTheme);
+    }
+  } catch (_) {}
+  try {
+    document.querySelectorAll('.CodeMirror').forEach(function (el) {
+      var cm = el.CodeMirror;
+      if (cm && cm.setOption) cm.setOption('theme', cmTheme);
+    });
+  } catch (_) {}
+  /* CodeMirror 5 "default" theme lives in the base stylesheet; the dracula
+     file only overrides. So light = disable dracula sheet, dark/blue = enable. */
+  try {
+    document.querySelectorAll('link[data-cm-theme="dracula"]').forEach(function (link) {
+      link.disabled = (cmTheme === 'default');
+    });
+  } catch (_) {}
+}
+function webuxSetTheme(theme, persist) {
+  if (WEBUX_THEMES.indexOf(theme) === -1) return;
+  document.documentElement.setAttribute('data-theme', theme);
+  if (persist !== false) {
+    try { localStorage.setItem('webux-theme', theme); } catch (_) {}
+    try {
+      fetch('/api/system/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: theme }),
+      }).catch(function () {});
+    } catch (_) {}
+  }
+  var sel = document.getElementById('webux-theme');
+  if (sel && sel.value !== theme) sel.value = theme;
+  webuxApplyEditorTheme(theme);
+  try { window.dispatchEvent(new CustomEvent('webux-theme-change', { detail: { theme: theme } })); } catch (_) {}
+}
+document.addEventListener('DOMContentLoaded', function () {
+  var current = webuxGetTheme();
+  document.documentElement.setAttribute('data-theme', current);
+  var sel = document.getElementById('webux-theme');
+  if (sel) {
+    sel.value = current;
+    sel.addEventListener('change', function () { webuxSetTheme(sel.value); });
+  }
+  webuxApplyEditorTheme(current);
+});
+</script>
+"""
+
 _PROMPT_INFO_CSS = """
-.prompt-info { position: relative; cursor: help; color: #fff; font-weight: 400; margin-left: 6px; }
+.prompt-info { position: relative; cursor: help; color: var(--text); font-weight: 400; margin-left: 6px; }
 .prompt-info:hover::after {
   content: attr(data-content);
   position: absolute;
@@ -131,28 +261,63 @@ function setupPromptInfo(selectId, infoId) {
 """
 
 
-def _build_nav(plugins: dict[str, WebuxPluginManifest], active: str | None = None) -> str:
+def _build_nav(
+    plugins: dict[str, WebuxPluginManifest],
+    active: str | None = None,
+    current_theme: str = DEFAULT_THEME,
+) -> str:
     links = []
     for plugin in plugins.values():
         klass = "active" if plugin.name == active else ""
         links.append(
             f'<a class="{klass}" href="/{plugin.name}">{plugin.tab_icon} {plugin.tab_label}</a>'
         )
+    options = "".join(
+        f'<option value="{name}"{" selected" if name == current_theme else ""}>'
+        f'{"🌙" if name == "dark" else "☀️" if name == "light" else "🔵"} {name}'
+        f"</option>"
+        for name in THEME_NAMES
+    )
+    links.append(
+        f'<select id="webux-theme" class="theme-select" title="Theme">'
+        f"{options}</select>"
+    )
     links.append('<button class="exit-btn" onclick="webuxExit()">⏻ Exit</button>')
     return f"<nav class=\"webux-nav\">{''.join(links)}</nav>"
 
 
-def _inject_nav(plugin_html: str, nav_html: str) -> str:
-    style_tag = f"<style>{_NAV_CSS}{_PROMPT_INFO_CSS}</style>"
-    script_tag = _WEBUX_EXIT_SCRIPT + _PROMPT_INFO_SCRIPT
+def _inject_nav(
+    plugin_html: str, nav_html: str, default_theme: str = DEFAULT_THEME
+) -> str:
+    if default_theme not in THEME_NAMES:
+        default_theme = DEFAULT_THEME
+    theme_css = render_all_themes_css()
+    style_tag = f"<style>{theme_css}{_NAV_LAYOUT}{_PROMPT_INFO_CSS}</style>"
+    # Boot script must run ASAP (in <head>) to avoid a flash of the wrong theme.
+    head_tags = _WEBUX_THEME_BOOT_SCRIPT + style_tag
+    script_tag = _WEBUX_EXIT_SCRIPT + _WEBUX_THEME_SCRIPT + _PROMPT_INFO_SCRIPT
     if "</head>" in plugin_html:
         plugin_html = plugin_html.replace(
             "</head>",
-            f"{style_tag}{script_tag}</head>",
+            f"{head_tags}{script_tag}</head>",
             1,
         )
     else:
-        plugin_html = style_tag + script_tag + plugin_html
+        plugin_html = head_tags + script_tag + plugin_html
+
+    # Ensure <html> carries the server default so first paint is correct
+    # even when localStorage is empty. The boot script overrides per-browser.
+    if "<html" in plugin_html:
+        idx = plugin_html.find("<html")
+        end = plugin_html.find(">", idx)
+        if end != -1:
+            tag = plugin_html[idx : end + 1]
+            if "data-theme" not in tag:
+                plugin_html = (
+                    plugin_html[:end]
+                    + f' data-theme="{default_theme}"'
+                    + plugin_html[end:]
+                )
 
     if "<body" in plugin_html:
         body_start = plugin_html.find(">", plugin_html.find("<body"))
@@ -182,21 +347,23 @@ def _mount_plugin_router(
     mounted.add(plugin.name)
 
 
-
-
 def _make_page_handler(
     app: FastAPI,
     manifests: dict[str, WebuxPluginManifest],
     plugin: WebuxPluginManifest,
     mounted: set[str],
 ):
-    def _render_page() -> HTMLResponse:
+    def _render_page(request: Request) -> HTMLResponse:
         if plugin.lazy and plugin.name not in mounted:
             _mount_plugin_router(app, plugin, mounted)
             logger.info("webux_plugin_lazy_mounted", name=plugin.name)
-        nav = _build_nav(manifests, active=plugin.name)
+        theme_q = request.query_params.get("theme", "")
+        default_theme = getattr(app.state, "webux_theme", DEFAULT_THEME)
+        if theme_q in THEME_NAMES:
+            default_theme = theme_q
+        nav = _build_nav(manifests, active=plugin.name, current_theme=default_theme)
         return HTMLResponse(
-            _inject_nav(plugin.frontend_html, nav),
+            _inject_nav(plugin.frontend_html, nav, default_theme),
             headers={
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
                 "Pragma": "no-cache",
@@ -212,11 +379,17 @@ def build_app(
     plugins: dict[str, WebuxPluginManifest],
     shutdown_callback: Callable[[], None] | None = None,
 ) -> FastAPI:
-    del config
+    initial_theme = resolve_theme(config if isinstance(config, dict) else {})
     app = FastAPI(title="webux-agent")
+    app.state.webux_theme = initial_theme
     manifests = plugins
 
-    logger.info("plugins_discovered", count=len(manifests), names=list(manifests.keys()))
+    logger.info(
+        "plugins_discovered",
+        count=len(manifests),
+        names=list(manifests.keys()),
+        theme=initial_theme,
+    )
 
     mounted_routers: set[str] = set()
     for plugin in manifests.values():
@@ -257,19 +430,57 @@ def build_app(
         return RedirectResponse(url=f"/{first.name}")
 
     @app.get("/shell", response_class=HTMLResponse)
-    def shell_page() -> HTMLResponse:
-        nav = _build_nav(manifests, active=None)
+    def shell_page(request: Request) -> HTMLResponse:
+        theme_q = request.query_params.get("theme", "")
+        default_theme = getattr(app.state, "webux_theme", DEFAULT_THEME)
+        if theme_q in THEME_NAMES:
+            default_theme = theme_q
+        nav = _build_nav(manifests, active=None, current_theme=default_theme)
         links = "".join(
             [
                 f'<li><a href="/{p.name}">{p.tab_icon} {p.tab_label}</a></li>'
                 for p in manifests.values()
             ]
         )
+        theme_css = render_all_themes_css()
         html = (
-            f"<html><head><style>{_NAV_CSS}</style>{_WEBUX_EXIT_SCRIPT}</head><body>{nav}"
+            f'<html data-theme="{default_theme}"><head><style>{theme_css}{_NAV_LAYOUT}</style>'
+            f"{_WEBUX_THEME_BOOT_SCRIPT}{_WEBUX_EXIT_SCRIPT}{_WEBUX_THEME_SCRIPT}</head>"
+            f"<body>{nav}"
             f'<main class="webux-shell"><h1>webux</h1><ul>{links}</ul></main></body></html>'
         )
         return HTMLResponse(html)
+
+    @app.get("/theme.css", response_class=PlainTextResponse)
+    def theme_css() -> PlainTextResponse:
+        return PlainTextResponse(
+            render_all_themes_css(),
+            media_type="text/css",
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
+
+    @app.get("/api/system/theme")
+    def get_theme() -> dict:
+        current = getattr(app.state, "webux_theme", DEFAULT_THEME)
+        return {
+            "theme": current,
+            "available": list(THEME_NAMES),
+            "codemirror": {name: codemirror_theme(name) for name in THEME_NAMES},
+        }
+
+    @app.post("/api/system/theme")
+    def set_theme(payload: dict) -> dict:
+        name = (payload or {}).get("theme", "")
+        if name not in THEME_NAMES:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown theme '{name}'. Available: {', '.join(THEME_NAMES)}",
+            )
+        app.state.webux_theme = name
+        logger.info("webux_theme_changed", theme=name)
+        return {"ok": True, "theme": name}
 
     for plugin in manifests.values():
         app.add_api_route(
@@ -308,5 +519,8 @@ def build_app(
                 "error": (proc.stderr or proc.stdout or "prompt get failed").strip(),
             }
         return {"name": name, "content": proc.stdout.strip()}
+
+    # Re-export for tests that import render helpers from core.server.
+    app.state.render_root_css = render_root_css  # type: ignore[attr-defined]
 
     return app

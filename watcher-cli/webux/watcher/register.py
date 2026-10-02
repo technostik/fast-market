@@ -94,8 +94,8 @@ def news(
 _HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Watcher</title>
 <style>
-:root { --bg:#1a1a2e; --surface:#16213e; --accent:#0f3460; --text:#eee; --text-dim:#9ca3af; --border:#334155; --success:#22c55e; --error:#ef4444; --warning:#f59e0b; }
-body { margin:0; padding:16px; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; }
+/* Theme vars (:root) are injected by the webux hub (see /theme.css). */
+body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; }
 input, button, select { padding:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:6px; }
 button { cursor:pointer; }
 button:hover { background:var(--accent); }
@@ -119,6 +119,7 @@ tr.clickable:hover td { background:rgba(255,255,255,.03); }
 #spinner { color:var(--text-dim); padding:24px; text-align:center; }
 </style></head>
 <body>
+<main class="webux-page">
   <h2>📈 Watcher</h2>
   <div class="row">
     <label class="dim">News:</label>
@@ -132,6 +133,7 @@ tr.clickable:hover td { background:rgba(255,255,255,.03); }
   <div id="hist"><div class="row"><strong id="histTitle"></strong><span class="dim" id="histStats"></span><button id="histClose">✕</button></div><canvas id="spark" width="640" height="160" style="width:100%;height:160px;"></canvas><h4 style="margin:12px 0 6px 0;">📰 News for <span id="histNewsTitle"></span></h4><div class="news" id="histNews" style="margin-top:0;"></div></div>
   <h3>📰 News</h3>
   <div class="news" id="news"></div>
+</main>
 <script>
 const out = document.getElementById('out');
 const newsEl = document.getElementById('news');

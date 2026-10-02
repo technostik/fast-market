@@ -82,8 +82,8 @@ _HTML = """<!doctype html>
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
   <title>Corpus</title>
   <style>
-    :root { --bg:#1a1a2e; --surface:#16213e; --accent:#0f3460; --text:#eee; --text-dim:#9ca3af; --border:#334155; --error:#f87171; }
-    body { margin:0; padding:16px; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; }
+    /* Theme vars (:root) are injected by the webux hub (see /theme.css). */
+    body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; }
     .row { display:flex; gap:8px; margin-bottom:10px; }
     input, select, button { padding:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:6px; }
     input { flex:1; }
@@ -92,10 +92,12 @@ _HTML = """<!doctype html>
   </style>
 </head>
 <body>
+<main class="webux-page">
   <h2>Corpus</h2>
   <div class="row"><input id="q" placeholder="Search..."/><select id="mode"><option value="keyword">keyword</option><option value="semantic">semantic</option></select><button id="searchBtn">Search</button></div>
   <div class="row"><button id="listBtn">List Docs</button><button id="statusBtn">Status</button></div>
   <div id="out" class="card"><pre>Ready.</pre></div>
+</main>
 <script>
 const out = document.querySelector('#out pre');
 const show = (v) => out.textContent = JSON.stringify(v, null, 2);

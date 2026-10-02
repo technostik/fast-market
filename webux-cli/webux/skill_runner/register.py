@@ -10,7 +10,7 @@ _SKILL_RUNNER_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Skill Runner</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css" data-cm-theme="dracula">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js"></script>
@@ -19,17 +19,8 @@ _SKILL_RUNNER_HTML = """<!doctype html>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
   <style>
-    :root {
-      --bg: #1a1a2e;
-      --bg-secondary: #16213e;
-      --text: #eee;
-      --text-dim: #888;
-      --accent: #0f3460;
-      --success: #4ade80;
-      --error: #f87171;
-      --warning: #fbbf24;
-      --border: #333;
-    }
+    /* Theme vars (:root) are injected by the webux hub (see /theme.css).
+       Do not redeclare :root here — use var(--*) only. */
     body { margin:0; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
     .layout { display:flex; height: calc(100vh - 60px); }
     .left { width: 300px; border-right: 1px solid var(--border); overflow:auto; background:var(--bg-secondary); display:flex; flex-direction:column; }
@@ -56,7 +47,7 @@ _SKILL_RUNNER_HTML = """<!doctype html>
     .group-files { padding-left:16px; display:none; }
     .group-files.open { display:block; }
     .file-item { padding:4px 8px; cursor:pointer; color:var(--text-dim); border-radius:4px; font-size:13px; }
-    .file-item:hover { color:var(--text); background:#26395f; }
+    .file-item:hover { color:var(--text); background:var(--surface2); }
     .file-item.active { background:var(--accent); color:var(--text); }
     .empty-state { padding:20px; text-align:center; color:var(--text-dim); font-size:13px; }
     .toolbar { display:flex; gap:8px; align-items:center; padding:10px; border-bottom:1px solid var(--border); background:var(--bg-secondary); }
@@ -421,10 +412,16 @@ async function loadDetectedPlans() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  const initialTheme = (document.documentElement.getAttribute('data-theme') === 'light') ? 'default' : 'dracula';
   editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
     lineNumbers: true,
     mode: 'yaml',
-    theme: 'dracula',
+    theme: initialTheme,
+  });
+  window.editor = editor;
+  window.addEventListener('webux-theme-change', (e) => {
+    const t = (e.detail && e.detail.theme === 'light') ? 'default' : 'dracula';
+    try { editor.setOption('theme', t); } catch (_) {}
   });
   document.getElementById('loadBtn').onclick = loadPlan;
   document.getElementById('clearBtn').onclick = clearPlan;

@@ -476,14 +476,8 @@ _HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Storyboard</title>
 <style>
-:root {
-  --bg: #1e1e2e; --bg2: #181825; --bg3: #11111b;
-  --surface: #313244; --surface2: #45475a;
-  --text: #cdd6f4; --text-dim: #6c7086; --text-muted: #9399b2;
-  --accent: #89b4fa; --accent2: #74c7ec;
-  --green: #a6e3a1; --red: #f38ba8; --yellow: #f9e2af; --orange: #fab387;
-  --border: #313244;
-}
+/* Theme vars (:root) are injected by the webux hub (see /theme.css).
+   Do not redeclare :root here — use var(--*) only. */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg3); color: var(--text); font-family: system-ui, sans-serif; font-size: 13px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
@@ -501,9 +495,9 @@ body { background: var(--bg3); color: var(--text); font-family: system-ui, sans-
 .status-badge { font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: 600; }
 .s-idle { background: var(--surface); color: var(--text-muted); }
 .s-running { background: var(--accent); color: #fff; }
-.s-done { background: var(--green); color: #1e1e2e; }
+.s-done { background: var(--green); color: var(--bg); }
 .s-error { background: var(--red); color: #fff; }
-.s-partial { background: var(--yellow); color: #1e1e2e; }
+.s-partial { background: var(--yellow); color: var(--bg); }
 .topbar-sep { color: var(--text-dim); }
 .workdir-label { color: var(--text-dim); font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -659,7 +653,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 /* ── Sidebar step run buttons ── */
 .gstep-actions { display: flex; gap: 2px; opacity: 0; transition: opacity .1s; }
 .gstep:hover .gstep-actions { opacity: 1; }
-.gstep-btn { font-size: 9px; padding: 1px 5px; border-radius: 3px; border: none; cursor: pointer; background: var(--surface2); color: #fff; }
+.gstep-btn { font-size: 9px; padding: 1px 5px; border-radius: 3px; border: none; cursor: pointer; background: var(--surface2); color: var(--text); }
 .gstep-btn:hover { background: var(--accent); }
 
 /* ── Config panel ── */
@@ -680,7 +674,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 .prompt-label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
 .prompt-area { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; color: var(--text); font-size: 11px; font-family: monospace; resize: vertical; min-height: 80px; }
 .prompt-sel { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; color: var(--text); font-size: 12px; margin-bottom: 4px; }
-.prompt-info { cursor: help; color: #fff; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.prompt-info { cursor: help; color: var(--text); font-weight: 400; text-transform: none; letter-spacing: 0; }
 .prompt-info:hover::after {
   content: attr(data-content);
   position: absolute;
@@ -701,7 +695,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
 }
 
 /* ── Character modal status ── */
-.char-banner { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; background: var(--bg-2); border: 1px solid var(--border); }
+.char-banner { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; background: var(--bg-secondary); border: 1px solid var(--border); }
 .char-banner .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--text-dim); border-top-color: var(--accent); border-radius: 50%; animation: charspin .8s linear infinite; }
 @keyframes charspin { to { transform: rotate(360deg); } }
 .char-banner.running { border-color: var(--accent); color: var(--accent); }
@@ -772,7 +766,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
         </div>
         <div id="charMsg" style="font-size:11px;color:var(--green)"></div>
         <div class="detail-label" style="font-size:10px;margin-top:2px">Log</div>
-        <pre id="charLog" style="font-size:10px;line-height:1.4;color:var(--text-dim);background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:8px;max-height:160px;overflow:auto;white-space:pre-wrap;margin:0"></pre>
+        <pre id="charLog" style="font-size:10px;line-height:1.4;color:var(--text-dim);background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:8px;max-height:160px;overflow:auto;white-space:pre-wrap;margin:0"></pre>
       </div>
     </div>
   </div>
@@ -1077,7 +1071,7 @@ video.scene-vid { max-width: 320px; max-height: 180px; border-radius: 4px; borde
           The character is auto-designed from the script, then editable in the 🧍 Character panel.
           Generate it before running the pipeline, or it runs automatically when enabled.
         </div>
-        <div id="cfgCharRefBox" style="padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px">
+        <div id="cfgCharRefBox" style="padding:8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px">
           <div class="detail-label" style="font-size:10px;color:var(--accent);margin-bottom:6px">Stored Reference Character</div>
           <div id="cfgCharRefNone" style="font-size:11px;color:var(--text-dim);font-style:italic;margin-bottom:6px">No reference character set.</div>
           <img id="cfgCharRefPreview" src="" style="display:none;width:100%;max-width:160px;border-radius:6px;border:1px solid var(--border);margin-bottom:6px" />

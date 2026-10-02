@@ -4,12 +4,11 @@
   <meta charset="utf-8" />
   <title>Long Publish</title>
   <style>
-    :root {
-      --bg:#1a1a2e; --bg2:#16213e; --text:#eee; --dim:#888;
-      --accent:#0f3460; --ok:#4ade80; --err:#f87171; --warn:#fbbf24; --border:#333;
-      --link:#7dd3fc;
-    }
-    body { margin:0; padding:16px; background:var(--bg); color:var(--text);
+    /* Theme vars (:root) are injected by the webux hub (see /theme.css).
+       Do not redeclare :root here — use var(--*) only. */
+    /* Page padding lives on main.webux-page (hub keeps body padding at 0
+       so the tab bar is full-bleed and identical on every tab). */
+    body { margin:0; padding:0; background:var(--bg); color:var(--text);
            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
     .wrap { max-width:880px; margin:0 auto; }
     h2 { margin:0 0 12px; font-size:18px; }
@@ -27,7 +26,7 @@
     .options-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; margin-bottom:10px; }
     .options-grid .opt { min-width:0; }
     button { padding:7px 14px; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
-    .btn-go     { background:var(--ok); color:#000; }
+    .btn-go     { background:var(--ok); color:var(--bg); }
     .btn-go:hover { opacity:.88; }
     .btn-go:disabled { opacity:.4; cursor:default; }
     .btn-resume { background:var(--warn); color:#000; }
@@ -61,7 +60,7 @@
     .result-title { font-size:15px; font-weight:700; margin-bottom:6px; }
     .result-desc { font-size:12px; color:var(--dim); white-space:pre-wrap; max-height:110px;
                    overflow-y:auto; border:1px solid var(--border); border-radius:4px;
-                   padding:8px; background:#0f172a; margin-bottom:8px; }
+                   padding:8px; background:var(--bg3); margin-bottom:8px; }
     .result-links { display:flex; flex-direction:column; gap:5px; }
     .result-links a { color:var(--link); font-size:13px; word-break:break-all; }
     .hint { font-size:11px; color:var(--dim); margin-left:8px; }
@@ -75,12 +74,13 @@
     .resume-box { display:none; padding:10px; border:1px solid var(--border);
                   border-radius:6px; background:var(--bg2); margin:10px 0; }
     .thumb-preview { max-width:100%; border-radius:6px; border:1px solid var(--border); margin-top:6px; }
-    .log-box { font-size:11px; color:var(--dim); background:#0f172a; border:1px solid var(--border);
+    .log-box { font-size:11px; color:var(--dim); background:var(--bg3); border:1px solid var(--border);
                border-radius:6px; padding:8px; margin-top:10px; white-space:pre-wrap; word-break:break-all;
                max-height:240px; overflow:auto; }
   </style>
 </head>
 <body>
+<main class="webux-page">
 <div class="wrap">
   <h2>🎬 Long Publish</h2>
 
@@ -231,6 +231,7 @@
     </div>
   </div>
 </div>
+</main>
 
 <script>
 const API = '/api/long_publish';

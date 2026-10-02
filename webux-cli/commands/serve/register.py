@@ -16,6 +16,7 @@ from commands.base import CommandManifest
 from common import structlog
 from common.core.config import load_tool_config
 from common.webux.registry import discover_webux_plugins
+from common.webux.theme import THEME_NAMES, resolve_theme
 from core.server import build_app
 
 logger = structlog.get_logger(__name__)
@@ -42,8 +43,21 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--port", "-p", default=8007, type=int)
     @click.option("--open", "open_browser", is_flag=True, default=False)
     @click.option("--restart", is_flag=True, default=False, help="Kill existing server on port before starting")
+    @click.option(
+        "--theme",
+        type=click.Choice(list(THEME_NAMES)),
+        default=None,
+        help="Default theme for this session (overrides webux config file).",
+    )
     @click.pass_context
-    def serve_cmd(ctx: click.Context, host: str, port: int, open_browser: bool, restart: bool) -> None:
+    def serve_cmd(
+        ctx: click.Context,
+        host: str,
+        port: int,
+        open_browser: bool,
+        restart: bool,
+        theme: str | None,
+    ) -> None:
         logging.getLogger().setLevel(
             logging.DEBUG if ctx.obj.get("verbose") else logging.CRITICAL
         )
@@ -52,8 +66,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
             _kill_process_on_port(port)
 
         config = load_tool_config("webux")
+        if theme is not None:
+            config = {**config, "theme": resolve_theme(config, theme)}
         discovered = discover_webux_plugins(config)
-        logger.info("server_start", host=host, port=port, plugins=list(discovered.keys()))
+        logger.info(
+            "server_start",
+            host=host,
+            port=port,
+            plugins=list(discovered.keys()),
+            theme=resolve_theme(config),
+        )
 
         # Ensure all webux prompts exist in the prompt store (idempotent).
         try:
