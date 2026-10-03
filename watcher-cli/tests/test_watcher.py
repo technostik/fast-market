@@ -49,10 +49,10 @@ def test_stooq_parses_valid_daily_csv(monkeypatch):
  monkeypatch.setattr(stooq_mod,'get',lambda *a,**k: 'Date,Open,High,Low,Close,Volume\n2026-09-29,4.70,4.77,4.69,4.762,0\n2026-09-30,4.76,4.80,4.75,4.781,0\n')
  obs=StooqProvider({}).fetch_latest('10yfry.b')
  assert str(obs.date)=='2026-09-30' and obs.value==pytest.approx(4.781)
-def test_catalog_oat_uses_daily_bdf():
+def test_catalog_fr_uses_daily_bdf():
  import yaml
  catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
- oat=next(v for v in catalog['variables'] if v['id']=='oat_10y')
+ oat=next(v for v in catalog['variables'] if v['id']=='fr_10y')
  assert oat['provider']=='bdf' and oat['symbol']=='FM.D.FR.EUR.FR2.BB.FRMOYTEC10.HSTA'
 def test_catalog_oil_uses_fred_and_bitcoin_kraken():
  import yaml
@@ -151,9 +151,10 @@ def test_human_results_full_precision_percent():
  from datetime import date
  from commands.helpers import human_results
  from core.models import VariableResult
- r=VariableResult('oat_10y','OAT',3.68,'percent',date(2026,8,1),'fred',0.06,1.66,False,None)
- line=[l for l in human_results([r]).splitlines() if l.startswith('oat_10y')][0]
+ r=VariableResult('fr_10y','OAT',3.68,'percent',date(2026,8,1),'fred',0.06,1.66,False,None)
+ line=[l for l in human_results([r]).splitlines() if l.startswith('fr_10y')][0]
  assert '3.68%' in line and 'percent' not in line
+ assert '+1.66%' in line and '(' not in line and '+0.06' not in line
  r2=VariableResult('gold','Gold',2648.125,'USD/oz',date(2026,9,30),'stooq',None,None,False,None)
  line2=[l for l in human_results([r2]).splitlines() if l.startswith('gold')][0]
  assert '2.65K USD/oz' in line2 and '2648' not in line2 and '2648.125' not in line2
@@ -165,7 +166,7 @@ def test_news_variable_filter(monkeypatch):
   NewsItem('france_debt_ecb','OAT watch','FT',datetime(2026,9,30,11,tzinfo=timezone.utc),'https://x/oat')]
  class News:
   def fetch(self,topic): return [i for i in items if i.topic==topic.id]
- variables=[Var('bitcoin','Bitcoin','coingecko','bitcoin:eur','EUR',1,('bitcoin_regulation',)),Var('oat_10y','OAT','bdf','X','percent',5,('france_debt_ecb',))]
+ variables=[Var('bitcoin','Bitcoin','coingecko','bitcoin:eur','EUR',1,('bitcoin_regulation',)),Var('fr_10y','OAT','bdf','X','percent',5,('france_debt_ecb',))]
  topics=[Topic('bitcoin_regulation','BTC','bitcoin regulation','en'),Topic('france_debt_ecb','OAT','France debt','en')]
  monkeypatch.setattr(news_mod,'context',lambda: ({'google_news':News()},variables,topics,[],None))
  cmd=news_mod.register({}).click_command
@@ -248,8 +249,8 @@ def test_catalog_sovereign_10y_usa_uk_germany():
  catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
  by_id={v['id']:v for v in catalog['variables']}
  assert by_id['us_10y']['provider']=='fred' and by_id['us_10y']['symbol']=='DGS10' and by_id['us_10y']['unit']=='percent'
- assert by_id['uk_10y']['provider']=='cnbc' and by_id['uk_10y']['symbol']=='GB10Y' and by_id['uk_10y']['unit']=='percent'
- assert by_id['de_10y']['provider']=='yahoo' and by_id['de_10y']['symbol']=='MDE10.AS' and by_id['de_10y']['unit']=='percent'
+ assert by_id['uk_10y']['provider']=='fred' and by_id['uk_10y']['symbol']=='IRLTLT01GBM156N' and by_id['uk_10y']['unit']=='percent'
+ assert by_id['de_10y']['provider']=='fred' and by_id['de_10y']['symbol']=='IRLTLT01DEM156N' and by_id['de_10y']['unit']=='percent'
  topics={t['id'] for t in catalog['news_topics']}
  assert {'us_treasury_fed','uk_gilts','german_bunds'} <= topics
  for vid in ('us_10y','uk_10y','de_10y'):
@@ -306,15 +307,15 @@ def test_latest_adds_eur_usd_secondary(tmp_path):
  from core.services import latest
  db=connection(tmp_path/'dual.sqlite3')
  upsert(db,Observation('eurusd',date(2026,9,30),1.10,'USD/EUR','fred',datetime.now(timezone.utc)))
- variables=[Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,()),Var('gold','Gold','stooq','xauusd','USD/oz',5,()),Var('oat_10y','OAT','bdf','X','percent',5,())]
+ variables=[Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,()),Var('gold','Gold','stooq','xauusd','USD/oz',5,()),Var('fr_10y','OAT','bdf','X','percent',5,())]
  providers={'kraken':_live_provider(100000.0,date(2026,9,30)),'stooq':_live_provider(2000.0,date(2026,9,30)),'bdf':_live_provider(3.5,date(2026,9,30))}
  by_id={r.id:r for r in latest(variables,providers,db)}
  assert (by_id['bitcoin'].value,by_id['bitcoin'].unit)==(pytest.approx(110000.0),'USD')
  assert (by_id['bitcoin'].secondary_value,by_id['bitcoin'].secondary_unit)==(pytest.approx(100000.0),'EUR')
  assert (by_id['gold'].value,by_id['gold'].unit)==(pytest.approx(2000.0),'USD/oz')
  assert (by_id['gold'].secondary_value,by_id['gold'].secondary_unit)==(pytest.approx(2000.0/1.10),'EUR/oz')
- assert by_id['oat_10y'].secondary_value is None and by_id['oat_10y'].secondary_unit is None
- assert (by_id['oat_10y'].value,by_id['oat_10y'].unit)==(pytest.approx(3.5),'percent')
+ assert by_id['fr_10y'].secondary_value is None and by_id['fr_10y'].secondary_unit is None
+ assert (by_id['fr_10y'].value,by_id['fr_10y'].unit)==(pytest.approx(3.5),'percent')
 def test_latest_main_eur_flips_primary(tmp_path):
  from core.models import Variable as Var
  from core.services import latest
@@ -435,6 +436,112 @@ def test_cnbc_parses_gilt_quote(monkeypatch):
  assert len(out)==1 and out[0].value==pytest.approx(5.377)
  assert CnbcProvider({}).fetch_history('GB10Y',date(2026,9,1),date(2026,9,30))==[]
  with pytest.raises(ValueError): CnbcProvider({}).validate_symbol('')
+def test_history_backfills_partial_cache_from_provider(tmp_path):
+ from core.models import Variable as Var
+ from core.services import history
+ from core.storage import get_history_sync
+ from plugins.base.plugin import Observation as Obs
+ v=Var('fr_10y','OAT','test','s','percent',30,())
+ db=connection(tmp_path/'backfill.sqlite3')
+ upsert(db,Obs('fr_10y',date(2026,9,30),4.75,'percent','test',datetime.now(timezone.utc)))
+ calls=[]
+ class Full:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('test',(),True,'x')
+  def fetch_history(self,symbol,start,end):
+   calls.append((start,end))
+   return [Obs('',date(2020,1,2),1.10,'','test',datetime.now(timezone.utc)),Obs('',date(2026,9,30),4.75,'','test',datetime.now(timezone.utc))]
+ rows=history(v,{'test':Full()},db,date(2020,1,1),date(2026,10,2))
+ assert calls==[(date(2020,1,1),date(2026,9,29)),(date(2026,10,1),date(2026,10,2))]
+ assert [str(r.date) for r in rows]==['2020-01-02','2026-09-30']
+ sync=get_history_sync(db,'fr_10y')
+ assert sync and sync[0]==date(2020,1,2) and sync[1]==date(2026,9,30)
+def test_history_skips_fetch_when_sync_fresh_and_covered(tmp_path):
+ from core.models import Variable as Var
+ from core.services import history
+ from core.storage import save_history_sync
+ from plugins.base.plugin import Observation as Obs
+ v=Var('fr_10y','OAT','test','s','percent',30,())
+ db=connection(tmp_path/'covered.sqlite3')
+ upsert(db,Obs('fr_10y',date(2026,9,29),4.70,'percent','test',datetime.now(timezone.utc)))
+ upsert(db,Obs('fr_10y',date.today(),4.80,'percent','test',datetime.now(timezone.utc)))
+ save_history_sync(db,'fr_10y',date(2026,9,29),date.today(),datetime.now(timezone.utc))
+ class NeverCall:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('test',(),True,'x')
+  def fetch_history(self,symbol,start,end): raise AssertionError('must not fetch when covered')
+ rows=history(v,{'test':NeverCall()},db,date(2026,9,1),date.today())
+ assert [float(r.value) for r in rows]==[4.70,4.80]
+def test_history_stale_sync_fetches_only_gaps(tmp_path):
+ from datetime import timedelta
+ from core.models import Variable as Var
+ from core.services import history
+ from core.storage import save_history_sync,get_history_sync
+ from plugins.base.plugin import Observation as Obs
+ v=Var('fr_10y','OAT','test','s','percent',30,())
+ db=connection(tmp_path/'stale.sqlite3')
+ upsert(db,Obs('fr_10y',date(2026,9,29),4.70,'percent','test',datetime.now(timezone.utc)))
+ upsert(db,Obs('fr_10y',date(2026,9,30),4.75,'percent','test',datetime.now(timezone.utc)))
+ save_history_sync(db,'fr_10y',date(2026,9,29),date(2026,9,30),datetime.now(timezone.utc)-timedelta(hours=7))
+ calls=[]
+ class Gap:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('test',(),True,'x')
+  def fetch_history(self,symbol,start,end):
+   calls.append((start,end))
+   return [Obs('',end,9.99,'','test',datetime.now(timezone.utc))]
+ rows=history(v,{'test':Gap()},db,date(2026,9,1),date(2026,10,2))
+ assert calls==[(date(2026,9,1),date(2026,9,28)),(date(2026,10,1),date(2026,10,2))]
+ assert [str(r.date) for r in rows]==['2026-09-28','2026-09-29','2026-09-30','2026-10-02']
+ sync=get_history_sync(db,'fr_10y')
+ assert sync and (datetime.now(timezone.utc)-sync[2]).total_seconds()<60
+def test_history_returns_cache_on_provider_failure(tmp_path):
+ from core.models import Variable as Var
+ from core.services import history
+ from core.storage import get_history_sync
+ from plugins.base.plugin import Observation as Obs
+ v=Var('fr_10y','OAT','test','s','percent',30,())
+ db=connection(tmp_path/'failback.sqlite3')
+ upsert(db,Obs('fr_10y',date(2026,9,30),4.75,'percent','test',datetime.now(timezone.utc)))
+ class Broken:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('test',(),True,'x')
+  def fetch_history(self,symbol,start,end): raise RuntimeError('network down')
+ rows=history(v,{'test':Broken()},db,date(2020,1,1),date(2026,10,2))
+ assert [str(r.date) for r in rows]==['2026-09-30']
+ assert get_history_sync(db,'fr_10y') is None
+def test_history_sync_storage_roundtrip(tmp_path):
+ from core.storage import save_history_sync,get_history_sync,history_bounds
+ db=connection(tmp_path/'sync.sqlite3')
+ assert get_history_sync(db,'x') is None and history_bounds(db,'x') is None
+ now=datetime.now(timezone.utc)
+ save_history_sync(db,'x',date(2020,1,1),date(2026,9,30),now)
+ assert get_history_sync(db,'x')==(date(2020,1,1),date(2026,9,30),now)
+ upsert(db,Observation('x',date(2026,9,30),1.0,'u','s',now))
+ assert history_bounds(db,'x')==(date(2026,9,30),date(2026,9,30))
+def test_catalog_gold_spot_and_tradingview_symbols():
+ import yaml
+ catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
+ by_id={v['id']:v for v in catalog['variables']}
+ assert by_id['gold_spot']['provider']=='yahoo' and by_id['gold_spot']['symbol']=='GC=F' and by_id['gold_spot']['unit']=='USD/oz'
+ assert by_id['gold_spot']['tradingview']=='OANDA:XAUUSD'
+ assert by_id['fr_10y']['tradingview']=='TVC:FR10Y'
+ assert by_id['napoleon']['tradingview']=='OANDA:XAUUSD'
+ for vid in ('fr_10y','us_10y','uk_10y','de_10y','brent','wti','napoleon','gold_spot','nasdaq','bitcoin','spacex','eurusd'):
+  assert by_id[vid].get('icon') and by_id[vid].get('tradingview'), vid
+ assert 'gold_central_banks' in {t['id'] for t in catalog['news_topics']}
+def test_tradingview_flows_from_config_to_result(tmp_path):
+ from core.config import load_config
+ from core.models import Variable as Var
+ from core.services import latest
+ path=tmp_path/'watcher.yaml'
+ path.write_text('version: 1\nvariables: [{id: fr_10y, label: OAT, provider: test, symbol: s, unit: percent, tradingview: "TVC:FR10Y"}]\nnews_topics: []\nfeeds: []\n')
+ variables,_,_=load_config({'test':Provider()},path)
+ assert variables[0].tradingview=='TVC:FR10Y'
+ db=connection(tmp_path/'tv.sqlite3')
+ upsert(db,Observation('fr_10y',date(2026,10,2),3.5,'percent','test',datetime.now(timezone.utc)))
+ res=latest([Var('fr_10y','OAT','test','s','percent',30,(),'','TVC:FR10Y')],{'test':_live_provider(3.5,date(2026,10,2))},db)
+ assert res[0].tradingview=='TVC:FR10Y'
 def test_catalog_napoleon_and_nasdaq():
  import yaml
  catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
@@ -446,7 +553,7 @@ def test_catalog_napoleon_and_nasdaq():
  assert {'napoleon_or','nasdaq_stocks'} <= topics
  for vid in ('napoleon','nasdaq'):
   for t in by_id[vid]['news_topics']: assert t in topics
- for vid in ('oat_10y','us_10y','uk_10y','de_10y','brent','wti','napoleon','nasdaq','bitcoin','spacex','eurusd'):
+ for vid in ('fr_10y','us_10y','uk_10y','de_10y','brent','wti','napoleon','nasdaq','bitcoin','spacex','eurusd'):
   assert by_id[vid].get('icon'), vid
 def test_bdor_parses_fixing(monkeypatch):
  from plugins.bdor.plugin import BdorProvider

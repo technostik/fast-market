@@ -35,7 +35,7 @@ def human_results(results):
   elif r.error:
    lines.append(f'{r.id:<10} {base:<18} {"—":<17} {r.as_of} {r.source} STALE WARNING: {r.error}')
   else:
-   change='—' if r.change_abs is None else f'{round(r.change_abs,6):+} ({r.change_pct:+.2f}%)'; stale=' STALE' if r.stale else ''
+   change='—' if r.change_pct is None else f'{r.change_pct:+.2f}%'; stale=' STALE' if r.stale else ''
    lines.append(f'{r.id:<10} {base:<18} {change:<17} {r.as_of} {r.source}{stale}')
  return '\n'.join(lines)
 def parse_since(text):

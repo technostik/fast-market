@@ -124,6 +124,12 @@ h2 { margin:0 0 12px 0; }
 .card-label { font-size:12px; margin-top:2px; }
 .card-value { font-size:20px; font-weight:700; margin:8px 0 4px 0; font-variant-numeric:tabular-nums; }
 .card-foot { display:flex; justify-content:space-between; gap:8px; font-size:12px; margin-top:6px; }
+.ranges { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+.ranges button { padding:4px 10px; font-size:12px; }
+.ranges button.active { background:var(--accent); border-color:var(--accent); }
+#tvChart { width:100%; height:360px; margin:4px 0 8px 0; }
+#nativeChart { width:100%; height:300px; margin:4px 0 8px 0; display:none; }
+#ratioBox { font-size:12px; margin:6px 0; padding:8px 10px; border:1px solid var(--border); border-radius:6px; }
 .val { font-weight:700; font-variant-numeric:tabular-nums; }
 .up { color:var(--success); } .down { color:var(--error); }
 .stale { color:var(--warning); font-size:11px; font-weight:700; margin-left:6px; }
@@ -151,7 +157,7 @@ h2 { margin:0 0 12px 0; }
   </div>
   <div class="split">
     <div id="out"><div id="spinner">Loading…</div></div>
-    <div id="detail"><div class="row"><strong id="detailTitle"></strong><span class="dim" id="detailMeta"></span><button id="detailGlobal" title="Back to global news" style="display:none;">⇤ All news</button></div><div id="detailChart"><div class="dim" id="detailStats"></div><canvas id="spark" width="640" height="160" style="width:100%;height:160px;"></canvas><h4 style="margin:12px 0 6px 0;">📰 News for <span id="detailNewsTitle"></span></h4></div><div class="news" id="detailNews" style="margin-top:0;"></div><div class="row" id="newsPager" style="display:none;"><button id="pgFirst" title="Back to start">⇤</button><button id="pgPrev" title="Previous 5">‹</button><span class="dim" id="pgInfo"></span><button id="pgNext" title="Next 5">›</button></div></div>
+    <div id="detail"><div class="row"><strong id="detailTitle"></strong><span class="dim" id="detailMeta"></span><button id="detailGlobal" title="Back to global news" style="display:none;">⇤ All news</button></div><div id="detailChart"><div class="dim" id="detailStats"></div><div class="ranges" id="rangeRow"><button data-range="1D">1D</button><button data-range="1W">1W</button><button data-range="1M">1M</button><button data-range="1Y" class="active">1Y</button><button data-range="10Y">10Y</button><button data-range="MAX">MAX</button><span class="dim" id="tvSymbol"></span></div><div id="tvChart"></div><canvas id="nativeChart" width="640" height="300"></canvas><div id="ratioBox" style="display:none;"></div><div class="dim" id="detailSrc" style="font-size:11px;"></div><h4 style="margin:12px 0 6px 0;">📰 News for <span id="detailNewsTitle"></span></h4></div><div class="news" id="detailNews" style="margin-top:0;"></div><div class="row" id="newsPager" style="display:none;"><button id="pgFirst" title="Back to start">⇤</button><button id="pgPrev" title="Previous 5">‹</button><span class="dim" id="pgInfo"></span><button id="pgNext" title="Next 5">›</button></div></div>
   </div>
 </main>
 <script>
@@ -212,10 +218,10 @@ function display(v, unit) {
   return Number(v).toFixed(2) + ' ' + unit;
 }
 function fmtChange(r) {
-  if (r.change_abs == null) return '<span class="dim">—</span>';
-  const cls = r.change_abs >= 0 ? 'up' : 'down';
-  const sign = r.change_abs >= 0 ? '+' : '';
-  return `<span class="${cls}">${sign}${r.change_abs} (${sign}${r.change_pct.toFixed(2)}%)</span>`;
+  if (r.change_pct == null) return '<span class="dim">—</span>';
+  const cls = r.change_pct >= 0 ? 'up' : 'down';
+  const sign = r.change_pct >= 0 ? '+' : '';
+  return `<span class="${cls}">${sign}${r.change_pct.toFixed(2)}%</span>`;
 }
 async function load(force) {
   detail.style.display = 'none';
@@ -251,6 +257,180 @@ async function load(force) {
   globalNews = data.news || [];
   showGlobalNews();
 }
+let tvRange = '1Y';
+let tvLabel = '1Y';
+const TV_INTERVAL = {'1D': '15', '1W': '60', '1M': 'D', '1Y': 'D', '10Y': 'W', 'MAX': 'W'};
+const TV_RANGE = {'1D': '1D', '1W': '5D', '1M': '1M', '1Y': '12M', '10Y': 'ALL', 'MAX': 'ALL'};
+const RANGE_DAYS = {'1D': 1, '1W': 7, '1M': 30, '1Y': 365, '10Y': 3650, 'MAX': Infinity};
+// TVC bond yields and index tickers (NASDAQ:IXIC) are blocked in TradingView's
+// free embed widgets ("only available on TradingView" = exchange licensing).
+// No other free TV widget can show them, so these render from our own
+// provider history (BdF/FRED/Yahoo — official daily fixings) instead.
+const NATIVE_CHART = new Set(['fr_10y', 'us_10y', 'uk_10y', 'de_10y', 'nasdaq']);
+// Monthly OECD series (no daily fixings): short ranges show the nearest points.
+const MONTHLY = new Set(['uk_10y', 'de_10y']);
+let nativeCache = {id: null, obs: [], profile: null};
+function clearNative(msg) {
+  const c = document.getElementById('nativeChart');
+  c.getContext('2d').clearRect(0, 0, c.width, c.height);
+  if (msg != null) document.getElementById('detailStats').textContent = msg;
+}
+const DEFAULT_TV = {fr_10y: 'TVC:FR10Y', us_10y: 'TVC:US10Y', uk_10y: 'TVC:GB10Y', de_10y: 'TVC:DE10Y', brent: 'TVC:UKOIL', wti: 'TVC:USOIL', napoleon: 'OANDA:XAUUSD', gold_spot: 'OANDA:XAUUSD', gold: 'OANDA:XAUUSD', nasdaq: 'NASDAQ:IXIC', bitcoin: 'BITSTAMP:BTCUSD', spacex: 'NASDAQ:SPCX', eurusd: 'OANDA:EURUSD'};
+function tvSymbolFor(id) { return (lastVars[id] || {}).tradingview || DEFAULT_TV[id] || null; }
+function eurValueOf(r) {
+  if (!r || r.value == null) return null;
+  if (String(r.unit || '').split('/')[0] === 'EUR') return r.value;
+  if (r.secondary_unit && String(r.secondary_unit).split('/')[0] === 'EUR') return r.secondary_value;
+  return null;
+}
+function renderRatio(id) {
+  const box = document.getElementById('ratioBox');
+  box.style.display = 'none';
+  box.innerHTML = '';
+  if (id !== 'napoleon' && id !== 'gold_spot') return;
+  const nap = lastVars['napoleon'], gold = lastVars['gold_spot'];
+  if (!nap || !gold || nap.value == null || gold.value == null) {
+    box.style.display = 'block';
+    box.innerHTML = '<span class="dim">Add both <b>napoleon</b> and <b>gold_spot</b> to the watchlist to see the coin premium (ratio).</span>';
+    return;
+  }
+  const napEur = eurValueOf(nap), goldEurOz = eurValueOf(gold);
+  if (napEur == null || goldEurOz == null || goldEurOz <= 0) return;
+  const FINE_G = 5.806, OZ_G = 31.1035; // Napoléon 20F: 5.806g fine gold
+  const melt = goldEurOz * FINE_G / OZ_G;
+  const premium = napEur / melt - 1;
+  box.style.display = 'block';
+  box.innerHTML = `🪙 Napoléon <b>${esc(napEur.toFixed(2))} €</b> · melt <b>${esc(melt.toFixed(2))} €</b> (${FINE_G}g @ ${esc(goldEurOz.toFixed(0))} €/oz) · premium <b>${esc((premium*100).toFixed(1))}%</b> <span class="dim">ratio nap/melt = ${esc((napEur/melt).toFixed(3))}</span>`;
+}
+function loadChart(id) {
+  document.querySelectorAll('#rangeRow button').forEach(b => b.classList.toggle('active', b.textContent === tvLabel));
+  if (NATIVE_CHART.has(id)) loadNativeChart(id);
+  else loadTradingView(id);
+}
+function sliceRange(obs, key) {
+  const days = RANGE_DAYS[key] == null ? 365 : RANGE_DAYS[key];
+  if (!isFinite(days)) return obs;
+  const cut = new Date();
+  cut.setDate(cut.getDate() - days);
+  const iso = cut.toISOString().slice(0, 10);
+  const out = obs.filter(o => o.date >= iso);
+  return out.length ? out : obs.slice(-30); // daily fixings: 1D/1W would be empty
+}
+function drawNative(obs, key) {
+  const c = document.getElementById('nativeChart'), ctx = c.getContext('2d');
+  const W = c.width, H = c.height, P = 8, LP = 44;
+  ctx.clearRect(0, 0, W, H);
+  const vals = obs.map(o => o.value);
+  const min = Math.min(...vals), max = Math.max(...vals), span = (max - min) || 1;
+  ctx.strokeStyle = '#334155'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(LP, H-P); ctx.lineTo(W-P, H-P); ctx.stroke();
+  ctx.fillStyle = '#64748b'; ctx.font = '10px system-ui';
+  [min, (min + max) / 2, max].forEach(v => {
+    const y = P + (H - 2*P) * (1 - (v - min) / span);
+    ctx.fillText(v.toFixed(2), 4, y + 3);
+    ctx.strokeStyle = '#1e293b'; ctx.beginPath(); ctx.moveTo(LP, y); ctx.lineTo(W-P, y); ctx.stroke();
+  });
+  ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 2; ctx.beginPath();
+  obs.forEach((o, i) => {
+    const x = LP + (W - LP - P) * (obs.length === 1 ? 1 : i / (obs.length - 1));
+    const y = P + (H - 2*P) * (1 - (o.value - min) / span);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+  if (obs.length === 1) {
+    ctx.fillStyle = '#4ade80';
+    ctx.beginPath(); ctx.arc(W - P, P + (H - 2*P) * (1 - (obs[0].value - min) / span), 3, 0, 7); ctx.fill();
+  }
+}
+async function loadNativeChart(id) {
+  const tv = document.getElementById('tvChart');
+  const canvas = document.getElementById('nativeChart');
+  const symSlot = document.getElementById('tvSymbol');
+  const srcSlot = document.getElementById('detailSrc');
+  tv.innerHTML = '';
+  tv.style.display = 'none';
+  canvas.style.display = 'block';
+  clearNative('loading official history for ' + id + '…');
+  symSlot.textContent = 'official history · ' + tvLabel;
+  const profile = document.getElementById('profile').value.trim();
+  let obs;
+  if (nativeCache.id === id && nativeCache.profile === profile) {
+    obs = nativeCache.obs;
+  } else {
+    const params = new URLSearchParams({variable: id, since: '30y'});
+    if (profile) params.set('profile', profile);
+    try {
+      const r = await fetch('/api/watcher/history?' + params.toString());
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+      obs = (data.observations || []).filter(o => o.value != null);
+    } catch (e) {
+      if (selectedId !== id) return;
+      clearNative('history for ' + id + ' failed to load: ' + e.message);
+      return;
+    }
+    if (selectedId !== id) return; // superseded while fetching: never draw stale data
+    nativeCache = {id, obs, profile};
+  }
+  if (selectedId !== id) return;
+  const sliced = sliceRange(obs, tvRange);
+  if (!sliced.length) {
+    clearNative('no history yet for ' + id + ' — new points accumulate on each refresh');
+    return;
+  }
+  const vals = sliced.map(o => o.value);
+  document.getElementById('detailStats').textContent =
+    `official ${tvLabel} · ${id}: ${sliced[0].date} → ${sliced[sliced.length-1].date} · ${sliced.length} pts · min ${Math.min(...vals).toFixed(2)} · max ${Math.max(...vals).toFixed(2)}`;
+  srcSlot.textContent = MONTHLY.has(id)
+    ? 'Native chart: official FRED/OECD monthly series (no daily fixings; short ranges show nearest points)'
+    : (id === 'nasdaq'
+      ? 'Native chart: official Yahoo daily history (TradingView blocks NASDAQ:IXIC in free embeds)'
+      : 'Native chart: official daily fixing (TradingView blocks bond-yield TVC symbols in free embeds)');
+  drawNative(sliced, tvRange);
+}
+function loadTradingView(id) {
+  const box = document.getElementById('tvChart');
+  const canvas = document.getElementById('nativeChart');
+  canvas.style.display = 'none';
+  box.style.display = 'block';
+  const symSlot = document.getElementById('tvSymbol');
+  const srcSlot = document.getElementById('detailSrc');
+  const tv = tvSymbolFor(id);
+  document.querySelectorAll('#rangeRow button').forEach(b => b.classList.toggle('active', b.textContent === tvLabel));
+  box.innerHTML = '';
+  if (!tv) {
+    symSlot.textContent = '';
+    srcSlot.textContent = 'No TradingView symbol mapped for this variable.';
+    return;
+  }
+  symSlot.textContent = tv + ' · ' + tvLabel;
+  const isCoin = (id === 'napoleon');
+  srcSlot.textContent = isCoin
+    ? 'Widget: spot gold proxy (Napoléon fixing has no listed symbol) · official fixing + premium below · source: TradingView'
+    : 'Widget source: TradingView (' + tv + ') · official value above · range ' + tvLabel;
+  const container = document.createElement('div');
+  container.className = 'tradingview-widget-container';
+  container.style.cssText = 'height:100%;width:100%';
+  const widget = document.createElement('div');
+  widget.className = 'tradingview-widget-container__widget';
+  widget.style.cssText = 'height:calc(100% - 32px);width:100%';
+  const copy = document.createElement('div');
+  copy.className = 'tradingview-widget-copyright';
+  copy.innerHTML = `<a href="https://www.tradingview.com/symbols/${esc(tv.replace(':', '-'))}/" rel="noopener nofollow" target="_blank"><span class="blue-text">${esc(tv)} chart</span></a><span class="trademark"> by TradingView</span>`;
+  const script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.async = true;
+  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+  script.innerHTML = JSON.stringify({
+    autosize: true, symbol: tv, interval: TV_INTERVAL[tvRange] || 'D', range: TV_RANGE[tvRange] || '12M',
+    timezone: 'Europe/Paris', theme: 'dark', style: '3', locale: 'en',
+    allow_symbol_change: false, hide_side_toolbar: true, support_host: 'https://www.tradingview.com'
+  });
+  container.appendChild(widget);
+  container.appendChild(copy);
+  container.appendChild(script);
+  box.appendChild(container);
+}
 async function selectVariable(id, profile) {
   selectedId = id;
   out.querySelectorAll('.card').forEach(c => c.classList.toggle('selected', c.dataset.id === id));
@@ -263,7 +443,10 @@ async function selectVariable(id, profile) {
   detail.style.display = 'block';
   try { detail.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } catch (e) {}
   loadDetailNews(id, profile);
-  const params = new URLSearchParams({variable: id, since: '90d'});
+  renderRatio(id);
+  if (NATIVE_CHART.has(id)) { loadChart(id); return; }
+  loadTradingView(id);
+  const params = new URLSearchParams({variable: id, since: '1y'});
   if (profile) params.set('profile', profile);
   let data;
   try {
@@ -271,26 +454,16 @@ async function selectVariable(id, profile) {
     data = await r.json();
     if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
   } catch (e) {
-    document.getElementById('detailStats').textContent = 'failed: ' + e.message;
+    if (selectedId !== id) return;
+    document.getElementById('detailStats').textContent = 'official history failed: ' + e.message;
     return;
   }
+  if (selectedId !== id) return;
   const obs = (data.observations || []).filter(o => o.value != null);
-  if (!obs.length) { document.getElementById('detailStats').textContent = 'no data'; return; }
+  if (!obs.length) { document.getElementById('detailStats').textContent = 'no official history (widget above still covers 1D–MAX)'; return; }
   const vals = obs.map(o => o.value);
   document.getElementById('detailStats').textContent =
-    `${obs[0].date} → ${obs[obs.length-1].date} · ${obs.length} pts · min ${Math.min(...vals)} · max ${Math.max(...vals)}`;
-  const c = document.getElementById('spark'), ctx = c.getContext('2d');
-  const W = c.width, H = c.height, P = 8;
-  const min = Math.min(...vals), max = Math.max(...vals), span = (max - min) || 1;
-  ctx.clearRect(0, 0, W, H);
-  ctx.strokeStyle = '#334155'; ctx.beginPath(); ctx.moveTo(P, H-P); ctx.lineTo(W-P, H-P); ctx.stroke();
-  ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 2; ctx.beginPath();
-  obs.forEach((o, i) => {
-    const x = P + (W - 2*P) * (obs.length === 1 ? 1 : i / (obs.length - 1));
-    const y = P + (H - 2*P) * (1 - (o.value - min) / span);
-    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-  });
-  ctx.stroke();
+    `official 1Y: ${obs[0].date} → ${obs[obs.length-1].date} · ${obs.length} pts · min ${Math.min(...vals).toFixed(2)} · max ${Math.max(...vals).toFixed(2)}`;
 }
 async function loadDetailNews(id, profile) {
   document.getElementById('detailNewsTitle').textContent = id;
@@ -324,6 +497,7 @@ document.getElementById('currency').onchange = (e) => {
 document.getElementById('pgFirst').onclick = () => { newsPage = 0; renderNewsPage(); };
 document.getElementById('pgPrev').onclick = () => { newsPage = Math.max(0, newsPage - 1); renderNewsPage(); };
 document.getElementById('pgNext').onclick = () => { newsPage = newsPage + 1; renderNewsPage(); };
+document.querySelectorAll('#rangeRow button').forEach(b => { b.onclick = () => { tvRange = b.dataset.range; tvLabel = b.textContent; if (selectedId) loadChart(selectedId); }; });
 load(false);
 </script>
 </body></html>

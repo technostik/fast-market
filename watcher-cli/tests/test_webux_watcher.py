@@ -50,6 +50,27 @@ def test_frontend_card_split_layout():
     assert "detailGlobal" in html
 
 
+def test_frontend_tradingview_widget_ranges_and_ratio():
+    html = watcher_mod._HTML
+    assert 'id="tvChart"' in html and "embed-widget-advanced-chart.js" in html
+    assert 'id="rangeRow"' in html
+    for label in (">1D<", ">1W<", ">1M<", ">1Y<", ">10Y<", ">MAX<"):
+        assert label in html
+    assert 'id="ratioBox"' in html and "premium" in html and "5.806" in html
+    assert "loadTradingView" in html and "tvSymbolFor" in html
+    assert "DEFAULT_TV" in html and "TVC:FR10Y" in html and "OANDA:XAUUSD" in html
+    # Bond yields (TVC) + NASDAQ:IXIC are blocked in free TV embeds → native chart
+    assert "NATIVE_CHART" in html and 'id="nativeChart"' in html
+    assert "loadNativeChart" in html and "loadChart" in html
+    assert "MONTHLY" in html and "clearNative" in html
+    assert "selectedId !== id" in html  # stale responses never paint another variable
+    for rid in ("fr_10y", "us_10y", "uk_10y", "de_10y", "nasdaq"):
+        assert rid in html
+    for rng in ('data-range="1D"', 'data-range="1W"', 'data-range="1M"', 'data-range="1Y"', 'data-range="10Y"', 'data-range="MAX"'):
+        assert rng in html
+    assert 'id="spark"' not in html  # canvas sparkline replaced by lightweight widget
+
+
 def test_dashboard_refresh_forwarded_to_cli(monkeypatch):
     seen = {}
 
@@ -79,16 +100,16 @@ def test_dashboard_currency_forwarded_to_cli(monkeypatch):
 
 
 def test_dashboard_passthrough(monkeypatch):
-    payload = {"generated_at": "x", "variables": [{"id": "oat_10y"}], "news": []}
+    payload = {"generated_at": "x", "variables": [{"id": "fr_10y"}], "news": []}
     c = _client(monkeypatch, stdout=json.dumps(payload))
     r = c.get("/dashboard", params={"last": 5})
     assert r.status_code == 200
-    assert r.json()["variables"] == [{"id": "oat_10y"}]
+    assert r.json()["variables"] == [{"id": "fr_10y"}]
     assert r.json()["exit_code"] == 0
 
 
 def test_dashboard_partial_errors_still_returns_data(monkeypatch):
-    payload = {"variables": [{"id": "oat_10y", "error": "boom"}], "news": []}
+    payload = {"variables": [{"id": "fr_10y", "error": "boom"}], "news": []}
     c = _client(monkeypatch, stdout=json.dumps(payload), returncode=1)
     r = c.get("/dashboard")
     assert r.status_code == 200
