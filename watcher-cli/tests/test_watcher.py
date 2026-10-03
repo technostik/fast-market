@@ -309,9 +309,41 @@ def test_latest_adds_eur_usd_secondary(tmp_path):
  variables=[Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,()),Var('gold','Gold','stooq','xauusd','USD/oz',5,()),Var('oat_10y','OAT','bdf','X','percent',5,())]
  providers={'kraken':_live_provider(100000.0,date(2026,9,30)),'stooq':_live_provider(2000.0,date(2026,9,30)),'bdf':_live_provider(3.5,date(2026,9,30))}
  by_id={r.id:r for r in latest(variables,providers,db)}
- assert (by_id['bitcoin'].secondary_value,by_id['bitcoin'].secondary_unit)==(pytest.approx(110000.0),'USD')
+ assert (by_id['bitcoin'].value,by_id['bitcoin'].unit)==(pytest.approx(110000.0),'USD')
+ assert (by_id['bitcoin'].secondary_value,by_id['bitcoin'].secondary_unit)==(pytest.approx(100000.0),'EUR')
+ assert (by_id['gold'].value,by_id['gold'].unit)==(pytest.approx(2000.0),'USD/oz')
  assert (by_id['gold'].secondary_value,by_id['gold'].secondary_unit)==(pytest.approx(2000.0/1.10),'EUR/oz')
  assert by_id['oat_10y'].secondary_value is None and by_id['oat_10y'].secondary_unit is None
+ assert (by_id['oat_10y'].value,by_id['oat_10y'].unit)==(pytest.approx(3.5),'percent')
+def test_latest_main_eur_flips_primary(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ db=connection(tmp_path/'maineur.sqlite3')
+ upsert(db,Observation('eurusd',date(2026,9,30),1.10,'USD/EUR','fred',datetime.now(timezone.utc)))
+ variables=[Var('spacex','SpaceX','yahoo','SPCX','USD',5,()),Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,())]
+ providers={'yahoo':_live_provider(110.0,date(2026,9,30)),'kraken':_live_provider(100.0,date(2026,9,30))}
+ by_id={r.id:r for r in latest(variables,providers,db,main_currency='EUR')}
+ assert (by_id['spacex'].value,by_id['spacex'].unit)==(pytest.approx(100.0),'EUR')
+ assert (by_id['spacex'].secondary_value,by_id['spacex'].secondary_unit)==(pytest.approx(110.0),'USD')
+ assert (by_id['bitcoin'].value,by_id['bitcoin'].unit)==(pytest.approx(100.0),'EUR')
+ assert (by_id['bitcoin'].secondary_value,by_id['bitcoin'].secondary_unit)==(pytest.approx(110.0),'USD')
+def test_latest_main_usd_change_in_usd(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ db=connection(tmp_path/'mainchange.sqlite3')
+ upsert(db,Observation('eurusd',date(2026,9,30),1.10,'USD/EUR','fred',datetime.now(timezone.utc)))
+ upsert(db,Observation('bitcoin',date(2026,9,29),90000.0,'EUR','kraken',datetime.now(timezone.utc)))
+ v=Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,())
+ res=latest([v],{'kraken':_live_provider(100000.0,date(2026,9,30))},db,force=True)
+ assert (res[0].value,res[0].unit)==(pytest.approx(110000.0),'USD')
+ assert res[0].change_abs==pytest.approx(11000.0) and res[0].change_pct==pytest.approx(11000.0/99000.0*100)
+def test_latest_invalid_main_falls_back_to_usd(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ db=connection(tmp_path/'badmain.sqlite3')
+ upsert(db,Observation('eurusd',date(2026,9,30),1.10,'USD/EUR','fred',datetime.now(timezone.utc)))
+ res=latest([Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,())],{'kraken':_live_provider(100.0,date(2026,9,30))},db,main_currency='CHF')
+ assert (res[0].value,res[0].unit)==(pytest.approx(110.0),'USD')
 def test_latest_secondary_skipped_without_fx(tmp_path):
  from core.models import Variable as Var
  from core.services import latest
@@ -321,7 +353,10 @@ def test_latest_secondary_skipped_without_fx(tmp_path):
 def test_get_refresh_option_exists():
  from click.testing import CliRunner
  import commands.get.register as get_mod
+ import commands.dashboard.register as dash_mod
  assert '--refresh' in CliRunner().invoke(get_mod.register({}).click_command,['--help']).output
+ assert '--main-currency' in CliRunner().invoke(get_mod.register({}).click_command,['--help']).output
+ assert '--main-currency' in CliRunner().invoke(dash_mod.register({}).click_command,['--help']).output
 def test_latest_serves_fresh_cache_without_fetch(tmp_path):
  from core.models import Variable as Var
  from core.services import latest
@@ -336,6 +371,7 @@ def test_latest_serves_fresh_cache_without_fetch(tmp_path):
  res=latest([v],{'fred':NeverCall()},db)
  assert res[0].value==pytest.approx(4.75) and res[0].error is None
  assert res[0].change_abs==pytest.approx(0.05)
+ assert res[0].unit=='percent'
 def test_latest_force_refresh_bypasses_fresh_cache(tmp_path):
  from core.models import Variable as Var
  from core.services import latest

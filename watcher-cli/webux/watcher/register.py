@@ -42,14 +42,17 @@ def dashboard(
     last: int = Query(3, ge=0, le=50),
     profile: str | None = Query(None),
     refresh: bool = Query(False),
+    main_currency: str = Query("USD"),
 ) -> dict:
     """Live watchlist values plus latest news (mirrors `watcher dashboard --json`).
 
     Without refresh=true, values fetched less than 1h ago are served from storage.
+    main_currency is USD or EUR (anything else falls back to USD).
     """
     args = ["dashboard", "--json", "--last", str(last)]
     if refresh:
         args.append("--refresh")
+    args += ["--main-currency", main_currency if main_currency in ("EUR", "USD") else "USD"]
     proc = _run_watcher(*args, profile=profile)
     try:
         data = json.loads(proc.stdout)
@@ -141,6 +144,8 @@ h2 { margin:0 0 12px 0; }
   <div class="row">
     <label class="dim">Profile:</label>
     <input id="profile" placeholder="(active)" style="width:120px;">
+    <label class="dim">Currency:</label>
+    <select id="currency"><option value="USD" selected>USD</option><option value="EUR">EUR</option></select>
     <button id="refresh">🔄 Refresh</button>
     <span class="dim" id="generated"></span>
   </div>
@@ -218,7 +223,9 @@ async function load(force) {
   lastVars = {};
   out.innerHTML = '<div id="spinner">Loading…</div>';
   const profile = document.getElementById('profile').value.trim();
+  const currency = document.getElementById('currency').value;
   const params = new URLSearchParams({last: '50'});
+  params.set('main_currency', currency === 'EUR' ? 'EUR' : 'USD');
   if (force) params.set('refresh', '1');
   if (profile) params.set('profile', profile);
   let data;
@@ -306,6 +313,14 @@ async function loadDetailNews(id, profile) {
 }
 document.getElementById('refresh').onclick = () => load(true);
 document.getElementById('detailGlobal').onclick = () => showGlobalNews();
+try {
+  const savedCur = localStorage.getItem('watcher-currency');
+  if (savedCur === 'EUR' || savedCur === 'USD') document.getElementById('currency').value = savedCur;
+} catch (e) {}
+document.getElementById('currency').onchange = (e) => {
+  try { localStorage.setItem('watcher-currency', e.target.value); } catch (err) {}
+  load(false);
+};
 document.getElementById('pgFirst').onclick = () => { newsPage = 0; renderNewsPage(); };
 document.getElementById('pgPrev').onclick = () => { newsPage = Math.max(0, newsPage - 1); renderNewsPage(); };
 document.getElementById('pgNext').onclick = () => { newsPage = newsPage + 1; renderNewsPage(); };

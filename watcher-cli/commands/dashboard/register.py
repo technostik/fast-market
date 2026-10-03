@@ -8,8 +8,9 @@ def register(plugin_manifests):
  @click.option('--last',type=click.IntRange(0),default=3,show_default=True,help='Show only the last N news items.')
  @click.option('--nolinks',is_flag=True,default=False,help='Omit URLs from news output.')
  @click.option('--refresh',is_flag=True,default=False,help='Force live refresh, bypassing values fetched less than 1h ago.')
- def command(json_output,last,nolinks,refresh):
-  providers,variables,topics,_,db=context(); results=latest(variables,providers,db,force=refresh); news=[]
+ @click.option('--main-currency',type=click.Choice(['USD','EUR']),default='USD',show_default=True,help='Main display currency; the other is shown as secondary.')
+ def command(json_output,last,nolinks,refresh,main_currency):
+  providers,variables,topics,_,db=context(); results=latest(variables,providers,db,force=refresh,main_currency=main_currency); news=[]
   try:
    for topic in topics: news.extend(providers['google_news'].fetch(topic))
   except Exception as exc: news_error=str(exc)

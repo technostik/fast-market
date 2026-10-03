@@ -64,6 +64,20 @@ def test_dashboard_refresh_forwarded_to_cli(monkeypatch):
     assert "--refresh" not in seen["cmd"]
 
 
+def test_dashboard_currency_forwarded_to_cli(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"variables": [], "news": []}), "")
+
+    monkeypatch.setattr(watcher_mod.subprocess, "run", fake_run)
+    assert TestClient(_app()).get("/dashboard", params={"main_currency": "EUR"}).status_code == 200
+    assert "--main-currency" in seen["cmd"] and "EUR" in seen["cmd"]
+    assert TestClient(_app()).get("/dashboard").status_code == 200
+    assert seen["cmd"].count("--main-currency") == 1 and "USD" in seen["cmd"]
+
+
 def test_dashboard_passthrough(monkeypatch):
     payload = {"generated_at": "x", "variables": [{"id": "oat_10y"}], "news": []}
     c = _client(monkeypatch, stdout=json.dumps(payload))
