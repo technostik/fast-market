@@ -60,8 +60,18 @@ def test_catalog_oil_uses_fred_and_bitcoin_kraken():
  by_id={v['id']:v for v in catalog['variables']}
  assert by_id['brent']['provider']=='fred' and by_id['brent']['symbol']=='DCOILBRENTEU'
  assert by_id['wti']['provider']=='fred' and by_id['wti']['symbol']=='DCOILWTICO'
- assert by_id['bitcoin']['provider']=='kraken'
- assert by_id['bitcoin_usd']['provider']=='kraken' and by_id['bitcoin_usd']['symbol']=='bitcoin:usd'
+ assert by_id['bitcoin']['provider']=='kraken' and by_id['bitcoin']['symbol']=='bitcoin:eur'
+ assert 'bitcoin_usd' not in by_id
+def test_catalog_spacex_and_eurusd():
+ import yaml
+ catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
+ by_id={v['id']:v for v in catalog['variables']}
+ assert by_id['spacex']['provider']=='yahoo' and by_id['spacex']['symbol']=='SPCX' and by_id['spacex']['unit']=='USD'
+ assert by_id['eurusd']['provider']=='yahoo' and by_id['eurusd']['symbol']=='EURUSD=X'
+ topics={t['id'] for t in catalog['news_topics']}
+ assert {'spacex_spcx','eur_usd_fx'} <= topics
+ for vid in ('spacex','eurusd'):
+  for t in by_id[vid]['news_topics']: assert t in topics
 def test_bdf_parses_decimal_comma_newest_first(monkeypatch):
  from plugins.bdf.plugin import BdfProvider
  import plugins.bdf.plugin as bdf_mod
@@ -146,7 +156,7 @@ def test_human_results_full_precision_percent():
  assert '3.68%' in line and 'percent' not in line
  r2=VariableResult('gold','Gold',2648.125,'USD/oz',date(2026,9,30),'stooq',None,None,False,None)
  line2=[l for l in human_results([r2]).splitlines() if l.startswith('gold')][0]
- assert '2648.125 USD/oz' in line2
+ assert '2648.12 USD/oz' in line2 and '2648.125' not in line2
 def test_news_variable_filter(monkeypatch):
  import json
  import commands.news.register as news_mod
@@ -232,14 +242,14 @@ def test_human_results_shows_cached_value_with_warning():
  from core.models import VariableResult
  r=VariableResult('bitcoin','Bitcoin',61000.0,'EUR',date(2026,9,30),'kraken',None,None,True,'Provider rate limit reached')
  line=[l for l in human_results([r]).splitlines() if l.startswith('bitcoin')][0]
- assert '61000.0' in line and 'WARNING' in line and 'STALE' in line and 'Provider rate limit reached' in line
+ assert '61000.00' in line and 'WARNING' in line and 'STALE' in line and 'Provider rate limit reached' in line
 def test_catalog_sovereign_10y_usa_uk_germany():
  import yaml
  catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
  by_id={v['id']:v for v in catalog['variables']}
  assert by_id['us_10y']['provider']=='fred' and by_id['us_10y']['symbol']=='DGS10' and by_id['us_10y']['unit']=='percent'
- assert by_id['uk_10y']['provider']=='stooq' and by_id['uk_10y']['symbol']=='10yuky.b' and by_id['uk_10y']['unit']=='percent'
- assert by_id['de_10y']['provider']=='stooq' and by_id['de_10y']['symbol']=='10ydey.b' and by_id['de_10y']['unit']=='percent'
+ assert by_id['uk_10y']['provider']=='cnbc' and by_id['uk_10y']['symbol']=='GB10Y' and by_id['uk_10y']['unit']=='percent'
+ assert by_id['de_10y']['provider']=='yahoo' and by_id['de_10y']['symbol']=='MDE10.AS' and by_id['de_10y']['unit']=='percent'
  topics={t['id'] for t in catalog['news_topics']}
  assert {'us_treasury_fed','uk_gilts','german_bunds'} <= topics
  for vid in ('us_10y','uk_10y','de_10y'):
@@ -284,3 +294,60 @@ def test_fallback_change_uses_last_distinct_day(tmp_path):
   def fetch_latest(self,symbol): raise RateLimitError('Provider rate limit reached')
  res=latest([v],{'fred':Limited()},db)
  assert res[0].value==pytest.approx(4.75) and res[0].change_abs==pytest.approx(0.05)
+def _live_provider(value,asof):
+ from plugins.base.plugin import ProviderDescriptor as PD
+ from plugins.base.plugin import Observation as Obs
+ class Live:
+  descriptor=PD('test',(),True,'x')
+  def fetch_latest(self,symbol): return Obs('',asof,value,'','test',datetime.now(timezone.utc))
+ return Live()
+def test_latest_adds_eur_usd_secondary(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ db=connection(tmp_path/'dual.sqlite3')
+ upsert(db,Observation('eurusd',date(2026,9,30),1.10,'USD/EUR','fred',datetime.now(timezone.utc)))
+ variables=[Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,()),Var('gold','Gold','stooq','xauusd','USD/oz',5,()),Var('oat_10y','OAT','bdf','X','percent',5,())]
+ providers={'kraken':_live_provider(100000.0,date(2026,9,30)),'stooq':_live_provider(2000.0,date(2026,9,30)),'bdf':_live_provider(3.5,date(2026,9,30))}
+ by_id={r.id:r for r in latest(variables,providers,db)}
+ assert (by_id['bitcoin'].secondary_value,by_id['bitcoin'].secondary_unit)==(pytest.approx(110000.0),'USD')
+ assert (by_id['gold'].secondary_value,by_id['gold'].secondary_unit)==(pytest.approx(2000.0/1.10),'EUR/oz')
+ assert by_id['oat_10y'].secondary_value is None and by_id['oat_10y'].secondary_unit is None
+def test_latest_secondary_skipped_without_fx(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ db=connection(tmp_path/'nofx.sqlite3')
+ res=latest([Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,())],{'kraken':_live_provider(100000.0,date(2026,9,30))},db)
+ assert res[0].secondary_value is None
+def test_human_results_shows_secondary():
+ from commands.helpers import human_results
+ from core.models import VariableResult
+ r=VariableResult('bitcoin','Bitcoin',100000.0,'EUR',date(2026,9,30),'kraken',None,None,False,None,110000.0,'USD')
+ line=[l for l in human_results([r]).splitlines() if l.startswith('bitcoin')][0]
+ assert '100000.00 EUR' in line and '(≈110000.00 USD)' in line
+def test_yahoo_parses_chart_and_history(monkeypatch):
+ import json
+ from plugins.yahoo.plugin import YahooProvider
+ import plugins.yahoo.plugin as yahoo_mod
+ from plugins.base.plugin import ProviderError
+ payload={'chart':{'result':[{'meta':{'regularMarketPrice':158.96,'regularMarketTime':1790947800},'timestamp':[1790861400,1790947800],'indicators':{'quote':[{'close':[150.5,None]}]}}],'error':None}}
+ monkeypatch.setattr(yahoo_mod,'get',lambda *a,**k: json.dumps(payload))
+ obs=YahooProvider({}).fetch_latest('SPCX')
+ assert obs.value==pytest.approx(158.96) and obs.source=='yahoo' and str(obs.date)=='2026-10-02'
+ out=YahooProvider({}).fetch_history('SPCX',date(2026,10,1),date(2026,10,3))
+ assert [(str(o.date),o.value) for o in out]==[('2026-10-01',150.5)]
+ monkeypatch.setattr(yahoo_mod,'get',lambda *a,**k: json.dumps({'chart':{'result':None,'error':{'code':'Not Found'}}}))
+ with pytest.raises(ProviderError): YahooProvider({}).fetch_latest('NOPE')
+ with pytest.raises(ValueError): YahooProvider({}).validate_symbol('has space')
+def test_cnbc_parses_gilt_quote(monkeypatch):
+ import json
+ from plugins.cnbc.plugin import CnbcProvider
+ import plugins.cnbc.plugin as cnbc_mod
+ from plugins.base.plugin import ProviderError
+ payload={'FormattedQuoteResult':{'FormattedQuote':[{'code':0,'last':'5.377%','last_time':'2026-10-03T09:23:24.000+0000'}]}}
+ monkeypatch.setattr(cnbc_mod,'get',lambda *a,**k: json.dumps(payload))
+ obs=CnbcProvider({}).fetch_latest('GB10Y')
+ assert obs.value==pytest.approx(5.377) and obs.source=='cnbc' and str(obs.date)=='2026-10-03'
+ out=CnbcProvider({}).fetch_history('GB10Y',date(2026,10,1),date(2026,10,5))
+ assert len(out)==1 and out[0].value==pytest.approx(5.377)
+ assert CnbcProvider({}).fetch_history('GB10Y',date(2026,9,1),date(2026,9,30))==[]
+ with pytest.raises(ValueError): CnbcProvider({}).validate_symbol('')

@@ -23,12 +23,14 @@ def human_results(results):
  lines=['ID        VALUE             CHANGE          AS OF       SOURCE']
  for r in results:
   unit='%' if r.unit=='percent' else f' {r.unit}'
+  base=f"{r.value!r}{unit}" if r.unit=='percent' or r.value is None else f"{r.value:.2f}{unit}"
+  if r.secondary_value is not None and r.secondary_unit: base+=f' (≈{r.secondary_value:.2f} {r.secondary_unit})'
   if r.error and r.value is None: lines.append(f'{r.id:<10} ERROR: {r.error}')
   elif r.error:
-   lines.append(f'{r.id:<10} {f"{r.value!r}{unit}":<18} {"—":<17} {r.as_of} {r.source} STALE WARNING: {r.error}')
+   lines.append(f'{r.id:<10} {base:<18} {"—":<17} {r.as_of} {r.source} STALE WARNING: {r.error}')
   else:
    change='—' if r.change_abs is None else f'{round(r.change_abs,6):+} ({r.change_pct:+.2f}%)'; stale=' STALE' if r.stale else ''
-   lines.append(f'{r.id:<10} {f"{r.value!r}{unit}":<18} {change:<17} {r.as_of} {r.source}{stale}')
+   lines.append(f'{r.id:<10} {base:<18} {change:<17} {r.as_of} {r.source}{stale}')
  return '\n'.join(lines)
 def parse_since(text):
  import re

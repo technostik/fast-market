@@ -43,6 +43,7 @@ def test_frontend_card_split_layout():
     assert 'role="button"' in html and 'tabindex="0"' in html
     assert "<table" not in html and "showHistory" not in html
     assert "/api/watcher/history" in html and "/api/watcher/news" in html
+    assert "secondary_value" in html and "toFixed(2)" in html
 
 
 def test_dashboard_passthrough(monkeypatch):

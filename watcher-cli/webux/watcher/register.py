@@ -151,15 +151,16 @@ const detail = document.getElementById('detail');
 let selectedId = null;
 let lastVars = {};
 function cardBody(r) {
+  const alt = (r.secondary_value != null && r.secondary_unit) ? `<div class="dim">≈ ${esc(display(r.secondary_value, r.secondary_unit))}</div>` : '';
   if (r.error && r.value != null) {
-    return `<div class="card-value">${esc(display(r.value, r.unit))}<span class="stale">STALE</span></div><div class="err">WARNING: ${esc(r.error)}</div>`;
+    return `<div class="card-value">${esc(display(r.value, r.unit))}<span class="stale">STALE</span></div>${alt}<div class="err">WARNING: ${esc(r.error)}</div>`;
   } else if (r.error) {
     return `<div class="err">ERROR: ${esc(r.error)}</div>`;
   }
-  return `<div class="card-value">${esc(display(r.value, r.unit))}${r.stale ? '<span class="stale">STALE</span>' : ''}</div>`;
+  return `<div class="card-value">${esc(display(r.value, r.unit))}${r.stale ? '<span class="stale">STALE</span>' : ''}</div>${alt}`;
 }
 function esc(s) { return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
-function display(v, unit) { return unit === 'percent' ? String(v) + '%' : String(v) + ' ' + unit; }
+function display(v, unit) { return unit === 'percent' ? String(v) + '%' : Number(v).toFixed(2) + ' ' + unit; }
 function fmtChange(r) {
   if (r.change_abs == null) return '<span class="dim">—</span>';
   const cls = r.change_abs >= 0 ? 'up' : 'down';

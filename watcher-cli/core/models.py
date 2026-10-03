@@ -12,4 +12,4 @@ class NewsItem:
  topic: str; title: str; source: str; published_at: datetime | None; url: str
 @dataclass(frozen=True, slots=True)
 class VariableResult:
- id: str; label: str; value: float|None; unit: str; as_of: date|None; source: str|None; change_abs: float|None; change_pct: float|None; stale: bool; error: str|None
+ id: str; label: str; value: float|None; unit: str; as_of: date|None; source: str|None; change_abs: float|None; change_pct: float|None; stale: bool; error: str|None; secondary_value: float|None=None; secondary_unit: str|None=None

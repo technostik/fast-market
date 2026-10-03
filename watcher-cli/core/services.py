@@ -1,7 +1,20 @@
 from __future__ import annotations
+from dataclasses import replace
 from datetime import date,datetime,timezone,timedelta
 from core.models import NewsItem,Variable,VariableResult
 from core.storage import observations,upsert
+# Dual EUR/USD display: converted from the `eurusd` variable (USD per EUR,
+# read from storage so no extra fetch is needed). Units not
+# listed here (percent, USD/EUR, …) have no meaningful conversion.
+def _secondary(unit,value,rate):
+ if value is None or not rate or rate<=0: return (None,None)
+ if unit=='EUR': return (value*rate,'USD')
+ if unit=='USD': return (value/rate,'EUR')
+ if unit=='USD/bbl': return (value/rate,'EUR/bbl')
+ if unit=='USD/oz': return (value/rate,'EUR/oz')
+ if unit=='EUR/bbl': return (value*rate,'USD/bbl')
+ if unit=='EUR/oz': return (value*rate,'USD/oz')
+ return (None,None)
 def latest(variables,providers,db):
  results=[]
  for v in variables:
@@ -26,6 +39,15 @@ def latest(variables,providers,db):
     change=None if not prior else c.value-prior.value
     results.append(VariableResult(v.id,v.label,c.value,v.unit,c.date,c.source,change,None if not prior or prior.value==0 else change/prior.value*100,True,str(exc)))
    else: results.append(VariableResult(v.id,v.label,None,v.unit,None,v.provider,None,None,False,str(exc)))
+ try: fx=observations(db,'eurusd')[-1:]
+ except Exception: fx=[]
+ rate=fx[-1].value if fx else None
+ if rate and rate>0:
+  out=[]
+  for r in results:
+   sv,su=_secondary(r.unit,r.value,rate)
+   out.append(replace(r,secondary_value=sv,secondary_unit=su) if sv is not None else r)
+  results=out
  return results
 def history(v,providers,db,start,end):
  cached=observations(db,v.id,start,end)
