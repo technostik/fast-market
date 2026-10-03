@@ -22,9 +22,11 @@ def results_payload(results): return {'generated_at':datetime.now(timezone.utc).
 def human_results(results):
  lines=['ID        VALUE             CHANGE          AS OF       SOURCE']
  for r in results:
-  if r.error: lines.append(f'{r.id:<10} ERROR: {r.error}')
+  unit='%' if r.unit=='percent' else f' {r.unit}'
+  if r.error and r.value is None: lines.append(f'{r.id:<10} ERROR: {r.error}')
+  elif r.error:
+   lines.append(f'{r.id:<10} {f"{r.value!r}{unit}":<18} {"—":<17} {r.as_of} {r.source} STALE WARNING: {r.error}')
   else:
-   unit='%' if r.unit=='percent' else f' {r.unit}'
    change='—' if r.change_abs is None else f'{round(r.change_abs,6):+} ({r.change_pct:+.2f}%)'; stale=' STALE' if r.stale else ''
    lines.append(f'{r.id:<10} {f"{r.value!r}{unit}":<18} {change:<17} {r.as_of} {r.source}{stale}')
  return '\n'.join(lines)

@@ -54,14 +54,14 @@ def test_catalog_oat_uses_daily_bdf():
  catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
  oat=next(v for v in catalog['variables'] if v['id']=='oat_10y')
  assert oat['provider']=='bdf' and oat['symbol']=='FM.D.FR.EUR.FR2.BB.FRMOYTEC10.HSTA'
-def test_catalog_oil_uses_fred_and_bitcoin_coingecko():
+def test_catalog_oil_uses_fred_and_bitcoin_kraken():
  import yaml
  catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
  by_id={v['id']:v for v in catalog['variables']}
  assert by_id['brent']['provider']=='fred' and by_id['brent']['symbol']=='DCOILBRENTEU'
  assert by_id['wti']['provider']=='fred' and by_id['wti']['symbol']=='DCOILWTICO'
- assert by_id['bitcoin']['provider']=='coingecko'
- assert by_id['bitcoin_usd']['provider']=='coingecko' and by_id['bitcoin_usd']['symbol']=='bitcoin:usd'
+ assert by_id['bitcoin']['provider']=='kraken'
+ assert by_id['bitcoin_usd']['provider']=='kraken' and by_id['bitcoin_usd']['symbol']=='bitcoin:usd'
 def test_bdf_parses_decimal_comma_newest_first(monkeypatch):
  from plugins.bdf.plugin import BdfProvider
  import plugins.bdf.plugin as bdf_mod
@@ -165,3 +165,122 @@ def test_news_variable_filter(monkeypatch):
  assert r.exit_code!=0 and 'Unknown variable' in r.output
  r=CliRunner().invoke(cmd,['--variable','bitcoin','--topic','bitcoin_regulation'])
  assert r.exit_code!=0 and 'mutually exclusive' in r.output
+def test_kraken_parses_ticker_and_falls_back_to_coinbase(monkeypatch):
+ import json
+ from plugins.kraken.plugin import KrakenProvider
+ import plugins.kraken.plugin as kraken_mod
+ from plugins.base.plugin import ProviderError
+ monkeypatch.setattr(kraken_mod,'get',lambda *a,**k: json.dumps({'error':[],'result':{'XXBTZEUR':{'c':['61234.5','0.01']}}}))
+ obs=KrakenProvider({}).fetch_latest('bitcoin:eur')
+ assert obs.value==pytest.approx(61234.5) and obs.source=='kraken'
+ monkeypatch.setattr(kraken_mod,'get',lambda *a,**k: (_ for _ in ()).throw(ProviderError('Provider rate limit reached')))
+ import plugins.coinbase.plugin as coinbase_mod
+ monkeypatch.setattr(coinbase_mod,'get',lambda *a,**k: json.dumps({'data':{'base':'BTC','currency':'EUR','amount':'61000.12'}}))
+ obs=KrakenProvider({}).fetch_latest('bitcoin:eur')
+ assert obs.value==pytest.approx(61000.12) and obs.source=='coinbase'
+ with pytest.raises(ValueError): KrakenProvider({}).validate_symbol('bad-symbol')
+def test_kraken_history_parses_ohlc(monkeypatch):
+ import json
+ from plugins.kraken.plugin import KrakenProvider
+ import plugins.kraken.plugin as kraken_mod
+ payload={'error':[],'result':{'XXBTZUSD':[[1711929600,'67000.1','68000.0','66000.0','67500.0','67200.0','123.4',5000],[1712016000,'67500.0','69000.0','67000.0','68500.0','68000.0','100.0',4000]],'last':1712016000}}
+ monkeypatch.setattr(kraken_mod,'get',lambda *a,**k: json.dumps(payload))
+ out=KrakenProvider({}).fetch_history('bitcoin:usd',date(2024,1,1),date(2024,12,31))
+ assert [o.value for o in out]==pytest.approx([67500.0,68500.0])
+def test_coinbase_spot_and_history(monkeypatch):
+ import json
+ from plugins.coinbase.plugin import CoinbaseProvider
+ import plugins.coinbase.plugin as coinbase_mod
+ monkeypatch.setattr(coinbase_mod,'get',lambda *a,**k: json.dumps({'data':{'base':'BTC','currency':'USD','amount':'67000.12'}}))
+ obs=CoinbaseProvider({}).fetch_latest('bitcoin:usd')
+ assert obs.value==pytest.approx(67000.12) and obs.source=='coinbase'
+ def fake_get(url,*a,**k):
+  assert 'candles' in url
+  return json.dumps([[1712016000,67000.0,69000.0,67500.0,68500.0,100.0]])
+ monkeypatch.setattr(coinbase_mod,'get',fake_get)
+ out=CoinbaseProvider({}).fetch_history('bitcoin:usd',date(2024,1,1),date(2026,12,31))
+ assert len(out)==1 and out[0].value==pytest.approx(68500.0)
+def test_latest_falls_back_to_cached_on_rate_limit(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ from plugins.base.plugin import RateLimitError
+ v=Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,())
+ db=connection(tmp_path/'fallback.sqlite3')
+ upsert(db,Observation('bitcoin',date(2026,9,30),61000.0,'EUR','kraken',datetime.now(timezone.utc)))
+ class Limited:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('kraken',(),True,'x')
+  def fetch_latest(self,symbol): raise RateLimitError('Provider rate limit reached')
+ res=latest([v],{'kraken':Limited()},db)
+ assert res[0].value==pytest.approx(61000.0) and res[0].as_of==date(2026,9,30)
+ assert res[0].stale is True and 'rate limit' in res[0].error.lower()
+ assert res[0].source=='kraken'
+def test_latest_without_cache_still_reports_error(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ from plugins.base.plugin import RateLimitError
+ v=Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,())
+ db=connection(tmp_path/'nocache.sqlite3')
+ class Limited:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('kraken',(),True,'x')
+  def fetch_latest(self,symbol): raise RateLimitError('Provider rate limit reached')
+ res=latest([v],{'kraken':Limited()},db)
+ assert res[0].value is None and res[0].error is not None
+def test_human_results_shows_cached_value_with_warning():
+ from commands.helpers import human_results
+ from core.models import VariableResult
+ r=VariableResult('bitcoin','Bitcoin',61000.0,'EUR',date(2026,9,30),'kraken',None,None,True,'Provider rate limit reached')
+ line=[l for l in human_results([r]).splitlines() if l.startswith('bitcoin')][0]
+ assert '61000.0' in line and 'WARNING' in line and 'STALE' in line and 'Provider rate limit reached' in line
+def test_catalog_sovereign_10y_usa_uk_germany():
+ import yaml
+ catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
+ by_id={v['id']:v for v in catalog['variables']}
+ assert by_id['us_10y']['provider']=='fred' and by_id['us_10y']['symbol']=='DGS10' and by_id['us_10y']['unit']=='percent'
+ assert by_id['uk_10y']['provider']=='stooq' and by_id['uk_10y']['symbol']=='10yuky.b' and by_id['uk_10y']['unit']=='percent'
+ assert by_id['de_10y']['provider']=='stooq' and by_id['de_10y']['symbol']=='10ydey.b' and by_id['de_10y']['unit']=='percent'
+ topics={t['id'] for t in catalog['news_topics']}
+ assert {'us_treasury_fed','uk_gilts','german_bunds'} <= topics
+ for vid in ('us_10y','uk_10y','de_10y'):
+  for t in by_id[vid]['news_topics']: assert t in topics
+def test_latest_change_uses_last_distinct_day_on_same_day_refresh(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ v=Var('us_10y','US 10Y','fred','DGS10','percent',5,())
+ db=connection(tmp_path/'changeday.sqlite3')
+ upsert(db,Observation('us_10y',date(2026,9,29),4.70,'percent','fred',datetime.now(timezone.utc)))
+ upsert(db,Observation('us_10y',date(2026,9,30),4.75,'percent','fred',datetime.now(timezone.utc)))
+ class SameDay:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('fred',(),True,'x')
+  def fetch_latest(self,symbol): return Observation('',date(2026,9,30),4.80,'','fred',datetime.now(timezone.utc))
+ res=latest([v],{'fred':SameDay()},db)
+ assert res[0].change_abs==pytest.approx(0.10) and res[0].change_pct==pytest.approx(0.10/4.70*100)
+def test_latest_change_uses_last_day_on_new_day(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ v=Var('us_10y','US 10Y','fred','DGS10','percent',5,())
+ db=connection(tmp_path/'newday.sqlite3')
+ upsert(db,Observation('us_10y',date(2026,9,29),4.70,'percent','fred',datetime.now(timezone.utc)))
+ upsert(db,Observation('us_10y',date(2026,9,30),4.75,'percent','fred',datetime.now(timezone.utc)))
+ class NewDay:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('fred',(),True,'x')
+  def fetch_latest(self,symbol): return Observation('',date(2026,10,1),4.90,'','fred',datetime.now(timezone.utc))
+ res=latest([v],{'fred':NewDay()},db)
+ assert res[0].change_abs==pytest.approx(0.15) and res[0].change_pct==pytest.approx(0.15/4.75*100)
+def test_fallback_change_uses_last_distinct_day(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ from plugins.base.plugin import RateLimitError
+ v=Var('us_10y','US 10Y','fred','DGS10','percent',5,())
+ db=connection(tmp_path/'fallbackchange.sqlite3')
+ upsert(db,Observation('us_10y',date(2026,9,29),4.70,'percent','fred',datetime.now(timezone.utc)))
+ upsert(db,Observation('us_10y',date(2026,9,30),4.75,'percent','fred',datetime.now(timezone.utc)))
+ class Limited:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('fred',(),True,'x')
+  def fetch_latest(self,symbol): raise RateLimitError('Provider rate limit reached')
+ res=latest([v],{'fred':Limited()},db)
+ assert res[0].value==pytest.approx(4.75) and res[0].change_abs==pytest.approx(0.05)

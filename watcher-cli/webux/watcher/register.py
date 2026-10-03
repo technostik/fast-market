@@ -163,9 +163,14 @@ async function load() {
   }
   document.getElementById('generated').textContent = 'updated ' + (data.generated_at || '').slice(0, 19).replace('T', ' ');
   const rows = (data.variables || []).map(r => {
-    const body = r.error
-      ? `<span class="err">ERROR: ${esc(r.error)}</span>`
-      : `<span class="val">${esc(display(r.value, r.unit))}</span>${r.stale ? '<span class="stale">STALE</span>' : ''}`;
+    let body;
+    if (r.error && r.value != null) {
+      body = `<span class="val">${esc(display(r.value, r.unit))}</span><span class="stale">STALE</span><br><span class="err">WARNING: ${esc(r.error)}</span>`;
+    } else if (r.error) {
+      body = `<span class="err">ERROR: ${esc(r.error)}</span>`;
+    } else {
+      body = `<span class="val">${esc(display(r.value, r.unit))}</span>${r.stale ? '<span class="stale">STALE</span>' : ''}`;
+    }
     return `<tr class="clickable" data-id="${esc(r.id)}"><td><strong>${esc(r.id)}</strong><br><span class="dim">${esc(r.label || '')}</span></td><td>${body}</td><td>${fmtChange(r)}</td><td>${esc(r.as_of || '—')}</td><td class="dim">${esc(r.source || '')}</td></tr>`;
   }).join('');
   out.innerHTML = `<table><thead><tr><th>Variable</th><th>Value</th><th>Change</th><th>As of</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table>`;

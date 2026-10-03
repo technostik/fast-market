@@ -10,10 +10,22 @@ def latest(variables,providers,db):
    for env in p.descriptor.required_env:
     import os
     if not os.getenv(env): raise __import__('plugins.base.plugin',fromlist=['MissingCredentialsError']).MissingCredentialsError(env)
-   o=p.fetch_latest(v.symbol); o=type(o)(v.id,o.date,o.value,v.unit,o.source,o.fetched_at); previous=observations(db,v.id)[-1:] ; upsert(db,o)
-   prior=previous[0] if previous and previous[0].date != o.date else None; change=None if not prior else o.value-prior.value
+   o=p.fetch_latest(v.symbol); o=type(o)(v.id,o.date,o.value,v.unit,o.source,o.fetched_at); rows=observations(db,v.id)[-2:] ; upsert(db,o)
+   prior=None
+   for r in reversed(rows):
+    if r.date != o.date: prior=r; break
+   change=None if not prior else o.value-prior.value
    results.append(VariableResult(v.id,v.label,o.value,v.unit,o.date,o.source,change,None if not prior or prior.value==0 else change/prior.value*100,(date.today()-o.date).days>v.max_age_days,None))
-  except Exception as exc: results.append(VariableResult(v.id,v.label,None,v.unit,None,v.provider,None,None,False,str(exc)))
+  except Exception as exc:
+   try: rows=observations(db,v.id)[-2:]
+   except Exception: rows=[]
+   if rows:
+    c=rows[-1]; prior=None
+    for r in reversed(rows[:-1]):
+     if r.date != c.date: prior=r; break
+    change=None if not prior else c.value-prior.value
+    results.append(VariableResult(v.id,v.label,c.value,v.unit,c.date,c.source,change,None if not prior or prior.value==0 else change/prior.value*100,True,str(exc)))
+   else: results.append(VariableResult(v.id,v.label,None,v.unit,None,v.provider,None,None,False,str(exc)))
  return results
 def history(v,providers,db,start,end):
  cached=observations(db,v.id,start,end)
