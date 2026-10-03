@@ -12,4 +12,4 @@ watcher = "watcher_entry:main"
 [project.entry-points."fast_market.webux_plugins"]
 watcher = "webux.watcher.register:register"
 [tool.setuptools]
-packages = ["watcher_entry", "cli", "core", "plugins", "plugins.base", "plugins.coingecko", "plugins.kraken", "plugins.coinbase", "plugins.yahoo", "plugins.cnbc", "plugins.stooq", "plugins.dbnomics", "plugins.google_news", "plugins.fred", "plugins.bdf", "commands", "commands.get", "commands.history", "commands.news", "commands.dashboard", "commands.setup", "commands.wizard", "webux", "webux.watcher"]
+packages = ["watcher_entry", "cli", "core", "plugins", "plugins.base", "plugins.coingecko", "plugins.kraken", "plugins.coinbase", "plugins.yahoo", "plugins.cnbc", "plugins.bdor", "plugins.stooq", "plugins.dbnomics", "plugins.google_news", "plugins.fred", "plugins.bdf", "commands", "commands.get", "commands.history", "commands.news", "commands.dashboard", "commands.setup", "commands.wizard", "webux", "webux.watcher"]

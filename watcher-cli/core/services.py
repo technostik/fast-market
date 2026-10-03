@@ -15,23 +15,39 @@ def _secondary(unit,value,rate):
  if unit=='EUR/bbl': return (value*rate,'USD/bbl')
  if unit=='EUR/oz': return (value*rate,'USD/oz')
  return (None,None)
-def latest(variables,providers,db):
+# Values fetched less than an hour ago are served from storage without
+# hitting providers again; pass force=True for an explicit refresh.
+_FRESH_SECONDS=3600
+def _fresh(obs,now):
+ fa=obs.fetched_at
+ if fa is None: return False
+ if fa.tzinfo is None: fa=fa.replace(tzinfo=timezone.utc)
+ return (now-fa).total_seconds()<_FRESH_SECONDS
+def latest(variables,providers,db,force=False):
  results=[]
+ now=datetime.now(timezone.utc)
  for v in variables:
+  try: rows=observations(db,v.id)[-2:]
+  except Exception: rows=[]
+  if not force and rows and _fresh(rows[-1],now):
+   c=rows[-1]; prior=None
+   for r in reversed(rows[:-1]):
+    if r.date != c.date: prior=r; break
+   change=None if not prior else c.value-prior.value
+   results.append(VariableResult(v.id,v.label,c.value,v.unit,c.date,c.source,change,None if not prior or prior.value==0 else change/prior.value*100,(date.today()-c.date).days>v.max_age_days,None))
+   continue
   try:
    p=providers[v.provider]
    for env in p.descriptor.required_env:
     import os
     if not os.getenv(env): raise __import__('plugins.base.plugin',fromlist=['MissingCredentialsError']).MissingCredentialsError(env)
-   o=p.fetch_latest(v.symbol); o=type(o)(v.id,o.date,o.value,v.unit,o.source,o.fetched_at); rows=observations(db,v.id)[-2:] ; upsert(db,o)
+   o=p.fetch_latest(v.symbol); o=type(o)(v.id,o.date,o.value,v.unit,o.source,o.fetched_at); upsert(db,o)
    prior=None
    for r in reversed(rows):
     if r.date != o.date: prior=r; break
    change=None if not prior else o.value-prior.value
    results.append(VariableResult(v.id,v.label,o.value,v.unit,o.date,o.source,change,None if not prior or prior.value==0 else change/prior.value*100,(date.today()-o.date).days>v.max_age_days,None))
   except Exception as exc:
-   try: rows=observations(db,v.id)[-2:]
-   except Exception: rows=[]
    if rows:
     c=rows[-1]; prior=None
     for r in reversed(rows[:-1]):

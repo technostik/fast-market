@@ -15,6 +15,12 @@ def context():
  except ValueError as exc: raise click.ClickException(str(exc)) from exc
  return providers,variables,topics,feeds,connection()
 def iso(value): return value.isoformat() if hasattr(value,'isoformat') else value
+def compact(value):
+ a=abs(value)
+ if a>=1e9: return f'{value/1e9:.2f}B'
+ if a>=1e6: return f'{value/1e6:.2f}M'
+ if a>=1e3: return f'{value/1e3:.2f}K'
+ return f'{value:.2f}'
 def emit(data,json_output):
  if json_output: click.echo(json.dumps(data,default=iso,sort_keys=True))
  else: click.echo(data if isinstance(data,str) else json.dumps(data,default=iso,indent=2))
@@ -23,8 +29,8 @@ def human_results(results):
  lines=['ID        VALUE             CHANGE          AS OF       SOURCE']
  for r in results:
   unit='%' if r.unit=='percent' else f' {r.unit}'
-  base=f"{r.value!r}{unit}" if r.unit=='percent' or r.value is None else f"{r.value:.2f}{unit}"
-  if r.secondary_value is not None and r.secondary_unit: base+=f' (≈{r.secondary_value:.2f} {r.secondary_unit})'
+  base=f"{r.value!r}{unit}" if r.unit=='percent' or r.value is None else f"{compact(r.value)}{unit}"
+  if r.secondary_value is not None and r.secondary_unit: base+=f' (≈{compact(r.secondary_value)} {r.secondary_unit})'
   if r.error and r.value is None: lines.append(f'{r.id:<10} ERROR: {r.error}')
   elif r.error:
    lines.append(f'{r.id:<10} {base:<18} {"—":<17} {r.as_of} {r.source} STALE WARNING: {r.error}')

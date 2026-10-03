@@ -7,8 +7,9 @@ def register(plugin_manifests):
  @click.option('--json','json_output',is_flag=True)
  @click.option('--last',type=click.IntRange(0),default=3,show_default=True,help='Show only the last N news items.')
  @click.option('--nolinks',is_flag=True,default=False,help='Omit URLs from news output.')
- def command(json_output,last,nolinks):
-  providers,variables,topics,_,db=context(); results=latest(variables,providers,db); news=[]
+ @click.option('--refresh',is_flag=True,default=False,help='Force live refresh, bypassing values fetched less than 1h ago.')
+ def command(json_output,last,nolinks,refresh):
+  providers,variables,topics,_,db=context(); results=latest(variables,providers,db,force=refresh); news=[]
   try:
    for topic in topics: news.extend(providers['google_news'].fetch(topic))
   except Exception as exc: news_error=str(exc)

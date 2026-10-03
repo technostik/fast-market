@@ -5,7 +5,8 @@ variables:
   - {id: de_10y, label: "Germany 10-year Bund yield (MTS, daily, Yahoo)", provider: yahoo, symbol: "MDE10.AS", unit: "percent", max_age: 5d, news_topics: [german_bunds]}
   - {id: brent, label: "Brent crude oil spot", provider: fred, symbol: "DCOILBRENTEU", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
   - {id: wti, label: "WTI crude oil spot", provider: fred, symbol: "DCOILWTICO", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
-  - {id: gold, label: "Gold spot", provider: stooq, symbol: "xauusd", unit: "USD/oz", max_age: 5d, news_topics: [gold_central_banks]}
+  - {id: napoleon, label: "Napoléon 20 Francs (fixing, daily, BdOR)", provider: bdor, symbol: "20-francs-napoleon-or", unit: "EUR", max_age: 5d, news_topics: [napoleon_or]}
+  - {id: nasdaq, label: "Nasdaq Composite (daily, Yahoo)", provider: yahoo, symbol: "^IXIC", unit: "USD", max_age: 5d, news_topics: [nasdaq_stocks]}
   - {id: bitcoin, label: "Bitcoin (EUR)", provider: kraken, symbol: "bitcoin:eur", unit: "EUR", max_age: 1d, news_topics: [bitcoin_regulation]}
   - {id: spacex, label: "SpaceX (SPCX, Nasdaq, daily, Yahoo)", provider: yahoo, symbol: "SPCX", unit: "USD", max_age: 5d, news_topics: [spacex_spcx]}
   - {id: eurusd, label: "Euro/US Dollar spot (daily, Yahoo)", provider: yahoo, symbol: "EURUSD=X", unit: "USD/EUR", max_age: 5d, news_topics: [eur_usd_fx]}
@@ -16,6 +17,8 @@ news_topics:
   - {id: german_bunds, label: "German Bunds & ECB", query: "German Bund yield ECB", lang: en}
   - {id: oil_opec, label: "Oil & OPEC", query: "oil price OPEC", lang: en}
   - {id: gold_central_banks, label: "Gold & central banks", query: "gold central banks", lang: en}
+  - {id: napoleon_or, label: "Napoléon & gold coins", query: "Napoléon 20 francs or", lang: en}
+  - {id: nasdaq_stocks, label: "Nasdaq & US tech", query: "Nasdaq composite stocks", lang: en}
   - {id: bitcoin_regulation, label: "Bitcoin & regulation", query: "bitcoin regulation", lang: en}
   - {id: spacex_spcx, label: "SpaceX & SPCX", query: "SpaceX SPCX stock", lang: en}
   - {id: eur_usd_fx, label: "Euro dollar FX", query: "EUR USD exchange rate", lang: en}

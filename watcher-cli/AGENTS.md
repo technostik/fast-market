@@ -17,6 +17,11 @@ Network egress in the build environment was blocked by the proxy (`CONNECT tunne
 - **CoinGecko**: public `/api/v3/simple/price` and `/api/v3/coins/<id>/market_chart`; no key is used by this MVP. Public rate limits and historical-window limits apply; rate-limit responses are typed errors.
 - **DBnomics**: public `https://api.db.nomics.world/v22/series/<provider>/<dataset>/<series>?observations=1`, no authentication. It mirrors official series and can have publication lag; do not use it as a daily-market-price replacement.
 - **Google News RSS**: `https://news.google.com/rss/search?q=...`; unofficial RSS search. It is isolated as `google_news`; URLs, availability, and ToS/rate limits need periodic verification.
+- **Kraken**: public `https://api.kraken.com/0/public/Ticker` + `OHLC?interval=1440`; no key, ~1 req/s. Primary crypto source (same `coin:currency` symbols as CoinGecko); falls back to Coinbase spot internally.
+- **Coinbase**: public `https://api.coinbase.com/v2/prices/<BASE>-<CUR>/spot` for latest, Exchange `candles?granularity=86400` for history; no key. Used as Kraken fallback.
+- **Yahoo**: undocumented `https://query1.finance.yahoo.com/v8/finance/chart/<ticker>`; keyless JSON but requires a browser-like User-Agent (see `core/http.py` `headers=`) and may break without notice. Used for SPCX, `MDE10.AS` (Bund 10Y), `^IXIC`, `GC=F`, `EURUSD=X`.
+- **CNBC**: keyless `quote-html-webservice/restQuote` quick quotes; used for `GB10Y` latest only (no history endpoint — history accumulates in storage). Values arrive as `"5.377%"` strings.
+- **BdOR**: `https://www.bdor.fr/cours-or` HTML table; parses the `Actualisation en direct - DD/MM/YYYY` fixing date and the `prixAffiche` row for a product slug (e.g. `20-francs-napoleon-or`). Dealer page, not an API — strict parsing, failures surface as `ProviderError`. Fixings publish on business days only.
 
 ## Template conflicts
 The requested `watcher.yaml` conflicts with the template's conventional tool file name `config.yaml`. Behavior requires a clearly named watchlist YAML, so it is stored beside template config at `watcher/watcher.yaml`; the template's XDG/profile paths, entry point, registry, logging and test isolation are retained. The prompt refers to `.doc/GOLDEN_RULES.md`, but that file is absent in this checkout; `_doc/BUILD_NEW_AGENT_CLI.md` was followed.

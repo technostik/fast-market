@@ -156,7 +156,7 @@ def test_human_results_full_precision_percent():
  assert '3.68%' in line and 'percent' not in line
  r2=VariableResult('gold','Gold',2648.125,'USD/oz',date(2026,9,30),'stooq',None,None,False,None)
  line2=[l for l in human_results([r2]).splitlines() if l.startswith('gold')][0]
- assert '2648.12 USD/oz' in line2 and '2648.125' not in line2
+ assert '2.65K USD/oz' in line2 and '2648' not in line2 and '2648.125' not in line2
 def test_news_variable_filter(monkeypatch):
  import json
  import commands.news.register as news_mod
@@ -221,7 +221,7 @@ def test_latest_falls_back_to_cached_on_rate_limit(tmp_path):
   from plugins.base.plugin import ProviderDescriptor as PD
   descriptor=PD('kraken',(),True,'x')
   def fetch_latest(self,symbol): raise RateLimitError('Provider rate limit reached')
- res=latest([v],{'kraken':Limited()},db)
+ res=latest([v],{'kraken':Limited()},db,force=True)
  assert res[0].value==pytest.approx(61000.0) and res[0].as_of==date(2026,9,30)
  assert res[0].stale is True and 'rate limit' in res[0].error.lower()
  assert res[0].source=='kraken'
@@ -242,7 +242,7 @@ def test_human_results_shows_cached_value_with_warning():
  from core.models import VariableResult
  r=VariableResult('bitcoin','Bitcoin',61000.0,'EUR',date(2026,9,30),'kraken',None,None,True,'Provider rate limit reached')
  line=[l for l in human_results([r]).splitlines() if l.startswith('bitcoin')][0]
- assert '61000.00' in line and 'WARNING' in line and 'STALE' in line and 'Provider rate limit reached' in line
+ assert '61.00K' in line and 'WARNING' in line and 'STALE' in line and 'Provider rate limit reached' in line
 def test_catalog_sovereign_10y_usa_uk_germany():
  import yaml
  catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
@@ -265,7 +265,7 @@ def test_latest_change_uses_last_distinct_day_on_same_day_refresh(tmp_path):
   from plugins.base.plugin import ProviderDescriptor as PD
   descriptor=PD('fred',(),True,'x')
   def fetch_latest(self,symbol): return Observation('',date(2026,9,30),4.80,'','fred',datetime.now(timezone.utc))
- res=latest([v],{'fred':SameDay()},db)
+ res=latest([v],{'fred':SameDay()},db,force=True)
  assert res[0].change_abs==pytest.approx(0.10) and res[0].change_pct==pytest.approx(0.10/4.70*100)
 def test_latest_change_uses_last_day_on_new_day(tmp_path):
  from core.models import Variable as Var
@@ -278,7 +278,7 @@ def test_latest_change_uses_last_day_on_new_day(tmp_path):
   from plugins.base.plugin import ProviderDescriptor as PD
   descriptor=PD('fred',(),True,'x')
   def fetch_latest(self,symbol): return Observation('',date(2026,10,1),4.90,'','fred',datetime.now(timezone.utc))
- res=latest([v],{'fred':NewDay()},db)
+ res=latest([v],{'fred':NewDay()},db,force=True)
  assert res[0].change_abs==pytest.approx(0.15) and res[0].change_pct==pytest.approx(0.15/4.75*100)
 def test_fallback_change_uses_last_distinct_day(tmp_path):
  from core.models import Variable as Var
@@ -292,7 +292,7 @@ def test_fallback_change_uses_last_distinct_day(tmp_path):
   from plugins.base.plugin import ProviderDescriptor as PD
   descriptor=PD('fred',(),True,'x')
   def fetch_latest(self,symbol): raise RateLimitError('Provider rate limit reached')
- res=latest([v],{'fred':Limited()},db)
+ res=latest([v],{'fred':Limited()},db,force=True)
  assert res[0].value==pytest.approx(4.75) and res[0].change_abs==pytest.approx(0.05)
 def _live_provider(value,asof):
  from plugins.base.plugin import ProviderDescriptor as PD
@@ -318,12 +318,60 @@ def test_latest_secondary_skipped_without_fx(tmp_path):
  db=connection(tmp_path/'nofx.sqlite3')
  res=latest([Var('bitcoin','Bitcoin','kraken','bitcoin:eur','EUR',1,())],{'kraken':_live_provider(100000.0,date(2026,9,30))},db)
  assert res[0].secondary_value is None
+def test_get_refresh_option_exists():
+ from click.testing import CliRunner
+ import commands.get.register as get_mod
+ assert '--refresh' in CliRunner().invoke(get_mod.register({}).click_command,['--help']).output
+def test_latest_serves_fresh_cache_without_fetch(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ v=Var('us_10y','US 10Y','fred','DGS10','percent',30,())
+ db=connection(tmp_path/'fresh.sqlite3')
+ upsert(db,Observation('us_10y',date(2026,9,29),4.70,'percent','fred',datetime.now(timezone.utc)))
+ upsert(db,Observation('us_10y',date(2026,9,30),4.75,'percent','fred',datetime.now(timezone.utc)))
+ class NeverCall:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('fred',(),True,'x')
+  def fetch_latest(self,symbol): raise AssertionError('must not fetch within 1h')
+ res=latest([v],{'fred':NeverCall()},db)
+ assert res[0].value==pytest.approx(4.75) and res[0].error is None
+ assert res[0].change_abs==pytest.approx(0.05)
+def test_latest_force_refresh_bypasses_fresh_cache(tmp_path):
+ from core.models import Variable as Var
+ from core.services import latest
+ v=Var('us_10y','US 10Y','fred','DGS10','percent',30,())
+ db=connection(tmp_path/'force.sqlite3')
+ upsert(db,Observation('us_10y',date(2026,9,29),4.70,'percent','fred',datetime.now(timezone.utc)))
+ upsert(db,Observation('us_10y',date(2026,9,30),4.75,'percent','fred',datetime.now(timezone.utc)))
+ class NewDay:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('fred',(),True,'x')
+  def fetch_latest(self,symbol): return Observation('',date(2026,10,1),4.90,'','fred',datetime.now(timezone.utc))
+ res=latest([v],{'fred':NewDay()},db,force=True)
+ assert res[0].value==pytest.approx(4.90) and res[0].change_abs==pytest.approx(0.15)
+def test_dashboard_refresh_option_uses_cache_then_forces(monkeypatch,tmp_path):
+ import commands.dashboard.register as dash_mod
+ from core.models import Variable as Var
+ calls=[]
+ class P:
+  from plugins.base.plugin import ProviderDescriptor as PD
+  descriptor=PD('test',(),True,'x')
+  def fetch_latest(self,symbol):
+   calls.append(1)
+   return Observation('',date(2026,10,2),1.0,'','test',datetime.now(timezone.utc))
+ v=Var('x','X','test','s','USD',30,())
+ db=connection(tmp_path/'dash.sqlite3')
+ monkeypatch.setattr(dash_mod,'context',lambda: ({'test':P()},[v],[],[],db))
+ cmd=dash_mod.register({}).click_command
+ assert CliRunner().invoke(cmd,['--json','--last','0']).exit_code==0 and len(calls)==1
+ assert CliRunner().invoke(cmd,['--json','--last','0']).exit_code==0 and len(calls)==1
+ assert CliRunner().invoke(cmd,['--json','--last','0','--refresh']).exit_code==0 and len(calls)==2
 def test_human_results_shows_secondary():
  from commands.helpers import human_results
  from core.models import VariableResult
  r=VariableResult('bitcoin','Bitcoin',100000.0,'EUR',date(2026,9,30),'kraken',None,None,False,None,110000.0,'USD')
  line=[l for l in human_results([r]).splitlines() if l.startswith('bitcoin')][0]
- assert '100000.00 EUR' in line and '(≈110000.00 USD)' in line
+ assert '100.00K EUR' in line and '(≈110.00K USD)' in line
 def test_yahoo_parses_chart_and_history(monkeypatch):
  import json
  from plugins.yahoo.plugin import YahooProvider
@@ -351,3 +399,39 @@ def test_cnbc_parses_gilt_quote(monkeypatch):
  assert len(out)==1 and out[0].value==pytest.approx(5.377)
  assert CnbcProvider({}).fetch_history('GB10Y',date(2026,9,1),date(2026,9,30))==[]
  with pytest.raises(ValueError): CnbcProvider({}).validate_symbol('')
+def test_catalog_napoleon_and_nasdaq():
+ import yaml
+ catalog=yaml.safe_load((Path(__file__).resolve().parents[1]/'catalog.yaml').read_text())
+ by_id={v['id']:v for v in catalog['variables']}
+ assert by_id['napoleon']['provider']=='bdor' and by_id['napoleon']['symbol']=='20-francs-napoleon-or' and by_id['napoleon']['unit']=='EUR'
+ assert by_id['nasdaq']['provider']=='yahoo' and by_id['nasdaq']['symbol']=='^IXIC' and by_id['nasdaq']['unit']=='USD'
+ assert 'gold' not in by_id
+ topics={t['id'] for t in catalog['news_topics']}
+ assert {'napoleon_or','nasdaq_stocks'} <= topics
+ for vid in ('napoleon','nasdaq'):
+  for t in by_id[vid]['news_topics']: assert t in topics
+def test_bdor_parses_fixing(monkeypatch):
+ from plugins.bdor.plugin import BdorProvider
+ import plugins.bdor.plugin as bdor_mod
+ from plugins.base.plugin import ProviderError
+ html=('Actualisation en direct - 02/10/2026 ... '
+  '<a href=\"/produits/20-francs-napoleon-or\">20 Francs Napoléon Or</a> ... '
+  '<span class=\"prixAffiche\"> 716,90 € </span>')
+ monkeypatch.setattr(bdor_mod,'get',lambda *a,**k: html)
+ obs=BdorProvider({}).fetch_latest('20-francs-napoleon-or')
+ assert obs.value==pytest.approx(716.9) and obs.source=='bdor' and str(obs.date)=='2026-10-02'
+ assert BdorProvider({}).fetch_history('20-francs-napoleon-or',date(2026,10,1),date(2026,10,3))[0].value==pytest.approx(716.9)
+ with pytest.raises(ProviderError): BdorProvider({}).fetch_latest('no-such-product')
+ monkeypatch.setattr(bdor_mod,'get',lambda *a,**k: '<html><body>bot check</body></html>')
+ with pytest.raises(ProviderError,match='unexpected format'): BdorProvider({}).fetch_latest('20-francs-napoleon-or')
+ with pytest.raises(ValueError): BdorProvider({}).validate_symbol('has space')
+def test_yahoo_quotes_index_symbols(monkeypatch):
+ from plugins.yahoo.plugin import YahooProvider
+ import plugins.yahoo.plugin as yahoo_mod
+ seen={}
+ def fake_get(url,*a,**k):
+  seen['url']=url
+  return '{\"chart\":{\"result\":[{\"meta\":{\"regularMarketPrice\":27190.86,\"regularMarketTime\":1790947800}}],\"error\":null}}'
+ monkeypatch.setattr(yahoo_mod,'get',fake_get)
+ obs=YahooProvider({}).fetch_latest('^IXIC')
+ assert obs.value==pytest.approx(27190.86) and '%5EIXIC' in seen['url']

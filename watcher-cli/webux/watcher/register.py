@@ -41,9 +41,16 @@ def _failure(proc: subprocess.CompletedProcess) -> str:
 def dashboard(
     last: int = Query(3, ge=0, le=50),
     profile: str | None = Query(None),
+    refresh: bool = Query(False),
 ) -> dict:
-    """Live watchlist values plus latest news (mirrors `watcher dashboard --json`)."""
-    proc = _run_watcher("dashboard", "--json", "--last", str(last), profile=profile)
+    """Live watchlist values plus latest news (mirrors `watcher dashboard --json`).
+
+    Without refresh=true, values fetched less than 1h ago are served from storage.
+    """
+    args = ["dashboard", "--json", "--last", str(last)]
+    if refresh:
+        args.append("--refresh")
+    proc = _run_watcher(*args, profile=profile)
     try:
         data = json.loads(proc.stdout)
     except Exception as exc:
@@ -160,14 +167,21 @@ function cardBody(r) {
   return `<div class="card-value">${esc(display(r.value, r.unit))}${r.stale ? '<span class="stale">STALE</span>' : ''}</div>${alt}`;
 }
 function esc(s) { return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
-function display(v, unit) { return unit === 'percent' ? String(v) + '%' : Number(v).toFixed(2) + ' ' + unit; }
+function display(v, unit) {
+  if (unit === 'percent') return String(v) + '%';
+  const a = Math.abs(v);
+  if (a >= 1e9) return (v/1e9).toFixed(2) + 'B ' + unit;
+  if (a >= 1e6) return (v/1e6).toFixed(2) + 'M ' + unit;
+  if (a >= 1e3) return (v/1e3).toFixed(2) + 'K ' + unit;
+  return Number(v).toFixed(2) + ' ' + unit;
+}
 function fmtChange(r) {
   if (r.change_abs == null) return '<span class="dim">—</span>';
   const cls = r.change_abs >= 0 ? 'up' : 'down';
   const sign = r.change_abs >= 0 ? '+' : '';
   return `<span class="${cls}">${sign}${r.change_abs} (${sign}${r.change_pct.toFixed(2)}%)</span>`;
 }
-async function load() {
+async function load(force) {
   detail.style.display = 'none';
   selectedId = null;
   lastVars = {};
@@ -176,6 +190,7 @@ async function load() {
   const last = document.getElementById('last').value;
   const profile = document.getElementById('profile').value.trim();
   const params = new URLSearchParams({last});
+  if (force) params.set('refresh', '1');
   if (profile) params.set('profile', profile);
   let data;
   try {
@@ -258,10 +273,10 @@ async function loadDetailNews(id, profile) {
     box.innerHTML = `<span class="err">News failed: ${esc(e.message)}</span>`;
   }
 }
-document.getElementById('refresh').onclick = load;
-document.getElementById('last').onchange = load;
+document.getElementById('refresh').onclick = () => load(true);
+document.getElementById('last').onchange = () => load(false);
 document.getElementById('detailClose').onclick = () => { detail.style.display = 'none'; selectedId = null; out.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected')); };
-load();
+load(false);
 </script>
 </body></html>
 """

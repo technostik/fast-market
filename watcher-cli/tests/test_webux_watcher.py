@@ -46,6 +46,20 @@ def test_frontend_card_split_layout():
     assert "secondary_value" in html and "toFixed(2)" in html
 
 
+def test_dashboard_refresh_forwarded_to_cli(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"variables": [], "news": []}), "")
+
+    monkeypatch.setattr(watcher_mod.subprocess, "run", fake_run)
+    assert TestClient(_app()).get("/dashboard", params={"refresh": "true"}).status_code == 200
+    assert "--refresh" in seen["cmd"]
+    assert TestClient(_app()).get("/dashboard").status_code == 200
+    assert "--refresh" not in seen["cmd"]
+
+
 def test_dashboard_passthrough(monkeypatch):
     payload = {"generated_at": "x", "variables": [{"id": "oat_10y"}], "news": []}
     c = _client(monkeypatch, stdout=json.dumps(payload))

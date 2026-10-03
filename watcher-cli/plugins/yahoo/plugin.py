@@ -2,11 +2,12 @@ from __future__ import annotations
 import calendar
 import json
 from datetime import date,datetime,timezone
+from urllib.parse import quote as urlquote
 from core.http import get
 from plugins.base.plugin import Observation,ProviderDescriptor,ProviderError
 _UA={'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'}
 def _chart(symbol,params):
- data=json.loads(get(f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}',params=params,headers=_UA))
+ data=json.loads(get(f'https://query1.finance.yahoo.com/v8/finance/chart/{urlquote(symbol,safe="")}',params=params,headers=_UA))
  chart=data.get('chart') if isinstance(data,dict) else None
  if not chart: raise ProviderError(f'Yahoo returned unexpected format for {symbol!r}')
  if chart.get('error'): raise ProviderError(f"Yahoo error for {symbol!r}: {chart['error']}")
