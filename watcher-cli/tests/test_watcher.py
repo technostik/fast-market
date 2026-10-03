@@ -410,6 +410,8 @@ def test_catalog_napoleon_and_nasdaq():
  assert {'napoleon_or','nasdaq_stocks'} <= topics
  for vid in ('napoleon','nasdaq'):
   for t in by_id[vid]['news_topics']: assert t in topics
+ for vid in ('oat_10y','us_10y','uk_10y','de_10y','brent','wti','napoleon','nasdaq','bitcoin','spacex','eurusd'):
+  assert by_id[vid].get('icon'), vid
 def test_bdor_parses_fixing(monkeypatch):
  from plugins.bdor.plugin import BdorProvider
  import plugins.bdor.plugin as bdor_mod
@@ -435,3 +437,17 @@ def test_yahoo_quotes_index_symbols(monkeypatch):
  monkeypatch.setattr(yahoo_mod,'get',fake_get)
  obs=YahooProvider({}).fetch_latest('^IXIC')
  assert obs.value==pytest.approx(27190.86) and '%5EIXIC' in seen['url']
+def test_variable_icon_config_and_result(tmp_path):
+ from core.config import load_config
+ from core.models import Variable as Var
+ from core.services import latest
+ path=tmp_path/'watcher.yaml'
+ path.write_text('version: 1\nvariables: [{id: x, label: X, provider: test, symbol: s, unit: USD, icon: "🚀"}]\nnews_topics: []\nfeeds: []\n')
+ variables,_,_=load_config({'test':Provider()},path)
+ assert variables[0].icon=='🚀'
+ path.write_text('version: 1\nvariables: [{id: x, label: X, provider: test, symbol: s, unit: USD}]\nnews_topics: []\nfeeds: []\n')
+ assert load_config({'test':Provider()},path)[0][0].icon==''
+ db=connection(tmp_path/'icon.sqlite3')
+ upsert(db,Observation('eurusd',date(2026,10,2),1.10,'USD/EUR','yahoo',datetime.now(timezone.utc)))
+ res=latest([Var('x','X','test','s','USD',30,(),'🚀')],{'test':_live_provider(1.0,date(2026,10,2))},db)
+ assert res[0].icon=='🚀' and res[0].secondary_unit=='EUR'

@@ -12,7 +12,7 @@ def duration_days(value: str)->int:
  return int(m.group(1))*{'h':1,'d':1,'m':30,'y':365}[m.group(2)]
 class VariableFile(BaseModel):
  model_config=ConfigDict(extra='forbid')
- id:str; label:str; provider:str; symbol:str; unit:str; max_age:str='1d'; news_topics:list[str]=Field(default_factory=list)
+ id:str; label:str; provider:str; symbol:str; unit:str; max_age:str='1d'; news_topics:list[str]=Field(default_factory=list); icon:str=''
  @field_validator('id')
  @classmethod
  def identifier(cls,v):
@@ -62,6 +62,6 @@ def load_config(registry: dict, path:Path|None=None)->tuple[list[Variable],list[
   if v.provider not in registry: raise ValueError(f"Variable '{v.id}' uses unknown provider '{v.provider}'.")
   try: registry[v.provider].validate_symbol(v.symbol)
   except Exception as exc: raise ValueError(f"Variable '{v.id}' has invalid {v.provider} symbol '{v.symbol}': {exc}") from exc
- return ([Variable(v.id,v.label,v.provider,v.symbol,v.unit,duration_days(v.max_age),tuple(v.news_topics)) for v in parsed.variables], [Topic(t.id,t.label,t.query,t.lang) for t in parsed.news_topics], parsed.feeds)
+ return ([Variable(v.id,v.label,v.provider,v.symbol,v.unit,duration_days(v.max_age),tuple(v.news_topics),v.icon) for v in parsed.variables], [Topic(t.id,t.label,t.query,t.lang) for t in parsed.news_topics], parsed.feeds)
 def write_config(data:dict,path:Path|None=None)->None:
  p=path or config_path(); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(yaml.safe_dump(data,sort_keys=False))

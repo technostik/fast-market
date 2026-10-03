@@ -44,6 +44,10 @@ def test_frontend_card_split_layout():
     assert "<table" not in html and "showHistory" not in html
     assert "/api/watcher/history" in html and "/api/watcher/news" in html
     assert "secondary_value" in html and "toFixed(2)" in html
+    assert "card-icon" in html and "newsPager" in html
+    assert "showGlobalNews" in html and "detailChart" in html
+    assert "pgFirst" in html and "pgNext" in html
+    assert "detailGlobal" in html
 
 
 def test_dashboard_refresh_forwarded_to_cli(monkeypatch):

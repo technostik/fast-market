@@ -117,6 +117,7 @@ h2 { margin:0 0 12px 0; }
 .card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .card-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
 .card-id { font-weight:700; }
+.card-icon { font-size:20px; margin-right:6px; }
 .card-label { font-size:12px; margin-top:2px; }
 .card-value { font-size:20px; font-weight:700; margin:8px 0 4px 0; font-variant-numeric:tabular-nums; }
 .card-foot { display:flex; justify-content:space-between; gap:8px; font-size:12px; margin-top:6px; }
@@ -129,7 +130,8 @@ h2 { margin:0 0 12px 0; }
 .news a { color:var(--text); text-decoration:none; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 12px; display:block; }
 .news a:hover { border-color:var(--accent); }
 .news .meta { color:var(--text-dim); font-size:12px; margin-bottom:2px; }
-#detail { flex:0 0 380px; width:380px; max-width:42%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; display:none; position:sticky; top:12px; }
+#detail { flex:0 0 460px; width:460px; max-width:48%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; display:none; position:sticky; top:12px; }
+#newsPager { margin:8px 0 0 0; }
 @media (max-width:900px) { .split { flex-direction:column; } #detail { flex:1 1 auto; width:100%; max-width:none; position:static; } }
 #spinner { color:var(--text-dim); padding:24px; text-align:center; }
 </style></head>
@@ -137,8 +139,6 @@ h2 { margin:0 0 12px 0; }
 <main class="webux-page">
   <h2>📈 Watcher</h2>
   <div class="row">
-    <label class="dim">News:</label>
-    <select id="last"><option value="0">0</option><option value="3" selected>3</option><option value="5">5</option><option value="10">10</option></select>
     <label class="dim">Profile:</label>
     <input id="profile" placeholder="(active)" style="width:120px;">
     <button id="refresh">🔄 Refresh</button>
@@ -146,17 +146,48 @@ h2 { margin:0 0 12px 0; }
   </div>
   <div class="split">
     <div id="out"><div id="spinner">Loading…</div></div>
-    <div id="detail"><div class="row"><strong id="detailTitle"></strong><span class="dim" id="detailMeta"></span><button id="detailClose">✕</button></div><div class="dim" id="detailStats"></div><canvas id="spark" width="640" height="160" style="width:100%;height:160px;"></canvas><h4 style="margin:12px 0 6px 0;">📰 News for <span id="detailNewsTitle"></span></h4><div class="news" id="detailNews" style="margin-top:0;"></div></div>
+    <div id="detail"><div class="row"><strong id="detailTitle"></strong><span class="dim" id="detailMeta"></span><button id="detailGlobal" title="Back to global news" style="display:none;">⇤ All news</button></div><div id="detailChart"><div class="dim" id="detailStats"></div><canvas id="spark" width="640" height="160" style="width:100%;height:160px;"></canvas><h4 style="margin:12px 0 6px 0;">📰 News for <span id="detailNewsTitle"></span></h4></div><div class="news" id="detailNews" style="margin-top:0;"></div><div class="row" id="newsPager" style="display:none;"><button id="pgFirst" title="Back to start">⇤</button><button id="pgPrev" title="Previous 5">‹</button><span class="dim" id="pgInfo"></span><button id="pgNext" title="Next 5">›</button></div></div>
   </div>
-  <h3>📰 News</h3>
-  <div class="news" id="news"></div>
 </main>
 <script>
 const out = document.getElementById('out');
-const newsEl = document.getElementById('news');
 const detail = document.getElementById('detail');
 let selectedId = null;
 let lastVars = {};
+let globalNews = [];
+let newsList = [];
+let newsPage = 0;
+const PAGE_SIZE = 5;
+function newsItem(n) {
+  return `<a href="${esc(n.url || '#')}" target="_blank" rel="noopener"><div class="meta">${esc(n.published_at || '')} · ${esc(n.source || '')}</div>${esc(n.title || '')}</a>`;
+}
+function renderNewsPage() {
+  const box = document.getElementById('detailNews');
+  const pager = document.getElementById('newsPager');
+  const total = newsList.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  newsPage = Math.min(Math.max(0, newsPage), pages - 1);
+  const start = newsPage * PAGE_SIZE;
+  const slice = newsList.slice(start, start + PAGE_SIZE);
+  box.innerHTML = slice.length ? slice.map(newsItem).join('') : '<span class="dim">No news.</span>';
+  pager.style.display = total > PAGE_SIZE ? 'flex' : 'none';
+  document.getElementById('pgInfo').textContent = total ? `${start + 1}–${start + slice.length} of ${total}` : '';
+  document.getElementById('pgFirst').disabled = newsPage === 0;
+  document.getElementById('pgPrev').disabled = newsPage === 0;
+  document.getElementById('pgNext').disabled = newsPage >= pages - 1;
+}
+function showGlobalNews() {
+  selectedId = null;
+  out.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+  document.getElementById('detailTitle').textContent = '📰 Latest news';
+  document.getElementById('detailMeta').textContent = '';
+  document.getElementById('detailGlobal').style.display = 'none';
+  document.getElementById('detailChart').style.display = 'none';
+  newsList = globalNews;
+  newsPage = 0;
+  renderNewsPage();
+  detail.style.display = 'block';
+}
 function cardBody(r) {
   const alt = (r.secondary_value != null && r.secondary_unit) ? `<div class="dim">≈ ${esc(display(r.secondary_value, r.secondary_unit))}</div>` : '';
   if (r.error && r.value != null) {
@@ -186,10 +217,8 @@ async function load(force) {
   selectedId = null;
   lastVars = {};
   out.innerHTML = '<div id="spinner">Loading…</div>';
-  newsEl.innerHTML = '';
-  const last = document.getElementById('last').value;
   const profile = document.getElementById('profile').value.trim();
-  const params = new URLSearchParams({last});
+  const params = new URLSearchParams({last: '50'});
   if (force) params.set('refresh', '1');
   if (profile) params.set('profile', profile);
   let data;
@@ -205,24 +234,25 @@ async function load(force) {
   const vars = data.variables || [];
   vars.forEach(r => { lastVars[r.id] = r; });
   out.innerHTML = vars.length ? `<div class="cards-grid">` + vars.map(r => {
-    return `<article class="card" data-id="${esc(r.id)}" tabindex="0" role="button" aria-label="${esc(r.id)} ${esc(r.label || '')}"><div class="card-head"><span class="card-id">${esc(r.id)}</span><span class="dim">${esc(r.source || '')}</span></div><div class="card-label dim">${esc(r.label || '')}</div>${cardBody(r)}<div class="card-foot"><span>${fmtChange(r)}</span><span class="dim">${esc(r.as_of || '—')}</span></div></article>`;
+    return `<article class="card" data-id="${esc(r.id)}" tabindex="0" role="button" aria-label="${esc(r.id)} ${esc(r.label || '')}"><div class="card-head"><span class="card-id">${r.icon ? `<span class="card-icon">${esc(r.icon)}</span>` : ''}${esc(r.id)}</span><span class="dim">${esc(r.source || '')}</span></div><div class="card-label dim">${esc(r.label || '')}</div>${cardBody(r)}<div class="card-foot"><span>${fmtChange(r)}</span><span class="dim">${esc(r.as_of || '—')}</span></div></article>`;
   }).join('') + `</div>` : '<span class="dim">No variables.</span>';
   out.querySelectorAll('.card').forEach(card => {
-    card.onclick = () => selectVariable(card.dataset.id, profile);
-    card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectVariable(card.dataset.id, profile); } };
+    const pick = () => { if (card.dataset.id === selectedId) showGlobalNews(); else selectVariable(card.dataset.id, profile); };
+    card.onclick = pick;
+    card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
   });
-  const items = data.news || [];
-  newsEl.innerHTML = items.length ? items.map(n =>
-    `<a href="${esc(n.url || '#')}" target="_blank" rel="noopener"><div class="meta">${esc(n.published_at || '')} · ${esc(n.source || '')}</div>${esc(n.title || '')}</a>`
-  ).join('') : '<span class="dim">No news.</span>';
+  globalNews = data.news || [];
+  showGlobalNews();
 }
 async function selectVariable(id, profile) {
   selectedId = id;
   out.querySelectorAll('.card').forEach(c => c.classList.toggle('selected', c.dataset.id === id));
   const meta = lastVars[id] || {};
-  document.getElementById('detailTitle').textContent = id;
+  document.getElementById('detailTitle').textContent = (meta.icon ? meta.icon + ' ' : '') + id;
   document.getElementById('detailMeta').textContent = [meta.label, meta.as_of ? ('as of ' + meta.as_of) : null, meta.source].filter(Boolean).join(' · ') || 'loading…';
+  document.getElementById('detailGlobal').style.display = '';
   document.getElementById('detailStats').textContent = 'loading…';
+  document.getElementById('detailChart').style.display = 'block';
   detail.style.display = 'block';
   try { detail.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } catch (e) {}
   loadDetailNews(id, profile);
@@ -256,26 +286,29 @@ async function selectVariable(id, profile) {
   ctx.stroke();
 }
 async function loadDetailNews(id, profile) {
-  const box = document.getElementById('detailNews');
   document.getElementById('detailNewsTitle').textContent = id;
-  box.innerHTML = '<span class="dim">Loading news…</span>';
-  const params = new URLSearchParams({variable: id, limit: '10'});
+  newsList = [];
+  newsPage = 0;
+  document.getElementById('detailNews').innerHTML = '<span class="dim">Loading news…</span>';
+  document.getElementById('newsPager').style.display = 'none';
+  const params = new URLSearchParams({variable: id, limit: '50'});
   if (profile) params.set('profile', profile);
   try {
     const r = await fetch('/api/watcher/news?' + params.toString());
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
-    const items = data.news || [];
-    box.innerHTML = items.length ? items.map(n =>
-      `<a href="${esc(n.url || '#')}" target="_blank" rel="noopener"><div class="meta">${esc(n.published_at || '')} · ${esc(n.source || '')}</div>${esc(n.title || '')}</a>`
-    ).join('') : '<span class="dim">No news for this variable.</span>';
+    newsList = data.news || [];
+    newsPage = 0;
+    renderNewsPage();
   } catch (e) {
-    box.innerHTML = `<span class="err">News failed: ${esc(e.message)}</span>`;
+    document.getElementById('detailNews').innerHTML = `<span class="err">News failed: ${esc(e.message)}</span>`;
   }
 }
 document.getElementById('refresh').onclick = () => load(true);
-document.getElementById('last').onchange = () => load(false);
-document.getElementById('detailClose').onclick = () => { detail.style.display = 'none'; selectedId = null; out.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected')); };
+document.getElementById('detailGlobal').onclick = () => showGlobalNews();
+document.getElementById('pgFirst').onclick = () => { newsPage = 0; renderNewsPage(); };
+document.getElementById('pgPrev').onclick = () => { newsPage = Math.max(0, newsPage - 1); renderNewsPage(); };
+document.getElementById('pgNext').onclick = () => { newsPage = newsPage + 1; renderNewsPage(); };
 load(false);
 </script>
 </body></html>

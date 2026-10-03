@@ -1,15 +1,15 @@
 variables:
-  - {id: oat_10y, label: "France 10-year constant maturity rate (TEC10, daily, Banque de France)", provider: bdf, symbol: "FM.D.FR.EUR.FR2.BB.FRMOYTEC10.HSTA", unit: "percent", max_age: 5d, news_topics: [france_debt_ecb]}
-  - {id: us_10y, label: "USA 10-year Treasury yield (DGS10, daily, FRED)", provider: fred, symbol: "DGS10", unit: "percent", max_age: 5d, news_topics: [us_treasury_fed]}
-  - {id: uk_10y, label: "UK 10-year Gilt yield (GB10Y, daily, CNBC)", provider: cnbc, symbol: "GB10Y", unit: "percent", max_age: 5d, news_topics: [uk_gilts]}
-  - {id: de_10y, label: "Germany 10-year Bund yield (MTS, daily, Yahoo)", provider: yahoo, symbol: "MDE10.AS", unit: "percent", max_age: 5d, news_topics: [german_bunds]}
-  - {id: brent, label: "Brent crude oil spot", provider: fred, symbol: "DCOILBRENTEU", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
-  - {id: wti, label: "WTI crude oil spot", provider: fred, symbol: "DCOILWTICO", unit: "USD/bbl", max_age: 5d, news_topics: [oil_opec]}
-  - {id: napoleon, label: "Napoléon 20 Francs (fixing, daily, BdOR)", provider: bdor, symbol: "20-francs-napoleon-or", unit: "EUR", max_age: 5d, news_topics: [napoleon_or]}
-  - {id: nasdaq, label: "Nasdaq Composite (daily, Yahoo)", provider: yahoo, symbol: "^IXIC", unit: "USD", max_age: 5d, news_topics: [nasdaq_stocks]}
-  - {id: bitcoin, label: "Bitcoin (EUR)", provider: kraken, symbol: "bitcoin:eur", unit: "EUR", max_age: 1d, news_topics: [bitcoin_regulation]}
-  - {id: spacex, label: "SpaceX (SPCX, Nasdaq, daily, Yahoo)", provider: yahoo, symbol: "SPCX", unit: "USD", max_age: 5d, news_topics: [spacex_spcx]}
-  - {id: eurusd, label: "Euro/US Dollar spot (daily, Yahoo)", provider: yahoo, symbol: "EURUSD=X", unit: "USD/EUR", max_age: 5d, news_topics: [eur_usd_fx]}
+  - {id: oat_10y, label: "France 10-year constant maturity rate (TEC10, daily, Banque de France)", provider: bdf, symbol: "FM.D.FR.EUR.FR2.BB.FRMOYTEC10.HSTA", unit: "percent", max_age: 5d, icon: "🇫🇷", news_topics: [france_debt_ecb]}
+  - {id: us_10y, label: "USA 10-year Treasury yield (DGS10, daily, FRED)", provider: fred, symbol: "DGS10", unit: "percent", max_age: 5d, icon: "🇺🇸", news_topics: [us_treasury_fed]}
+  - {id: uk_10y, label: "UK 10-year Gilt yield (GB10Y, daily, CNBC)", provider: cnbc, symbol: "GB10Y", unit: "percent", max_age: 5d, icon: "🇬🇧", news_topics: [uk_gilts]}
+  - {id: de_10y, label: "Germany 10-year Bund yield (MTS, daily, Yahoo)", provider: yahoo, symbol: "MDE10.AS", unit: "percent", max_age: 5d, icon: "🇩🇪", news_topics: [german_bunds]}
+  - {id: brent, label: "Brent crude oil spot", provider: fred, symbol: "DCOILBRENTEU", unit: "USD/bbl", max_age: 5d, icon: "🛢️", news_topics: [oil_opec]}
+  - {id: wti, label: "WTI crude oil spot", provider: fred, symbol: "DCOILWTICO", unit: "USD/bbl", max_age: 5d, icon: "⛽", news_topics: [oil_opec]}
+  - {id: napoleon, label: "Napoléon 20 Francs (fixing, daily, BdOR)", provider: bdor, symbol: "20-francs-napoleon-or", unit: "EUR", max_age: 5d, icon: "🪙", news_topics: [napoleon_or]}
+  - {id: nasdaq, label: "Nasdaq Composite (daily, Yahoo)", provider: yahoo, symbol: "^IXIC", unit: "USD", max_age: 5d, icon: "📊", news_topics: [nasdaq_stocks]}
+  - {id: bitcoin, label: "Bitcoin (EUR)", provider: kraken, symbol: "bitcoin:eur", unit: "EUR", max_age: 1d, icon: "₿", news_topics: [bitcoin_regulation]}
+  - {id: spacex, label: "SpaceX (SPCX, Nasdaq, daily, Yahoo)", provider: yahoo, symbol: "SPCX", unit: "USD", max_age: 5d, icon: "🚀", news_topics: [spacex_spcx]}
+  - {id: eurusd, label: "Euro/US Dollar spot (daily, Yahoo)", provider: yahoo, symbol: "EURUSD=X", unit: "USD/EUR", max_age: 5d, icon: "💶", news_topics: [eur_usd_fx]}
 news_topics:
   - {id: france_debt_ecb, label: "French public debt & ECB", query: "France public debt ECB", lang: en}
   - {id: us_treasury_fed, label: "US Treasuries & Fed", query: "US Treasury yield Federal Reserve", lang: en}

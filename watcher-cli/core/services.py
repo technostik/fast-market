@@ -34,7 +34,7 @@ def latest(variables,providers,db,force=False):
    for r in reversed(rows[:-1]):
     if r.date != c.date: prior=r; break
    change=None if not prior else c.value-prior.value
-   results.append(VariableResult(v.id,v.label,c.value,v.unit,c.date,c.source,change,None if not prior or prior.value==0 else change/prior.value*100,(date.today()-c.date).days>v.max_age_days,None))
+   results.append(VariableResult(v.id,v.label,c.value,v.unit,c.date,c.source,change,None if not prior or prior.value==0 else change/prior.value*100,(date.today()-c.date).days>v.max_age_days,None,icon=v.icon))
    continue
   try:
    p=providers[v.provider]
@@ -46,14 +46,14 @@ def latest(variables,providers,db,force=False):
    for r in reversed(rows):
     if r.date != o.date: prior=r; break
    change=None if not prior else o.value-prior.value
-   results.append(VariableResult(v.id,v.label,o.value,v.unit,o.date,o.source,change,None if not prior or prior.value==0 else change/prior.value*100,(date.today()-o.date).days>v.max_age_days,None))
+   results.append(VariableResult(v.id,v.label,o.value,v.unit,o.date,o.source,change,None if not prior or prior.value==0 else change/prior.value*100,(date.today()-o.date).days>v.max_age_days,None,icon=v.icon))
   except Exception as exc:
    if rows:
     c=rows[-1]; prior=None
     for r in reversed(rows[:-1]):
      if r.date != c.date: prior=r; break
     change=None if not prior else c.value-prior.value
-    results.append(VariableResult(v.id,v.label,c.value,v.unit,c.date,c.source,change,None if not prior or prior.value==0 else change/prior.value*100,True,str(exc)))
+    results.append(VariableResult(v.id,v.label,c.value,v.unit,c.date,c.source,change,None if not prior or prior.value==0 else change/prior.value*100,True,str(exc),icon=v.icon))
    else: results.append(VariableResult(v.id,v.label,None,v.unit,None,v.provider,None,None,False,str(exc)))
  try: fx=observations(db,'eurusd')[-1:]
  except Exception: fx=[]
