@@ -101,11 +101,18 @@ button { cursor:pointer; }
 button:hover { background:var(--accent); }
 h2 { margin:0 0 12px 0; }
 .row { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
-table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
-th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); font-size:14px; }
-th { color:var(--text-dim); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
-tr.clickable { cursor:pointer; }
-tr.clickable:hover td { background:rgba(255,255,255,.03); }
+.split { display:flex; gap:12px; align-items:flex-start; }
+#out { flex:1 1 auto; min-width:0; }
+.cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; cursor:pointer; }
+.card:hover { border-color:var(--accent); }
+.card.selected { border-color:var(--accent); }
+.card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.card-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.card-id { font-weight:700; }
+.card-label { font-size:12px; margin-top:2px; }
+.card-value { font-size:20px; font-weight:700; margin:8px 0 4px 0; font-variant-numeric:tabular-nums; }
+.card-foot { display:flex; justify-content:space-between; gap:8px; font-size:12px; margin-top:6px; }
 .val { font-weight:700; font-variant-numeric:tabular-nums; }
 .up { color:var(--success); } .down { color:var(--error); }
 .stale { color:var(--warning); font-size:11px; font-weight:700; margin-left:6px; }
@@ -115,7 +122,8 @@ tr.clickable:hover td { background:rgba(255,255,255,.03); }
 .news a { color:var(--text); text-decoration:none; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 12px; display:block; }
 .news a:hover { border-color:var(--accent); }
 .news .meta { color:var(--text-dim); font-size:12px; margin-bottom:2px; }
-#hist { margin-top:8px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; display:none; }
+#detail { flex:0 0 380px; width:380px; max-width:42%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; display:none; position:sticky; top:12px; }
+@media (max-width:900px) { .split { flex-direction:column; } #detail { flex:1 1 auto; width:100%; max-width:none; position:static; } }
 #spinner { color:var(--text-dim); padding:24px; text-align:center; }
 </style></head>
 <body>
@@ -129,14 +137,27 @@ tr.clickable:hover td { background:rgba(255,255,255,.03); }
     <button id="refresh">🔄 Refresh</button>
     <span class="dim" id="generated"></span>
   </div>
-  <div id="out"><div id="spinner">Loading…</div></div>
-  <div id="hist"><div class="row"><strong id="histTitle"></strong><span class="dim" id="histStats"></span><button id="histClose">✕</button></div><canvas id="spark" width="640" height="160" style="width:100%;height:160px;"></canvas><h4 style="margin:12px 0 6px 0;">📰 News for <span id="histNewsTitle"></span></h4><div class="news" id="histNews" style="margin-top:0;"></div></div>
+  <div class="split">
+    <div id="out"><div id="spinner">Loading…</div></div>
+    <div id="detail"><div class="row"><strong id="detailTitle"></strong><span class="dim" id="detailMeta"></span><button id="detailClose">✕</button></div><div class="dim" id="detailStats"></div><canvas id="spark" width="640" height="160" style="width:100%;height:160px;"></canvas><h4 style="margin:12px 0 6px 0;">📰 News for <span id="detailNewsTitle"></span></h4><div class="news" id="detailNews" style="margin-top:0;"></div></div>
+  </div>
   <h3>📰 News</h3>
   <div class="news" id="news"></div>
 </main>
 <script>
 const out = document.getElementById('out');
 const newsEl = document.getElementById('news');
+const detail = document.getElementById('detail');
+let selectedId = null;
+let lastVars = {};
+function cardBody(r) {
+  if (r.error && r.value != null) {
+    return `<div class="card-value">${esc(display(r.value, r.unit))}<span class="stale">STALE</span></div><div class="err">WARNING: ${esc(r.error)}</div>`;
+  } else if (r.error) {
+    return `<div class="err">ERROR: ${esc(r.error)}</div>`;
+  }
+  return `<div class="card-value">${esc(display(r.value, r.unit))}${r.stale ? '<span class="stale">STALE</span>' : ''}</div>`;
+}
 function esc(s) { return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
 function display(v, unit) { return unit === 'percent' ? String(v) + '%' : String(v) + ' ' + unit; }
 function fmtChange(r) {
@@ -146,6 +167,9 @@ function fmtChange(r) {
   return `<span class="${cls}">${sign}${r.change_abs} (${sign}${r.change_pct.toFixed(2)}%)</span>`;
 }
 async function load() {
+  detail.style.display = 'none';
+  selectedId = null;
+  lastVars = {};
   out.innerHTML = '<div id="spinner">Loading…</div>';
   newsEl.innerHTML = '';
   const last = document.getElementById('last').value;
@@ -162,30 +186,30 @@ async function load() {
     return;
   }
   document.getElementById('generated').textContent = 'updated ' + (data.generated_at || '').slice(0, 19).replace('T', ' ');
-  const rows = (data.variables || []).map(r => {
-    let body;
-    if (r.error && r.value != null) {
-      body = `<span class="val">${esc(display(r.value, r.unit))}</span><span class="stale">STALE</span><br><span class="err">WARNING: ${esc(r.error)}</span>`;
-    } else if (r.error) {
-      body = `<span class="err">ERROR: ${esc(r.error)}</span>`;
-    } else {
-      body = `<span class="val">${esc(display(r.value, r.unit))}</span>${r.stale ? '<span class="stale">STALE</span>' : ''}`;
-    }
-    return `<tr class="clickable" data-id="${esc(r.id)}"><td><strong>${esc(r.id)}</strong><br><span class="dim">${esc(r.label || '')}</span></td><td>${body}</td><td>${fmtChange(r)}</td><td>${esc(r.as_of || '—')}</td><td class="dim">${esc(r.source || '')}</td></tr>`;
-  }).join('');
-  out.innerHTML = `<table><thead><tr><th>Variable</th><th>Value</th><th>Change</th><th>As of</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table>`;
-  out.querySelectorAll('tr.clickable').forEach(tr => { tr.onclick = () => showHistory(tr.dataset.id, profile); });
+  const vars = data.variables || [];
+  vars.forEach(r => { lastVars[r.id] = r; });
+  out.innerHTML = vars.length ? `<div class="cards-grid">` + vars.map(r => {
+    return `<article class="card" data-id="${esc(r.id)}" tabindex="0" role="button" aria-label="${esc(r.id)} ${esc(r.label || '')}"><div class="card-head"><span class="card-id">${esc(r.id)}</span><span class="dim">${esc(r.source || '')}</span></div><div class="card-label dim">${esc(r.label || '')}</div>${cardBody(r)}<div class="card-foot"><span>${fmtChange(r)}</span><span class="dim">${esc(r.as_of || '—')}</span></div></article>`;
+  }).join('') + `</div>` : '<span class="dim">No variables.</span>';
+  out.querySelectorAll('.card').forEach(card => {
+    card.onclick = () => selectVariable(card.dataset.id, profile);
+    card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectVariable(card.dataset.id, profile); } };
+  });
   const items = data.news || [];
   newsEl.innerHTML = items.length ? items.map(n =>
     `<a href="${esc(n.url || '#')}" target="_blank" rel="noopener"><div class="meta">${esc(n.published_at || '')} · ${esc(n.source || '')}</div>${esc(n.title || '')}</a>`
   ).join('') : '<span class="dim">No news.</span>';
 }
-async function showHistory(id, profile) {
-  const box = document.getElementById('hist');
-  document.getElementById('histTitle').textContent = id;
-  document.getElementById('histStats').textContent = 'loading…';
-  box.style.display = 'block';
-  box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+async function selectVariable(id, profile) {
+  selectedId = id;
+  out.querySelectorAll('.card').forEach(c => c.classList.toggle('selected', c.dataset.id === id));
+  const meta = lastVars[id] || {};
+  document.getElementById('detailTitle').textContent = id;
+  document.getElementById('detailMeta').textContent = [meta.label, meta.as_of ? ('as of ' + meta.as_of) : null, meta.source].filter(Boolean).join(' · ') || 'loading…';
+  document.getElementById('detailStats').textContent = 'loading…';
+  detail.style.display = 'block';
+  try { detail.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } catch (e) {}
+  loadDetailNews(id, profile);
   const params = new URLSearchParams({variable: id, since: '90d'});
   if (profile) params.set('profile', profile);
   let data;
@@ -194,14 +218,13 @@ async function showHistory(id, profile) {
     data = await r.json();
     if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
   } catch (e) {
-    document.getElementById('histStats').textContent = 'failed: ' + e.message;
+    document.getElementById('detailStats').textContent = 'failed: ' + e.message;
     return;
   }
   const obs = (data.observations || []).filter(o => o.value != null);
-  loadHistNews(id, profile);
-  if (!obs.length) { document.getElementById('histStats').textContent = 'no data'; return; }
+  if (!obs.length) { document.getElementById('detailStats').textContent = 'no data'; return; }
   const vals = obs.map(o => o.value);
-  document.getElementById('histStats').textContent =
+  document.getElementById('detailStats').textContent =
     `${obs[0].date} → ${obs[obs.length-1].date} · ${obs.length} pts · min ${Math.min(...vals)} · max ${Math.max(...vals)}`;
   const c = document.getElementById('spark'), ctx = c.getContext('2d');
   const W = c.width, H = c.height, P = 8;
@@ -216,9 +239,9 @@ async function showHistory(id, profile) {
   });
   ctx.stroke();
 }
-async function loadHistNews(id, profile) {
-  const box = document.getElementById('histNews');
-  document.getElementById('histNewsTitle').textContent = id;
+async function loadDetailNews(id, profile) {
+  const box = document.getElementById('detailNews');
+  document.getElementById('detailNewsTitle').textContent = id;
   box.innerHTML = '<span class="dim">Loading news…</span>';
   const params = new URLSearchParams({variable: id, limit: '10'});
   if (profile) params.set('profile', profile);
@@ -236,7 +259,7 @@ async function loadHistNews(id, profile) {
 }
 document.getElementById('refresh').onclick = load;
 document.getElementById('last').onchange = load;
-document.getElementById('histClose').onclick = () => { document.getElementById('hist').style.display = 'none'; };
+document.getElementById('detailClose').onclick = () => { detail.style.display = 'none'; selectedId = null; out.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected')); };
 load();
 </script>
 </body></html>

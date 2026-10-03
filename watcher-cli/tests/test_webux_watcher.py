@@ -35,6 +35,16 @@ def test_manifest_fields():
     assert "/watcher" in watcher_mod._HTML
 
 
+def test_frontend_card_split_layout():
+    html = watcher_mod._HTML
+    assert '<main class="webux-page">' in html
+    assert 'class="split"' in html and "cards-grid" in html
+    assert 'id="detail"' in html and 'id="detailNews"' in html
+    assert 'role="button"' in html and 'tabindex="0"' in html
+    assert "<table" not in html and "showHistory" not in html
+    assert "/api/watcher/history" in html and "/api/watcher/news" in html
+
+
 def test_dashboard_passthrough(monkeypatch):
     payload = {"generated_at": "x", "variables": [{"id": "oat_10y"}], "news": []}
     c = _client(monkeypatch, stdout=json.dumps(payload))
