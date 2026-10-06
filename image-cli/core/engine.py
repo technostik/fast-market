@@ -26,6 +26,7 @@ class ImageGenEngine:
         self,
         request: ImageGenRequest,
         output_dir: str | None = None,
+        verbose: bool = False,
     ) -> ImageGenResult:
         """Generate an image and save it to disk."""
         engine_name = request.engine or self.config.default_engine
@@ -69,7 +70,7 @@ class ImageGenEngine:
             engine=engine_name,
         )
 
-        image = plugin.generate(request)
+        image = plugin.generate(request, verbose=verbose)
 
         output_format = request.output_format or self.config.default_output_format
         output_dir_path = Path(output_dir or self.config.output_dir)

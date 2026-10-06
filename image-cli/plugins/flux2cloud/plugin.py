@@ -3,6 +3,9 @@ from __future__ import annotations
 import base64
 import io
 import random
+import socket
+import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -11,6 +14,9 @@ from PIL import Image
 
 from core.models import EngineConfig, ImageGenRequest
 from plugins.base import ImageEnginePlugin
+
+#: Socket timeout for the Cloudflare Workers AI POST + body read.
+API_TIMEOUT = 120
 
 
 def _encode_multipart(fields: dict[str, str], files: dict[str, bytes], boundary: str) -> bytes:
@@ -47,7 +53,7 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
             config = EngineConfig.from_dict(config)
         self.config = config
 
-    def generate(self, request: ImageGenRequest) -> Image.Image:
+    def generate(self, request: ImageGenRequest, verbose: bool = False) -> Image.Image:
         """Generate an image using Cloudflare Workers AI."""
         if not self.config.account_id:
             raise ValueError(
@@ -57,6 +63,12 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
             raise ValueError(
                 "flux2cloud: api_token is required in engines.flux2cloud config"
             )
+
+        def _vlog(message: str, elapsed: float | None = None) -> None:
+            if not verbose:
+                return
+            suffix = f" [{elapsed:.1f}s]" if elapsed is not None else ""
+            print(f"flux2cloud: {message}{suffix}", file=sys.stderr, flush=True)
 
         seed = request.seed
         if seed is None:
@@ -90,6 +102,13 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
             files[f"input_image_{idx}"] = buf.getvalue()
         body = _encode_multipart(fields, files, boundary)
 
+        _vlog(
+            f"calling API model={self.config.cf_model} "
+            f"{request.width}x{request.height} steps={request.num_inference_steps} "
+            f"refs={len(request.reference_images or [])} timeout={API_TIMEOUT}s"
+        )
+        _vlog(f"POST https://api.cloudflare.com/.../ai/run/{self.config.cf_model}")
+
         req = urllib.request.Request(
             url,
             data=body,
@@ -100,14 +119,29 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
             method="POST",
         )
 
+        api_start = time.monotonic()
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=API_TIMEOUT) as resp:
                 raw = resp.read()
         except urllib.error.HTTPError as exc:
+            elapsed = time.monotonic() - api_start
             body_err = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(
-                f"flux2cloud: Cloudflare API error {exc.code}: {body_err}"
+                f"flux2cloud: Cloudflare API error {exc.code} after {elapsed:.1f}s: {body_err}"
             ) from exc
+        except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
+            elapsed = time.monotonic() - api_start
+            reason = getattr(exc, "reason", exc)
+            raise RuntimeError(
+                f"flux2cloud: API read timed out after {elapsed:.1f}s "
+                f"(timeout={API_TIMEOUT}s, model={self.config.cf_model}, "
+                f"{request.width}x{request.height} steps={request.num_inference_steps}): "
+                f"{reason}. The request was sent but no complete response arrived — "
+                "likely Cloudflare queue/cold-start or network stall. "
+                "Retry, or rerun with --verbose to see timings."
+            ) from exc
+        elapsed = time.monotonic() - api_start
+        _vlog(f"API responded bytes={len(raw)}", elapsed)
 
         import json as _json
         payload = _json.loads(raw)

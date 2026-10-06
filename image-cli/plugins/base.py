@@ -15,7 +15,7 @@ class ImageEnginePlugin(ABC):
     name: str
 
     @abstractmethod
-    def generate(self, request: ImageGenRequest) -> Image.Image:
+    def generate(self, request: ImageGenRequest, verbose: bool = False) -> Image.Image:
         """Generate an image from the request."""
         raise NotImplementedError
 

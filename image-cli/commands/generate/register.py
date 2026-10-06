@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import click
@@ -187,6 +188,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Shift text + band downward by this %% of image height (e.g. 10 = +10%%)",
     )
+    @click.option(
+        "--verbose",
+        "-v",
+        is_flag=True,
+        default=False,
+        help="Show debug steps with timings on stderr.",
+    )
     @click.pass_context
     def generate_cmd(
         ctx,
@@ -215,12 +223,24 @@ def register(plugin_manifests: dict) -> CommandManifest:
         overlay_band_size,
         overlay_size_pct,
         overlay_offset,
+        verbose,
     ):
         """Generate an image from a text prompt."""
+        is_verbose = verbose or ctx.obj.get("verbose", False)
+        _start = time.monotonic()
+
+        def _vlog(message: str) -> None:
+            if is_verbose:
+                click.echo(
+                    f"[+{time.monotonic() - _start:.1f}s] {message}",
+                    err=True,
+                )
+
         engine_instance, plugins, config = build_engine(
-            verbose=ctx.obj["verbose"],
+            verbose=is_verbose,
             cache_pipeline=False,
         )
+        _vlog(f"[1/5] config loaded default_engine={config.default_engine}")
 
         actual_engine = engine or config.default_engine
         if actual_engine not in plugins:
@@ -282,9 +302,22 @@ def register(plugin_manifests: dict) -> CommandManifest:
             output_format=output_format or config.default_output_format,
             engine=actual_engine,
         )
+        _vlog(
+            f"[2/5] engine={actual_engine} size={actual_width}x{actual_height} "
+            f"steps={request.num_inference_steps} prompt_chars={len(prompt)} "
+            f"refs={len(ref_images or [])}"
+        )
 
         try:
-            result = engine_instance.generate(request, output_dir=output_dir)
+            _vlog(f"[3/5] calling {actual_engine} engine...")
+            _gen_start = time.monotonic()
+            result = engine_instance.generate(
+                request, output_dir=output_dir, verbose=is_verbose
+            )
+            _vlog(
+                f"[4/5] generation done in {time.monotonic() - _gen_start:.1f}s "
+                f"saved={result.path}"
+            )
             base_path = result.path
 
             if title:
@@ -332,9 +365,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 )
 
             out(result.to_dict(), fmt)
+            _vlog(f"[5/5] finished in {time.monotonic() - _start:.1f}s total")
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
-            if ctx.obj["verbose"]:
+            if is_verbose:
                 import traceback
 
                 traceback.print_exc()

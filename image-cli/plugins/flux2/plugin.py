@@ -80,7 +80,7 @@ class Flux2EnginePlugin(ImageEnginePlugin):
         except ImportError:
             pass
 
-    def generate(self, request: ImageGenRequest) -> Image.Image:
+    def generate(self, request: ImageGenRequest, verbose: bool = False) -> Image.Image:
         """Generate an image using FLUX.2 Klein."""
         import torch
 
