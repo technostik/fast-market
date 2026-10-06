@@ -63,7 +63,6 @@ _NAV_LAYOUT = (
 .webux-nav a:hover { color: var(--text); background: var(--surface); }
 .webux-nav a.active { color: var(--text); background: var(--accent); }
 .webux-nav .theme-select {
-  margin-left: auto;
   padding: 8px 10px;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -73,6 +72,37 @@ _NAV_LAYOUT = (
   font: inherit;
   width: auto;
   max-width: 170px;
+  flex-shrink: 0;
+}
+.webux-nav .llm-select {
+  margin-left: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  width: auto;
+  max-width: 190px;
+  flex-shrink: 0;
+}
+.webux-nav .model-select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  width: auto;
+  max-width: 220px;
+  flex-shrink: 0;
+}
+.webux-nav .llm-status {
+  font-size: 12px;
+  color: var(--success);
+  white-space: nowrap;
   flex-shrink: 0;
 }
 .webux-nav .exit-btn {
@@ -260,18 +290,171 @@ function setupPromptInfo(selectId, infoId) {
 </script>
 """
 
+_WEBUX_LLM_SCRIPT = """
+<script>
+// Global LLM provider + model switcher in the webux main toolbar.
+// Source of truth is the server config (common/llm/config.yaml);
+// switching writes default_provider (and model) globally via /api/system/llm.
+function webuxLlmStatus(msg, isError) {
+  var el = document.getElementById('webux-llm-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--error)' : 'var(--success)';
+  if (msg) setTimeout(function () { if (el.textContent === msg) el.textContent = ''; }, 2600);
+}
+async function webuxLoadModels(provider, currentModel) {
+  var modelSel = document.getElementById('webux-llm-model');
+  if (!modelSel) return;
+  modelSel.innerHTML = '';
+  var loading = document.createElement('option');
+  loading.value = '';
+  loading.textContent = '… models';
+  modelSel.appendChild(loading);
+  try {
+    var r = await fetch('/api/system/llm/models?provider=' + encodeURIComponent(provider));
+    var d = await r.json();
+    var models = (d && d.models) || [];
+    var current = (d && d.current) || currentModel || '';
+    modelSel.innerHTML = '';
+    if (!models.length && current) models = [current];
+    models.forEach(function (m) {
+      var o = document.createElement('option');
+      o.value = m;
+      o.textContent = m;
+      if (m === current) o.selected = true;
+      modelSel.appendChild(o);
+    });
+    if (current && modelSel.value !== current) modelSel.value = current;
+  } catch (e) {
+    modelSel.innerHTML = '';
+    if (currentModel) {
+      var o = document.createElement('option');
+      o.value = currentModel;
+      o.textContent = currentModel;
+      modelSel.appendChild(o);
+    }
+  }
+}
+async function webuxSetLlm(provider, model) {
+  try {
+    var body = { provider: provider };
+    if (model) body.model = model;
+    var r = await fetch('/api/system/llm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    var d = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      webuxLlmStatus((d && d.detail) || 'LLM switch failed', true);
+      return false;
+    }
+    webuxLlmStatus('✓ ' + provider + (model ? ' / ' + model : ''));
+    return true;
+  } catch (e) {
+    webuxLlmStatus('LLM switch failed', true);
+    return false;
+  }
+}
+document.addEventListener('DOMContentLoaded', function () {
+  var provSel = document.getElementById('webux-llm');
+  var modelSel = document.getElementById('webux-llm-model');
+  if (!provSel) return;
+  // Sync with server (page may have been rendered before a switch elsewhere).
+  fetch('/api/system/llm').then(function (r) { return r.json(); }).then(function (d) {
+    if (d && d.default_provider && provSel.querySelector('option[value="' + d.default_provider + '"]')) {
+      provSel.value = d.default_provider;
+    }
+    var currentModel = modelSel ? modelSel.value : '';
+    if (d && d.providers && d.providers[provSel.value]) {
+      currentModel = d.providers[provSel.value].model || currentModel;
+    }
+    return webuxLoadModels(provSel.value, currentModel);
+  }).catch(function () {
+    webuxLoadModels(provSel.value, modelSel ? modelSel.value : '');
+  });
+  provSel.addEventListener('change', async function () {
+    var ok = await webuxSetLlm(provSel.value, null);
+    if (ok) {
+      try {
+        var r = await fetch('/api/system/llm');
+        var d = await r.json();
+        var current = (d.providers && d.providers[provSel.value] && d.providers[provSel.value].model) || '';
+        await webuxLoadModels(provSel.value, current);
+      } catch (e) {}
+    }
+  });
+  if (modelSel) {
+    modelSel.addEventListener('change', async function () {
+      if (!modelSel.value) return;
+      await webuxSetLlm(provSel.value, modelSel.value);
+    });
+  }
+});
+</script>
+"""
+
+
+def _get_llm_nav_state() -> tuple[str, dict[str, dict]]:
+    """Return (default_provider, {name: {model, base_url}}) for the toolbar.
+
+    Reads common/llm/config.yaml on every page render so a switch in one
+    tab is visible in all tabs. Never exposes secret values.
+    """
+    try:
+        from common.core.config import load_llm_config
+
+        cfg = load_llm_config() or {}
+    except Exception:
+        return "", {}
+    providers = cfg.get("providers") or {}
+    default_provider = str(cfg.get("default_provider") or "")
+    info: dict[str, dict] = {}
+    for name, pcfg in providers.items():
+        if not isinstance(pcfg, dict):
+            continue
+        info[str(name)] = {
+            "model": str(pcfg.get("model") or ""),
+            "base_url": str(pcfg.get("base_url") or ""),
+            "type": str(pcfg.get("type") or name),
+        }
+    return default_provider, info
+
 
 def _build_nav(
     plugins: dict[str, WebuxPluginManifest],
     active: str | None = None,
     current_theme: str = DEFAULT_THEME,
 ) -> str:
+    import html as _html
+
     links = []
     for plugin in plugins.values():
         klass = "active" if plugin.name == active else ""
         links.append(
             f'<a class="{klass}" href="/{plugin.name}">{plugin.tab_icon} {plugin.tab_label}</a>'
         )
+    default_provider, llm_info = _get_llm_nav_state()
+    if llm_info:
+        prov_options = "".join(
+            f'<option value="{_html.escape(name)}"'
+            f'{" selected" if name == default_provider else ""}>'
+            f"🤖 {_html.escape(name)}</option>"
+            for name in sorted(llm_info)
+        )
+        current_model = (llm_info.get(default_provider) or {}).get("model", "")
+        links.append(
+            '<select id="webux-llm" class="llm-select" title="LLM provider '
+            '(global default_provider)">'
+            f"{prov_options}</select>"
+        )
+        links.append(
+            '<select id="webux-llm-model" class="model-select" title="LLM model '
+            '(saved globally for the selected provider)">'
+            f'<option value="{_html.escape(current_model)}">'
+            f"{_html.escape(current_model)}</option></select>"
+        )
+        links.append('<span id="webux-llm-status" class="llm-status"></span>')
     options = "".join(
         f'<option value="{name}"{" selected" if name == current_theme else ""}>'
         f'{"🌙" if name == "dark" else "☀️" if name == "light" else "🔵"} {name}'
@@ -295,7 +478,9 @@ def _inject_nav(
     style_tag = f"<style>{theme_css}{_NAV_LAYOUT}{_PROMPT_INFO_CSS}</style>"
     # Boot script must run ASAP (in <head>) to avoid a flash of the wrong theme.
     head_tags = _WEBUX_THEME_BOOT_SCRIPT + style_tag
-    script_tag = _WEBUX_EXIT_SCRIPT + _WEBUX_THEME_SCRIPT + _PROMPT_INFO_SCRIPT
+    script_tag = (
+        _WEBUX_EXIT_SCRIPT + _WEBUX_THEME_SCRIPT + _PROMPT_INFO_SCRIPT + _WEBUX_LLM_SCRIPT
+    )
     if "</head>" in plugin_html:
         plugin_html = plugin_html.replace(
             "</head>",
@@ -445,7 +630,8 @@ def build_app(
         theme_css = render_all_themes_css()
         html = (
             f'<html data-theme="{default_theme}"><head><style>{theme_css}{_NAV_LAYOUT}</style>'
-            f"{_WEBUX_THEME_BOOT_SCRIPT}{_WEBUX_EXIT_SCRIPT}{_WEBUX_THEME_SCRIPT}</head>"
+            f"{_WEBUX_THEME_BOOT_SCRIPT}{_WEBUX_EXIT_SCRIPT}{_WEBUX_THEME_SCRIPT}"
+            f"{_WEBUX_LLM_SCRIPT}</head>"
             f"<body>{nav}"
             f'<main class="webux-shell"><h1>webux</h1><ul>{links}</ul></main></body></html>'
         )
@@ -481,6 +667,95 @@ def build_app(
         app.state.webux_theme = name
         logger.info("webux_theme_changed", theme=name)
         return {"ok": True, "theme": name}
+
+    @app.get("/api/system/llm")
+    def get_llm() -> dict:
+        """List configured LLM providers (no secrets) + global default."""
+        from common.core.config import load_llm_config, resolve_secret
+
+        cfg = load_llm_config() or {}
+        providers = cfg.get("providers") or {}
+        out: dict[str, dict] = {}
+        for name, pcfg in providers.items():
+            if not isinstance(pcfg, dict):
+                continue
+            out[str(name)] = {
+                "type": str(pcfg.get("type") or name),
+                "model": str(pcfg.get("model") or ""),
+                "base_url": str(pcfg.get("base_url") or ""),
+                "key_configured": bool(resolve_secret(pcfg)),
+            }
+        return {
+            "default_provider": str(cfg.get("default_provider") or ""),
+            "default_temperature": cfg.get("default_temperature", 0.3),
+            "providers": out,
+        }
+
+    @app.post("/api/system/llm")
+    def set_llm(payload: dict) -> dict:
+        """Switch global default_provider, optionally persisting model.
+
+        Body: {"provider": "<name>", "model": "<optional model id>"}.
+        Writes to common/llm/config.yaml so all CLIs pick it up.
+        """
+        from fastapi import HTTPException
+
+        from common.core.config import load_llm_config, save_llm_config
+
+        provider = str((payload or {}).get("provider") or "").strip()
+        model = payload.get("model") if isinstance(payload, dict) else None
+        if model is not None:
+            model = str(model).strip()
+        if not provider:
+            raise HTTPException(status_code=400, detail="Missing 'provider'")
+        cfg = load_llm_config() or {}
+        providers = cfg.get("providers") or {}
+        if provider not in providers or not isinstance(providers[provider], dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown provider '{provider}'. "
+                f"Available: {', '.join(sorted(str(k) for k in providers))}",
+            )
+        if model:
+            providers[provider]["model"] = model
+        cfg["providers"] = providers
+        cfg["default_provider"] = provider
+        save_llm_config(cfg)
+        logger.info("webux_llm_changed", provider=provider, model=model or "")
+        return {
+            "ok": True,
+            "default_provider": provider,
+            "model": str((providers[provider] or {}).get("model") or ""),
+        }
+
+    @app.get("/api/system/llm/models")
+    def list_llm_models(provider: str = "") -> dict:
+        """Return live model ids for a provider (via /v1/models when possible).
+
+        Never exposes API keys — resolution happens server-side.
+        Falls back to the configured model when the endpoint is unreachable.
+        """
+        from common.core.config import load_llm_config
+        from common.llm.registry import discover_providers
+
+        cfg = load_llm_config() or {}
+        providers = cfg.get("providers") or {}
+        name = (provider or str(cfg.get("default_provider") or "")).strip()
+        current = ""
+        if isinstance(providers.get(name), dict):
+            current = str(providers[name].get("model") or "")
+        models: list[str] = []
+        try:
+            llm_cfg = {"providers": providers, "default_provider": cfg.get("default_provider", "")}
+            instances = discover_providers(llm_cfg)
+            inst = instances.get(name)
+            if inst is not None:
+                models = [str(m) for m in (inst.list_models() or []) if str(m)]
+        except Exception as exc:
+            logger.warning("webux_llm_models_failed", provider=name, error=str(exc))
+        if not models and current:
+            models = [current]
+        return {"provider": name, "current": current, "models": models}
 
     for plugin in manifests.values():
         app.add_api_route(

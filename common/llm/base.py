@@ -253,6 +253,11 @@ class LazyLLMProvider(LLMProvider):
 
     def list_models(self) -> list[str]:
         self._ensure_initialized()
+        if self._provider is None:
+            fallback = (self.config.get("providers") or {}).get(
+                self.provider_name or "", {}
+            ).get("model", "")
+            return [fallback] if fallback else []
         return self._provider.list_models()
 
     def set_debug(self, debug: bool) -> None:

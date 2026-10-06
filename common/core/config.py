@@ -356,6 +356,33 @@ def save_tool_config(tool_name: str, config: dict) -> None:
     )
 
 
+_project_env_loaded = False
+
+
+def project_env_path() -> Path:
+    """Path of the auto-loaded project `.env` file (repo root, gitignored)."""
+    return Path(__file__).resolve().parent.parent.parent / ".env"
+
+
+def ensure_project_env_loaded() -> None:
+    """Load the project `.env` file once (never overrides real env vars).
+
+    Idempotent and safe to call from anywhere secrets are resolved, so
+    API keys stored in `.env` work without shell exports.
+    """
+    global _project_env_loaded
+    if _project_env_loaded:
+        return
+    _project_env_loaded = True
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    env_path = project_env_path()
+    if env_path.exists():
+        load_dotenv(env_path)
+
+
 def resolve_secret(
     provider_config: dict,
     key_field: str = "api_key",
@@ -369,8 +396,13 @@ def resolve_secret(
         2. env var named by ``env_field`` (e.g. ``api_key_env``)
         3. env var named by ``default_env`` (legacy fallback)
 
+    Before checking the environment, the project ``.env`` file (repo root,
+    gitignored) is loaded once — so keys stored there work without shell
+    exports. Real environment variables always win over ``.env`` values.
+
     Returns the secret string or None if nothing is set.
     """
+    ensure_project_env_loaded()
     inline = provider_config.get(key_field)
     if inline:
         return str(inline)

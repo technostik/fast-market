@@ -10,6 +10,11 @@ providers:
     model: deepseek-chat
     base_url: http://localhost:5005/v1
     api_key_env: NONE
+  freellmapi:
+    type: openai-compatible
+    model: auto
+    base_url: http://localhost:3001/v1
+    api_key_env: FREELLMAPI_API_KEY
   xai:
     type: xai
     model: grok-4-1-fast-non-reasoning

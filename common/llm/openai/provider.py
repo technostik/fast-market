@@ -22,14 +22,9 @@ class OpenAIProvider(LazyLLMProvider):
     name = "openai"
 
     def _initialize(self):
-        try:
-            from dotenv import load_dotenv
-            from pathlib import Path
+        from common.core.config import ensure_project_env_loaded
 
-            env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
-            load_dotenv(env_path)
-        except ImportError:
-            pass
+        ensure_project_env_loaded()
 
         try:
             from openai import OpenAI
