@@ -77,6 +77,7 @@ The shared Click group also accepts these global options:
 | `video duration INPUT` | Print a video duration in seconds |
 | `video assemble IMAGE AUDIO` | Create a Ken Burns clip from an image and audio |
 | `video generate PROMPT` | Generate a video from text (or a still image) via fal.ai |
+| `video lipsync PHOTO AUDIO` | Animate a still photo with speech audio (SadTalker, offline) |
 | `video pipeline INPUT` | Run silence removal, ASS transcription, and subtitle burn-in |
 | `video modal-diagnose` | Check Modal connectivity and the remote environment |
 
@@ -271,6 +272,36 @@ JSON output contains the output path, model endpoint, mode, prompt, and remote U
 }
 ```
 
+### `video lipsync PHOTO AUDIO`
+
+Animate a still photo with a speech audio file into a talking-head MP4, fully offline via SadTalker (Apache-2.0). French audio works: head motion is derived from acoustics, not phonemes.
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `PHOTO` | — | Input portrait image | required (unless `--setup`) |
+| `AUDIO` | — | Input speech audio (wav/mp3) | required (unless `--setup`) |
+| `--output` | `-o` | Output MP4 path; missing parent directories are created | `<photo-stem>_talking.mp4` next to photo |
+| `--engine` | — | Backend (`sadtalker` only for now) | `sadtalker` |
+| `--size` | — | Face render size: `256` (~4GB VRAM) or `512` (12GB+) | `256` |
+| `--still` / `--no-still` | — | Still-image mode (natural motion for one photo) | `--still` |
+| `--preprocess` | — | Face preprocessing: `full`, `crop`, or `resize` | `full` |
+| `--enhancer` | — | Face enhancer: `none` or `gfpgan` (needs ~8GB+ peak VRAM) | `none` |
+| `--device` | — | `auto`, `cuda`, or `cpu` | `auto` |
+| `--sadtalker-dir` | — | SadTalker data home | `~/.local/share/fast-market/video/sadtalker` |
+| `--setup` | — | Install SadTalker (clone, CUDA torch venv, checkpoints) and exit | off |
+| `--timeout` | — | Max seconds for setup steps and inference | `900` |
+| `--format` | `-F` | Output: `text` or `json` | `text` |
+
+The first run needs one (large, one-time) setup — repo clone, isolated venv with CUDA PyTorch (your system Python is untouched), and checkpoint downloads:
+
+```bash
+video lipsync --setup
+video lipsync portrait.png voix.wav -o clips/moi.mp4
+video lipsync portrait.png voix.wav --enhancer gfpgan -o clips/moi_hd.mp4
+```
+
+On 8GB VRAM, keep `--size 256` and test without `--enhancer` first; add `gfpgan` only if it fits. CPU fallback (`--device cpu`) works but is much slower.
+
 ### `video pipeline INPUT_FILE`
 
 Run the complete local or remote sequence:
@@ -392,6 +423,7 @@ The `webux-cli` publishing workflows use the granular commands so each processin
 - MoviePy concatenation with re-encoding
 - Image-plus-audio Ken Burns assembly
 - Cloud text/image-to-video generation via fal.ai
+- Offline photo lip-sync via SadTalker
 - Combined pipeline with local or Modal execution
 - Script-friendly stdout and stderr separation
 - Modal environment and transfer diagnostics

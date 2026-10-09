@@ -45,6 +45,7 @@ commands/<command>/register.py
 | `commands/duration/` | `ffprobe` duration reporting |
 | `commands/assemble/` | Still-image and audio Ken Burns rendering |
 | `commands/generate/` | fal.ai cloud text/image-to-video (`register.py`, `fal.py` queue client, `models.py` catalog + discovery) |
+| `commands/lipsync/` | Offline photo lip-sync (`register.py`, `sadtalker.py` backend: isolated venv + subprocess) |
 | `commands/pipeline/` | Combined silence removal, ASS transcription, and subtitle burn-in |
 | `commands/modal_diagnose/` | Modal connectivity, environment, transfer, and full-pipeline checks |
 | `commands/remote.py` | Local subprocess-facing bridge to the granular Modal functions |
@@ -75,6 +76,7 @@ commands/<command>/register.py
 | `duration` | `commands/duration/register.py` | none |
 | `assemble` | `commands/assemble/assembler.py` | none |
 | `generate` | `commands/generate/fal.py` (fal.ai queue REST: submit → poll → download) | none (fal.ai is already cloud) |
+| `lipsync` | `commands/lipsync/sadtalker.py` (SadTalker `inference.py` subprocess in an isolated venv) | none (runs offline, local GPU/CPU) |
 | `modal-diagnose` | `commands/modal_diagnose/register.py` | `run_diagnose`, `run_file_roundtrip`, and `run_media_pipeline` |
 
 `video pipeline` always generates ASS subtitles and does not expose the granular transcription command's `--use-groq` flag. Publishing integrations should invoke the granular commands when they need independent retry or resume boundaries.
@@ -135,6 +137,9 @@ commands/<command>/register.py
 - **fal endpoint IDs drift:** the catalog changes often; `--list-models`/`--refresh-models` re-discovers via `GET api.fal.ai/v1/models`. Keep the curated `MODEL_CATALOG` to verified IDs and accept full endpoint IDs verbatim.
 - **fal has no free-quota API:** the Platform Models API exposes no pricing/free-quota fields, and sandbox-free (5/day) is playground-only while API calls are pay-per-use. `sandbox_free` on `FalModel` is curation for `--list-models --free-only`, not a billing exemption.
 - **fal payload schemas differ per model:** unknown keys are rejected server-side, so send only the minimal cross-model payload and expose model-specific keys via `--set KEY=VALUE`.
+- **lipsync needs a CUDA torch, not the system one:** system Python ships CPU-only torch; `video lipsync --setup` installs CUDA PyTorch into an isolated venv under `~/.local/share/fast-market/video/sadtalker` and never touches system packages.
+- **lipsync VRAM budget:** `--size 256` without enhancer fits ~4GB; `--size 512` or `gfpgan` can exceed 8GB. Default to the light path and escalate explicitly.
+- **lipsync venv-local basicsr patch:** basicsr 1.4.2 imports `torchvision.transforms.functional_tensor` (removed in tv>=0.15); `setup()` auto-patches the venv copy with a try/except fallback. Re-apply is idempotent.
 - **Missing output parents:** Most commands write directly to the resolved output path and do not create its parent directory.
 - **Silence failure modes:** A file with no usable audio raises `SilentVideoError`. The local implementation removes and rejects a result that is not shorter than the source; the current Modal worker returns the resulting video without that additional check.
 - **Stream-copy cuts:** `cut` avoids re-encoding, so keyframes and timestamps can make an arbitrary cut point imprecise.
@@ -163,6 +168,7 @@ The suite covers:
 - Timestamp parsing, `head`/`tail` selection, and stream-copy failure handling in `tests/test_cut.py`.
 - `ffprobe` duration success and failure handling in `tests/test_duration.py`.
 - fal.ai generate resolution, quota fallback, payload building, and output handling in `tests/test_generate_fal.py` (network-free via monkeypatched client).
+- SadTalker command construction, output discovery, and setup helpers in `tests/test_lipsync.py` (no GPU/network; subprocess mocked).
 - ASS generation, silence removal, and subtitle-burn regressions in `tests/test_publish_regression.py`.
 
 The publish tests require the direct media dependencies (`moviepy` and `faster-whisper`) and fail with `ModuleNotFoundError` when those packages are unavailable; they are not conditionally skipped for missing packages. Golden fixtures can be regenerated with `pytest video-cli/tests/test_publish_regression.py --generate-golden`; regeneration overwrites fixtures and may invoke a real model, so use it only for intentional behavior changes.

@@ -36,6 +36,7 @@ packages = [
     "commands.modal_diagnose",
     "commands.pipeline",
     "commands.generate",
+    "commands.lipsync",
     "video_entry",
     "modal_client",
 ]
