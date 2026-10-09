@@ -44,6 +44,7 @@ commands/<command>/register.py
 | `commands/concat/` | MoviePy concatenation with H.264/AAC output |
 | `commands/duration/` | `ffprobe` duration reporting |
 | `commands/assemble/` | Still-image and audio Ken Burns rendering |
+| `commands/generate/` | fal.ai cloud text/image-to-video (`register.py`, `fal.py` queue client, `models.py` catalog + discovery) |
 | `commands/pipeline/` | Combined silence removal, ASS transcription, and subtitle burn-in |
 | `commands/modal_diagnose/` | Modal connectivity, environment, transfer, and full-pipeline checks |
 | `commands/remote.py` | Local subprocess-facing bridge to the granular Modal functions |
@@ -73,6 +74,7 @@ commands/<command>/register.py
 | `cut` | `commands/cut/register.py` | none |
 | `duration` | `commands/duration/register.py` | none |
 | `assemble` | `commands/assemble/assembler.py` | none |
+| `generate` | `commands/generate/fal.py` (fal.ai queue REST: submit → poll → download) | none (fal.ai is already cloud) |
 | `modal-diagnose` | `commands/modal_diagnose/register.py` | `run_diagnose`, `run_file_roundtrip`, and `run_media_pipeline` |
 
 `video pipeline` always generates ASS subtitles and does not expose the granular transcription command's `--use-groq` flag. Publishing integrations should invoke the granular commands when they need independent retry or resume boundaries.
@@ -86,7 +88,7 @@ commands/<command>/register.py
 - `numpy` provides RMS analysis and image-array operations.
 - `moviepy` provides local silence removal, concatenation, and assembly.
 - `faster-whisper` provides local transcription.
-- `requests` supports the Groq transcription request.
+- `requests` supports the Groq transcription request and the fal.ai queue/storage REST calls.
 - `modal` provides remote execution and the Modal image.
 - `Pillow` is imported by `commands/assemble/assembler.py` but is not currently declared directly in `pyproject.toml`; keep this packaging mismatch visible when changing dependencies.
 - `python-dotenv` is an optional import used for repository `.env` loading but is not currently declared directly in `pyproject.toml`.
@@ -120,7 +122,7 @@ commands/<command>/register.py
 - Do not claim that the shared `--verbose` flag changes video logging; `cli/main.py` currently configures logging at `CRITICAL`.
 - Do not claim that `assemble --zoom-from` or `--zoom-to` overrides a supported motion profile; supported profiles currently define their own motion values.
 - Do not swallow media, subprocess, credential, or serialization errors without converting them into an actionable CLI error.
-- Do not assume an explicit output parent directory exists.
+- Do not assume an explicit output parent directory exists (exception: `generate -o` creates missing parents per user requirement).
 
 ## Pitfalls
 
@@ -128,6 +130,11 @@ commands/<command>/register.py
 - **Remote drift:** `modal_client/remote_steps.py` duplicates local silence removal, transcription, subtitle burn-in, and concatenation logic. There is no automated parity check, so review both implementations for every behavior change.
 - **Root `.env` and path timing:** `cli/main.py` loads the repository `.env` and changes the working directory to the repository root before Modal imports and Click parses arguments. Modal's `Secret.from_dotenv()` also depends on that root file; running from another directory without this setup can produce an empty remote secret, and relative file arguments are resolved from the repository root.
 - **Packaging omissions:** `pyproject.toml` uses an explicit package list that currently omits newer command packages and `common`. The documented editable checkout install can work while a clean wheel install is incomplete; do not assume packaging parity without a build-and-install check.
+- **fal quota auto-selection is ordered fallback, not a quota query:** fal.ai exposes no "remaining free generations" counter, so `generate --model auto` tries the catalog in order and skips models that fail with quota/billing errors. Always echo the model used to stderr.
+- **fal queue URLs come from the submit response:** the gateway canonicalizes the app route (e.g. `minimax/h3-max/text-to-video` is served as `fal-ai/minimax`), so `submit()` returns `status_url`/`response_url` and polling must use those — hand-built `{endpoint}/requests/{id}/...` paths return HTTP 405.
+- **fal endpoint IDs drift:** the catalog changes often; `--list-models`/`--refresh-models` re-discovers via `GET api.fal.ai/v1/models`. Keep the curated `MODEL_CATALOG` to verified IDs and accept full endpoint IDs verbatim.
+- **fal has no free-quota API:** the Platform Models API exposes no pricing/free-quota fields, and sandbox-free (5/day) is playground-only while API calls are pay-per-use. `sandbox_free` on `FalModel` is curation for `--list-models --free-only`, not a billing exemption.
+- **fal payload schemas differ per model:** unknown keys are rejected server-side, so send only the minimal cross-model payload and expose model-specific keys via `--set KEY=VALUE`.
 - **Missing output parents:** Most commands write directly to the resolved output path and do not create its parent directory.
 - **Silence failure modes:** A file with no usable audio raises `SilentVideoError`. The local implementation removes and rejects a result that is not shorter than the source; the current Modal worker returns the resulting video without that additional check.
 - **Stream-copy cuts:** `cut` avoids re-encoding, so keyframes and timestamps can make an arbitrary cut point imprecise.
@@ -155,6 +162,7 @@ The suite covers:
 
 - Timestamp parsing, `head`/`tail` selection, and stream-copy failure handling in `tests/test_cut.py`.
 - `ffprobe` duration success and failure handling in `tests/test_duration.py`.
+- fal.ai generate resolution, quota fallback, payload building, and output handling in `tests/test_generate_fal.py` (network-free via monkeypatched client).
 - ASS generation, silence removal, and subtitle-burn regressions in `tests/test_publish_regression.py`.
 
 The publish tests require the direct media dependencies (`moviepy` and `faster-whisper`) and fail with `ModuleNotFoundError` when those packages are unavailable; they are not conditionally skipped for missing packages. Golden fixtures can be regenerated with `pytest video-cli/tests/test_publish_regression.py --generate-golden`; regeneration overwrites fixtures and may invoke a real model, so use it only for intentional behavior changes.
@@ -165,6 +173,7 @@ The publish tests require the direct media dependencies (`moviepy` and `faster-w
 - Final output paths are printed to stdout by file-producing commands.
 - `video duration` prints only the three-decimal numeric result.
 - `video assemble --format json` prints one JSON object for scripting.
+- `video generate` echoes `Using model: <endpoint> (<mode>)` to stderr and prints the output path (`text`) or a JSON object (`--format json`) to stdout.
 - `video modal-diagnose` reports the remote Python, ffmpeg, faster-whisper, and MoviePy environment.
 - `video modal-diagnose --full` additionally verifies an ffmpeg byte round trip and a tiny-model media pipeline; it creates local temporary output files and uses remote resources.
 - The root `--verbose/-v` option is inherited from `common.cli.base`, but video currently configures logging at `CRITICAL`; use the explicit status messages and diagnostic command for troubleshooting.

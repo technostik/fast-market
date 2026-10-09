@@ -30,8 +30,12 @@ packages = [
     "commands.cut",
     "commands.extract_transcript",
     "commands.burn_subtitles",
+    "commands.concat",
+    "commands.duration",
+    "commands.assemble",
     "commands.modal_diagnose",
     "commands.pipeline",
+    "commands.generate",
     "video_entry",
     "modal_client",
 ]

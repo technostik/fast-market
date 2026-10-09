@@ -1,6 +1,6 @@
 # video-agent
 
-`video` is a Click CLI for preparing video assets: remove silence, transcribe speech, burn subtitles, trim or concatenate clips, inspect duration, assemble image-and-audio clips, and run a combined publishing pipeline locally or on Modal.
+`video` is a Click CLI for preparing video assets: remove silence, transcribe speech, burn subtitles, trim or concatenate clips, inspect duration, assemble image-and-audio clips, generate video from text or a still image via fal.ai, and run a combined publishing pipeline locally or on Modal.
 
 ## Installation
 
@@ -23,6 +23,7 @@ video --help
 - The Python dependencies declared in `video-cli/pyproject.toml`
 - Modal authentication for `--modal` and `modal-diagnose`
 - `GROQ_API_KEY` only when using `extract-transcript --use-groq`
+- `FAL_KEY` (or `FAL_API_KEY` in the repository root `.env`) only when using `generate`
 
 Check the system media tools with:
 
@@ -47,6 +48,7 @@ video modal-diagnose
 | Setting | How it is used |
 |---------|----------------|
 | `GROQ_API_KEY` | Required for local `extract-transcript --use-groq`; required on Modal for ASS output |
+| `FAL_KEY` / `FAL_API_KEY` | Required for `generate` (`--api-key` flag wins; `FAL_KEY` first, then `FAL_API_KEY` from root `.env`) |
 | `FASTMARKET_PROFILE` | Selects the shared fast-market profile; the global `--profile/-P` flag overrides it |
 | Modal credentials | Managed by the Modal CLI through `modal setup` |
 
@@ -74,6 +76,7 @@ The shared Click group also accepts these global options:
 | `video concat INPUT... -o OUTPUT` | Concatenate two or more videos |
 | `video duration INPUT` | Print a video duration in seconds |
 | `video assemble IMAGE AUDIO` | Create a Ken Burns clip from an image and audio |
+| `video generate PROMPT` | Generate a video from text (or a still image) via fal.ai |
 | `video pipeline INPUT` | Run silence removal, ASS transcription, and subtitle burn-in |
 | `video modal-diagnose` | Check Modal connectivity and the remote environment |
 
@@ -215,6 +218,59 @@ JSON output contains the output path, audio duration, and probed dimensions:
 }
 ```
 
+### `video generate PROMPT`
+
+Generate a video from a text prompt with fal.ai (cloud queue API), optionally animated from a still image.
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `PROMPT` | — | Text prompt describing the shot | required (unless `--list-models`) |
+| `--model` | `-m` | `auto`, a curated alias (`minimax`, `flux`, `kling`, `ltx`), or a full endpoint ID | `auto` |
+| `--custom-model` | — | Full fal endpoint ID override | none |
+| `--image` | — | Local still image for image-to-video (uploaded to the fal CDN) | none |
+| `--image-url` | — | Already-hosted image URL (skips CDN upload) | none |
+| `--output` | `-o` | Output MP4 path; missing parent directories are created | `<prompt-slug>_fal.mp4` in CWD |
+| `--duration` | — | Clip duration in seconds (model-dependent) | model default |
+| `--aspect-ratio` | — | Aspect ratio hint, e.g. `16:9` (model-dependent) | none |
+| `--seed` | — | Random seed (model-dependent) | none |
+| `--negative-prompt` | — | Negative prompt (model-dependent) | none |
+| `--set` | — | Model-specific passthrough as `KEY=VALUE` (repeatable, overrides defaults) | none |
+| `--timeout` | — | Max seconds to wait for the queued generation | `600` |
+| `--api-key` | — | fal API key | `FAL_KEY`, then `FAL_API_KEY` |
+| `--list-models` | — | List discoverable fal text-to-video models (cached 24h) and exit | off |
+| `--free-only` | — | With `--list-models`, show only curated models with a free daily sandbox allowance | off |
+| `--refresh-models` | — | Force-refresh the cached model catalog, then list and exit | off |
+| `--format` | `-F` | Output: `text` or `json` | `text` |
+| `--verbose` | `-v` | Show queue progress with timings on stderr | off |
+
+With `--model auto` (the default) the curated catalog is tried in order — MiniMax H3 Max, FLUX 3 draft, Kling v3 Standard, LTX 2.3 22B — and a model that fails with a quota/billing error (HTTP 402/429 or credit/balance message) is skipped in favour of the next one. fal.ai exposes no "remaining free generations" counter, so auto-selection is ordered fallback, not a quota query. The model actually used is always reported on stderr (`Using model: ...`). With `--image`/`--image-url` the image-to-video endpoint variant is used automatically. Unknown per-model options are rejected by the fal API; use `--set` for model-specific keys.
+
+Free-tier note: the 5/day free allowances (MiniMax H3 Max, FLUX 3 draft) are web sandbox/playground quotas — API calls are pay-per-use and the Platform API exposes no free-quota field. `video generate --list-models --free-only` lists the curated sandbox-free models; it does not make API generation free.
+
+```bash
+video generate "a drone shot over snowy mountains at dawn"
+video generate "waves crashing at night" -m kling -o clips/sea.mp4
+video generate "animate this portrait" --image face.png -o clips/portrait.mp4
+video generate "a city timelapse" --model fal-ai/veo3.1 --set duration=8 --format json
+video generate --list-models
+video generate --list-models --free-only
+video generate --refresh-models
+```
+
+JSON output contains the output path, model endpoint, mode, prompt, and remote URLs:
+
+```json
+{
+  "path": "/absolute/path/a-drone-shot_fal.mp4",
+  "model": "fal-ai/minimax/h3-max/text-to-video",
+  "mode": "text-to-video",
+  "prompt": "a drone shot over snowy mountains at dawn",
+  "image": "",
+  "video_url": "https://v3b.fal.media/files/.../output.mp4",
+  "request_id": "764cabcf-b745-4b3e-ae38-1200304cf45b"
+}
+```
+
 ### `video pipeline INPUT_FILE`
 
 Run the complete local or remote sequence:
@@ -273,6 +329,7 @@ Local processing is the default. Add `--modal` to commands that support remote e
 | `cut` | yes | no |
 | `duration` | yes | no |
 | `assemble` | yes | no |
+| `generate` | no (fal.ai cloud) | no |
 | `modal-diagnose` | remote diagnostic | yes |
 
 Modal commands serialize input files as bytes and write returned bytes to the requested output path. The granular remote commands use the shared Modal application and can be cancelled when the local process receives `SIGINT` or `SIGTERM`; the combined `video pipeline --modal` path uses one remote function for the complete sequence. See [ADR 010](../_doc/adr/010-modal-remote-processing.md) for the transport and resume decisions.
@@ -291,7 +348,7 @@ printf '%s\n' "$final"
 
 `video duration` emits only a numeric value such as `12.345`. `video assemble --format json` emits one JSON object. Do not parse the status lines on stderr as command results.
 
-Most commands do not create missing parent directories for an explicit output path; create the directory first. `video pipeline --workdir` does create its work directory.
+Most commands do not create missing parent directories for an explicit output path; create the directory first. Exceptions: `video pipeline --workdir` creates its work directory, and `video generate -o` creates missing output parents.
 
 ## Architecture
 
@@ -334,6 +391,7 @@ The `webux-cli` publishing workflows use the granular commands so each processin
 - Fast stream-copy trimming
 - MoviePy concatenation with re-encoding
 - Image-plus-audio Ken Burns assembly
+- Cloud text/image-to-video generation via fal.ai
 - Combined pipeline with local or Modal execution
 - Script-friendly stdout and stderr separation
 - Modal environment and transfer diagnostics
@@ -363,6 +421,14 @@ Check that the video has usable audio, that `--language` matches the speech, and
 ### `GROQ_API_KEY environment variable not set`
 
 Set `GROQ_API_KEY` in the environment or repository `.env` before using local `--use-groq`. For Modal execution, the key must be available to the Modal secret loaded from the repository `.env` when requesting ASS output; Modal SRT and TXT requests currently use worker-side `faster-whisper` instead.
+
+### fal API key or generation errors (`video generate`)
+
+- `fal API key not set`: pass `--api-key`, export `FAL_KEY`, or add `FAL_API_KEY` to the repository root `.env`.
+- `rejected the API key (HTTP 401)`: the key is wrong or revoked; check the fal dashboard.
+- Quota/billing failures (HTTP 402/429, `insufficient balance`, `quota exceeded`): with `--model auto` the CLI automatically tries the next curated model; with an explicit `--model` it fails loudly so no surprise spend happens on another model. The 5/day free allowances are sandbox/playground quotas — API calls are pay-per-use (see `--free-only` note above).
+- `timed out after Ns`: the queued job was still running; re-run with a larger `--timeout` (the server-side job may still complete).
+- `fal result contained no video URL`: the model returned an unexpected schema; re-run with `--verbose` and report the endpoint ID.
 
 ### Modal authentication or remote execution fails
 
