@@ -63,9 +63,11 @@ def remove_silence_simple(
     Raises RuntimeError on failure.
     """
     import numpy as np
-    from moviepy import VideoFileClip, concatenate_videoclips
+    from moviepy import concatenate_videoclips
 
-    video = VideoFileClip(input_file)
+    from commands.media_open import open_video_clip
+
+    video = open_video_clip(input_file)
     original_duration = video.duration
     audio_array = video.audio.to_soundarray(fps=video.audio.fps)
     if len(audio_array.shape) > 1:

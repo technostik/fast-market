@@ -74,6 +74,8 @@ Each `register(config: dict) -> WebuxPluginManifest` must provide:
 - **workdir not configured**: `yt_poster` and `fileviewer` return HTTP 404 when `workdir` is absent from `~/.config/fast-market/common/config.yaml`. Run `toolsetup workdir init <path>` first.
 - **plugin order**: `order` in `WebuxPluginManifest` controls tab position; lower numbers appear leftmost. Default ordering: fileviewer=30, skill_runner=20, yt_poster=40, monitor=20.
 - **short_publish pool duration is the processed file**: the pool row must show the renamed/concatenated clip (`upload_duration_seconds`, measured after step 3) — never the source-file length (`duration_seconds`). Source length belongs on the file picker only.
+- **long_publish video extensions are shared**: `youtube.publish.video_extensions` is the same key short_publish reads. The long-publish default is `mp4,mkv,webm`. A stored value that is exactly the legacy `mp4,mkv` (any order or spacing) is rewritten to that default on `GET /config`. Any other saved list, including one that drops `webm` on purpose, is left unchanged.
+- **long_publish Retry uses the meta log**: `*-long-meta.json` records `completed_steps`. Retry starts at the first index missing from `completed_steps` and `skipped_steps`. The thumbnail engine select on that run overrides `youtube.publish.thumbnail_engine`; an empty select still follows the image CLI default (`flux2cloud` on this profile).
 
 ## 🧪 Tests
 - Test files: `tests/`

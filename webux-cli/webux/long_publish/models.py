@@ -16,7 +16,8 @@ STEP_NAMES = [
 ]
 
 DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
-DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv"
+DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv,webm"
+LEGACY_VIDEO_EXTENSIONS = "mp4,mkv"
 
 _INTERMEDIATE_RE = re.compile(r"_(nosilence|subtitled|volume_normalized|no_signature)$", re.IGNORECASE)
 
@@ -61,6 +62,7 @@ class Job:
     source_urls: list[str] = field(default_factory=list)
     thumbnail_overlay_title: str = ""
     thumbnail_prompt: str = ""
+    thumbnail_engine: str = ""
     stop_requested: bool = False
     steps: list[Step] = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)

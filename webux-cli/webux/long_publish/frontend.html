@@ -32,6 +32,8 @@
     .btn-resume { background:var(--warn); color:#000; }
     .btn-resume:hover { opacity:.88; }
     .btn-resume:disabled { opacity:.4; cursor:default; }
+    .publish-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0 12px; }
+    .publish-actions .inline-select { width:auto; min-width:180px; flex:1; }
     .btn-sec    { background:var(--accent); color:var(--text); }
     .btn-sec:hover { opacity:.88; }
     .main-layout { display:flex; gap:16px; align-items:flex-start; }
@@ -88,7 +90,7 @@
   <div class="config-panel" id="cfgPanel">
     <div class="cols2">
       <div class="row"><label>Video source path</label><input id="cfgSourcePath" type="text"></div>
-      <div class="row"><label>Video extensions</label><input id="cfgExt" type="text"></div>
+      <div class="row"><label>Video extensions</label><input id="cfgExt" type="text" placeholder="mp4,mkv,webm"></div>
     </div>
     <div class="row"><label>Signature (appended to description)</label><textarea id="cfgSignature" rows="2"></textarea></div>
     <div class="row"><label>Signature video path</label><input id="cfgSigVideo" type="text" oninput="updateSignatureAvailability()"></div>
@@ -152,7 +154,11 @@
       <div class="row"><label>Source URLs (one per line)</label><textarea id="sourceUrls" rows="2"></textarea></div>
       <div class="row" id="overlayRow"><label>Thumbnail overlay title (optional, overrides prompt)</label><input id="thumbOverlayTitle" type="text"></div>
 
-      <button class="btn-go" id="startBtn">▶ Publish</button>
+      <div class="publish-actions">
+        <button class="btn-go" id="startBtn">▶ Publish</button>
+        <button class="btn-resume" id="retryBtn" disabled title="Select a video that already has a publish log">↻ Retry</button>
+        <select id="thumbEngine" class="inline-select" title="Thumbnail engine for this run"></select>
+      </div>
 
       <div class="resume-box" id="resumeBox">
         <div id="resumeInfo" style="font-size:12px;color:var(--dim);margin-bottom:8px;"></div>
@@ -237,6 +243,7 @@
 const API = '/api/long_publish';
 let currentJob = null;
 let pollTimer = null;
+let nextRetryStep = null;
 const STEP_ICONS = { pending:'⏳', running:'⏳', done:'✅', error:'❌', skipped:'⏭', stopped:'⏹' };
 
 function el(id){ return document.getElementById(id); }
@@ -382,20 +389,56 @@ el('videoSel').addEventListener('change', ()=>{
   } else {
     el('videoWrap').style.display='none';
     el('resumeBox').style.display='none';
+    setRetry(null);
   }
   refreshQuickPrompt();
 });
 
+function setRetry(data){
+  const retry = el('retryBtn');
+  const names = (data && data.step_names) || [];
+  const step = data && Number.isInteger(data.next_step) ? data.next_step : null;
+  if (!data || !data.meta_exists){
+    nextRetryStep = null;
+    retry.disabled = true;
+    retry.textContent = '↻ Retry';
+    retry.title = 'No publish log for this video yet';
+    return;
+  }
+  if (step == null){
+    nextRetryStep = null;
+    retry.disabled = true;
+    retry.textContent = '↻ Retry';
+    retry.title = 'Every step in the publish log is already done';
+    return;
+  }
+  if (step === 0){
+    nextRetryStep = null;
+    retry.disabled = true;
+    retry.textContent = '↻ Retry';
+    retry.title = 'Nothing completed yet — use Publish';
+    return;
+  }
+  nextRetryStep = step;
+  retry.disabled = false;
+  retry.textContent = '↻ Retry from ' + (names[step] || ('step '+step));
+  retry.title = 'Continue from the first step that is not done in the long-meta log';
+}
+
 async function checkResume(source){
   const r = await fetch(API+'/check-resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({source}) }).catch(()=>null);
   const data = r ? await r.json() : null;
+  setRetry(data);
   if (!data || !data.can_resume){
     el('resumeBox').style.display='none';
     return;
   }
   el('resumeBox').style.display='block';
-  const steps = ['Remove silence','Extract transcript','Generate title & description','Generate thumbnail','Append signature video','Upload to YouTube'];
+  const steps = data.step_names || [];
   el('resumeStep').innerHTML = data.available_from_steps.map(s=>`<option value="${s}">${s}. ${steps[s]||'step '+s}</option>`).join('');
+  if (data.next_step != null && el('resumeStep').querySelector('option[value="'+data.next_step+'"]')){
+    el('resumeStep').value = String(data.next_step);
+  }
   const info = [];
   if (data.title) info.push('Title: '+data.title);
   if (data.thumbnail_overlay_title) info.push('Overlay: '+data.thumbnail_overlay_title);
@@ -423,6 +466,7 @@ function startBody(){
     description_prefix: el('descPrefix').value,
     source_urls: el('sourceUrls').value.split('\n').map(s=>s.trim()).filter(Boolean),
     thumbnail_overlay_title: el('thumbOverlayTitle').value,
+    thumbnail_engine: el('thumbEngine').value,
   };
 }
 
@@ -430,6 +474,18 @@ el('startBtn').addEventListener('click', async ()=>{
   if (!el('videoSel').value){ alert('Select a source video'); return; }
   const r = await fetch(API+'/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(startBody()) });
   const data = await r.json();
+  currentJob = data.job_id;
+  startPoll();
+});
+
+el('retryBtn').addEventListener('click', async ()=>{
+  const source = el('videoSel').value;
+  if (!source || nextRetryStep == null) return;
+  const body = startBody();
+  body.from_step = nextRetryStep;
+  const r = await fetch(API+'/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await r.json().catch(()=>({}));
+  if (!r.ok || !data.job_id){ alert(data.detail || 'Retry failed'); return; }
   currentJob = data.job_id;
   startPoll();
 });
@@ -464,15 +520,18 @@ el('cfgSave').addEventListener('click', saveConfig);
 async function loadEngines(){
   const r = await fetch(API+'/list-engines').catch(()=>null);
   const data = r ? await r.json() : {engines:[], default:''};
-  const sel = el('regenEngine');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">— config default ('+data.default+') —</option>';
-  for (const e of (data.engines||[])){
-    const o = document.createElement('option');
-    o.value = e; o.textContent = e;
-    sel.appendChild(o);
+  const engines = data.engines || [];
+  const blank = '— config default ('+(data.default||'image default')+') —';
+  for (const sel of [el('regenEngine'), el('thumbEngine')]){
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">'+blank+'</option>';
+    for (const e of engines){
+      const o = document.createElement('option');
+      o.value = e; o.textContent = e === data.default ? e+' (default)' : e;
+      sel.appendChild(o);
+    }
+    if (cur && engines.includes(cur)) sel.value = cur;
   }
-  if (cur && (data.engines||[]).includes(cur)) sel.value = cur;
 }
 async function loadThumbVideos(){
   const path = el('cfgSourcePath').value || '';

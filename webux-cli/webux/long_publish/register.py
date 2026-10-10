@@ -27,7 +27,10 @@ from .models import (
 from .utils import (
     _load_publish_cfg,
     _save_publish_cfg,
+    _migrate_publish_cfg_if_needed,
+    video_extension_set,
     _load_meta,
+    _long_meta_path,
     _pr,
     _image,
     _yt,
@@ -80,6 +83,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
 
 @router.get("/config")
 async def get_config():
+    _migrate_publish_cfg_if_needed()
     pub = _load_publish_cfg()
     return {
         "video_source_path": pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH),
@@ -179,7 +183,7 @@ async def list_videos(
     d = Path(path).expanduser()
     if not d.exists() or not d.is_dir():
         return {"videos": [], "error": f"Directory not found: {path}"}
-    exts = {("." + e.strip().lstrip(".")).lower() for e in extensions.split(",") if e.strip()}
+    exts = video_extension_set(extensions)
 
     pipeline_outputs: set[str] = set()
     for meta_file in d.glob("*-long-meta.json"):
@@ -336,6 +340,7 @@ class StartRequest(BaseModel):
     do_add_signature: bool = True
     do_generate_thumbnail: bool = True
     thumbnail_overlay_title: str = ""
+    thumbnail_engine: str = ""
 
 
 class ResumeRequest(BaseModel):
@@ -353,6 +358,7 @@ class ResumeRequest(BaseModel):
     description_prefix: str = ""
     source_urls: list[str] = []
     thumbnail_overlay_title: str = ""
+    thumbnail_engine: str = ""
 
 
 @router.post("/start")
@@ -381,6 +387,7 @@ async def start(req: StartRequest):
         do_add_signature=req.do_add_signature,
         do_generate_thumbnail=req.do_generate_thumbnail,
         thumbnail_overlay_title=req.thumbnail_overlay_title,
+        thumbnail_engine=req.thumbnail_engine.strip(),
         steps=[Step(name=n) for n in STEP_NAMES],
     )
     _jobs[job_id] = job
@@ -461,6 +468,7 @@ async def resume(req: ResumeRequest):
         do_add_signature=req.do_add_signature,
         do_generate_thumbnail=req.do_generate_thumbnail if not req.do_generate_thumbnail else meta.get("do_generate_thumbnail", True),
         thumbnail_overlay_title=req.thumbnail_overlay_title or meta.get("thumbnail_overlay_title", ""),
+        thumbnail_engine=req.thumbnail_engine.strip(),
         steps=[Step(name=n) for n in STEP_NAMES],
         files=files,
         title=meta.get("title", ""),
@@ -487,6 +495,10 @@ async def check_resume(body: dict):
     skipped = set(meta.get("skipped_steps", []))
     passed = completed | skipped
     available = sorted({c + 1 for c in passed if c + 1 < len(STEP_NAMES)})
+    meta_exists = _long_meta_path(source).exists()
+    next_step = next((i for i in range(len(STEP_NAMES)) if i not in passed), None)
+    if not meta_exists:
+        next_step = None
     files = meta.get("files", {})
     step_files = [
         [
@@ -498,6 +510,9 @@ async def check_resume(body: dict):
     ]
     return {
         "can_resume": bool(available),
+        "meta_exists": meta_exists,
+        "next_step": next_step,
+        "step_names": STEP_NAMES,
         "available_from_steps": available,
         "completed_steps": sorted(completed),
         "skipped_steps": sorted(skipped),
@@ -577,7 +592,7 @@ async def list_thumbnails(
     d = Path(path).expanduser()
     if not d.exists() or not d.is_dir():
         return {"videos": [], "error": f"Directory not found: {path}"}
-    exts = {("." + e.strip().lstrip(".")).lower() for e in extensions.split(",") if e.strip()}
+    exts = video_extension_set(extensions)
     files = sorted(
         [
             f for f in d.iterdir()

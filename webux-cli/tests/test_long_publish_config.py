@@ -7,13 +7,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 import webux.long_publish.register as reg
+import webux.long_publish.utils as pub_utils
+from common.core.config import ConfigError
+from webux.long_publish.models import DEFAULT_VIDEO_EXTENSIONS
 
 
 @pytest.fixture
-def store():
+def store(monkeypatch):
     data = {}
-    reg._load_publish_cfg = lambda: dict(data)
-    reg._save_publish_cfg = lambda pub: data.update(pub)
+    monkeypatch.setattr(reg, "_load_publish_cfg", lambda: dict(data))
+    monkeypatch.setattr(reg, "_save_publish_cfg", lambda pub: data.update(pub))
+    # GET /config migrates the real youtube config. Keep this fixture off disk.
+    monkeypatch.setattr(reg, "_migrate_publish_cfg_if_needed", lambda: False)
     return data
 
 
@@ -85,3 +90,96 @@ def test_replace_base_image(tmp_path, store, monkeypatch):
     assert Path(body["base"]).exists()
     # base renamed to <stem>_thumb_<N><ext>
     assert body["base"].endswith("_thumb_1.png")
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("mp4,mkv", True),
+        ("mkv, mp4", True),
+        ("MP4,MKV", True),
+        ("mp4,mkv,webm", False),
+        ("mp4", False),
+        ("mp4,mkv,mov", False),
+        ("", False),
+    ],
+)
+def test_needs_webm_migration(raw, expected):
+    assert pub_utils._needs_webm_migration(raw) is expected
+
+
+def test_needs_webm_migration_rejects_non_string():
+    with pytest.raises(ConfigError):
+        pub_utils._needs_webm_migration(["mp4", "mkv"])
+
+
+def _patch_publish_cfg(monkeypatch, publish: dict) -> dict:
+    state = {"youtube": {"publish": dict(publish)}}
+
+    def load(_name):
+        return {"youtube": {"publish": dict(state["youtube"]["publish"])}}
+
+    def save(pub):
+        state["youtube"]["publish"] = dict(pub)
+
+    monkeypatch.setattr(pub_utils, "load_tool_config", load)
+    monkeypatch.setattr(pub_utils, "_save_publish_cfg", save)
+    return state
+
+
+def test_migrate_legacy_extensions_persists_webm(monkeypatch):
+    state = _patch_publish_cfg(monkeypatch, {"video_extensions": "mp4,mkv", "signature": "keep"})
+    assert pub_utils._migrate_publish_cfg_if_needed() is True
+    assert state["youtube"]["publish"]["video_extensions"] == DEFAULT_VIDEO_EXTENSIONS
+    assert state["youtube"]["publish"]["signature"] == "keep"
+    assert pub_utils._migrate_publish_cfg_if_needed() is False
+
+
+def test_migrate_leaves_custom_extension_list(monkeypatch):
+    state = _patch_publish_cfg(monkeypatch, {"video_extensions": "mp4"})
+    assert pub_utils._migrate_publish_cfg_if_needed() is False
+    assert state["youtube"]["publish"]["video_extensions"] == "mp4"
+
+
+def test_migrate_raises_when_publish_is_not_a_mapping(monkeypatch):
+    monkeypatch.setattr(
+        pub_utils, "load_tool_config", lambda _name: {"youtube": {"publish": "mp4,mkv"}}
+    )
+    with pytest.raises(ConfigError):
+        pub_utils._migrate_publish_cfg_if_needed()
+
+
+def test_get_config_returns_migrated_extensions(monkeypatch):
+    state = _patch_publish_cfg(monkeypatch, {"video_extensions": "mkv,mp4", "signature": "s"})
+    monkeypatch.setattr(reg, "_migrate_publish_cfg_if_needed", pub_utils._migrate_publish_cfg_if_needed)
+    monkeypatch.setattr(reg, "_load_publish_cfg", pub_utils._load_publish_cfg)
+    monkeypatch.setattr(reg, "_save_publish_cfg", pub_utils._save_publish_cfg)
+
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(reg.router)
+    with TestClient(app) as client:
+        cfg = client.get("/config").json()
+    assert cfg["video_extensions"] == DEFAULT_VIDEO_EXTENSIONS
+    assert state["youtube"]["publish"]["video_extensions"] == DEFAULT_VIDEO_EXTENSIONS
+    assert cfg["signature"] == "s"
+
+
+def test_list_videos_includes_webm_by_default(tmp_path):
+    (tmp_path / "clip.webm").write_bytes(b"x")
+    (tmp_path / "clip.mp4").write_bytes(b"x")
+    (tmp_path / "notes.txt").write_text("no")
+    (tmp_path / "clip_nosilence.webm").write_bytes(b"x")
+
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(reg.router)
+    with TestClient(app) as client:
+        listed = client.get("/list-videos", params={"path": str(tmp_path)})
+        omitted = client.get(
+            "/list-videos",
+            params={"path": str(tmp_path), "extensions": "mp4,mkv"},
+        )
+    assert listed.status_code == 200
+    assert {v["name"] for v in listed.json()["videos"]} == {"clip.webm", "clip.mp4"}
+    assert {v["name"] for v in omitted.json()["videos"]} == {"clip.mp4"}

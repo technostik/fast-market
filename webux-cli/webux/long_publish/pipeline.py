@@ -366,7 +366,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         job.thumbnail_prompt = image_prompt
         overlay_title = job.thumbnail_overlay_title.strip() or await _generate_overlay_title(job, txt_path, pub_cfg)
 
-        thumb_engine = pub_cfg.get("thumbnail_engine", "").strip()
+        thumb_engine = (job.thumbnail_engine or pub_cfg.get("thumbnail_engine", "")).strip()
         cmd = [_image(), "generate", image_prompt, "--size", "youtube", "-F", "json", "--output-dir", str(d)]
         if thumb_engine:
             cmd += ["--engine", thumb_engine]

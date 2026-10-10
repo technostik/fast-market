@@ -285,7 +285,7 @@ Stored under the `publish` key in `~/.config/fast-market/common/youtube/config.y
 youtube:
   publish:
     video_source_path: /home/user/Videos
-    video_extensions: mp4,mkv
+    video_extensions: mp4,mkv,webm
     default_title_prompt: youtube-title
     default_description_prompt: youtube-summary
     language: fr

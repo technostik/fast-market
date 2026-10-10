@@ -142,6 +142,7 @@ commands/<command>/register.py
 - **lipsync venv-local basicsr patch:** basicsr 1.4.2 imports `torchvision.transforms.functional_tensor` (removed in tv>=0.15); `setup()` auto-patches the venv copy with a try/except fallback. Re-apply is idempotent.
 - **Missing output parents:** Most commands write directly to the resolved output path and do not create its parent directory.
 - **Silence failure modes:** A file with no usable audio raises `SilentVideoError`. The local implementation removes and rejects a result that is not shorter than the source; the current Modal worker returns the resulting video without that additional check.
+- **Chrome WebM has no container duration:** MediaRecorder writes `Duration: N/A`. MoviePy's `ffmpeg -i` parser raises `OSError` on that header. `commands/media_open.py` (and the Modal copy `_open_video_clip`) takes the duration from packet timestamps. Do not open those files with a bare `VideoFileClip`.
 - **Stream-copy cuts:** `cut` avoids re-encoding, so keyframes and timestamps can make an arbitrary cut point imprecise.
 - **Assembly zoom options:** Supported named and dynamic motion profiles currently ignore the CLI zoom fallback values.
 - **Model availability:** The Modal image preloads the `medium` Whisper model. Other requested model sizes may need runtime download or may fail in a restricted worker environment.

@@ -8,7 +8,11 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from common.core.config import load_tool_config, save_tool_config
+from common import structlog
+from common.core.config import ConfigError, load_tool_config, save_tool_config
+from .models import DEFAULT_VIDEO_EXTENSIONS, LEGACY_VIDEO_EXTENSIONS
+
+logger = structlog.get_logger(__name__)
 
 
 def _load_publish_cfg() -> dict:
@@ -17,6 +21,47 @@ def _load_publish_cfg() -> dict:
         return cfg.get("youtube", {}).get("publish", {})
     except Exception:
         return {}
+
+
+def _normalize_ext_list(ext_str: str) -> list[str]:
+    if not isinstance(ext_str, str):
+        raise ConfigError(
+            f"video_extensions must be a comma-separated string, got {type(ext_str).__name__}"
+        )
+    return [e.strip().lstrip(".").lower() for e in ext_str.split(",") if e.strip()]
+
+
+def video_extension_set(ext_str: str) -> set[str]:
+    """Suffixes accepted by the long-publish file lists, including the leading dot."""
+    return {"." + e for e in _normalize_ext_list(ext_str)}
+
+
+def _needs_webm_migration(ext_str: str) -> bool:
+    """True when a stored config is the pre-webm legacy default (``mp4,mkv``)."""
+    return set(_normalize_ext_list(ext_str)) == set(_normalize_ext_list(LEGACY_VIDEO_EXTENSIONS))
+
+
+def _migrate_publish_cfg_if_needed() -> bool:
+    """Persist a legacy ``mp4,mkv`` config so it includes ``webm``.
+
+    Returns True when a migration was written. Only the exact legacy value
+    is touched — user-customized extension lists are left alone.
+    """
+    cfg = load_tool_config("youtube")
+    youtube = cfg.get("youtube") or {}
+    if not isinstance(youtube, dict):
+        raise ConfigError("youtube config must be a mapping")
+    pub = youtube.get("publish") or {}
+    if not isinstance(pub, dict):
+        raise ConfigError("youtube.publish must be a mapping")
+    current = pub.get("video_extensions", "")
+    if not current or not _needs_webm_migration(current):
+        return False
+    updated = dict(pub)
+    updated["video_extensions"] = DEFAULT_VIDEO_EXTENSIONS
+    _save_publish_cfg(updated)
+    logger.info("long_publish_config_migrated", to=DEFAULT_VIDEO_EXTENSIONS)
+    return True
 
 
 def _save_publish_cfg(pub: dict) -> None:

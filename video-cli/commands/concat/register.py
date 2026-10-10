@@ -15,9 +15,11 @@ def concat_videos_simple(input_files: list[str], output_file: str) -> str:
     resolutions are handled by construction, matching this repo's
     convention (no separate codec-compatibility pre-check).
     """
-    from moviepy import VideoFileClip, concatenate_videoclips
+    from moviepy import concatenate_videoclips
 
-    clips = [VideoFileClip(f) for f in input_files]
+    from commands.media_open import open_video_clip
+
+    clips = [open_video_clip(f) for f in input_files]
     same_size = len({tuple(c.size) for c in clips}) == 1
     method = "chain" if same_size else "compose"
     final = concatenate_videoclips(clips, method=method)

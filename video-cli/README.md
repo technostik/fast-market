@@ -94,6 +94,8 @@ Detect silent audio with an RMS threshold and write the remaining clips as H.264
 
 The local implementation fails if the input has no detectable non-silent audio or if the resulting video is not shorter than the source.
 
+Chrome MediaRecorder WebM files often store `Duration: N/A`. `remove-silence` reads the packet timestamps and opens the file with that duration instead of failing in MoviePy.
+
 ```bash
 video remove-silence interview.mp4
 video remove-silence interview.mp4 -o interview_compact.mp4 -t -55

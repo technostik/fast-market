@@ -228,15 +228,112 @@ def remote_concat_videos(video_bytes_list: list[bytes], video_names: list[str]) 
 
 # ── Helpers (run on the Modal worker) ────────────────────────────────────────
 
+def _packet_end_seconds(path: str, stream: str) -> float | None:
+    import subprocess
+
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", stream,
+            "-show_entries", "packet=pts_time,duration_time",
+            "-of", "csv=p=0",
+            str(path),
+        ],
+        capture_output=True, text=True,
+    )
+    end = None
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(",")
+        if not parts or not parts[0]:
+            continue
+        try:
+            pts = float(parts[0])
+        except ValueError:
+            continue
+        extra = 0.0
+        if len(parts) > 1 and parts[1] not in ("", "N/A"):
+            try:
+                extra = float(parts[1])
+            except ValueError:
+                extra = 0.0
+        if extra < 0:
+            extra = 0.0
+        edge = pts + extra
+        end = edge if end is None else max(end, edge)
+    return end if end is not None and end > 0 else None
+
+
+def _open_video_clip(filename: str):
+    """MoviePy open that survives Chrome WebM ``Duration: N/A``.
+
+    Self-contained for the Modal worker. The local copy is
+    ``commands.media_open.open_video_clip``.
+    """
+    import sys
+    from pathlib import Path
+
+    import moviepy.audio.io.readers as audio_readers
+    import moviepy.video.io.ffmpeg_reader as video_reader
+    from moviepy import VideoFileClip
+
+    try:
+        return VideoFileClip(filename)
+    except OSError as exc:
+        if "Duration: N/A" not in str(exc):
+            raise
+        print(
+            f"Container duration is missing for {Path(filename).name}; "
+            "reading packet timestamps...",
+            file=sys.stderr,
+        )
+        ends = [
+            end for end in (
+                _packet_end_seconds(filename, "v:0"),
+                _packet_end_seconds(filename, "a:0"),
+            )
+            if end is not None
+        ]
+        if not ends:
+            raise RuntimeError(
+                f"ffmpeg reported Duration: N/A for {filename} and no packet "
+                "timestamps were found."
+            ) from exc
+        duration = min(ends)
+        original_video = video_reader.ffmpeg_parse_infos
+        original_audio = audio_readers.ffmpeg_parse_infos
+
+        def parse(filename, check_duration=True, fps_source="fps", decode_file=False, print_infos=False):
+            infos = original_video(
+                filename,
+                check_duration=False,
+                fps_source=fps_source,
+                decode_file=False,
+                print_infos=print_infos,
+            )
+            infos["duration"] = duration
+            if infos.get("video_found"):
+                infos["video_duration"] = duration
+                infos["video_n_frames"] = int(duration * (infos.get("video_fps") or 0))
+            return infos
+
+        video_reader.ffmpeg_parse_infos = parse
+        audio_readers.ffmpeg_parse_infos = parse
+        try:
+            return VideoFileClip(filename)
+        finally:
+            video_reader.ffmpeg_parse_infos = original_video
+            audio_readers.ffmpeg_parse_infos = original_audio
+
+
 def _remove_silence(
     input_path: str,
     output_path: str,
     threshold: float,
 ) -> tuple[str, float, float]:
     import numpy as np
-    from moviepy import VideoFileClip, concatenate_videoclips
+    from moviepy import concatenate_videoclips
 
-    video = VideoFileClip(input_path)
+    video = _open_video_clip(input_path)
     original_duration = video.duration
     audio_array = video.audio.to_soundarray(fps=video.audio.fps)
     if len(audio_array.shape) > 1:
@@ -270,9 +367,9 @@ def _remove_silence(
 
 
 def _concat_videos(clip_paths: list[str], output_path: str) -> str:
-    from moviepy import VideoFileClip, concatenate_videoclips
+    from moviepy import concatenate_videoclips
 
-    clips = [VideoFileClip(p) for p in clip_paths]
+    clips = [_open_video_clip(p) for p in clip_paths]
     same_size = len({tuple(c.size) for c in clips}) == 1
     method = "chain" if same_size else "compose"
     final = concatenate_videoclips(clips, method=method)
