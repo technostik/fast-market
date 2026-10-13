@@ -32,6 +32,21 @@ def get_default_config() -> dict:
                 # for GPUs with <24GB VRAM / machines with <64GB RAM.
                 "quantization": None,
             },
+            "flux2cloud": {
+                "account_id": "",
+                "api_token": "",
+                # "@cf/black-forest-labs/flux-2-klein-4b" or
+                # "@cf/black-forest-labs/flux-2-klein-9b"
+                # (9B: fixed 4 steps, higher quality).
+                "cf_model": "@cf/black-forest-labs/flux-2-klein-4b",
+            },
+            "flux29bcloud": {
+                "account_id": "",
+                "api_token": "",
+                # Pinned to 9B (fixed 4 steps, higher quality). The plugin
+                # forces this value; kept here for visibility / credentials.
+                "cf_model": "@cf/black-forest-labs/flux-2-klein-9b",
+            },
         },
         "default_width": 1024,
         "default_height": 1024,

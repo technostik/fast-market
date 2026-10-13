@@ -189,6 +189,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Shift text + band downward by this %% of image height (e.g. 10 = +10%%)",
     )
     @click.option(
+        "--cf-model",
+        type=click.Choice(
+            [
+                "@cf/black-forest-labs/flux-2-klein-4b",
+                "@cf/black-forest-labs/flux-2-klein-9b",
+                "4b",
+                "9b",
+            ]
+        ),
+        default=None,
+        help="Cloudflare Workers AI model (flux2cloud only: 4b or 9b). Overrides engines.flux2cloud.cf_model. Ignored for flux29bcloud (pinned to 9B).",
+    )
+    @click.option(
         "--verbose",
         "-v",
         is_flag=True,
@@ -223,6 +236,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         overlay_band_size,
         overlay_size_pct,
         overlay_offset,
+        cf_model,
         verbose,
     ):
         """Generate an image from a text prompt."""
@@ -247,6 +261,32 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo(f"Error: Unknown engine '{actual_engine}'", err=True)
             click.echo(f"Available engines: {', '.join(plugins.keys())}", err=True)
             ctx.exit(1)
+
+        # --cf-model overrides engines.flux2cloud.cf_model for this run.
+        if cf_model is not None:
+            if actual_engine == "flux29bcloud":
+                click.echo(
+                    "Warning: --cf-model is ignored for flux29bcloud (pinned to 9B)",
+                    err=True,
+                )
+            elif actual_engine != "flux2cloud":
+                click.echo(
+                    f"Warning: --cf-model only applies to flux2cloud (ignoring for {actual_engine})",
+                    err=True,
+                )
+            else:
+                from plugins.flux2cloud.plugin import KNOWN_CF_MODELS
+
+                plugin = plugins[actual_engine]
+                normalized = KNOWN_CF_MODELS.get(cf_model.strip().lower())
+                if normalized is None:
+                    normalized = cf_model.strip()
+                    if normalized == "flux-2-klein-9b":
+                        normalized = "@cf/black-forest-labs/flux-2-klein-9b"
+                    elif normalized == "flux-2-klein-4b":
+                        normalized = "@cf/black-forest-labs/flux-2-klein-4b"
+                plugin.config.cf_model = normalized
+                _vlog(f"[1/5] cf_model override -> {normalized}")
 
         if width is not None or height is not None:
             actual_width = width or config.default_width

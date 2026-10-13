@@ -18,6 +18,21 @@ from plugins.base import ImageEnginePlugin
 #: Socket timeout for the Cloudflare Workers AI POST + body read.
 API_TIMEOUT = 120
 
+#: Known Cloudflare Workers AI FLUX.2 Klein model IDs.
+CF_MODEL_4B = "@cf/black-forest-labs/flux-2-klein-4b"
+CF_MODEL_9B = "@cf/black-forest-labs/flux-2-klein-9b"
+KNOWN_CF_MODELS = {
+    "4b": CF_MODEL_4B,
+    "9b": CF_MODEL_9B,
+    CF_MODEL_4B: CF_MODEL_4B,
+    CF_MODEL_9B: CF_MODEL_9B,
+}
+
+#: Models with a fixed 4-step distilled inference process. The `steps`
+#: parameter must NOT be sent for these (Cloudflare rejects/ignores it).
+FIXED_STEPS_MODELS = frozenset({CF_MODEL_9B})
+FIXED_STEPS = 4
+
 
 def _encode_multipart(fields: dict[str, str], files: dict[str, bytes], boundary: str) -> bytes:
     """Encode text fields and file fields as multipart/form-data.
@@ -44,7 +59,7 @@ def _encode_multipart(fields: dict[str, str], files: dict[str, bytes], boundary:
 
 
 class Flux2CloudEnginePlugin(ImageEnginePlugin):
-    """FLUX.2 Klein-4B image generation via Cloudflare Workers AI (free tier)."""
+    """FLUX.2 Klein-4B/9B image generation via Cloudflare Workers AI (free tier)."""
 
     name = "flux2cloud"
 
@@ -52,6 +67,21 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
         if isinstance(config, dict):
             config = EngineConfig.from_dict(config)
         self.config = config
+        # Allow short aliases ("4b"/"9b") in config; normalize to full ID.
+        normalized = KNOWN_CF_MODELS.get(str(self.config.cf_model).strip().lower())
+        if normalized is None:
+            normalized = str(self.config.cf_model).strip()
+            # Also accept a bare "flux-2-klein-9b" without the @cf/ prefix.
+            if normalized == "flux-2-klein-9b":
+                normalized = CF_MODEL_9B
+            elif normalized == "flux-2-klein-4b":
+                normalized = CF_MODEL_4B
+        self.config.cf_model = normalized
+
+    @staticmethod
+    def is_fixed_steps_model(cf_model: str) -> bool:
+        """Return True when the model uses a fixed 4-step process (9B)."""
+        return cf_model in FIXED_STEPS_MODELS
 
     def generate(self, request: ImageGenRequest, verbose: bool = False) -> Image.Image:
         """Generate an image using Cloudflare Workers AI."""
@@ -84,8 +114,14 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
             "prompt": request.prompt,
             "width": str(request.width),
             "height": str(request.height),
-            "steps": str(request.num_inference_steps),
         }
+        # 9B is a distilled model with a fixed 4-step process: the `steps`
+        # parameter must not be sent. 4B accepts it.
+        if not self.is_fixed_steps_model(self.config.cf_model):
+            fields["steps"] = str(request.num_inference_steps)
+        # Both models accept guidance + seed for reproducibility.
+        fields["guidance"] = str(request.guidance_scale)
+        fields["seed"] = str(seed)
         # Reference images (subject/character consistency). Up to 4, sent as
         # input_image_0..3. The Cloudflare FLUX.2 Klein API requires every
         # reference to be strictly smaller than 512x512; downscale defensively.
@@ -104,7 +140,9 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
 
         _vlog(
             f"calling API model={self.config.cf_model} "
-            f"{request.width}x{request.height} steps={request.num_inference_steps} "
+            f"{request.width}x{request.height} "
+            f"steps={'fixed-4' if self.is_fixed_steps_model(self.config.cf_model) else request.num_inference_steps} "
+            f"guidance={request.guidance_scale} seed={seed} "
             f"refs={len(request.reference_images or [])} timeout={API_TIMEOUT}s"
         )
         _vlog(f"POST https://api.cloudflare.com/.../ai/run/{self.config.cf_model}")
@@ -162,7 +200,7 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
         return True
 
     def supports_seeds(self) -> bool:
-        return False
+        return True
 
     def get_default_size(self) -> tuple[int, int]:
         return (1024, 1024)

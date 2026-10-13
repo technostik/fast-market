@@ -10,7 +10,14 @@ from common.core.paths import get_tool_config
 from common.core.yaml_utils import dump_yaml
 from core.config import get_default_config
 
-_SUPPORTED_ENGINES = {"flux2", "qwen21"}
+_SUPPORTED_ENGINES = {"flux2", "qwen21", "flux2cloud", "flux29bcloud"}
+
+_CLOUD_ENGINES = {"flux2cloud", "flux29bcloud"}
+
+_FLUX2CLOUD_MODELS = (
+    "@cf/black-forest-labs/flux-2-klein-4b",
+    "@cf/black-forest-labs/flux-2-klein-9b",
+)
 
 
 def get_config_path() -> Path:
@@ -69,9 +76,16 @@ def list_engines(config: dict) -> None:
     for name, settings in engines.items():
         marker = " (default)" if name == default_engine else ""
         click.echo(f"  - {name}{marker}")
-        model_path = (
-            settings.get("model_path", "N/A") if isinstance(settings, dict) else "N/A"
-        )
+        if not isinstance(settings, dict):
+            click.echo("    Model path: N/A")
+            continue
+        if name in ("flux2cloud", "flux29bcloud"):
+            click.echo(f"    Model: {settings.get('cf_model', 'N/A')}")
+            click.echo(
+                f"    Account: {settings.get('account_id', '') or '(not set)'}"
+            )
+            continue
+        model_path = settings.get("model_path", "N/A")
         click.echo(f"    Model path: {model_path}")
 
 
@@ -94,6 +108,43 @@ def add_engine(config_path: Path, config: dict, engine_name: str) -> None:
 
     default_settings = get_engine_defaults(normalized)
     click.echo(f"\n=== Adding {normalized} engine ===")
+    if normalized in _CLOUD_ENGINES:
+        account_id = click.prompt(
+            "Cloudflare account ID",
+            default=default_settings.get("account_id", ""),
+        )
+        api_token = click.prompt(
+            "Cloudflare API token",
+            default=default_settings.get("api_token", ""),
+        )
+        if normalized == "flux29bcloud":
+            cf_model = "@cf/black-forest-labs/flux-2-klein-9b"
+            click.echo(f"Model pinned to: {cf_model} (fixed 4 steps).")
+        else:
+            cf_model = click.prompt(
+                "Cloudflare model",
+                type=click.Choice(list(_FLUX2CLOUD_MODELS)),
+                default=default_settings.get(
+                    "cf_model", "@cf/black-forest-labs/flux-2-klein-4b"
+                ),
+            )
+            click.echo("Note: 9B uses a fixed 4-step process (steps is ignored).")
+        engines = config.setdefault("engines", {})
+        engines[normalized] = {
+            "account_id": account_id,
+            "api_token": api_token,
+            "cf_model": cf_model,
+        }
+
+        if not config.get("default_engine"):
+            config["default_engine"] = normalized
+            click.echo(f"\nSet {normalized} as default engine")
+
+        save_config(config_path, config)
+        click.echo(f"\n✓ Added {normalized} engine")
+        click.echo(f"\nConfiguration saved to: {config_path}")
+        return
+
     model_path = click.prompt(
         "Model path",
         default=default_settings.get("model_path", "./flux2-klein-4b"),

@@ -97,4 +97,42 @@ def register(plugin_manifests: dict) -> click.Command:
         config_path = get_config_path()
         set_model_path(config_path, load_config(config_path), engine_path)
 
+    @group.command(
+        "set-cf-model",
+        help="Set Cloudflare model for flux2cloud (4b or 9b).",
+    )
+    @click.argument(
+        "model",
+        type=click.Choice(
+            [
+                "@cf/black-forest-labs/flux-2-klein-4b",
+                "@cf/black-forest-labs/flux-2-klein-9b",
+                "4b",
+                "9b",
+            ]
+        ),
+    )
+    @click.pass_context
+    def set_cf_model_cmd(ctx, model, **kwargs):
+        from commands.setup.helpers import get_config_path, load_config, save_config
+
+        _configure_logging(ctx.obj["verbose"])
+        config_path = get_config_path()
+        config = load_config(config_path)
+        engines = config.setdefault("engines", {})
+        if "flux2cloud" not in engines or not isinstance(
+            engines["flux2cloud"], dict
+        ):
+            engines["flux2cloud"] = {}
+        normalized = model.strip().lower()
+        if normalized == "4b":
+            normalized = "@cf/black-forest-labs/flux-2-klein-4b"
+        elif normalized == "9b":
+            normalized = "@cf/black-forest-labs/flux-2-klein-9b"
+        engines["flux2cloud"]["cf_model"] = normalized
+        save_config(config_path, config)
+        click.echo(f"✓ Set flux2cloud cf_model to: {normalized}")
+        if normalized.endswith("9b"):
+            click.echo("Note: 9B uses a fixed 4-step process (steps is ignored).")
+
     return group
