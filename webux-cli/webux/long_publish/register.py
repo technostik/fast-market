@@ -19,6 +19,8 @@ from .models import (
     Job,
     Step,
     STEP_NAMES,
+    RHYTHM_STEP_NAMES,
+    rhythm_params_from_pub,
     DEFAULT_VIDEO_SOURCE_PATH,
     DEFAULT_VIDEO_EXTENSIONS,
     _INTERMEDIATE_RE,
@@ -50,17 +52,40 @@ def _is_intermediate(path: Path) -> bool:
     return bool(_INTERMEDIATE_RE.search(path.stem))
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", use_modal: bool = True, do_remove_silence: bool = True, language: str = "fr", model: str = "medium", privacy: str = "unlisted") -> Job:
+def _validate_rhythm_options(rhythm_silence: bool, use_modal: bool, transcript_mode: str, do_remove_silence: bool) -> None:
+    """Reject rhythm-mode combinations the pipeline cannot run (HTTP 400)."""
+    if not rhythm_silence:
+        return
+    if use_modal:
+        raise HTTPException(
+            status_code=400,
+            detail="Rhythm silence mode is local-only (word-level JSON + transcript-aware cut); uncheck 'Use Modal' to use it.",
+        )
+    if transcript_mode == "none":
+        raise HTTPException(
+            status_code=400,
+            detail="Rhythm silence mode needs a transcript; pick a transcript mode first.",
+        )
+    if not do_remove_silence:
+        raise HTTPException(
+            status_code=400,
+            detail="Rhythm silence mode requires 'Remove silence' to be enabled.",
+        )
+
+
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted") -> Job:
     """Create (but do not start) a publish Job. Respects publish config for
     default prompts etc."""
     pub = _load_publish_cfg()
     job_id = str(uuid.uuid4())
+    step_names = RHYTHM_STEP_NAMES if rhythm_silence else STEP_NAMES
     job = Job(
         job_id=job_id,
         source=source,
         prompt_title=pub.get("default_title_prompt", "youtube-title"),
         prompt_summary=pub.get("default_description_prompt", "youtube-summary"),
         do_remove_silence=do_remove_silence,
+        rhythm_silence=rhythm_silence,
         transcript_mode=transcript_mode,
         language=language,
         model=model,
@@ -73,7 +98,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_add_signature=do_add_signature,
         do_generate_thumbnail=do_generate_thumbnail,
         thumbnail_overlay_title=thumbnail_overlay_title,
-        steps=[Step(name=n) for n in STEP_NAMES],
+        steps=[Step(name=n) for n in step_names],
     )
     _jobs[job_id] = job
     return job
@@ -102,6 +127,13 @@ async def get_config():
         "transcript_mode": pub.get("transcript_mode", "normal"),
         "transcript_model": pub.get("transcript_model", "medium"),
         "transcript_language": pub.get("transcript_language", "fr"),
+        "rhythm_transcript_tolerance": pub.get("rhythm_transcript_tolerance"),
+        "rhythm_paragraph_threshold": pub.get("rhythm_paragraph_threshold"),
+        "rhythm_pause_inline": pub.get("rhythm_pause_inline"),
+        "rhythm_pause_comma": pub.get("rhythm_pause_comma"),
+        "rhythm_pause_sentence": pub.get("rhythm_pause_sentence"),
+        "rhythm_pause_paragraph": pub.get("rhythm_pause_paragraph"),
+        "rhythm_crossfade": pub.get("rhythm_crossfade"),
         "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings/usage"),
     }
 
@@ -123,7 +155,27 @@ class ConfigSaveRequest(BaseModel):
     transcript_mode: str = "normal"
     transcript_model: str = "medium"
     transcript_language: str = "fr"
+    rhythm_transcript_tolerance: float | None = None
+    rhythm_paragraph_threshold: float | None = None
+    rhythm_pause_inline: float | None = None
+    rhythm_pause_comma: float | None = None
+    rhythm_pause_sentence: float | None = None
+    rhythm_pause_paragraph: float | None = None
+    rhythm_crossfade: float | None = None
     modal_usage_url: str = "https://modal.com/settings/usage"
+
+
+def _rhythm_config_from_request(req: ConfigSaveRequest) -> dict:
+    """Collect rhythm tuning fields for validation/storage (None = unset)."""
+    return {
+        "rhythm_transcript_tolerance": req.rhythm_transcript_tolerance,
+        "rhythm_paragraph_threshold": req.rhythm_paragraph_threshold,
+        "rhythm_pause_inline": req.rhythm_pause_inline,
+        "rhythm_pause_comma": req.rhythm_pause_comma,
+        "rhythm_pause_sentence": req.rhythm_pause_sentence,
+        "rhythm_pause_paragraph": req.rhythm_pause_paragraph,
+        "rhythm_crossfade": req.rhythm_crossfade,
+    }
 
 
 @router.post("/config")
@@ -145,6 +197,16 @@ async def save_config(req: ConfigSaveRequest):
     pub["transcript_mode"] = req.transcript_mode
     pub["transcript_model"] = req.transcript_model
     pub["transcript_language"] = req.transcript_language
+    rhythm_cfg = _rhythm_config_from_request(req)
+    try:
+        rhythm_params_from_pub(rhythm_cfg)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    for key, value in rhythm_cfg.items():
+        if value is None:
+            pub.pop(key, None)  # cleared field = unset, keep the file tidy
+        else:
+            pub[key] = value
     pub["modal_usage_url"] = req.modal_usage_url
     _save_publish_cfg(pub)
     return {"ok": True}
@@ -219,7 +281,10 @@ async def list_videos(
                 completed = set(meta.get("completed_steps", []))
                 skipped = set(meta.get("skipped_steps", []))
                 passed = completed | skipped
-                if set(range(len(STEP_NAMES))).issubset(passed):
+                # Hidden only when fully processed AND uploaded: a run whose
+                # tail steps were skipped (no thumbnail/signature/upload) never
+                # published anything, so the source stays selectable.
+                if set(range(len(STEP_NAMES))).issubset(passed) and len(STEP_NAMES) - 1 in completed:
                     continue
                 available = [c + 1 for c in passed if c + 1 < len(STEP_NAMES)]
                 resumable = bool(available)
@@ -331,6 +396,8 @@ class StartRequest(BaseModel):
     prompt_title: str
     prompt_summary: str
     do_remove_silence: bool = True
+    rhythm_silence: bool = False
+    cut_time: str = ""
     privacy: str = "unlisted"
     description_prefix: str = ""
     source_urls: list[str] = []
@@ -354,11 +421,21 @@ class ResumeRequest(BaseModel):
     do_add_signature: bool = True
     do_generate_thumbnail: bool = True
     do_remove_silence: bool = False
+    rhythm_silence: bool = False
+    cut_time: str = ""
     privacy: str = "unlisted"
     description_prefix: str = ""
     source_urls: list[str] = []
     thumbnail_overlay_title: str = ""
     thumbnail_engine: str = ""
+
+
+def _job_rhythm_params(pub: dict) -> dict[str, float]:
+    """Validated rhythm overrides from the publish config (HTTP 400 if bad)."""
+    try:
+        return rhythm_params_from_pub(pub)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/start")
@@ -368,14 +445,20 @@ async def start(req: StartRequest):
         raise HTTPException(status_code=400, detail=f"File not found: {source}")
 
     pub = _load_publish_cfg()
+    transcript_mode = pub.get("transcript_mode", "normal")
+    _validate_rhythm_options(req.rhythm_silence, req.use_modal, transcript_mode, req.do_remove_silence)
     job_id = str(uuid.uuid4())
+    step_names = RHYTHM_STEP_NAMES if req.rhythm_silence else STEP_NAMES
     job = Job(
         job_id=job_id,
         source=source,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
         do_remove_silence=req.do_remove_silence,
-        transcript_mode=pub.get("transcript_mode", "normal"),
+        rhythm_silence=req.rhythm_silence,
+        rhythm_params=_job_rhythm_params(pub),
+        cut_time=req.cut_time.strip(),
+        transcript_mode=transcript_mode,
         language=pub.get("transcript_language", "fr"),
         model=pub.get("transcript_model", "medium"),
         privacy=req.privacy,
@@ -388,7 +471,7 @@ async def start(req: StartRequest):
         do_generate_thumbnail=req.do_generate_thumbnail,
         thumbnail_overlay_title=req.thumbnail_overlay_title,
         thumbnail_engine=req.thumbnail_engine.strip(),
-        steps=[Step(name=n) for n in STEP_NAMES],
+        steps=[Step(name=n) for n in step_names],
     )
     _jobs[job_id] = job
     asyncio.create_task(_run_job_safely(_run_pipeline_from(job, 0), job))
@@ -449,14 +532,20 @@ async def resume(req: ResumeRequest):
     skipped_before = set(meta.get("skipped_steps", []))
 
     pub = _load_publish_cfg()
+    transcript_mode = pub.get("transcript_mode", "normal")
+    _validate_rhythm_options(req.rhythm_silence, req.use_modal, transcript_mode, req.do_remove_silence)
     job_id = str(uuid.uuid4())
+    step_names = RHYTHM_STEP_NAMES if req.rhythm_silence else STEP_NAMES
     job = Job(
         job_id=job_id,
         source=source,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
         do_remove_silence=req.do_remove_silence,
-        transcript_mode=pub.get("transcript_mode", "normal"),
+        rhythm_silence=req.rhythm_silence,
+        rhythm_params=_job_rhythm_params(pub),
+        cut_time=req.cut_time.strip(),
+        transcript_mode=transcript_mode,
         language=pub.get("transcript_language", "fr"),
         model=pub.get("transcript_model", "medium"),
         privacy=req.privacy,
@@ -469,7 +558,7 @@ async def resume(req: ResumeRequest):
         do_generate_thumbnail=req.do_generate_thumbnail if not req.do_generate_thumbnail else meta.get("do_generate_thumbnail", True),
         thumbnail_overlay_title=req.thumbnail_overlay_title or meta.get("thumbnail_overlay_title", ""),
         thumbnail_engine=req.thumbnail_engine.strip(),
-        steps=[Step(name=n) for n in STEP_NAMES],
+        steps=[Step(name=n) for n in step_names],
         files=files,
         title=meta.get("title", ""),
         description=meta.get("description", ""),

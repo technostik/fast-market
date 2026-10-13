@@ -263,6 +263,68 @@ def _packet_end_seconds(path: str, stream: str) -> float | None:
     return end if end is not None and end > 0 else None
 
 
+def _parse_rate(text: str) -> float | None:
+    try:
+        num, _, den = text.strip().partition("/")
+        num_f, den_f = float(num), float(den)
+    except ValueError:
+        return None
+    if den_f == 0 or num_f <= 0:
+        return None
+    return num_f / den_f
+
+
+def _probe_frame_rates(path: str) -> tuple[float | None, float | None]:
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=r_frame_rate,avg_frame_rate",
+                "-of", "csv=p=0",
+                str(path),
+            ],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        return None, None
+    parts = result.stdout.strip().split(",")
+    r_frame_rate = _parse_rate(parts[0]) if len(parts) > 0 else None
+    avg_frame_rate = _parse_rate(parts[1]) if len(parts) > 1 else None
+    return r_frame_rate, avg_frame_rate
+
+
+def _container_fps_override(
+    r_frame_rate: float | None, avg_frame_rate: float | None
+) -> float | None:
+    """Mirror of the local VFR guard (see commands.media_open)."""
+    if r_frame_rate is None or avg_frame_rate is None:
+        return None
+    if abs(avg_frame_rate - r_frame_rate) / r_frame_rate > 0.05:
+        return r_frame_rate
+    return None
+
+
+def _apply_vfr_fps_override(filename: str, clip):
+    import sys
+    from pathlib import Path
+
+    override = _container_fps_override(*_probe_frame_rates(filename))
+    if override is not None:
+        print(
+            f"VFR content detected in {Path(filename).name}; "
+            f"using container frame rate ({override:.2f} fps) instead of "
+            f"{clip.fps:.2f} fps.",
+            file=sys.stderr,
+        )
+        clip.fps = override
+        if getattr(clip, "reader", None) is not None:
+            clip.reader.fps = override
+    return clip
+
+
 def _open_video_clip(filename: str):
     """MoviePy open that survives Chrome WebM ``Duration: N/A``.
 
@@ -277,7 +339,7 @@ def _open_video_clip(filename: str):
     from moviepy import VideoFileClip
 
     try:
-        return VideoFileClip(filename)
+        return _apply_vfr_fps_override(filename, VideoFileClip(filename))
     except OSError as exc:
         if "Duration: N/A" not in str(exc):
             raise
@@ -319,7 +381,7 @@ def _open_video_clip(filename: str):
         video_reader.ffmpeg_parse_infos = parse
         audio_readers.ffmpeg_parse_infos = parse
         try:
-            return VideoFileClip(filename)
+            return _apply_vfr_fps_override(filename, VideoFileClip(filename))
         finally:
             video_reader.ffmpeg_parse_infos = original_video
             audio_readers.ffmpeg_parse_infos = original_audio

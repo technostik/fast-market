@@ -92,6 +92,77 @@ def packet_span_seconds(path: str) -> float | None:
     return min(ends)
 
 
+def _parse_rate(text: str) -> float | None:
+    """Parse an ffmpeg ``num/den`` frame rate; None when unknown (``0/0``)."""
+    try:
+        num, _, den = text.strip().partition("/")
+        num_f, den_f = float(num), float(den)
+    except ValueError:
+        return None
+    if den_f == 0 or num_f <= 0:
+        return None
+    return num_f / den_f
+
+
+def _probe_frame_rates(path: str) -> tuple[float | None, float | None]:
+    """(r_frame_rate, avg_frame_rate) of the first video stream.
+
+    Either is None when ffprobe is missing or the rate is unknown.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=r_frame_rate,avg_frame_rate",
+                "-of", "csv=p=0",
+                str(path),
+            ],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        return None, None
+    parts = result.stdout.strip().split(",")
+    r_frame_rate = _parse_rate(parts[0]) if len(parts) > 0 else None
+    avg_frame_rate = _parse_rate(parts[1]) if len(parts) > 1 else None
+    return r_frame_rate, avg_frame_rate
+
+
+def container_fps_override(
+    r_frame_rate: float | None, avg_frame_rate: float | None
+) -> float | None:
+    """Container fps to force for VFR content, else None (leave untouched).
+
+    MoviePy reads ``video_fps`` (usually the average rate) and uses it both
+    to map times to frame numbers and as the re-encode rate. For VFR the
+    average can be far below the container rate (e.g. 10 fps computed over a
+    static talking-head stretch of a 30 fps file), which misindexes frames
+    and plays the re-encoded output in slow motion. Forcing the container
+    rate reproduces what files with undetermined average already get.
+    """
+    if r_frame_rate is None or avg_frame_rate is None:
+        return None
+    if abs(avg_frame_rate - r_frame_rate) / r_frame_rate > 0.05:
+        return r_frame_rate
+    return None
+
+
+def _apply_vfr_fps_override(filename: str, clip):
+    """Force the container fps on VFR clips (reader + clip attributes)."""
+    override = container_fps_override(*_probe_frame_rates(filename))
+    if override is not None:
+        print(
+            f"VFR content detected in {Path(filename).name}; "
+            f"using container frame rate ({override:.2f} fps) instead of "
+            f"{clip.fps:.2f} fps.",
+            file=sys.stderr,
+        )
+        clip.fps = override
+        if getattr(clip, "reader", None) is not None:
+            clip.reader.fps = override
+    return clip
+
+
 def _missing_container_duration(exc: BaseException) -> bool:
     return "Duration: N/A" in str(exc)
 
@@ -128,11 +199,16 @@ def _open_with_known_duration(filename: str, duration: float):
 
 
 def open_video_clip(filename: str):
-    """Open ``filename`` with MoviePy, including Chrome WebM with no duration."""
+    """Open ``filename`` with MoviePy, including Chrome WebM with no duration.
+
+    VFR content is forced to the container frame rate (see
+    :func:`container_fps_override`): otherwise MoviePy adopts the computed
+    average rate, misindexes frames, and re-encodes in slow motion.
+    """
     from moviepy import VideoFileClip
 
     try:
-        return VideoFileClip(filename)
+        clip = VideoFileClip(filename)
     except OSError as exc:
         if not _missing_container_duration(exc):
             raise
@@ -148,4 +224,5 @@ def open_video_clip(filename: str):
                 "timestamps were found. Remux the file with "
                 "`ffmpeg -i INPUT -c copy OUTPUT.mkv` and retry."
             ) from exc
-        return _open_with_known_duration(filename, duration)
+        clip = _open_with_known_duration(filename, duration)
+    return _apply_vfr_fps_override(filename, clip)

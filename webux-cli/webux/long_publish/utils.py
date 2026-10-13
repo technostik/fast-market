@@ -100,6 +100,8 @@ def _save_meta(job) -> None:
         meta["thumbnail_prompt"] = job.thumbnail_prompt
     if job.do_generate_thumbnail is not True:
         meta["do_generate_thumbnail"] = job.do_generate_thumbnail
+    if getattr(job, "rhythm_silence", False):
+        meta["rhythm_silence"] = True
     if job.transcript_text:
         meta["transcript_text"] = job.transcript_text
     if job.video_url:
@@ -298,3 +300,29 @@ async def _run_capture(step, *cmd: str):
         clear_active_proc()
     rc = proc.returncode or 0
     return rc, "\n".join(stdout_chunks)
+
+
+def _parse_timestamp(ts: str) -> float | None:
+    """Parse a cut point into seconds. Accepts ``MM:SS``, ``HH:MM:SS`` or a bare
+    number of seconds. Returns ``None`` for an empty/unparseable value."""
+    ts = (ts or "").strip()
+    if not ts:
+        return None
+    if ":" in ts:
+        parts: list[float] = []
+        for p in ts.split(":"):
+            try:
+                parts.append(float(p))
+            except ValueError:
+                return None
+        if not parts:
+            return None
+        parts.reverse()
+        seconds = 0.0
+        for i, v in enumerate(parts):
+            seconds += v * (60 ** i)
+        return seconds
+    try:
+        return float(ts)
+    except ValueError:
+        return None

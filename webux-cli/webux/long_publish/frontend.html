@@ -103,6 +103,20 @@
       <div class="row"><label>Transcript model</label><input id="cfgModel" type="text" value="medium"></div>
     </div>
     <div class="checkrow"><input type="checkbox" id="cfgGroq"><label style="margin:0">Use Groq for transcript (vs local Whisper)</label></div>
+    <div class="row"><label>Rhythm silence tuning (seconds; empty = video config default)</label></div>
+    <div class="cols2">
+      <div class="row"><label>Alignment tolerance</label><input id="cfgRhyTol" type="number" min="0" step="0.05" placeholder="0.3"></div>
+      <div class="row"><label>Paragraph threshold (0 = infinite)</label><input id="cfgRhyParaThr" type="number" min="0" step="0.1" placeholder="0"></div>
+    </div>
+    <div class="cols2">
+      <div class="row"><label>Keep: hesitation</label><input id="cfgRhyInline" type="number" min="0" step="0.05" placeholder="0.10"></div>
+      <div class="row"><label>Keep: comma</label><input id="cfgRhyComma" type="number" min="0" step="0.05" placeholder="0.25"></div>
+    </div>
+    <div class="cols2">
+      <div class="row"><label>Keep: sentence</label><input id="cfgRhySentence" type="number" min="0" step="0.05" placeholder="0.45"></div>
+      <div class="row"><label>Keep: paragraph</label><input id="cfgRhyParagraph" type="number" min="0" step="0.05" placeholder="0.90"></div>
+    </div>
+    <div class="row"><label>Crossfade at cuts</label><input id="cfgRhyXfade" type="number" min="0" step="0.001" placeholder="0.008"></div>
     <div class="cols2">
       <div class="row"><label>Thumbnail image prompt <span class="prompt-info" id="infoThumb" data-content="">ⓘ</span></label><select id="cfgThumbPrompt"><option value="">— none (disabled) —</option></select></div>
       <div class="row"><label>Thumbnail overlay prompt <span class="prompt-info" id="infoOverlay" data-content="">ⓘ</span></label><select id="cfgThumbOverlay"><option value="">— none (disabled) —</option></select></div>
@@ -133,7 +147,7 @@
       </div>
 
       <div class="options-grid">
-        <div class="opt checkrow"><input type="checkbox" id="doRemoveSilence" checked><label style="margin:0">Remove silence</label></div>
+        <div class="opt checkrow"><label for="silenceMode" style="margin:0" title="Rhythm transcribes first (word-level JSON), then cuts silences while keeping speech rhythm. Local-only: unchecks 'Use Modal'.">Silences</label><select id="silenceMode"><option value="remove" selected>Remove silence</option><option value="rhythm">🎵 Rhythm (transcript first)</option><option value="keep">Keep silences</option></select></div>
         <div class="opt checkrow"><input type="checkbox" id="doNormalize"><label style="margin:0">Normalize volume</label></div>
         <div class="opt checkrow"><input type="checkbox" id="doSignature" checked><label style="margin:0">Append signature video</label></div>
         <div class="opt checkrow"><input type="checkbox" id="useModal" checked><label style="margin:0">Use Modal</label></div>
@@ -151,6 +165,7 @@
         </div>
       </div>
       <div class="row"><label>Description prefix</label><textarea id="descPrefix" rows="2"></textarea></div>
+      <div class="row"><label>Cut time (optional — trims the video tail at this point before processing)</label><input id="cutTime" type="text" placeholder="MM:SS (e.g. 1:30) — leave empty to skip"></div>
       <div class="row"><label>Source URLs (one per line)</label><textarea id="sourceUrls" rows="2"></textarea></div>
       <div class="row" id="overlayRow"><label>Thumbnail overlay title (optional, overrides prompt)</label><input id="thumbOverlayTitle" type="text"></div>
 
@@ -268,6 +283,13 @@ async function loadConfig(){
   el('cfgLang').value = c.transcript_language||'fr';
   el('cfgModel').value = c.transcript_model||'medium';
   el('cfgGroq').checked = (c.transcript_mode==='groq');
+  el('cfgRhyTol').value = c.rhythm_transcript_tolerance ?? '';
+  el('cfgRhyParaThr').value = c.rhythm_paragraph_threshold ?? '';
+  el('cfgRhyInline').value = c.rhythm_pause_inline ?? '';
+  el('cfgRhyComma').value = c.rhythm_pause_comma ?? '';
+  el('cfgRhySentence').value = c.rhythm_pause_sentence ?? '';
+  el('cfgRhyParagraph').value = c.rhythm_pause_paragraph ?? '';
+  el('cfgRhyXfade').value = c.rhythm_crossfade ?? '';
   updateSignatureAvailability();
 }
 
@@ -285,6 +307,7 @@ function updateSignatureAvailability() {
 }
 
 async function saveConfig(){
+  const numOrNull = (id)=>{ const v = el(id).value.trim(); return v === '' ? null : Number(v); };
   const body = {
     video_source_path: el('cfgSourcePath').value,
     video_extensions: el('cfgExt').value,
@@ -303,10 +326,22 @@ async function saveConfig(){
     transcript_mode: el('cfgGroq').checked ? 'groq' : 'normal',
     transcript_model: el('cfgModel').value,
     transcript_language: el('cfgLang').value,
+    rhythm_transcript_tolerance: numOrNull('cfgRhyTol'),
+    rhythm_paragraph_threshold: numOrNull('cfgRhyParaThr'),
+    rhythm_pause_inline: numOrNull('cfgRhyInline'),
+    rhythm_pause_comma: numOrNull('cfgRhyComma'),
+    rhythm_pause_sentence: numOrNull('cfgRhySentence'),
+    rhythm_pause_paragraph: numOrNull('cfgRhyParagraph'),
+    rhythm_crossfade: numOrNull('cfgRhyXfade'),
   };
-  await fetch(API+'/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  el('cfgMsg').textContent = 'saved';
-  setTimeout(()=>el('cfgMsg').textContent='', 1500);
+  const r = await fetch(API+'/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!r.ok){
+    const data = await r.json().catch(()=>({}));
+    el('cfgMsg').textContent = 'error: ' + (data.detail || r.status);
+  } else {
+    el('cfgMsg').textContent = 'saved';
+    setTimeout(()=>el('cfgMsg').textContent='', 1500);
+  }
   await loadVideos();
   await loadThumbVideos();
 }
@@ -453,7 +488,9 @@ function startBody(){
     source: el('videoSel').value,
     prompt_title: el('cfgTitlePrompt').value,
     prompt_summary: el('cfgDescPrompt').value,
-    do_remove_silence: el('doRemoveSilence').checked,
+    do_remove_silence: el('silenceMode').value !== 'keep',
+    rhythm_silence: el('silenceMode').value === 'rhythm',
+    cut_time: el('cutTime').value,
     do_normalize_volume: el('doNormalize').checked,
     do_add_signature: (!el('doSignature').disabled && el('doSignature').checked),
     do_generate_thumbnail: el('doThumb').checked,
@@ -652,6 +689,13 @@ function updateOverlayRow(){
   el('overlayRow').style.display = el('doThumb').checked ? 'block' : 'none';
 }
 el('doThumb').addEventListener('change', updateOverlayRow);
+
+// Rhythm (transcript-first) silence mode is local-only: selecting it unchecks 'Use Modal'.
+el('silenceMode').addEventListener('change', ()=>{
+  if (el('silenceMode').value === 'rhythm'){
+    el('useModal').checked = false;
+  }
+});
 
 el('quickRun').addEventListener('click', async ()=>{
   const name = el('quickPromptSel').value;

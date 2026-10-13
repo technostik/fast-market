@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -367,9 +368,86 @@ def transcribe_to_txt(
         f.write("\n".join(lines))
 
 
+# ── JSON helpers ─────────────────────────────────────────────────────────────
+
+def transcribe_to_json(
+    input_path: str,
+    output_path: str,
+    language: str = "fr",
+    model_size: str = "medium",
+    progress_cb=None,
+    use_groq: bool = False,
+) -> None:
+    """Word-level timestamped JSON transcript: {language, text, words, segments}.
+
+    Intended as input for `video remove-silence --use-transcript`.
+    ``words`` is a flat list of {word, start, end}; ``segments`` holds
+    {start, end, text}. Local-only (no Modal branch).
+    """
+    if use_groq:
+        result_segments = _fetch_groq_segments(input_path, language)
+        if progress_cb:
+            try:
+                progress_cb(100, 100)
+            except Exception:
+                pass
+    else:
+        import subprocess
+
+        from faster_whisper import WhisperModel
+
+        # best-effort total duration for percentage
+        total_dur = None
+        try:
+            dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
+            dur_out = subprocess.check_output(dur_cmd, text=True)
+            total_dur = float(json.loads(dur_out)["format"]["duration"])
+        except Exception:
+            pass
+
+        lang = language if language != "auto" else None
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        segments_iter, _ = model.transcribe(input_path, word_timestamps=True, language=lang)
+
+        result_segments = []
+        for seg in segments_iter:
+            word_list = [
+                {"word": w.word.strip(), "start": w.start, "end": w.end}
+                for w in (seg.words or [])
+            ]
+            result_segments.append({
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text.strip(),
+                "words": word_list,
+            })
+            if progress_cb and total_dur:
+                try:
+                    pct = min(100.0, (seg.end / total_dur) * 100)
+                    progress_cb(round(pct, 1), 100)
+                except Exception:
+                    pass
+
+    flat_words = []
+    for seg in result_segments:
+        flat_words.extend(seg.get("words", []))
+    payload = {
+        "language": language,
+        "text": " ".join(s["text"] for s in result_segments if s["text"]).strip(),
+        "words": flat_words,
+        "segments": [
+            {"start": s["start"], "end": s["end"], "text": s["text"]}
+            for s in result_segments
+        ],
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-_EXT_TO_FORMAT = {".ass": "ass", ".srt": "srt", ".txt": "txt"}
+_EXT_TO_FORMAT = {".ass": "ass", ".srt": "srt", ".txt": "txt", ".json": "json"}
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -378,7 +456,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
     @click.option(
         "--format", "-f", "fmt",
-        type=click.Choice(["ass", "srt", "txt"]),
+        type=click.Choice(["ass", "srt", "txt", "json"]),
         default=None,
         help="Output format (default: inferred from extension, else srt)",
     )
@@ -397,10 +475,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         modal: bool,
         use_groq: bool,
     ):
-        """Transcribe a video to ASS karaoke, SRT, or plain TXT subtitles.
+        """Transcribe a video to ASS karaoke, SRT, plain TXT, or word-level JSON subtitles.
 
-        Format is inferred from the output file extension (.ass / .srt / .txt).
+        Format is inferred from the output file extension (.ass / .srt / .txt / .json).
         Use --format to override. Defaults to srt when not specified.
+        The json format is local-only and is the recommended input for
+        `video remove-silence --use-transcript`.
         """
         input_path = Path(input_file).resolve()
 
@@ -418,12 +498,18 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Transcribing {input_path.name} ({model}, {language}, {fmt})...", err=True)
 
         if modal:
+            if fmt == "json":
+                raise click.ClickException(
+                    "--format json is local-only; drop --modal to use it."
+                )
             from commands.remote import run_remote_extract_transcript
             run_remote_extract_transcript(input_path, output_path, fmt, language, model, font_size, use_groq)
         elif fmt == "ass":
             generate_karaoke_ass(str(input_path), str(output_path), language, model, font_size, progress_cb=None, use_groq=use_groq)
         elif fmt == "srt":
             transcribe_to_srt(str(input_path), str(output_path), language, model, progress_cb=None, use_groq=use_groq)
+        elif fmt == "json":
+            transcribe_to_json(str(input_path), str(output_path), language, model, progress_cb=None, use_groq=use_groq)
         else:
             transcribe_to_txt(str(input_path), str(output_path), language, model, progress_cb=None, use_groq=use_groq)
 

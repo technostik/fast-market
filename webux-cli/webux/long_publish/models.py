@@ -19,17 +19,60 @@ DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
 DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv,webm"
 LEGACY_VIDEO_EXTENSIONS = "mp4,mkv"
 
-_INTERMEDIATE_RE = re.compile(r"_(nosilence|subtitled|volume_normalized|no_signature)$", re.IGNORECASE)
+_INTERMEDIATE_RE = re.compile(r"_(nosilence|cut|subtitled|volume_normalized|no_signature)$", re.IGNORECASE)
 
 # Output file keys surfaced per step in the UI (index aligns with STEP_NAMES).
 _STEP_FILE_KEYS: list[list[str]] = [
-    ["no_silence", "audio"],
-    ["transcript", "transcript_txt"],
+    ["no_silence", "audio", "cut"],
+    ["transcript", "transcript_txt", "transcript_json"],
     ["final_video"],
     ["thumbnail", "thumbnail_base"],
     ["final_video"],
     [],
 ]
+
+# Step display names used when rhythm (transcript-first) mode is enabled.
+# STEP_NAMES stays static (resume dropdowns and meta logs use indices).
+RHYTHM_STEP_NAMES = [
+    "Prepare audio",
+    "Transcript + rhythm cut",
+    "Generate title & description",
+    "Generate thumbnail",
+    "Append signature video",
+    "Upload to YouTube",
+]
+
+# Rhythm tuning keys (publish config) mapped to video remove-silence flags.
+# A key that is missing/empty in the publish config is NOT passed, so the
+# video config file (or code default) applies. Set values override it.
+RHYTHM_PARAM_FLAGS: dict[str, str] = {
+    "rhythm_transcript_tolerance": "--transcript-tolerance",
+    "rhythm_paragraph_threshold": "--paragraph-threshold",
+    "rhythm_pause_inline": "--pause-inline",
+    "rhythm_pause_comma": "--pause-comma",
+    "rhythm_pause_sentence": "--pause-sentence",
+    "rhythm_pause_paragraph": "--pause-paragraph",
+    "rhythm_crossfade": "--crossfade",
+}
+
+
+def rhythm_params_from_pub(pub: dict) -> dict[str, float]:
+    """Extract validated rhythm overrides from the publish config.
+
+    Returns {config_key: value} for set values only. Raises ValueError on
+    non-numeric or negative values.
+    """
+    params: dict[str, float] = {}
+    for key in RHYTHM_PARAM_FLAGS:
+        value = pub.get(key, None)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{key} must be a number >= 0, got {value!r}")
+        if float(value) < 0:
+            raise ValueError(f"{key} must be a number >= 0, got {value!r}")
+        params[key] = float(value)
+    return params
 
 
 @dataclass
@@ -52,6 +95,9 @@ class Job:
     language: str
     model: str
     privacy: str
+    rhythm_silence: bool = False
+    rhythm_params: dict[str, float] = field(default_factory=dict)
+    cut_time: str = ""
     transcript_mode: str = "normal"
     description_prefix: str = ""
     skip_upload: bool = False

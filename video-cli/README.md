@@ -70,7 +70,7 @@ The shared Click group also accepts these global options:
 | Command | Description |
 |---------|-------------|
 | `video remove-silence INPUT` | Remove silent portions from a video |
-| `video extract-transcript INPUT` | Create ASS, SRT, or TXT subtitles |
+| `video extract-transcript INPUT` | Create ASS, SRT, TXT, or word-level JSON subtitles |
 | `video burn-subtitles VIDEO ASS` | Burn ASS subtitles into a video |
 | `video cut INPUT` | Trim a video at a timestamp using stream copy |
 | `video concat INPUT... -o OUTPUT` | Concatenate two or more videos |
@@ -91,8 +91,26 @@ Detect silent audio with an RMS threshold and write the remaining clips as H.264
 | `--output` | `-o` | Output path | `<stem>_nosilence<suffix>` next to the input |
 | `--threshold` | `-t` | Silence threshold in dB | `-65.0` |
 | `--modal` / `--local` | — | Run on Modal or locally | `--local` |
+| `--use-transcript` | — | Timestamped transcript (word-level JSON preferred, else JSON/SRT segments); keep natural speech pauses instead of removing every silence | off |
+| `--transcript-tolerance` | — | Max gap (s) between a word end and a silence start for alignment | `0.3` + config |
+| `--paragraph-threshold` | — | Silence (s) after a sentence end that counts as a paragraph pause; `0` means infinite (never) | `0` + config |
+| `--pause-inline` | — | Seconds kept for mid-sentence hesitations | `0.10` + config |
+| `--pause-comma` | — | Seconds kept after a comma | `0.25` + config |
+| `--pause-sentence` | — | Seconds kept after a sentence end | `0.45` + config |
+| `--pause-paragraph` | — | Seconds kept after a paragraph end | `0.90` + config |
+| `--crossfade` | — | Short audio fade (s) at each cut to avoid clicks (transcript mode only) | `0.008` + config |
+| `--dry-run` | — | Print the pause table without writing any file (requires `--use-transcript`) | off |
+| `--reset-config` | — | Reset the rhythm-silence section of the video config file to defaults and exit | — |
 
 The local implementation fails if the input has no detectable non-silent audio or if the resulting video is not shorter than the source.
+
+Without `--use-transcript` every detected silence is removed. With `--use-transcript`, silences are detected exactly as usual on the original file, then each one is classified from the word ending just before it (sentence end, comma, or mid-sentence hesitation; a sentence-end silence longer than `--paragraph-threshold` counts as a paragraph pause — the default `0` means infinite, so paragraphs only apply when you set a threshold) and shortened to the matching target — never longer than the original. The kept portion sits next to the following word to preserve the breath before a sentence, and video/audio are cut from the same intervals so they stay in sync. When the transcript has no punctuation or a silence cannot be aligned, classification falls back to the original duration (`<0.8` s hesitation, `0.8–1.5` s sentence, longer paragraph — or sentence when the paragraph threshold is infinite). Transcript mode and `--dry-run` are local-only.
+
+Rhythm parameters resolve as CLI option > config file > built-in default. The config file is the `remove_silence` section of `~/.config/fast-market/profiles/<profile>/video/config.yaml`; the effective values used for a run are printed to stderr. Reset them with:
+
+```bash
+video remove-silence --reset-config
+```
 
 Chrome MediaRecorder WebM files often store `Duration: N/A`. `remove-silence` reads the packet timestamps and opens the file with that duration instead of failing in MoviePy.
 
@@ -100,29 +118,34 @@ Chrome MediaRecorder WebM files often store `Duration: N/A`. `remove-silence` re
 video remove-silence interview.mp4
 video remove-silence interview.mp4 -o interview_compact.mp4 -t -55
 video remove-silence interview.mp4 --modal
+video extract-transcript interview.mp4 -f json -o interview.json
+video remove-silence interview.mp4 --use-transcript interview.json
+video remove-silence interview.mp4 --use-transcript interview.json --dry-run
+video remove-silence interview.mp4 --use-transcript interview.json --pause-sentence 0.6
 ```
 
 ### `video extract-transcript INPUT_FILE`
 
-Transcribe a video into karaoke-style ASS subtitles, SRT subtitles, or plain text.
+Transcribe a video into karaoke-style ASS subtitles, SRT subtitles, plain text, or word-level JSON.
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
 | `INPUT_FILE` | — | Existing input video | required |
 | `--output` | `-o` | Output path | `<stem>.<format>` next to the input |
-| `--format` | `-f` | Output format: `ass`, `srt`, or `txt` | Inferred from the output extension, otherwise `srt` |
+| `--format` | `-f` | Output format: `ass`, `srt`, `txt`, or `json` | Inferred from the output extension, otherwise `srt` |
 | `--language` | `-l` | Language code or `auto` | `fr` |
 | `--model` | `-m` | Whisper model size | `medium` |
 | `--font-size` | — | ASS font size | `96` |
 | `--modal` / `--local` | — | Run on Modal or locally | `--local` |
 | `--use-groq` | — | Use Groq `whisper-large-v3` instead of local `faster-whisper`; Modal SRT/TXT still use faster-whisper | off |
 
-Format selection follows this order: explicit `--format`, output-file extension, then `srt`. ASS output uses word-level green/white highlighting; SRT and TXT contain segment-level or plain text. Local `--use-groq` supports all three formats, but the current Modal implementation uses Groq only for ASS; Modal SRT and TXT requests are transcribed with worker-side `faster-whisper`.
+Format selection follows this order: explicit `--format`, output-file extension, then `srt`. ASS output uses word-level green/white highlighting; SRT and TXT contain segment-level or plain text. The `json` format is local-only and writes word-level timestamps (`{language, text, words:[{word,start,end}], segments:[{start,end,text}]}`); it is the recommended input for `video remove-silence --use-transcript`. Local `--use-groq` supports all four formats, but the current Modal implementation uses Groq only for ASS; Modal SRT and TXT requests are transcribed with worker-side `faster-whisper`.
 
 ```bash
 video extract-transcript talk.mp4
 video extract-transcript talk.mp4 -o captions.ass -f ass -l en -m medium
 video extract-transcript talk.mp4 -o captions.srt --font-size 72
+video extract-transcript talk.mp4 -o talk.json -f json
 video extract-transcript talk.mp4 --use-groq
 video extract-transcript talk.mp4 --modal
 ```
@@ -147,7 +170,7 @@ video burn-subtitles talk.mp4 talk.ass --modal
 
 ### `video cut INPUT_FILE`
 
-Trim at a timestamp with ffmpeg stream copy. This is fast, but the cut is not frame-accurate because the video is not re-encoded.
+Trim at a timestamp with ffmpeg stream copy. This is fast, but the cut is not frame-accurate because the video is not re-encoded. Timestamps are preserved as-is, so VFR sources stay in sync; downstream re-encoding opens them at the container frame rate.
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
@@ -491,7 +514,7 @@ cd video-cli
 pytest tests/
 ```
 
-The current tests cover cut timestamp parsing and stream-copy behavior, duration probing, ASS generation, silence removal, and subtitle-burn regressions. Golden fixtures can be regenerated with:
+The current tests cover cut timestamp parsing and stream-copy behavior, duration probing, ASS generation, silence removal, and subtitle-burn regressions, plus transcript-aware pause classification and JSON transcript output (`tests/test_remove_silence_transcript.py`, no Whisper/ffmpeg needed except the marked integration cases). Golden fixtures can be regenerated with:
 
 ```bash
 pytest video-cli/tests/test_publish_regression.py --generate-golden

@@ -6,7 +6,7 @@ import os
 import time
 from pathlib import Path
 
-from .models import Job, DEFAULT_VIDEO_SOURCE_PATH
+from .models import Job, DEFAULT_VIDEO_SOURCE_PATH, RHYTHM_PARAM_FLAGS
 from .utils import (
     _load_publish_cfg,
     _save_meta,
@@ -21,6 +21,7 @@ from .utils import (
     _run,
     _run_capture,
     _extract_video_id,
+    _parse_timestamp,
 )
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
 
@@ -165,36 +166,70 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
 
     current_video = job.source
 
-    # ── Step 0: Remove silence + normalize (modal-aware) ──────────────────────
+    # ── Step 0: Cut tail + remove silence + normalize (modal-aware) ──────────
     if from_step <= 0:
         s0 = job.steps[0]
         s0.start_time = time.time()
         s0.status = "running"
         s0.progress = 0.0
 
-        if job.do_remove_silence:
-            out_path = str(d / f"{stem}_nosilence.mp4")
-            cmd = [_video(), "remove-silence", job.source, "-o", out_path]
-            if job.use_modal:
-                cmd.append("--modal")
+        # ── Cut video tail (optional, one-time, before any other step) ──
+        if job.cut_time:
+            seconds = _parse_timestamp(job.cut_time)
+            if seconds is None:
+                s0.end_time = time.time()
+                s0.status = "error"
+                s0.output = f"[error] Invalid cut time: {job.cut_time!r} (use MM:SS or seconds)"
+                job.status = "error"
+                job.end_time = time.time()
+                _save_meta(job)
+                return
+            cut_path = str(d / f"{stem}_cut.mp4")
+            cmd = [_video(), "cut", job.source, "-o", cut_path, "-t", job.cut_time]
             if await _run_tracked(job, s0, *cmd):
                 return
-            current_video = out_path
-            job.files["no_silence"] = out_path
+            current_video = cut_path
+            job.files["cut"] = cut_path
+            s0.output += f"\n✂ Cut at {job.cut_time}"
+            # One-time cut done — clear the field so a later retry won't re-cut.
+            job.cut_time = ""
+            _save_meta(job)
+        elif job.files.get("cut", "") and Path(job.files["cut"]).exists():
+            # Re-entering step 0 after a prior cut already ran: reuse the
+            # existing cut file instead of the untouched original.
+            current_video = job.files["cut"]
 
-        if job.do_normalize_volume and Path(current_video).exists():
-            audio_out = str(d / f"{stem}_volume_normalized.mp4")
-            norm_cmd = [_sound(), "normalize-volume", "apply", current_video, "--output", audio_out]
-            if job.use_modal:
-                norm_cmd.append("--modal")
-            if await _run_tracked(job, s0, *norm_cmd):
-                return
-            current_video = audio_out
-            job.files["audio"] = audio_out
-            s0.output += "\n🔊 Normalized"
+        if getattr(job, "rhythm_silence", False):
+            # Transcript-first mode: the rhythm cut (on the original audio)
+            # and the volume normalization both happen in step 1, so this
+            # step only records the deferred work.
+            s0.output = "Rhythm mode: silence cut + normalize moved to step 1 (transcript first)"
+            s0.end_time = time.time(); s0.status = "done"; s0.progress = 100
+            _save_meta(job)
+        else:
+            if job.do_remove_silence:
+                out_path = str(d / f"{stem}_nosilence.mp4")
+                cmd = [_video(), "remove-silence", current_video, "-o", out_path]
+                if job.use_modal:
+                    cmd.append("--modal")
+                if await _run_tracked(job, s0, *cmd):
+                    return
+                current_video = out_path
+                job.files["no_silence"] = out_path
 
-        s0.end_time = time.time(); s0.status = "done"; s0.progress = 100
-        _save_meta(job)
+            if job.do_normalize_volume and Path(current_video).exists():
+                audio_out = str(d / f"{stem}_volume_normalized.mp4")
+                norm_cmd = [_sound(), "normalize-volume", "apply", current_video, "--output", audio_out]
+                if job.use_modal:
+                    norm_cmd.append("--modal")
+                if await _run_tracked(job, s0, *norm_cmd):
+                    return
+                current_video = audio_out
+                job.files["audio"] = audio_out
+                s0.output += "\n🔊 Normalized"
+
+            s0.end_time = time.time(); s0.status = "done"; s0.progress = 100
+            _save_meta(job)
     else:
         av = job.files.get("audio", "")
         if av and Path(av).exists():
@@ -203,6 +238,10 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             nv = job.files.get("no_silence", "")
             if nv and Path(nv).exists():
                 current_video = nv
+            else:
+                cut = job.files.get("cut", "")
+                if cut and Path(cut).exists():
+                    current_video = cut
 
     ass_path = str(d / f"{stem}.ass")
     txt_path = str(d / f"{stem}_transcript.txt")
@@ -214,6 +253,50 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         s1.start_time = time.time()
         s1.status = "running"
         s1.progress = 0.0
+
+        rhythm_note = ""
+        if getattr(job, "rhythm_silence", False):
+            # Transcript-first mode (local-only): word-level JSON transcript
+            # of the current video, then a rhythm-aware cut on that same
+            # file, then volume normalization of the cut. The ASS transcript
+            # below is regenerated from the final clip so downstream steps
+            # always describe the video that continues through the pipeline.
+            json_path = str(d / f"{stem}_transcript.json")
+            json_cmd = [
+                _video(), "extract-transcript", current_video,
+                "-o", json_path, "-l", job.language, "-m", job.model, "--format", "json",
+            ]
+            if job.transcript_mode == "groq":
+                json_cmd.append("--use-groq")
+            if await _run_tracked(job, s1, *json_cmd):
+                return
+            job.files["transcript_json"] = json_path
+            rhythm_note = "🎵 Word-level transcript ready"
+
+            if job.do_remove_silence:
+                out_path = str(d / f"{stem}_nosilence.mp4")
+                cut_cmd = [
+                    _video(), "remove-silence", current_video,
+                    "-o", out_path, "--use-transcript", json_path,
+                ]
+                for key, flag in RHYTHM_PARAM_FLAGS.items():
+                    value = getattr(job, "rhythm_params", {}).get(key)
+                    if value is not None:
+                        cut_cmd += [flag, str(value)]
+                if await _run_tracked(job, s1, *cut_cmd):
+                    return
+                current_video = out_path
+                job.files["no_silence"] = out_path
+                rhythm_note += "\n🎵 Rhythm cut applied"
+
+            if job.do_normalize_volume and Path(current_video).exists():
+                audio_out = str(d / f"{stem}_volume_normalized.mp4")
+                norm_cmd = [_sound(), "normalize-volume", "apply", current_video, "--output", audio_out]
+                if await _run_tracked(job, s1, *norm_cmd):
+                    return
+                current_video = audio_out
+                job.files["audio"] = audio_out
+                rhythm_note += "\n🔊 Normalized"
 
         cmd = [
             _video(), "extract-transcript", current_video,
@@ -230,6 +313,8 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         mode_label = "modal" if job.use_modal else "local"
         plain = _ass_to_plain_text(ass_path)
         s1.output = f"Done in {elapsed_s}s [{mode_label} mode]\n\nTranscript:\n{plain}"
+        if rhythm_note:
+            s1.output = f"{rhythm_note}\n{s1.output}"
         s1.status = "done"; s1.progress = 100
         with open(txt_path, "w", encoding="utf-8") as _f:
             _f.write(plain)

@@ -183,3 +183,43 @@ def test_list_videos_includes_webm_by_default(tmp_path):
     assert listed.status_code == 200
     assert {v["name"] for v in listed.json()["videos"]} == {"clip.webm", "clip.mp4"}
     assert {v["name"] for v in omitted.json()["videos"]} == {"clip.mp4"}
+
+
+def _write_meta(tmp_path: Path, stem: str, completed: list[int], skipped: list[int]):
+    src = tmp_path / f"{stem}.webm"
+    src.write_bytes(b"x")
+    meta = {
+        "source": str(src),
+        "completed_steps": completed,
+        "skipped_steps": skipped,
+        "files": {},
+    }
+    (tmp_path / f"{stem}-long-meta.json").write_text(json.dumps(meta))
+    return src
+
+
+def test_list_videos_keeps_source_when_upload_was_skipped(tmp_path):
+    """A run that finished processing but skipped the tail steps (no upload)
+    must stay selectable — it was never published."""
+    _write_meta(tmp_path, "clip", [0, 1, 2], [3, 4, 5])
+
+    from fastapi import FastAPI
+    app = FastAPI(); app.include_router(reg.router)
+    with TestClient(app) as client:
+        listed = client.get("/list-videos", params={"path": str(tmp_path)})
+    assert listed.status_code == 200
+    videos = {v["name"]: v for v in listed.json()["videos"]}
+    assert "clip.webm" in videos
+    assert videos["clip.webm"]["resumable"] is True
+
+
+def test_list_videos_hides_fully_uploaded_source(tmp_path):
+    """A run with every step completed (upload done) stays hidden."""
+    _write_meta(tmp_path, "clip", [0, 1, 2, 3, 4, 5], [])
+
+    from fastapi import FastAPI
+    app = FastAPI(); app.include_router(reg.router)
+    with TestClient(app) as client:
+        listed = client.get("/list-videos", params={"path": str(tmp_path)})
+    assert listed.status_code == 200
+    assert {v["name"] for v in listed.json()["videos"]} == set()
