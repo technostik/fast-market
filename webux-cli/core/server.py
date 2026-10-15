@@ -62,6 +62,38 @@ _NAV_LAYOUT = (
 }
 .webux-nav a:hover { color: var(--text); background: var(--surface); }
 .webux-nav a.active { color: var(--text); background: var(--accent); }
+/* Grouped dropdowns: the tab bar stays short no matter how many plugins
+   are installed. One button per group, tabs inside the menu. */
+.webux-nav { flex-wrap: wrap; }
+.webux-dropdown { position: relative; flex-shrink: 0; }
+.webux-dropbtn {
+  color: var(--text-dim);
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+  width: auto;
+}
+.webux-dropbtn:hover { color: var(--text); background: var(--surface); }
+.webux-dropbtn.active { color: var(--text); background: var(--accent); }
+.webux-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 210px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  z-index: 1000;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45);
+}
+.webux-dropdown.open .webux-menu { display: block; }
+.webux-menu a { display: block; }
 .webux-nav .theme-select {
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -290,6 +322,31 @@ function setupPromptInfo(selectId, infoId) {
 </script>
 """
 
+_WEBUX_NAV_SCRIPT = """
+<script>
+// Grouped-dropdown toolbar: one button per group, tabs inside the menu.
+// Toggle on click, close on outside click or Escape.
+document.addEventListener('click', function (e) {
+  var btn = (e.target && e.target.closest) ? e.target.closest('.webux-dropbtn') : null;
+  document.querySelectorAll('.webux-dropdown.open').forEach(function (dd) {
+    var own = btn && dd.querySelector('.webux-dropbtn') === btn;
+    if (!own) dd.classList.remove('open');
+  });
+  if (btn) {
+    var dd = btn.closest('.webux-dropdown');
+    if (dd) dd.classList.toggle('open');
+  }
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.webux-dropdown.open').forEach(function (dd) {
+      dd.classList.remove('open');
+    });
+  }
+});
+</script>
+"""
+
 _WEBUX_LLM_SCRIPT = """
 <script>
 // Global LLM provider + model switcher in the webux main toolbar.
@@ -421,6 +478,43 @@ def _get_llm_nav_state() -> tuple[str, dict[str, dict]]:
     return default_provider, info
 
 
+# ── Grouped toolbar ────────────────────────────────────────────────────────
+# One dropdown per group keeps the top bar short as tabs are added.
+# A plugin declares its group via WebuxPluginManifest.group; the map below
+# covers plugins that predate the field. Unknown plugins land in "More".
+
+_WEBUX_GROUP_ORDER = ("Workspace", "Publish", "Create", "Observe", "More")
+
+_WEBUX_GROUP_ICONS = {
+    "Workspace": "📁",
+    "Publish": "📤",
+    "Create": "🎨",
+    "Observe": "👁",
+    "More": "🧩",
+}
+
+_WEBUX_GROUP_FALLBACK = {
+    "fileviewer": "Workspace",
+    "skill_runner": "Workspace",
+    "short_publish": "Publish",
+    "long_publish": "Publish",
+    "yt_poster": "Publish",
+    "yt_thumbnail": "Publish",
+    "storyboard": "Create",
+    "voiceboard": "Create",
+    "charisma": "Create",
+    "monitor": "Observe",
+}
+
+
+def _plugin_group(plugin: WebuxPluginManifest) -> str:
+    """Return the toolbar group for a plugin (manifest wins, else fallback)."""
+    claimed = (getattr(plugin, "group", "") or "").strip()
+    if claimed:
+        return claimed
+    return _WEBUX_GROUP_FALLBACK.get(plugin.name, "More")
+
+
 def _build_nav(
     plugins: dict[str, WebuxPluginManifest],
     active: str | None = None,
@@ -428,11 +522,32 @@ def _build_nav(
 ) -> str:
     import html as _html
 
-    links = []
+    # Bucket tabs into groups, preserving hub tab order inside each group.
+    buckets: dict[str, list[WebuxPluginManifest]] = {}
     for plugin in plugins.values():
-        klass = "active" if plugin.name == active else ""
+        buckets.setdefault(_plugin_group(plugin), []).append(plugin)
+    ordered_groups = [g for g in _WEBUX_GROUP_ORDER if g in buckets]
+    ordered_groups += [g for g in buckets if g not in _WEBUX_GROUP_ORDER]
+
+    links = []
+    for group in ordered_groups:
+        members = buckets[group]
+        icon = _WEBUX_GROUP_ICONS.get(group, "🧩")
+        group_active = any(p.name == active for p in members)
+        btn_cls = "webux-dropbtn active" if group_active else "webux-dropbtn"
+        items = []
+        for plugin in members:
+            klass = "active" if plugin.name == active else ""
+            items.append(
+                f'<a class="{klass}" href="/{plugin.name}">'
+                f"{plugin.tab_icon} {plugin.tab_label}</a>"
+            )
         links.append(
-            f'<a class="{klass}" href="/{plugin.name}">{plugin.tab_icon} {plugin.tab_label}</a>'
+            f'<div class="webux-dropdown" data-group="{_html.escape(group)}">'
+            f'<button class="{btn_cls}" aria-haspopup="true">'
+            f"{icon} {_html.escape(group)} ▾</button>"
+            f'<div class="webux-menu">{"".join(items)}</div>'
+            "</div>"
         )
     default_provider, llm_info = _get_llm_nav_state()
     if llm_info:
@@ -480,6 +595,7 @@ def _inject_nav(
     head_tags = _WEBUX_THEME_BOOT_SCRIPT + style_tag
     script_tag = (
         _WEBUX_EXIT_SCRIPT + _WEBUX_THEME_SCRIPT + _PROMPT_INFO_SCRIPT + _WEBUX_LLM_SCRIPT
+        + _WEBUX_NAV_SCRIPT
     )
     if "</head>" in plugin_html:
         plugin_html = plugin_html.replace(
@@ -631,7 +747,7 @@ def build_app(
         html = (
             f'<html data-theme="{default_theme}"><head><style>{theme_css}{_NAV_LAYOUT}</style>'
             f"{_WEBUX_THEME_BOOT_SCRIPT}{_WEBUX_EXIT_SCRIPT}{_WEBUX_THEME_SCRIPT}"
-            f"{_WEBUX_LLM_SCRIPT}</head>"
+            f"{_WEBUX_LLM_SCRIPT}{_WEBUX_NAV_SCRIPT}</head>"
             f"<body>{nav}"
             f'<main class="webux-shell"><h1>webux</h1><ul>{links}</ul></main></body></html>'
         )

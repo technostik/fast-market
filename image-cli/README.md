@@ -57,6 +57,11 @@ engines:
     local_files_only: false
     quantization: null                   # null = full precision (~32GB RAM);
                                          # "int8" = 8-bit (~16GB), "int4" = NF4 (~9GB)
+  qwen21turbo:
+    model_path: Qwen/Qwen-Image-2.1-Turbo # 8-step accelerated checkpoint, CFG 1.0
+    torch_dtype: bfloat16
+    local_files_only: false
+    quantization: null                   # same backends as qwen21
 
 default_width: 1024
 default_height: 1024
@@ -115,7 +120,11 @@ FLUX.2 Klein model files must be downloaded separately:
 3. Set `model_path` in config to that directory
 
 Qwen-Image-2.1 weights download automatically from the Hub
-(`Qwen/Qwen-Image-2.1`, ~7B params) on first use. Requirements:
+(`Qwen/Qwen-Image-2.1`, ~7B params) on first use. The accelerated
+`Qwen/Qwen-Image-2.1-Turbo` checkpoint (engine `qwen21turbo`) uses the same
+7B architecture for generation + editing in **8 denoising steps at CFG 1.0**
+(the schedule is stored in the checkpoint; the CLI default of 8 steps / 1.0
+guidance matches it). Requirements:
 `transformers>=5.17`, `accelerate`, and a CUDA GPU
 with ample VRAM — plus **pre-release diffusers from git main**
 (`pip install git+https://github.com/huggingface/diffusers`), because
@@ -130,20 +139,37 @@ in BF16) — it needs ~32GB system RAM but runs on 8GB VRAM cards: on CUDA
 the plugin enables sequential CPU offload (layer-by-layer streaming) plus
 attention slicing and VAE tiling. Verified on an 8GB RTX 4060 Laptop
 (512px/4 steps in ~50s, 1024px/40 steps in ~11min).
-
 Optional weight quantization (`quantization: int8` = 8-bit, `int4` = NF4)
-lowers RAM to ~16GB/~9GB. Backend is picked automatically: bitsandbytes on
+lowers RAM to ~16GB/~9GB. Same setting applies to `qwen21turbo`.
+Backend is picked automatically: bitsandbytes on
 CUDA (`pip install bitsandbytes`), quanto on CPU (`pip install
-optimum-quanto`). Two hard lessons encoded in the loader, don't regress:
+optimum-quanto`). Lessons encoded in the loader, don't regress:
 - the pipeline-level device map places *whole components* — a 7GB
-  transformer never fits a small GPU that way; components must be handled
-  individually or streamed with offload hooks;
+  transformer never fits a small GPU that way;
 - quanto tensors cannot be rebuilt from the meta device used by offload
   hooks or device maps (hence bnb, not quanto, on CUDA);
 - bitsandbytes refuses CPU/disk-dispatched modules without fp32 CPU
-  offload, and its quantization runs on GPU — so bnb components load
-  plainly and are streamed with sequential offload, never statically
-  dispatched to CPU.
+  offload, and static accelerate dispatch (`dispatch_model`) underestimates
+  bnb storage — a single 5.74GiB allocation OOMed an 8GB card that had
+  3.46GiB free. So the transformer loads bnb-quantized plainly on CPU and
+  streams submodule-by-submodule via sequential CPU offload (peak VRAM ≈
+  one block), plus attention slicing and VAE tiling. Standalone component
+  loads propagate the `init_empty_weights` quant_state (meta tensors,
+  `bnb_quantized=True`) onto params with real fp data, which kills the
+  offload hook's `.to("cuda")` ("Cannot copy out of meta tensor") —
+  `_repair_bnb_meta_state` clears the poisoned flags so each block
+  quantizes on the GPU as it streams up (uint8/meta-data params untouched).
+  The text encoder stays full-precision on CPU (`device_map="cpu"`, no bnb
+  config): transformers auto-maps quantized encoders to CUDA and its
+  allocator warmup grabs gigabytes (5.71GiB with 3.44GiB free) — a bf16
+  encoder is a few GB of system RAM and runs once per generation.
+- `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is set before the
+  first CUDA allocation (bnb quantization during load already allocates).
+
+Note: single-file `*.gguf` checkpoints (llama.cpp/ComfyUI format, e.g. the
+Unsloth GGUFs) cannot be loaded by `QwenImage21Pipeline`, which needs the
+full multi-component safetensors repo — `quantization: int4` is the
+supported small-footprint path (weights still download once, ~14GB).
 
 ## CLI Reference
 
@@ -157,7 +183,7 @@ image generate "a serene mountain landscape at sunset" [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-e, --engine` | Engine to use (flux2/flux2cloud/qwen21) | from config |
+| `-e, --engine` | Engine to use (flux2/flux2cloud/flux29bcloud/qwen21/qwen21turbo) | from config |
 | `-s, --size` | Size preset (square/portrait/landscape/youtube/wide/tall/custom) | from config (`default_width`/`default_height`) |
 | `-w, --width` | Image width (overrides size) | from config |
 | `-h, --height` | Image height (overrides size) | from config |
@@ -197,6 +223,18 @@ image generate "make it sunset" --init-image photo.jpg --strength 0.7
 
 # Generate with Qwen-Image-2.1 (uses true_cfg_scale 4.0 / 40 steps)
 image generate "a neon shop sign, rainy night" -e qwen21 -g 4.0 -S 40
+
+# Fast 8-step generation with Qwen-Image-2.1-Turbo (CFG 1.0)
+image generate "astronaut in a jungle, muted colors" -e qwen21turbo
+
+# Multi-image compose: keep the subjects, place them in a new scene
+# (flux2cloud / qwen21 / qwen21turbo, up to 4 refs as "image 0..3")
+image generate "put image 0 on a neon stage, dramatic light" \
+  -R face.png -R logo.png --size youtube -e qwen21turbo
+
+# Small change on an existing image (img2img, local engines)
+image generate "warmer background, keep the face exactly" \
+  --init-image thumb.png --strength 0.5 -e qwen21turbo
 
 # JSON output for scripting
 image generate "minimalist logo" -F json | jq '.path'
@@ -450,6 +488,33 @@ GET /config
 }
 ```
 
+## YT Thumbnail tab (webux)
+
+When `image-cli` is installed, `webux serve` gains a **🖼️ YT Thumbnail** tab
+(Publish group) backed by this package (`webux/yt_thumbnail/`, driven via the
+`image` CLI through subprocess — no `core.*` imports, so no namespace
+collision with the hub):
+
+- **Compose**: prompt + up to 4 source images (`-R` refs, "image 0..3") at
+  YouTube size (1280×720), with the same overlay options as
+  `image generate --title`.
+- **Small changes**: iterate on the current thumbnail with a follow-up prompt
+  (img2img `--init-image/--strength` on local engines, reference fallback on
+  cloud engines).
+- **Overlay**: re-apply title text in the long_publish style (fg/bg/effect/
+  style/position/size %/offset).
+- Files are versioned `<stem>_thumb[_overlay]_<N>` next to the video (the
+  video source dir shared with long_publish) and recorded in the shared
+  `*-long-meta.json` keys, so Long Publish sees them too — including
+  **push to YouTube** (`youtube thumbnail-set`).
+- Compose/edit/overlay run as **background jobs**: the tab returns a job id
+  immediately and streams the `image` console (weight download, pipeline
+  load, denoising steps) into a live Console panel via `GET /job/{id}` —
+  long generations can't hit HTTP timeouts and you always see what phase
+  it's in.
+
+API prefix: `/api/yt_thumbnail/`
+
 ## Features
 
 - **Multiple Engine Support**: Plugin architecture for different image generation engines
@@ -474,6 +539,9 @@ image-agent/
 │   ├── base.py           # Plugin ABC and manifest
 │   ├── flux2/            # FLUX.2 implementation
 │   └── qwen21/           # Qwen-Image-2.1 implementation
+│   └── qwen21turbo/      # Qwen-Image-2.1-Turbo (8-step, CFG 1.0, KV-cache)
+├── webux/                 # Webux hub tab(s) hosted by this package
+│   └── yt_thumbnail/     # 🖼️ YT Thumbnail composer (compose / edit / overlay)
 ├── commands/              # CLI commands
 │   ├── generate/         # image generate
 │   ├── setup/            # image setup

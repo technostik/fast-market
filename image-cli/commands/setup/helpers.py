@@ -10,9 +10,13 @@ from common.core.paths import get_tool_config
 from common.core.yaml_utils import dump_yaml
 from core.config import get_default_config
 
-_SUPPORTED_ENGINES = {"flux2", "qwen21", "flux2cloud", "flux29bcloud"}
+_SUPPORTED_ENGINES = {"flux2", "qwen21", "qwen21turbo", "flux2cloud", "flux29bcloud"}
 
 _CLOUD_ENGINES = {"flux2cloud", "flux29bcloud"}
+
+# Local engines whose config block carries a `quantization` key
+# (null/int8/int4). Preserved by add_engine instead of being dropped.
+_QUANTIZED_ENGINES = {"qwen21", "qwen21turbo"}
 
 _FLUX2CLOUD_MODELS = (
     "@cf/black-forest-labs/flux-2-klein-4b",
@@ -151,11 +155,14 @@ def add_engine(config_path: Path, config: dict, engine_name: str) -> None:
     )
 
     engines = config.setdefault("engines", {})
-    engines[normalized] = {
+    new_block: dict = {
         "model_path": model_path,
         "torch_dtype": default_settings.get("torch_dtype", "bfloat16"),
         "local_files_only": default_settings.get("local_files_only", True),
     }
+    if normalized in _QUANTIZED_ENGINES:
+        new_block["quantization"] = default_settings.get("quantization")
+    engines[normalized] = new_block
 
     if not config.get("default_engine"):
         config["default_engine"] = normalized

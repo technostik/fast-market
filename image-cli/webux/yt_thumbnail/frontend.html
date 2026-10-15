@@ -1,0 +1,342 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>YT Thumbnail</title>
+<style>
+body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; }
+input, button, select, textarea { padding:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:6px; }
+button { cursor:pointer; }
+button:hover { background:var(--accent); }
+button:disabled { opacity:.45; cursor:default; }
+.btn-primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+.grid { display:grid; grid-template-columns: 300px 1fr 300px; gap:12px; }
+@media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px; }
+.card h3 { margin:0 0 8px 0; font-size:14px; }
+.row { display:flex; gap:8px; margin-bottom:8px; align-items:center; flex-wrap:wrap; }
+.row label { font-size:12px; color:var(--text-dim); min-width:110px; }
+.row input[type=text], .row input[type=number], .row select, .row textarea { flex:1; min-width:0; }
+.hint { font-size:11px; color:var(--text-dim); }
+.src-slot { display:flex; gap:6px; margin-bottom:6px; align-items:center; }
+.src-slot input { flex:1; min-width:0; font-size:12px; }
+.src-slot img { width:48px; height:27px; object-fit:cover; border-radius:4px; border:1px solid var(--border); }
+.preview-main { width:100%; max-height:360px; object-fit:contain; background:#000; border-radius:6px; border:1px solid var(--border); }
+.preview-base { width:100%; max-height:140px; object-fit:contain; background:#000; border-radius:6px; border:1px solid var(--border); }
+.hist { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+.hist img { width:120px; height:68px; object-fit:cover; border-radius:4px; border:1px solid var(--border); cursor:pointer; }
+.hist img.current { border-color:var(--accent); border-width:2px; }
+#status { white-space:pre-wrap; font-size:12px; color:var(--text-dim); }
+#status.err { color:var(--error); }
+#status.ok { color:var(--success); }
+input[type=range] { flex:1; padding:0; }
+</style></head>
+<body>
+<main class="webux-page">
+  <h2>🖼️ YT Thumbnail composer</h2>
+  <div class="hint" style="margin-bottom:10px">Compose a 1280×720 thumbnail from up to 4 source images (multi-image compose via <code>-R</code> refs), re-apply overlay text in the long_publish style, then iterate with small edits. Files live next to the video (<code>&lt;stem&gt;_thumb[_overlay]_&lt;N&gt;</code>) and share the <code>*-long-meta.json</code> keys with Long Publish.</div>
+
+  <div class="card">
+    <div class="row">
+      <label>Video source dir</label><input id="srcDir" type="text"><button id="refreshBtn">↻ Refresh</button>
+    </div>
+    <div class="row">
+      <label>Video</label><select id="videoSel"><option value="">— select —</option></select>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h3>📥 Source images (up to 4)</h3>
+        <div id="srcSlots"></div>
+        <div class="row">
+          <input id="uploadFiles" type="file" accept="image/*" multiple>
+          <button id="uploadBtn">⬆ Upload</button>
+        </div>
+        <div class="hint">Optional: reference them in the prompt as “image 0” … “image 3” to keep a subject. With no sources this is plain text-to-image. Cloud engines need each ref &lt; 512px (auto-downscaled).</div>
+      </div>
+      <div class="card">
+        <h3>⚙️ Generation</h3>
+        <div class="row"><label>Engine</label><select id="engineSel"><option value="">— image default —</option></select></div>
+        <div class="row"><label>Seed</label><input id="seedInp" type="number" placeholder="random"></div>
+        <div class="row"><label>Steps</label><input id="stepsInp" type="number" placeholder="engine default (turbo: 8)"></div>
+        <div class="row"><label>Guidance</label><input id="guidanceInp" type="number" step="0.1" placeholder="engine default (turbo: 1.0)"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h3>🎨 Compose</h3>
+        <div class="row"><textarea id="promptInp" rows="3" style="width:100%" placeholder="Describe the thumbnail scene, e.g. “put image 0 on a neon stage, dramatic light”"></textarea></div>
+        <div class="row">
+          <button class="btn-primary" id="composeBtn">✨ Compose thumbnail</button>
+          <span id="composeOut" class="hint"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>🔎 Current</h3>
+        <img id="curImg" class="preview-main" alt="current thumbnail">
+        <div class="row" style="margin-top:8px"><label>Base (no overlay)</label></div>
+        <img id="baseImg" class="preview-base" alt="base image">
+        <div class="hist" id="histStrip"></div>
+      </div>
+      <div class="card">
+        <h3>✏️ Small change (iterate on the current image)</h3>
+        <div class="row"><textarea id="editPrompt" rows="2" style="width:100%" placeholder="e.g. “warmer background, keep the face exactly”"></textarea></div>
+        <div class="row"><label>Strength</label><input id="strengthInp" type="range" min="0.1" max="1" step="0.05" value="0.5"><span id="strengthVal" class="hint">0.50</span></div>
+        <div class="hint">Local engines (flux2, qwen21, qwen21turbo) use img2img with this strength; cloud engines re-send the image as a reference.</div>
+        <div class="row"><button id="editBtn">✏️ Apply small change</button><span id="editOut" class="hint"></span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h3>🏷️ Overlay text (long_publish style)</h3>
+        <div class="row"><label>Title</label><input id="ovTitle" type="text"></div>
+        <div class="row"><label>Text color (fg)</label><input id="ovFg" type="text" placeholder="e.g. white / #ff0000"></div>
+        <div class="row"><label>Background (bg)</label><input id="ovBg" type="text" placeholder="e.g. black / none"></div>
+        <div class="row"><label>Effect</label><select id="ovEffect"><option value="">— default —</option><option>none</option><option>box</option><option>shadow</option><option>band</option></select></div>
+        <div class="row"><label>Style</label><select id="ovStyle"><option value="">— default —</option><option>normal</option><option>bold</option><option>italic</option><option>bold-italic</option></select></div>
+        <div class="row"><label>Position</label><select id="ovPos"><option value="">— default —</option><option>top-left</option><option>top-center</option><option>top-right</option><option>middle-left</option><option>middle-center</option><option>middle-right</option><option>bottom-left</option><option>bottom-center</option><option>bottom-right</option></select></div>
+        <div class="row"><label>Font size (× %)</label><input id="ovSizePct" type="number" min="10" max="400" step="5" placeholder="100 = default"></div>
+        <div class="row"><label>Drop offset (% down)</label><input id="ovOffset" type="number" min="-50" max="80" step="1" placeholder="0 = default"></div>
+        <div class="row"><label>Band height (%)</label><input id="ovBand" type="number" min="1" max="50" step="1" placeholder="engine default"></div>
+        <div class="row"><button id="overlayBtn">🏷 Apply overlay</button><span id="overlayOut" class="hint"></span></div>
+      </div>
+      <div class="card">
+        <h3>🚀 Publish</h3>
+        <div class="row"><button id="pushBtn">⬆ Push thumbnail to YouTube</button></div>
+        <div class="row"><span id="pushOut" class="hint"></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card"><div id="status"></div></div>
+  <div class="card">
+    <h3>🖥 Console <span class="hint" id="consoleJob"></span></h3>
+    <pre id="consoleLog" style="max-height:240px;overflow:auto;white-space:pre-wrap;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;margin:0">(idle — start a compose, edit or overlay to see the live log)</pre>
+  </div>
+</main>
+<script>
+const API = '/api/yt_thumbnail';
+const el = id => document.getElementById(id);
+const status = (msg, cls='') => { const s = el('status'); s.textContent = msg; s.className = cls; };
+
+function imgUrl(path) { return API + '/download?file=' + encodeURIComponent(path) + '&t=' + Date.now(); }
+
+function setConsole(jobId, text) {
+  el('consoleJob').textContent = jobId ? `(job ${jobId})` : '';
+  const pre = el('consoleLog');
+  pre.textContent = text;
+  pre.scrollTop = pre.scrollHeight;
+}
+
+// Run a job endpoint (compose/edit/overlay): POST returns {job_id}, then
+// poll GET /job/{id} every 2s and stream the live console log.
+async function runJob(url, body, busyEl, busyText) {
+  if (busyEl) busyEl.textContent = busyText;
+  let jobId;
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { status(d.detail || 'Request failed', 'err'); return null; }
+    jobId = d.job_id;
+  } catch (e) {
+    status('Request failed: ' + e.message, 'err');
+    return null;
+  }
+  setConsole(jobId, 'started…');
+  for (;;) {
+    await new Promise(res => setTimeout(res, 2000));
+    let d;
+    try {
+      const r = await fetch(API + '/job/' + encodeURIComponent(jobId));
+      d = await r.json();
+      if (!r.ok) { status(d.detail || 'Job lookup failed', 'err'); return null; }
+    } catch (e) {
+      setConsole(jobId, el('consoleLog').textContent + `\n(poll error: ${e.message})`);
+      continue;
+    }
+    setConsole(jobId, d.log || '(no output yet)');
+    if (d.status === 'done') return d.result;
+    if (d.status === 'error') { status(d.error || 'Job failed — see console', 'err'); return null; }
+  }
+}
+function clearBusy() {
+  el('composeOut').textContent = '';
+  el('editOut').textContent = '';
+  el('overlayOut').textContent = '';
+}
+
+function overlayOpts() {
+  return {
+    fg: el('ovFg').value.trim(), bg: el('ovBg').value.trim(),
+    effect: el('ovEffect').value, style: el('ovStyle').value,
+    band_size: Number(el('ovBand').value) || 0,
+    size_pct: Number(el('ovSizePct').value) || 0,
+    offset: Number(el('ovOffset').value) || 0,
+    position: el('ovPos').value,
+  };
+}
+function genOpts() {
+  const o = {};
+  if (el('seedInp').value !== '') o.seed = Number(el('seedInp').value);
+  if (el('stepsInp').value !== '') o.steps = Number(el('stepsInp').value);
+  if (el('guidanceInp').value !== '') o.guidance = Number(el('guidanceInp').value);
+  return o;
+}
+function sourcePaths() {
+  return [...document.querySelectorAll('.src-path')].map(i => i.value.trim()).filter(Boolean).slice(0, 4);
+}
+
+function buildSlots(values) {
+  const box = el('srcSlots'); box.innerHTML = '';
+  for (let i = 0; i < 4; i++) {
+    const div = document.createElement('div'); div.className = 'src-slot';
+    div.innerHTML = `<img id="srcImg${i}" style="display:none"><input class="src-path" id="srcPath${i}" type="text" placeholder="image ${i} — path or upload below">`;
+    box.appendChild(div);
+    const inp = div.querySelector('input');
+    inp.value = (values && values[i]) || '';
+    inp.addEventListener('change', () => previewSlot(i));
+  }
+  for (let i = 0; i < 4; i++) previewSlot(i);
+}
+function previewSlot(i) {
+  const v = el('srcPath' + i).value.trim();
+  const img = el('srcImg' + i);
+  if (v) { img.src = imgUrl(v); img.style.display = ''; } else { img.style.display = 'none'; }
+}
+
+async function loadConfig() {
+  const r = await fetch(API + '/config'); const c = await r.json();
+  el('srcDir').value = c.video_source_path || '';
+  const d = c.overlay_defaults || {};
+  if (d.fg) el('ovFg').placeholder = d.fg + ' (image default)';
+  if (d.bg) el('ovBg').placeholder = d.bg + ' (image default)';
+  if (d.effect) el('ovEffect').value = '';
+  window._thumbEngine = c.thumbnail_engine || '';
+}
+async function loadEngines() {
+  const r = await fetch(API + '/list-engines'); const d = await r.json();
+  const sel = el('engineSel'); sel.innerHTML = '<option value="">— image default —</option>';
+  (d.engines || []).forEach(e => {
+    const o = document.createElement('option'); o.value = e.name || e; o.textContent = (e.name || e) + (e.is_default ? ' (default)' : '');
+    sel.appendChild(o);
+  });
+  const def = (d.engines || []).find(e => e.is_default);
+  if (def) sel.innerHTML = `<option value="">— image default (${def.name}) —</option>` + sel.innerHTML.slice(sel.innerHTML.indexOf('</option>') + 9);
+  if (window._thumbEngine) sel.value = window._thumbEngine;
+}
+async function loadVideos() {
+  const dir = el('srcDir').value;
+  const r = await fetch(API + '/list-videos?path=' + encodeURIComponent(dir));
+  const d = await r.json();
+  if (d.error) { status(d.error, 'err'); return; }
+  const sel = el('videoSel'); sel.innerHTML = '<option value="">— select —</option>';
+  (d.videos || []).forEach(v => {
+    const o = document.createElement('option'); o.value = v.path;
+    o.textContent = v.name + (v.has_thumbnail ? ' 🖼' : '');
+    sel.appendChild(o);
+  });
+  status(`Loaded ${(d.videos || []).length} videos from ${dir}`, 'ok');
+}
+async function refreshCurrent() {
+  const src = el('videoSel').value;
+  if (!src) return;
+  const r = await fetch(API + '/history?source=' + encodeURIComponent(src));
+  const d = await r.json();
+  if (d.current) el('curImg').src = imgUrl(d.current); else el('curImg').removeAttribute('src');
+  if (d.base) el('baseImg').src = imgUrl(d.base); else el('baseImg').removeAttribute('src');
+  const strip = el('histStrip'); strip.innerHTML = '';
+  (d.versions || []).slice().reverse().forEach(v => {
+    const im = document.createElement('img'); im.src = imgUrl(v.path); im.title = v.name;
+    if (v.path === d.current) im.className = 'current';
+    im.onclick = async () => {
+      // Click a version to make it the base for the next overlay/edit.
+      const paths = sourcePaths();
+      status(`Selected ${v.name} — use “Small change” (as base) or set overlay then Apply.`);
+      window._pickedBase = v.path;
+    };
+    strip.appendChild(im);
+  });
+}
+
+el('refreshBtn').onclick = loadVideos;
+el('videoSel').onchange = refreshCurrent;
+el('strengthInp').oninput = () => { el('strengthVal').textContent = Number(el('strengthInp').value).toFixed(2); };
+
+el('uploadBtn').onclick = async () => {
+  const files = el('uploadFiles').files;
+  if (!files.length) { status('Pick files first', 'err'); return; }
+  if (!el('videoSel').value) { status('Select a video first (uploads are stored next to it)', 'err'); return; }
+  const fd = new FormData();
+  fd.append('source', el('videoSel').value);
+  [...files].slice(0, 4).forEach(f => fd.append('files', f));
+  status('Uploading…');
+  const r = await fetch(API + '/upload-sources', { method: 'POST', body: fd });
+  const d = await r.json();
+  if (!r.ok) { status(d.detail || 'Upload failed', 'err'); return; }
+  buildSlots(d.sources);
+  status(`Uploaded ${d.sources.length} source image(s)`, 'ok');
+};
+
+el('composeBtn').onclick = async () => {
+  const src = el('videoSel').value;
+  if (!src) { status('Select a video first', 'err'); return; }
+  const refs = sourcePaths();
+  if (!el('promptInp').value.trim()) { status('Enter a prompt', 'err'); return; }
+  const body = { source: src, prompt: el('promptInp').value.trim(), engine: el('engineSel').value,
+    sources: refs, title: el('ovTitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
+  status('Composing… (live log in the Console below)');
+  const d = await runJob(API + '/compose', body, el('composeOut'), 'Composing…');
+  clearBusy();
+  if (!d) return;
+  el('composeOut').textContent = `Done v${d.version} (${String(d.thumbnail).split('/').pop()})`;
+  await refreshCurrent();
+  status(`Composed ${d.thumbnail}`, 'ok');
+};
+
+el('editBtn').onclick = async () => {
+  const src = el('videoSel').value;
+  if (!src) { status('Select a video first', 'err'); return; }
+  if (!el('editPrompt').value.trim()) { status('Describe the small change', 'err'); return; }
+  const body = { source: src, prompt: el('editPrompt').value.trim(), base: window._pickedBase || '',
+    engine: el('engineSel').value, strength: Number(el('strengthInp').value),
+    title: el('ovTitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
+  status('Editing… (live log in the Console below)');
+  const d = await runJob(API + '/edit', body, el('editOut'), 'Editing…');
+  clearBusy();
+  if (!d) return;
+  window._pickedBase = '';
+  el('editOut').textContent = `Done v${d.version} via ${d.mode}`;
+  await refreshCurrent();
+  status(`Edited (${d.mode}): ${d.thumbnail}`, 'ok');
+};
+
+el('overlayBtn').onclick = async () => {
+  const src = el('videoSel').value;
+  if (!src) { status('Select a video first', 'err'); return; }
+  if (!el('ovTitle').value.trim()) { status('Enter an overlay title', 'err'); return; }
+  const body = { source: src, base: window._pickedBase || '', title: el('ovTitle').value.trim(), overlay: overlayOpts() };
+  status('Applying overlay… (live log in the Console below)');
+  const d = await runJob(API + '/overlay', body, el('overlayOut'), 'Applying…');
+  clearBusy();
+  if (!d) return;
+  window._pickedBase = '';
+  el('overlayOut').textContent = 'Done';
+  await refreshCurrent();
+  status(`Overlay applied: ${d.thumbnail}`, 'ok');
+};
+
+el('pushBtn').onclick = async () => {
+  const src = el('videoSel').value;
+  if (!src) { status('Select a video first', 'err'); return; }
+  el('pushOut').textContent = 'Pushing…';
+  const r = await fetch(API + '/push-thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: src }) });
+  const d = await r.json();
+  if (!r.ok) { el('pushOut').textContent = ''; status(d.detail || 'Push failed', 'err'); return; }
+  el('pushOut').textContent = `Pushed to ${d.video_id}`;
+  status(`Thumbnail pushed to video ${d.video_id}`, 'ok');
+};
+
+buildSlots([]);
+(async () => { await loadConfig(); await loadEngines(); await loadVideos(); })();
+</script>
+</body></html>

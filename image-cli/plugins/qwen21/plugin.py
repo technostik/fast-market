@@ -24,33 +24,32 @@ def _log(message: str) -> None:
     print(f"qwen21: {message}", file=sys.stderr, flush=True)
 
 
-def _cpu_mem_bytes() -> int | None:
-    """Total system RAM in bytes (psutil, else /proc/meminfo, else None)."""
-    try:
-        import psutil
-
-        return psutil.virtual_memory().total
-    except ImportError:
-        pass
-    try:
-        with open("/proc/meminfo", encoding="utf-8") as fh:
-            for line in fh:
-                if line.startswith("MemTotal:"):
-                    return int(line.split()[1]) * 1024
-    except OSError:
-        pass
-    return None
-
-
 class Qwen21EnginePlugin(ImageEnginePlugin):
     """Qwen-Image-2.1 image generation engine (text-to-image + editing)."""
 
     name = "qwen21"
 
+    #: Default Hub repo for the weights. Subclasses (e.g. qwen21turbo)
+    #: override this to point at a different checkpoint.
+    default_model_id = DEFAULT_MODEL_ID
+
+    #: Extra pipeline call kwargs contributed by subclasses (e.g. Turbo's
+    #: ``use_kv_cache``). Dropped silently when the installed diffusers
+    #: does not accept them.
+    extra_pipe_kwargs: dict[str, Any] = {}
+
     def __init__(self, config: EngineConfig | dict[str, Any]):
+        explicit_path = config.get("model_path") if isinstance(config, dict) else None
         if isinstance(config, dict):
             config = EngineConfig.from_dict(config)
         self.config = config
+        if not explicit_path and config.model_path in ("", EngineConfig().model_path):
+            # No path configured for this engine (e.g. the block is missing
+            # from an older config file and EngineConfig filled in its generic
+            # "./flux2-klein-4b" default): fall back to this engine's own Hub
+            # checkpoint instead of pointing at an unrelated local directory.
+            config.model_path = self.default_model_id
+            config.local_files_only = False
         self._pipeline: "QwenImage21Pipeline | None" = None
         self._device: str | None = None
 
@@ -71,6 +70,11 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
         if cache and self._pipeline is not None:
             _log("reusing cached pipeline")
             return self._pipeline
+
+        # Must be set before the first CUDA allocation in this process
+        # (bnb quantization during from_pretrained already allocates).
+        # The error message itself suggests this when fragmentation hits.
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
         quantization = (self.config.quantization or "none").lower()
         if quantization not in ("none", "int8", "int4"):
@@ -103,13 +107,16 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
         device = self._get_device()
         split_bnb = False
         if quantization in ("int8", "int4"):
-            # bitsandbytes on CUDA (layer-wise dispatchable), quanto on CPU
-            # (plain load only).
+            # bitsandbytes on CUDA (plain CPU load + sequential offload, see
+            # _load_bnb_split), quanto on CPU (plain load only).
             # NOTE: quanto must never meet offload hooks or device maps —
-            # rebuilding its tensors from the meta device fails. And the
-            # pipeline-level device map only places whole components, so a
-            # 7GB transformer never fits a small GPU that way — bnb
-            # components are dispatched layer-wise individually instead.
+            # rebuilding its tensors from the meta device fails. Static
+            # accelerate dispatch (dispatch_model) is equally banned for bnb
+            # on small GPUs: its per-layer accounting underestimates bnb
+            # storage and a single oversized allocation OOMs the card
+            # (observed: 5.74GiB alloc with 3.46GiB free on an 8GB card).
+            # bnb components therefore load plainly and stream
+            # submodule-by-submodule via sequential CPU offload instead.
             backend = "bnb" if device == "cuda" or quantization == "int4" else "quanto"
             if backend == "bnb" and device == "cuda":
                 split_bnb = True
@@ -118,7 +125,7 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
                     quantization, backend
                 )
 
-        model_id = self.config.model_path or DEFAULT_MODEL_ID
+        model_id = self.config.model_path or self.default_model_id
         _log(
             f"loading pipeline from {model_id} "
             f"(dtype={self.config.torch_dtype}, "
@@ -144,13 +151,15 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
 
         _log(f"placing pipeline on {device}...")
         started = time.time()
-        if split_bnb or getattr(pipe, "hf_device_map", None):
-            # Components already placed (split dispatch or device map);
-            # only forward-level savers (offload hooks conflict).
-            if split_bnb:
-                _log("components already dispatched; forward-level savers only")
-            else:
-                _log("pipeline already dispatched; forward-level savers only")
+        if split_bnb:
+            # bnb components arrived plainly on CPU (see _load_bnb_split);
+            # stream them with the standard low-VRAM stack (peak VRAM is
+            # one submodule at a time — safe on 8GB cards).
+            self._apply_cuda_memory_savers(pipe)
+        elif getattr(pipe, "hf_device_map", None):
+            # Components already placed via device map; only forward-level
+            # savers (offload hooks conflict).
+            _log("pipeline already dispatched; forward-level savers only")
             self._enable_attention_slicing(pipe)
             self._enable_vae_packing(pipe)
         elif device == "cuda":
@@ -166,12 +175,19 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
     def _load_bnb_split(
         self, model_id: str, torch_dtype: Any, precision: str
     ) -> "QwenImage21Pipeline":
-        """Load bnb-quantized transformer + encoder on CPU, assemble pipeline.
+        """Load quantized transformer + full-precision encoder on CPU, assemble.
 
-        Plain CPU loads (no device map — bnb refuses CPU-dispatched modules
-        without fp32 offload). The caller then attaches sequential offload,
-        which streams submodule-by-submodule to the GPU. VAE is moved to
-        CUDA explicitly (small).
+        The transformer (7B DiT, the bulk of the weights) is bnb-quantized
+        (int8/int4) with a plain CPU load — no device map (bnb refuses
+        CPU-dispatched modules without fp32 offload). The text encoder loads
+        in full precision on CPU: passing it a bnb config makes transformers
+        auto-map layers to CUDA and its allocator warmup grabs gigabytes
+        (observed: 5.71GiB alloc with 3.44GiB free on an 8GB card). A bf16
+        encoder is a few GB of system RAM and runs once per generation, so
+        skipping its quantization is the robust trade. The caller then
+        attaches sequential CPU offload, which streams submodule-by-submodule
+        to the GPU at forward time (peak VRAM ≈ one block). The VAE is left
+        on CPU here — the offload hooks (plus tiling) manage it.
         """
         from diffusers import (
             QwenImage21Pipeline,
@@ -180,7 +196,7 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
         from transformers import Qwen3VLForConditionalGeneration
 
         try:
-            transformer_cfg, encoder_cfg = self._build_bnb_configs(precision)
+            transformer_cfg, _ = self._build_bnb_configs(precision)
         except ImportError as exc:
             raise RuntimeError(
                 "qwen21: quantization on CUDA requires bitsandbytes "
@@ -194,17 +210,15 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
             local_files_only=self.config.local_files_only,
             quantization_config=transformer_cfg,
         )
-        self._dispatch_split(transformer, "3GiB", "transformer")
-        _log("loading text encoder (bnb, CPU)...")
+        _log("loading text encoder (full precision, CPU)...")
         text_encoder = Qwen3VLForConditionalGeneration.from_pretrained(
             model_id,
             subfolder="text_encoder",
             torch_dtype=torch_dtype,
             local_files_only=self.config.local_files_only,
-            quantization_config=encoder_cfg,
+            device_map="cpu",
         )
-        self._dispatch_split(text_encoder, "1GiB", "text_encoder")
-        _log("assembling pipeline from dispatched components...")
+        _log("assembling pipeline from CPU components...")
         pipe = QwenImage21Pipeline.from_pretrained(
             model_id,
             transformer=transformer,
@@ -212,29 +226,66 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
             torch_dtype=torch_dtype,
             local_files_only=self.config.local_files_only,
         )
-        try:
-            pipe.vae.to("cuda")
-            _log("VAE on CUDA")
-        except Exception as exc:
-            _log(f"VAE stays on CPU: {exc}")
+        self._repair_bnb_meta_state(transformer)
         return pipe
 
     @staticmethod
-    def _dispatch_split(module: Any, gpu_budget: str, name: str) -> None:
-        """Spread one component across GPU/CPU with accelerate (bnb-aware).
+    def _repair_bnb_meta_state(module: Any) -> int:
+        """Reset poisoned bnb flags on CPU-resident fp params.
 
-        Plain `.to("cpu")` does not release bnb GPU storage; dispatch_model
-        moves tensors properly. Hot layers stay on GPU, the rest on CPU.
+        Standalone component loads propagate the ``init_empty_weights``
+        quant_state (meta tensors, ``bnb_quantized=True``) onto params whose
+        data is real fp on CPU. The offload hook's ``.to("cuda")`` then
+        tries to move the meta state and dies ("Cannot copy out of meta
+        tensor"). Clearing the flag/state makes ``Params4bit.to("cuda")``
+        take its other branch — quantize the block on the GPU on the fly —
+        which is exactly what sequential-offload streaming needs.
+
+        Only touches floating-point, non-meta data (real weights); already
+        quantized (uint8) or meta-data params are left alone and counted.
+        Returns the number of repaired params.
         """
-        from accelerate import dispatch_model, infer_auto_device_map
+        import torch
 
-        max_memory: dict[Any, str] = {0: gpu_budget}
-        cpu_bytes = _cpu_mem_bytes()
-        if cpu_bytes:
-            max_memory["cpu"] = f"{cpu_bytes / 2**30 * 0.8:.1f}GiB"
-        _log(f"dispatching {name}: {max_memory}")
-        device_map = infer_auto_device_map(module, max_memory=max_memory)
-        dispatch_model(module, device_map=device_map)
+        try:
+            import bitsandbytes as bnb
+        except ImportError:
+            return 0
+
+        repaired = 0
+        skipped = 0
+        for param in module.parameters():
+            if not isinstance(param, bnb.nn.Params4bit):
+                continue
+            state = param.__dict__.get("quant_state")
+            state_tensors = []
+            if state is not None:
+                for attr in ("absmax", "code", "state2"):
+                    tensor = getattr(state, attr, None)
+                    if isinstance(tensor, torch.Tensor):
+                        state_tensors.append(tensor)
+                    elif attr == "state2" and tensor is not None:
+                        for sub in ("absmax", "code"):
+                            sub_tensor = getattr(tensor, sub, None)
+                            if isinstance(sub_tensor, torch.Tensor):
+                                state_tensors.append(sub_tensor)
+            has_meta_state = any(t.is_meta for t in state_tensors)
+            if (
+                param.data is not None
+                and not param.data.is_meta
+                and param.data.is_floating_point()
+                and (param.__dict__.get("bnb_quantized") or has_meta_state)
+            ):
+                param.__dict__["bnb_quantized"] = False
+                param.__dict__["quant_state"] = None
+                repaired += 1
+            else:
+                skipped += 1
+        _log(
+            f"repaired {repaired} bnb params with meta quant_state "
+            f"(per-block GPU quantization); left {skipped} untouched"
+        )
+        return repaired
 
     def _enable_attention_slicing(self, pipe: "QwenImage21Pipeline") -> None:
         if hasattr(pipe, "enable_attention_slicing"):
@@ -438,6 +489,13 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
         )
         started = time.time()
         try:
+            result = pipe(**pipe_params, **self.extra_pipe_kwargs)
+        except TypeError as exc:
+            if not self.extra_pipe_kwargs or "unexpected keyword" not in str(exc):
+                raise
+            # Older diffusers without the extra kwarg (e.g. use_kv_cache):
+            # retry with the plain params so generation still works.
+            _log(f"{exc}; retrying without {sorted(self.extra_pipe_kwargs)}")
             result = pipe(**pipe_params)
         except torch.OutOfMemoryError as exc:
             raise RuntimeError(

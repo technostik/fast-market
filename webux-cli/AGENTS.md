@@ -40,6 +40,13 @@ Each `register(config: dict) -> WebuxPluginManifest` must provide:
 | `frontend_html` | Full HTML page (server injects nav CSS + JS + `<nav>` automatically) |
 | `order` | Integer for tab ordering (lower = leftmost) |
 | `lazy` | `True` by default — defers router mount to first request |
+| `group` | Toolbar dropdown group (e.g. `"Publish"`); empty = hub fallback mapping, then `"More"` |
+
+Tabs are bucketed into toolbar dropdowns (Workspace 📁, Publish 📤, Create 🎨,
+Observe 👁, More 🧩) in `core/server.py` (`_WEBUX_GROUP_ORDER`,
+`_WEBUX_GROUP_ICONS`, `_WEBUX_GROUP_FALLBACK`). The manifest `group` wins;
+`_WEBUX_GROUP_FALLBACK` covers pre-group plugins; unknown plugins land in
+"More". Custom group names render after the built-ins with a 🧩 icon.
 
 ## 🌐 API Conventions
 - Plugin APIs: `/api/{plugin_name}/...`

@@ -15,3 +15,6 @@ class WebuxPluginManifest:
     api_router: Any | None = None
     order: int = 100
     lazy: bool = True
+    #: Toolbar group for the grouped-dropdown nav (e.g. "Publish").
+    #: Empty = grouped by the hub's built-in mapping, else "More".
+    group: str = ""

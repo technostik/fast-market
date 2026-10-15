@@ -34,6 +34,15 @@ Their router and HTML are loaded on first request. This means:
 - A broken plugin does not prevent other tabs from working
 - Plugins can import heavy dependencies (ML models, DB connections) safely
 
+## Toolbar Groups
+`WebuxPluginManifest.group` (default `""`) assigns the tab to a toolbar
+dropdown (Workspace, Publish, Create, Observe, More, or a custom name).
+Empty groups fall back to the hub's built-in mapping, then to "More".
+Prefer driving sibling CLIs via subprocess over importing their `core.*`
+packages at module level — the hub process may already own a `core` module
+with the same name (see `monitor-cli/webux/AGENTS.md` for the isolation dance
+when imports are unavoidable).
+
 ## Do's
 - Always set lazy=True unless you have a specific reason not to
 - Keep register() fast — defer heavy imports inside router handlers

@@ -7,6 +7,17 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# Fully initialize native modules at collection time, before any test
+# patches sys.modules with fakes: a first real import that lands inside a
+# mocked context leaves torch/bitsandbytes half-initialized and later
+# imports explode (duplicate torch.library registration).
+import torch  # noqa: F401,E402
+
+try:
+    import bitsandbytes  # noqa: F401,E402
+except ImportError:
+    bitsandbytes = None  # noqa: E402
+
 
 class TestPluginSystem:
     """Test plugin discovery and registration."""
@@ -134,11 +145,12 @@ class TestQwen21Plugin:
         assert plugin.validate_model_path("Qwen/Qwen-Image-2.1") is True
 
     def test_validate_model_path_empty_string(self):
-        """Test model path validation with empty string."""
+        """Test empty model_path falls back to the Hub checkpoint (valid)."""
         from plugins.qwen21.plugin import Qwen21EnginePlugin
 
         plugin = Qwen21EnginePlugin({"model_path": ""})
-        assert plugin.validate_model_path() is False
+        assert plugin.config.model_path == "Qwen/Qwen-Image-2.1"
+        assert plugin.validate_model_path() is True
 
     def test_generate_maps_guidance_to_true_cfg_scale(self):
         """Test generate() maps guidance_scale onto true_cfg_scale."""
@@ -332,8 +344,10 @@ class TestQwen21Plugin:
         # CPU plain load: no static dispatch.
         assert "device_map" not in kwargs
 
-    def test_int8_cuda_split_loads_components_with_layer_dispatch(self):
-        """Test int8+CUDA split-loads bnb components and skips offload hooks."""
+    def test_int8_cuda_split_loads_components_then_offloads(self):
+        """Test int8+CUDA split-loads bnb components plainly, then streams
+        them with sequential CPU offload (no static accelerate dispatch —
+        that OOMs 8GB cards with a single oversized allocation)."""
         import sys
         from unittest.mock import MagicMock, patch
 
@@ -344,7 +358,7 @@ class TestQwen21Plugin:
             {"model_path": "Qwen/Qwen-Image-2.1", "quantization": "int8"}
         )
         fake_pipe = MagicMock()
-        fake_pipe.hf_device_map = {"transformer": "cpu"}  # dispatched already
+        fake_pipe.hf_device_map = None
 
         with (
             patch.dict(sys.modules, {"diffusers": MagicMock()}),
@@ -361,12 +375,11 @@ class TestQwen21Plugin:
 
         mock_split.assert_called_once()
         assert mock_split.call_args.args[2] == "int8"
-        mock_savers.assert_not_called()
-        fake_pipe.enable_attention_slicing.assert_called_once_with()
-        fake_pipe.vae.enable_tiling.assert_called_once_with()
+        mock_savers.assert_called_once_with(fake_pipe)
 
-    def test_load_bnb_split_cpu_loads_both_components(self):
-        """Test split-load dispatches bnb transformer + encoder via accelerate."""
+    def test_load_bnb_split_cpu_loads_both_components_plainly(self):
+        """Test split-load: bnb transformer + full-precision CPU encoder, no
+        accelerate dispatch and no eager VAE move (offload hooks stream)."""
         import sys
         from unittest.mock import MagicMock, patch
 
@@ -378,7 +391,6 @@ class TestQwen21Plugin:
         fake_transformer_cls = MagicMock()
         fake_encoder_cls = MagicMock()
         fake_pipe_cls = MagicMock()
-        fake_accelerate = MagicMock()
         fake_modules = {
             "diffusers": MagicMock(
                 QwenImage21Pipeline=fake_pipe_cls,
@@ -387,7 +399,6 @@ class TestQwen21Plugin:
             "transformers": MagicMock(
                 Qwen3VLForConditionalGeneration=fake_encoder_cls
             ),
-            "accelerate": fake_accelerate,
         }
 
         with (
@@ -403,21 +414,22 @@ class TestQwen21Plugin:
             pipe = plugin._load_bnb_split("Qwen/Qwen-Image-2.1", torch.bfloat16, "int8")
 
         mock_bnb.assert_called_once_with("int8")
-        # Both components spread via accelerate (transformer 3GiB, encoder 1GiB).
-        assert fake_accelerate.infer_auto_device_map.call_count == 2
-        assert fake_accelerate.dispatch_model.call_count == 2
-        assert fake_transformer_cls.from_pretrained.call_args.kwargs["subfolder"] == (
-            "transformer"
-        )
-        # Plain CPU loads: no dispatch involved (bnb refuses CPU dispatch).
+        # Plain CPU loads: transformer keeps its bnb config without any
+        # device map; the encoder is full-precision, pinned to CPU, and
+        # never quantized (transformers auto-maps + warmups gigabytes
+        # otherwise).
         assert "device_map" not in fake_transformer_cls.from_pretrained.call_args.kwargs
+        assert (
+            fake_transformer_cls.from_pretrained.call_args.kwargs["quantization_config"]
+            is mock_bnb.return_value[0]
+        )
         assert fake_encoder_cls.from_pretrained.call_args.kwargs["subfolder"] == (
             "text_encoder"
         )
-        assert "device_map" not in fake_encoder_cls.from_pretrained.call_args.kwargs
+        assert fake_encoder_cls.from_pretrained.call_args.kwargs["device_map"] == "cpu"
         assert (
-            fake_encoder_cls.from_pretrained.call_args.kwargs["quantization_config"]
-            is mock_bnb.return_value[1]
+            "quantization_config"
+            not in fake_encoder_cls.from_pretrained.call_args.kwargs
         )
         assert (
             fake_pipe_cls.from_pretrained.call_args.kwargs["transformer"]
@@ -512,3 +524,81 @@ class TestQwen21Plugin:
             pytest.raises(RuntimeError, match="CUDA out of memory.*-w 768"),
         ):
             plugin.generate(ImageGenRequest(prompt="x", seed=1))
+
+
+class TestRepairBnbMetaState:
+    """Test the post-load repair of meta bnb quant_state (8GB-GPU path)."""
+
+    @staticmethod
+    def _poisoned_module():
+        """A Linear4bit with real fp CPU data but meta quant_state, exactly
+        like accelerate's generic branch leaves it after a standalone
+        component load (meta state propagated via param kwargs)."""
+        import torch
+        from bitsandbytes.functional import QuantState
+        from bitsandbytes import nn as bnb_nn
+
+        lin = bnb_nn.Linear4bit(16, 16, bias=False)
+        meta_state = QuantState(
+            absmax=torch.zeros(1),
+            code=torch.empty(0, device="meta"),
+        )
+        lin.weight.__dict__["quant_state"] = meta_state
+        lin.weight.__dict__["bnb_quantized"] = True
+        return lin
+
+    def test_repairs_poisoned_fp_params(self):
+        import torch
+
+        from plugins.qwen21.plugin import Qwen21EnginePlugin
+
+        lin = self._poisoned_module()
+        assert lin.weight.data.is_floating_point()
+        assert not lin.weight.data.is_meta
+
+        repaired = Qwen21EnginePlugin._repair_bnb_meta_state(lin)
+
+        assert repaired == 1
+        assert lin.weight.__dict__["bnb_quantized"] is False
+        assert lin.weight.__dict__["quant_state"] is None
+        # Real weights are preserved for per-block GPU quantization.
+        assert lin.weight.data.is_floating_point()
+        assert not lin.weight.data.is_meta
+
+    def test_leaves_healthy_quantized_params_alone(self):
+        import torch
+        from bitsandbytes.functional import QuantState
+        from bitsandbytes import nn as bnb_nn
+
+        from plugins.qwen21.plugin import Qwen21EnginePlugin
+
+        lin = bnb_nn.Linear4bit(16, 16, bias=False)
+        # A settled param: real (non-meta) state, not flagged for repair.
+        lin.weight.__dict__["quant_state"] = QuantState(
+            absmax=torch.zeros(1),
+            code=torch.zeros(64),
+        )
+        lin.weight.__dict__["bnb_quantized"] = False
+
+        repaired = Qwen21EnginePlugin._repair_bnb_meta_state(lin)
+
+        assert repaired == 0
+        assert lin.weight.__dict__["bnb_quantized"] is False
+        assert lin.weight.__dict__["quant_state"] is not None
+
+    def test_leaves_meta_data_and_plain_params_alone(self):
+        import torch
+        from bitsandbytes import nn as bnb_nn
+
+        from plugins.qwen21.plugin import Qwen21EnginePlugin
+
+        class Tiny(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.plain = torch.nn.Linear(4, 4)
+                # Meta weights carry no data: nothing to re-derive, skip.
+                self.meta = bnb_nn.Params4bit(torch.empty(4, 4, device="meta"))
+
+        module = Tiny()
+        repaired = Qwen21EnginePlugin._repair_bnb_meta_state(module)
+        assert repaired == 0

@@ -27,6 +27,9 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 image = "image_entry:main"
 
+[project.entry-points."fast_market.webux_plugins"]
+yt_thumbnail = "webux.yt_thumbnail.register:register"
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["common*", "cli*", "core*", "plugins*", "commands*", "api*", "image_entry*"]
+include = ["common*", "cli*", "core*", "plugins*", "commands*", "api*", "image_entry*", "webux*", "webux.yt_thumbnail*"]

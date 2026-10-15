@@ -32,6 +32,15 @@ def get_default_config() -> dict:
                 # for GPUs with <24GB VRAM / machines with <64GB RAM.
                 "quantization": None,
             },
+            "qwen21turbo": {
+                "model_path": "Qwen/Qwen-Image-2.1-Turbo",
+                "torch_dtype": "bfloat16",
+                "local_files_only": False,
+                # Same backends as qwen21 (null/int8/int4). Turbo's
+                # recommended schedule is 8 steps at CFG 1.0 — pass
+                # -S/-g explicitly to deviate from it.
+                "quantization": None,
+            },
             "flux2cloud": {
                 "account_id": "",
                 "api_token": "",

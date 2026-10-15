@@ -11,6 +11,7 @@ image-agent/
 │   └── __init__.py        # Imports main from cli.main
 ├── core/                  # Core logic (models, engine, config)
 ├── plugins/               # Image engine plugins (flux2)
+├── webux/                 # Webux hub tab(s): yt_thumbnail (subprocess-driven)
 ├── commands/              # CLI commands (generate, setup, serve)
 ├── api/                   # FastAPI server
 └── common/                # Symlink to shared utilities
@@ -33,8 +34,10 @@ image-agent/
 | `base.py` | `ImageEnginePlugin` ABC, `PluginManifest` |
 | `flux2/plugin.py` | `Flux2EnginePlugin` - FLUX.2 Klein implementation |
 | `flux2/register.py` | Declares flux2 plugin to the system |
-| `qwen21/plugin.py` | `Qwen21EnginePlugin` - Qwen-Image-2.1 implementation (`QwenImage21Pipeline`; `guidance_scale` maps to `true_cfg_scale`, default 4.0/40 steps) |
+| `qwen21/plugin.py` | `Qwen21EnginePlugin` - Qwen-Image-2.1 implementation (`QwenImage21Pipeline`; `guidance_scale` maps to `true_cfg_scale`, default 4.0/40 steps; `extra_pipe_kwargs` + `default_model_id` hooks for subclasses) |
 | `qwen21/register.py` | Declares qwen21 plugin to the system |
+| `qwen21turbo/plugin.py` | `Qwen21TurboEnginePlugin(Qwen21EnginePlugin)` - Turbo checkpoint (`Qwen/Qwen-Image-2.1-Turbo`), defaults 8 steps / CFG 1.0, `use_kv_cache=True` (silently retried without on old diffusers) |
+| `qwen21turbo/register.py` | Declares qwen21turbo plugin to the system |
 
 ### Commands (`commands/`)
 
@@ -95,6 +98,11 @@ engines:
     torch_dtype: bfloat16
     local_files_only: false
     quantization: null  # null = BF16 (~32GB RAM); "int8" = quanto (~16GB)
+  qwen21turbo:
+    model_path: Qwen/Qwen-Image-2.1-Turbo  # 8-step Turbo, CFG 1.0
+    torch_dtype: bfloat16
+    local_files_only: false
+    quantization: null
 
 default_width: 1024
 default_height: 1024

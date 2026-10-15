@@ -68,6 +68,12 @@ webux setup reset
 
 The server starts at `http://localhost:8007` and redirects to the first available tab.
 
+The top toolbar groups tabs into dropdowns (**Workspace** 📁, **Publish** 📤,
+**Create** 🎨, **Observe** 👁, **More** 🧩) so it stays short as tabs are added.
+A plugin declares its group via `WebuxPluginManifest.group`; ungrouped tabs
+fall back to a built-in mapping, then to **More**. Deep links (`/tab_name`)
+keep working unchanged.
+
 ### 📁 Files (`/fileviewer`)
 
 Browse and edit config, data, and workdir files with a CodeMirror editor (Dracula theme).
@@ -112,6 +118,17 @@ API prefix: `/api/skill_runner/`
 ### 👁 Monitor (from `monitor-cli`)
 
 If `monitor-cli` is installed, a **Monitor** tab appears automatically, showing trigger logs, running status, and diagnostics. See `monitor-cli/README.md` for details.
+
+### 🖼️ YT Thumbnail (from `image-cli`, Publish group)
+
+If `image-cli` is installed, a **YT Thumbnail** tab appears automatically:
+compose a 1280×720 thumbnail from a prompt plus up to 4 source images
+(multi-image `-R` references), re-apply overlay text in the long_publish style,
+iterate with small-change edits, and push to YouTube. Files are versioned
+`<stem>_thumb[_overlay]_<N>` next to the video and share the
+`*-long-meta.json` keys with Long Publish. See `image-cli/README.md` for details.
+
+API prefix: `/api/yt_thumbnail/`
 
 ## Architecture
 
