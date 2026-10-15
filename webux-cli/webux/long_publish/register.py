@@ -73,7 +73,7 @@ def _validate_rhythm_options(rhythm_silence: bool, use_modal: bool, transcript_m
         )
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted") -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None) -> Job:
     """Create (but do not start) a publish Job. Respects publish config for
     default prompts etc."""
     pub = _load_publish_cfg()
@@ -97,6 +97,8 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_normalize_volume=do_normalize_volume,
         do_add_signature=do_add_signature,
         do_generate_thumbnail=do_generate_thumbnail,
+        do_pinned_comment=do_pinned_comment if do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
+        pinned_comment_text=pinned_comment_text if pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
         thumbnail_overlay_title=thumbnail_overlay_title,
         steps=[Step(name=n) for n in step_names],
     )
@@ -127,6 +129,8 @@ async def get_config():
         "transcript_mode": pub.get("transcript_mode", "normal"),
         "transcript_model": pub.get("transcript_model", "medium"),
         "transcript_language": pub.get("transcript_language", "fr"),
+        "long_pinned_comment_enabled": pub.get("long_pinned_comment_enabled", False),
+        "long_pinned_comment_text": pub.get("long_pinned_comment_text", ""),
         "rhythm_transcript_tolerance": pub.get("rhythm_transcript_tolerance"),
         "rhythm_paragraph_threshold": pub.get("rhythm_paragraph_threshold"),
         "rhythm_pause_inline": pub.get("rhythm_pause_inline"),
@@ -155,6 +159,8 @@ class ConfigSaveRequest(BaseModel):
     transcript_mode: str = "normal"
     transcript_model: str = "medium"
     transcript_language: str = "fr"
+    long_pinned_comment_enabled: bool = False
+    long_pinned_comment_text: str = ""
     rhythm_transcript_tolerance: float | None = None
     rhythm_paragraph_threshold: float | None = None
     rhythm_pause_inline: float | None = None
@@ -197,6 +203,8 @@ async def save_config(req: ConfigSaveRequest):
     pub["transcript_mode"] = req.transcript_mode
     pub["transcript_model"] = req.transcript_model
     pub["transcript_language"] = req.transcript_language
+    pub["long_pinned_comment_enabled"] = req.long_pinned_comment_enabled
+    pub["long_pinned_comment_text"] = req.long_pinned_comment_text
     rhythm_cfg = _rhythm_config_from_request(req)
     try:
         rhythm_params_from_pub(rhythm_cfg)
@@ -406,6 +414,8 @@ class StartRequest(BaseModel):
     do_normalize_volume: bool = False
     do_add_signature: bool = True
     do_generate_thumbnail: bool = True
+    do_pinned_comment: bool | None = None
+    pinned_comment_text: str | None = None
     thumbnail_overlay_title: str = ""
     thumbnail_engine: str = ""
 
@@ -420,6 +430,8 @@ class ResumeRequest(BaseModel):
     do_normalize_volume: bool = False
     do_add_signature: bool = True
     do_generate_thumbnail: bool = True
+    do_pinned_comment: bool | None = None
+    pinned_comment_text: str | None = None
     do_remove_silence: bool = False
     rhythm_silence: bool = False
     cut_time: str = ""
@@ -469,6 +481,8 @@ async def start(req: StartRequest):
         do_normalize_volume=req.do_normalize_volume,
         do_add_signature=req.do_add_signature,
         do_generate_thumbnail=req.do_generate_thumbnail,
+        do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
+        pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
         thumbnail_overlay_title=req.thumbnail_overlay_title,
         thumbnail_engine=req.thumbnail_engine.strip(),
         steps=[Step(name=n) for n in step_names],
@@ -556,6 +570,8 @@ async def resume(req: ResumeRequest):
         do_normalize_volume=req.do_normalize_volume,
         do_add_signature=req.do_add_signature,
         do_generate_thumbnail=req.do_generate_thumbnail if not req.do_generate_thumbnail else meta.get("do_generate_thumbnail", True),
+        do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
+        pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
         thumbnail_overlay_title=req.thumbnail_overlay_title or meta.get("thumbnail_overlay_title", ""),
         thumbnail_engine=req.thumbnail_engine.strip(),
         steps=[Step(name=n) for n in step_names],
@@ -564,6 +580,8 @@ async def resume(req: ResumeRequest):
         description=meta.get("description", ""),
         transcript_text=meta.get("transcript_text", ""),
     )
+    job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
+    job.pinned_comment_url = str(meta.get("pinned_comment_url", "") or "")
     for i in completed_before:
         if i < from_step:
             job.steps[i].status = "done"
@@ -663,6 +681,8 @@ async def review_info(body: dict):
         "thumbnail_overlay_title": meta.get("thumbnail_overlay_title", ""),
         "video_url": meta.get("video_url", ""),
         "studio_url": meta.get("studio_url", ""),
+        "pinned_comment_id": meta.get("pinned_comment_id", ""),
+        "pinned_comment_url": meta.get("pinned_comment_url", ""),
         "source": source,
         "final_video": meta.get("files", {}).get("final_video", ""),
         "thumbnail": meta.get("files", {}).get("thumbnail", ""),
@@ -712,6 +732,7 @@ async def list_thumbnails(
             "thumbnail_base": thumb_base,
             "video_url": video_url,
             "has_thumbnail": bool(thumb and Path(thumb).exists()),
+            "published": bool(video_url),
         })
     draft = _load_draft()
     draft_files = dict(draft.get("files", {}))
@@ -1245,7 +1266,7 @@ def register(config: dict) -> WebuxPluginManifest:
     html = (Path(__file__).parent / "frontend.html").read_text(encoding="utf-8")
     return WebuxPluginManifest(
         name="long_publish",
-        tab_label="Long Publish",
+        tab_label="YT Long Publish",
         tab_icon="🎬",
         api_router=router,
         frontend_html=html,

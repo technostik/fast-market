@@ -175,6 +175,16 @@
       <input type="text" id="cfgTranscriptScript">
     </div>
     <div class="row">
+      <div class="checkrow">
+        <input type="checkbox" id="cfgPinnedEnabled">
+        <label for="cfgPinnedEnabled" style="display:inline; margin:0;">Auto-post pinned comment after upload (pin manually in Studio)</label>
+      </div>
+    </div>
+    <div class="row">
+      <label>Default pinned comment (Shorts)</label>
+      <textarea id="cfgPinnedText" rows="3" style="width:100%; min-height:60px;" placeholder="Posted automatically after each Short upload"></textarea>
+    </div>
+    <div class="row">
       <label>Transcript mode</label>
       <select id="cfgTranscriptMode" onchange="updateSubtitleDependency()">
         <option value="normal">Normal transcript</option>
@@ -338,6 +348,17 @@
       <div class="row">
         <label>Cut time (optional — trims the video tail at this point before processing)</label>
         <input type="text" id="cutTime" placeholder="MM:SS (e.g. 1:30) — leave empty to skip">
+      </div>
+
+      <div class="row">
+        <div class="checkrow">
+          <input type="checkbox" id="doPinnedComment">
+          <label for="doPinnedComment" style="display:inline; margin:0;" title="Posts the comment right after upload (video still unlisted). Pin it manually in Studio via the comment link.">Post pinned comment after upload</label>
+        </div>
+      </div>
+      <div class="row">
+        <label>Pinned comment (overrides config default)</label>
+        <textarea id="pinnedCommentText" rows="2" placeholder="Leave empty to use the config default"></textarea>
       </div>
 
       <div style="display:flex; gap:8px; margin-top:8px;">
@@ -677,6 +698,8 @@ async function startJob() {
     privacy: document.getElementById('privacy').value,
     description_prefix: document.getElementById('descPrefix').value,
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
+    do_pinned_comment: document.getElementById('doPinnedComment').checked,
+    pinned_comment_text: document.getElementById('pinnedCommentText').value,
     cut_time: document.getElementById('cutTime').value
   };
   // Immediate publish (only if pool not running)
@@ -867,6 +890,7 @@ function showResult(job) {
   links.innerHTML = '';
   if (job.video_url) links.innerHTML += `<a href="${job.video_url}" target="_blank">Watch on YouTube</a>`;
   if (job.studio_url) links.innerHTML += `<a href="${job.studio_url}" target="_blank">Studio edit</a>`;
+  if (job.pinned_comment_url) links.innerHTML += `<a href="${job.pinned_comment_url}" target="_blank">💬 Pin this comment</a>`;
   if (job.elapsed_seconds != null) {
     links.innerHTML += `<span style="margin-left:12px;color:var(--dim);">⏱ ${job.elapsed_seconds}s total</span>`;
   }
@@ -945,7 +969,9 @@ async function doResume() {
     ignore_post_publish: document.getElementById('ignorePostPublish').checked,
     privacy: document.getElementById('privacy').value,
     description_prefix: document.getElementById('descPrefix').value,
-    source_urls: (document.getElementById('sourceUrls').value || '').split('\n')
+    source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
+    do_pinned_comment: document.getElementById('doPinnedComment').checked,
+    pinned_comment_text: document.getElementById('pinnedCommentText').value
   };
   const r = await fetch('/api/short_publish/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (!r.ok) { alert('Resume failed'); return; }
@@ -1001,6 +1027,8 @@ async function showConfig() {
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
       document.getElementById('cfgTranscriptMode').value = c.transcript_mode || 'normal';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
+      document.getElementById('cfgPinnedEnabled').checked = !!c.short_pinned_comment_enabled;
+      document.getElementById('cfgPinnedText').value = c.short_pinned_comment_text || '';
       document.getElementById('cfgLanguage').value = c.language || 'fr';
       document.getElementById('cfgModel').value = c.model || 'medium';
       updateSubtitleDependency();
@@ -1022,6 +1050,8 @@ async function saveConfig() {
     transcript_script: document.getElementById('cfgTranscriptScript').value,
     transcript_mode: document.getElementById('cfgTranscriptMode').value,
     modal_usage_url: document.getElementById('cfgModalUsageUrl').value,
+    short_pinned_comment_enabled: document.getElementById('cfgPinnedEnabled').checked,
+    short_pinned_comment_text: document.getElementById('cfgPinnedText').value,
     language: document.getElementById('cfgLanguage').value,
     model: document.getElementById('cfgModel').value
   };
@@ -1049,10 +1079,13 @@ async function toggleConfig() {
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
       document.getElementById('cfgTranscriptMode').value = c.transcript_mode || 'normal';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
+      document.getElementById('cfgPinnedEnabled').checked = !!c.short_pinned_comment_enabled;
+      document.getElementById('cfgPinnedText').value = c.short_pinned_comment_text || '';
       document.getElementById('cfgLanguage').value = c.language || 'fr';
       document.getElementById('cfgModel').value = c.model || 'medium';
       updateSubtitleDependency();
       updateSignatureAvailability();
+      applyPinnedDefaults(c);
       const link = document.getElementById('modalUsageLink');
       if (link && c.modal_usage_url) link.href = c.modal_usage_url;
     }
@@ -1560,6 +1593,8 @@ async function addToPool() {
       do_charisma: document.getElementById('doCharisma').checked,
       do_add_signature: (!document.getElementById('addSignature').disabled && document.getElementById('addSignature').checked),
       ignore_post_publish: document.getElementById('ignorePostPublish').checked,
+      do_pinned_comment: document.getElementById('doPinnedComment').checked,
+      pinned_comment_text: document.getElementById('pinnedCommentText').value,
       cut_time: document.getElementById('cutTime').value
     })
   });
@@ -1648,9 +1683,18 @@ function updateSignatureAvailability() {
   el.style.opacity = avail ? '1' : '0.4';
 }
 
+function applyPinnedDefaults(c) {
+  if (!c) return;
+  const cb = document.getElementById('doPinnedComment');
+  const tx = document.getElementById('pinnedCommentText');
+  if (cb) cb.checked = !!c.short_pinned_comment_enabled;
+  if (tx && !tx.value) tx.value = c.short_pinned_comment_text || '';
+}
+
 function init() {
   loadVideos();
   loadPrompts();
+  fetch('/api/short_publish/config').then(r => r.ok ? r.json() : {}).then(applyPinnedDefaults).catch(() => {});
   initDropZone();
   initPool();
   updateSubtitleDependency();

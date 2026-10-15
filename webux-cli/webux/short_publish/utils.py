@@ -58,6 +58,10 @@ def _save_meta(job) -> None:
         meta["video_url"] = job.video_url
     if job.studio_url:
         meta["studio_url"] = job.studio_url
+    if getattr(job, "pinned_comment_id", ""):
+        meta["pinned_comment_id"] = job.pinned_comment_id
+    if getattr(job, "pinned_comment_url", ""):
+        meta["pinned_comment_url"] = job.pinned_comment_url
     if job.check_result is not None:
         meta["check_result"] = job.check_result
     if getattr(job, "upload_duration_seconds", None) is not None:

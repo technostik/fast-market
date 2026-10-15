@@ -754,7 +754,7 @@ def register(config: dict) -> WebuxPluginManifest:
     del config
     return WebuxPluginManifest(
         name="yt_poster",
-        tab_label="YT Poster",
+        tab_label="YT Auto-comment",
         tab_icon="📤",
         api_router=router,
         frontend_html=_YT_POSTER_HTML,

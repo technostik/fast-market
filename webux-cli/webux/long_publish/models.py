@@ -105,6 +105,8 @@ class Job:
     do_normalize_volume: bool = False
     do_add_signature: bool = True
     do_generate_thumbnail: bool = True
+    do_pinned_comment: bool = False
+    pinned_comment_text: str = ""
     source_urls: list[str] = field(default_factory=list)
     thumbnail_overlay_title: str = ""
     thumbnail_prompt: str = ""
@@ -118,6 +120,8 @@ class Job:
     status: str = "running"
     video_url: str = ""
     studio_url: str = ""
+    pinned_comment_id: str = ""
+    pinned_comment_url: str = ""
     modal_url: str = ""
     start_time: float = field(default_factory=time.time)
     end_time: float | None = None
@@ -131,6 +135,8 @@ class Job:
             "status": self.status,
             "video_url": self.video_url,
             "studio_url": self.studio_url,
+            "pinned_comment_id": self.pinned_comment_id,
+            "pinned_comment_url": self.pinned_comment_url,
             "modal_url": self.modal_url,
             "title": self.title,
             "description": self.description,

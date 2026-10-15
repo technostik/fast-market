@@ -73,6 +73,8 @@ class Job:
     do_charisma: bool = True
     do_add_signature: bool = True
     do_ignore_post_publish: bool = False
+    do_pinned_comment: bool = False
+    pinned_comment_text: str = ""
     cut_time: str = ""
     source_urls: list[str] = field(default_factory=list)
     stop_requested: bool = False
@@ -85,6 +87,8 @@ class Job:
     status: str = "running"
     video_url: str = ""
     studio_url: str = ""
+    pinned_comment_id: str = ""
+    pinned_comment_url: str = ""
     modal_url: str = ""
     start_time: float = field(default_factory=time.time)
     end_time: float | None = None
@@ -101,6 +105,8 @@ class Job:
             "status": self.status,
             "video_url": self.video_url,
             "studio_url": self.studio_url,
+            "pinned_comment_id": self.pinned_comment_id,
+            "pinned_comment_url": self.pinned_comment_url,
             "modal_url": self.modal_url,
             "title": self.title,
             "description": self.description,

@@ -59,7 +59,7 @@ def _is_intermediate(path: Path) -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "") -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
@@ -93,11 +93,15 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_charisma=do_charisma,
         do_add_signature=do_add_signature,
         do_ignore_post_publish=do_ignore_post_publish,
+        do_pinned_comment=do_pinned_comment if do_pinned_comment is not None else bool(pub.get("short_pinned_comment_enabled", False)),
+        pinned_comment_text=pinned_comment_text if pinned_comment_text is not None else str(pub.get("short_pinned_comment_text", "") or ""),
         cut_time=cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
         upload_duration_seconds=meta.get("upload_duration_seconds"),
         files=restored_files,
     )
+    job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
+    job.pinned_comment_url = str(meta.get("pinned_comment_url", "") or "")
     _jobs[job_id] = job
     return job
 
@@ -125,6 +129,8 @@ async def get_config():
         "default_check_prompt": pub.get("default_check_prompt", ""),
         "transcript_mode": pub.get("transcript_mode", "normal"),
         "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings/usage"),
+        "short_pinned_comment_enabled": pub.get("short_pinned_comment_enabled", False),
+        "short_pinned_comment_text": pub.get("short_pinned_comment_text", ""),
         "language": pub.get("language", "fr"),
         "model": pub.get("model", "medium"),
     }
@@ -142,6 +148,8 @@ class ConfigSaveRequest(BaseModel):
     default_check_prompt: str = ""
     transcript_mode: str = "normal"
     modal_usage_url: str = "https://modal.com/settings/usage"
+    short_pinned_comment_enabled: bool = False
+    short_pinned_comment_text: str = ""
     language: str = ""
     model: str = ""
 
@@ -160,6 +168,8 @@ async def save_config(req: ConfigSaveRequest):
     pub["default_check_prompt"] = req.default_check_prompt
     pub["transcript_mode"] = req.transcript_mode
     pub["modal_usage_url"] = req.modal_usage_url
+    pub["short_pinned_comment_enabled"] = req.short_pinned_comment_enabled
+    pub["short_pinned_comment_text"] = req.short_pinned_comment_text
     pub["language"] = req.language
     pub["model"] = req.model
     _save_publish_cfg(pub)
@@ -344,6 +354,8 @@ class StartRequest(BaseModel):
     do_charisma: bool = True
     do_add_signature: bool = True
     ignore_post_publish: bool = False
+    do_pinned_comment: bool | None = None
+    pinned_comment_text: str | None = None
     cut_time: str = ""
 
 
@@ -362,6 +374,8 @@ class ResumeRequest(BaseModel):
     do_charisma: bool = True
     do_add_signature: bool = True
     ignore_post_publish: bool = False
+    do_pinned_comment: bool | None = None
+    pinned_comment_text: str | None = None
     language: str = ""
     model: str = ""
     privacy: str = "unlisted"
@@ -400,6 +414,8 @@ async def start(req: StartRequest):
         do_charisma=req.do_charisma,
         do_add_signature=req.do_add_signature,
         do_ignore_post_publish=req.ignore_post_publish,
+        do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("short_pinned_comment_enabled", False)),
+        pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("short_pinned_comment_text", "") or ""),
         cut_time=req.cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
@@ -477,6 +493,8 @@ async def resume(req: ResumeRequest):
         do_charisma=req.do_charisma,
         do_add_signature=req.do_add_signature,
         do_ignore_post_publish=req.ignore_post_publish,
+        do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub_cfg.get("short_pinned_comment_enabled", False)),
+        pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub_cfg.get("short_pinned_comment_text", "") or ""),
         steps=[Step(name=n) for n in STEP_NAMES],
         files=files,
         title=meta.get("title", ""),
@@ -484,6 +502,8 @@ async def resume(req: ResumeRequest):
         transcript_text=meta.get("transcript_text", ""),
         upload_duration_seconds=meta.get("upload_duration_seconds"),
     )
+    job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
+    job.pinned_comment_url = str(meta.get("pinned_comment_url", "") or "")
     for i in completed_before:
         if i < from_step:
             job.steps[i].status = "done"
@@ -631,6 +651,8 @@ async def review_info(body: dict):
         "source_urls": meta.get("source_urls", []),
         "video_url": video_url,
         "studio_url": studio_url,
+        "pinned_comment_id": meta.get("pinned_comment_id", ""),
+        "pinned_comment_url": meta.get("pinned_comment_url", ""),
         "source": source,
         "final_video": meta.get("files", {}).get("final_video", ""),
     }
@@ -711,12 +733,14 @@ class PoolAddRequest(BaseModel):
     do_charisma: bool = True
     do_add_signature: bool = True
     ignore_post_publish: bool = False
+    do_pinned_comment: bool | None = None
+    pinned_comment_text: str | None = None
     cut_time: str = ""
 
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text)
     return {"ok": ok}
 
 
@@ -857,7 +881,7 @@ def register(config: dict) -> WebuxPluginManifest:
     html = (Path(__file__).parent / "frontend.html").read_text(encoding="utf-8")
     return WebuxPluginManifest(
         name="short_publish",
-        tab_label="Short Publish",
+        tab_label="YT Short Publish",
         tab_icon="🚀",
         api_router=router,
         frontend_html=html,

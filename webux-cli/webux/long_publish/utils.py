@@ -108,6 +108,10 @@ def _save_meta(job) -> None:
         meta["video_url"] = job.video_url
     if job.studio_url:
         meta["studio_url"] = job.studio_url
+    if getattr(job, "pinned_comment_id", ""):
+        meta["pinned_comment_id"] = job.pinned_comment_id
+    if getattr(job, "pinned_comment_url", ""):
+        meta["pinned_comment_url"] = job.pinned_comment_url
     try:
         with open(_long_meta_path(job.source), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)

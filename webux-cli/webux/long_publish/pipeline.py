@@ -87,6 +87,83 @@ async def _run_tracked(job: Job, step, *cmd: str):
     return _finish_step(job, step, rc)
 
 
+def _pinned_comment_cfg(job: Job, pub_cfg: dict) -> tuple[bool, str]:
+    """Resolve pinned-comment setting: per-job override wins, else config default."""
+    text = (getattr(job, "pinned_comment_text", "") or "").strip()
+    enabled = bool(getattr(job, "do_pinned_comment", False))
+    if not text:
+        text = str(pub_cfg.get("long_pinned_comment_text", "") or "").strip()
+    if not getattr(job, "do_pinned_comment", False):
+        enabled = bool(pub_cfg.get("long_pinned_comment_enabled", False))
+    return enabled, text
+
+
+async def _maybe_post_pinned_comment(job: Job, video_id: str, step) -> None:
+    """Post the configured pinned comment (warn-only, never fails the job).
+
+    Auto-posts a top-level comment via ``youtube comment-post`` so the owner
+    can pin it manually in Studio. Failures are appended as warnings only.
+    """
+    if getattr(job, "skip_upload", False):
+        return
+    if not video_id:
+        return
+    if _stop_requested(job):
+        return
+    if getattr(job, "pinned_comment_id", ""):
+        return  # idempotency: already posted (resume/retry)
+    pub_cfg = _load_publish_cfg()
+    enabled, text = _pinned_comment_cfg(job, pub_cfg)
+    if not enabled or not text:
+        return
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _yt(), "comment-post", video_id,
+            "--text", text, "--format", "json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        set_active_proc(proc)
+        try:
+            stdout, stderr = await proc.communicate()
+        finally:
+            clear_active_proc()
+        if proc.returncode != 0:
+            err = (stdout or b"").decode(errors="replace").strip() or (stderr or b"").decode(errors="replace").strip()
+            step.output += f"\n⚠ Pinned comment failed (non-blocking): {err or f'exit {proc.returncode}'}"
+            _save_meta(job)
+            return
+        raw = (stdout or b"").decode(errors="replace").strip()
+        comment_id = ""
+        comment_url = ""
+        try:
+            data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+            comment_id = str(data.get("id", "") or data.get("comment_id", ""))
+            comment_url = str(data.get("comment_url", ""))
+        except Exception:
+            comment_id, comment_url = "", ""
+        if not comment_url and comment_id:
+            comment_url = f"https://www.youtube.com/watch?v={video_id}&lc={comment_id}"
+        job.pinned_comment_id = comment_id
+        job.pinned_comment_url = comment_url
+        files = job.files or {}
+        if comment_id:
+            files["pinned_comment_id"] = comment_id
+        if comment_url:
+            files["pinned_comment_url"] = comment_url
+        job.files = files
+        if comment_url:
+            step.output += f"\n💬 Comment posted — pin it manually: {comment_url}"
+        elif comment_id:
+            step.output += f"\n💬 Comment posted (id {comment_id}) — pin it manually in Studio"
+        else:
+            step.output += "\n💬 Comment posted — pin it manually in Studio"
+        _save_meta(job)
+    except Exception as exc:
+        step.output += f"\n⚠ Pinned comment failed (non-blocking): {exc}"
+        _save_meta(job)
+
+
 async def _run_pipeline_from(job: Job, from_step: int) -> None:
     set_active_job(job)
     try:
@@ -572,6 +649,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             job.studio_url = ""
         s5.output = f"Uploaded: {job.video_url}"
         _save_meta(job)
+        await _maybe_post_pinned_comment(job, video_id, s5)
 
     job.status = "done"
     job.end_time = time.time()

@@ -131,6 +131,8 @@
       <div class="row"><label>Default overlay drop offset (% down)</label><input id="cfgThumbOffset" type="number" min="-50" max="80" step="1" placeholder="0 = default"></div>
     </div>
     <div class="row"><label>Modal usage URL</label><input id="cfgModalUrl" type="text"></div>
+    <div class="checkrow"><input type="checkbox" id="cfgPinnedEnabled"><label style="margin:0">Auto-post pinned comment after upload (pin manually in Studio)</label></div>
+    <div class="row"><label>Default pinned comment (long videos)</label><textarea id="cfgPinnedText" rows="2" placeholder="Posted automatically after each long upload"></textarea></div>
     <button class="btn-sec" id="cfgSave">Save config</button>
     <span id="cfgMsg" class="hint"></span>
   </div>
@@ -168,6 +170,8 @@
       <div class="row"><label>Cut time (optional — trims the video tail at this point before processing)</label><input id="cutTime" type="text" placeholder="MM:SS (e.g. 1:30) — leave empty to skip"></div>
       <div class="row"><label>Source URLs (one per line)</label><textarea id="sourceUrls" rows="2"></textarea></div>
       <div class="row" id="overlayRow"><label>Thumbnail overlay title (optional, overrides prompt)</label><input id="thumbOverlayTitle" type="text"></div>
+      <div class="opt checkrow"><input type="checkbox" id="doPinnedComment"><label style="margin:0" title="Posts the comment right after upload (video still unlisted). Pin it manually in Studio via the comment link.">Post pinned comment after upload</label></div>
+      <div class="row"><label>Pinned comment (overrides config default)</label><textarea id="pinnedCommentText" rows="2" placeholder="Leave empty to use the config default"></textarea></div>
 
       <div class="publish-actions">
         <button class="btn-go" id="startBtn">▶ Publish</button>
@@ -280,6 +284,8 @@ async function loadConfig(){
   el('cfgThumbSizePct').value = c.thumbnail_overlay_size_pct||0;
   el('cfgThumbOffset').value = c.thumbnail_overlay_offset||0;
   el('cfgModalUrl').value = c.modal_usage_url||'';
+  el('cfgPinnedEnabled').checked = !!c.long_pinned_comment_enabled;
+  el('cfgPinnedText').value = c.long_pinned_comment_text||'';
   el('cfgLang').value = c.transcript_language||'fr';
   el('cfgModel').value = c.transcript_model||'medium';
   el('cfgGroq').checked = (c.transcript_mode==='groq');
@@ -322,6 +328,8 @@ async function saveConfig(){
     thumbnail_overlay_bg: el('cfgThumbBg').value,
     thumbnail_overlay_size_pct: Number(el('cfgThumbSizePct').value) || 0,
     thumbnail_overlay_offset: Number(el('cfgThumbOffset').value) || 0,
+    long_pinned_comment_enabled: el('cfgPinnedEnabled').checked,
+    long_pinned_comment_text: el('cfgPinnedText').value,
     modal_usage_url: el('cfgModalUrl').value,
     transcript_mode: el('cfgGroq').checked ? 'groq' : 'normal',
     transcript_model: el('cfgModel').value,
@@ -502,6 +510,8 @@ function startBody(){
     skip_upload: el('skipUpload').checked,
     description_prefix: el('descPrefix').value,
     source_urls: el('sourceUrls').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    do_pinned_comment: el('doPinnedComment').checked,
+    pinned_comment_text: el('pinnedCommentText').value,
     thumbnail_overlay_title: el('thumbOverlayTitle').value,
     thumbnail_engine: el('thumbEngine').value,
   };
@@ -575,10 +585,14 @@ async function loadThumbVideos(){
   const ext = el('cfgExt').value || '';
   const r = await fetch(API+'/list-thumbnails?path='+encodeURIComponent(path)+'&extensions='+encodeURIComponent(ext)).catch(()=>null);
   const data = r ? await r.json() : {videos:[], draft:null};
-  const videos = (data.videos||[]).filter(v=>v.has_thumbnail);
+  // The select resolves the YouTube video to update, so list every published
+  // video plus any video that already has a thumbnail (not just the latter:
+  // a just-uploaded video may have no thumbnail yet).
+  const videos = (data.videos||[]).filter(v=>v.has_thumbnail || v.video_url);
   const sel = el('thumbVidSel');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— select video (optional) —</option>' + videos.map(v=>`<option value="${v.path}">${v.name}</option>`).join('');
+  const label = v=>v.name+(v.video_url?' ▶ published':'')+(v.has_thumbnail?'':' (no thumb)');
+  sel.innerHTML = '<option value="">— select video (optional) —</option>' + videos.map(v=>`<option value="${v.path}">${label(v)}</option>`).join('');
   if (cur) sel.value = cur;
   applyDraftThumb(data.draft);
 }
@@ -748,6 +762,7 @@ async function poll(){
     let links = '';
     if (data.video_url) links += `<a href="${data.video_url}" target="_blank">▶ Watch</a>`;
     if (data.studio_url) links += `<a href="${data.studio_url}" target="_blank">🛠 Studio</a>`;
+    if (data.pinned_comment_url) links += `<a href="${data.pinned_comment_url}" target="_blank">💬 Pin this comment</a>`;
     const thumb = (data.files||{}).thumbnail;
     const thumbBase = (data.files||{}).thumbnail_base;
     let thumbHtml = '';
@@ -759,6 +774,7 @@ async function poll(){
   if (data.status === 'done' || data.status === 'error' || data.status === 'stopped'){
     stopPoll();
     refreshQuickPrompt();
+    loadThumbVideos();
   }
 }
 function startPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer = setInterval(poll, 1500); poll(); }
@@ -767,6 +783,8 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
 // init
 (async ()=>{
   await loadConfig();
+  if (el('doPinnedComment')) el('doPinnedComment').checked = el('cfgPinnedEnabled').checked;
+  if (el('pinnedCommentText') && !el('pinnedCommentText').value) el('pinnedCommentText').value = el('cfgPinnedText').value||'';
   updateOverlayRow();
   await loadVideos();
   await loadPrompts();
