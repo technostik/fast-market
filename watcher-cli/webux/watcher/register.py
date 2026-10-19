@@ -101,6 +101,41 @@ def news(
         raise HTTPException(status_code=502, detail=_failure(proc)) from exc
 
 
+@router.get("/get")
+def get_value(
+    variable: str = Query(...),
+    refresh: bool = Query(False),
+    profile: str | None = Query(None),
+    main_currency: str = Query("USD"),
+) -> dict:
+    args = ["get", variable, "--json"]
+    if refresh:
+        args.append("--refresh")
+    args += ["--main-currency", main_currency if main_currency in ("EUR", "USD") else "USD"]
+    proc = _run_watcher(*args, profile=profile)
+    if proc.returncode != 0:
+        err = _failure(proc)
+        if "Unknown variable" in err:
+            raise HTTPException(status_code=404, detail=err)
+        raise HTTPException(status_code=502, detail=err)
+    try:
+        data = json.loads(proc.stdout)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=_failure(proc)) from exc
+    data["exit_code"] = proc.returncode
+    return data
+
+
+@router.get("/value")
+def get_value_alias(
+    variable: str = Query(...),
+    refresh: bool = Query(False),
+    profile: str | None = Query(None),
+    main_currency: str = Query("USD"),
+) -> dict:
+    return get_value(variable=variable, refresh=refresh, profile=profile, main_currency=main_currency)
+
+
 _HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Watcher</title>
 <style>
@@ -109,6 +144,8 @@ body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family
 input, button, select { padding:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:6px; }
 button { cursor:pointer; }
 button:hover { background:var(--accent); }
+.card-refresh { padding:2px 6px; font-size:12px; line-height:1; border-radius:4px; }
+.card-refresh:disabled { opacity:.5; cursor:default; }
 h2 { margin:0 0 12px 0; }
 .row { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
 .split { display:flex; gap:12px; align-items:flex-start; }
@@ -199,6 +236,9 @@ function showGlobalNews() {
   renderNewsPage();
   detail.style.display = 'block';
 }
+function cardInner(r) {
+  return `<div class="card-head"><span class="card-id">${r.icon ? `<span class="card-icon">${esc(r.icon)}</span>` : ''}${esc(r.id)}</span><span><button class="card-refresh refresh-btn" data-id="${esc(r.id)}" title="Refresh this value" type="button">↻</button> <span class="dim">${esc(r.source || '')}</span></span></div><div class="card-label dim">${esc(r.label || '')}</div>${cardBody(r)}<div class="card-foot"><span>${fmtChange(r)}</span><span class="dim">${esc(r.as_of || '—')}</span></div>`;
+}
 function cardBody(r) {
   const alt = (r.secondary_value != null && r.secondary_unit) ? `<div class="dim">≈ ${esc(display(r.secondary_value, r.secondary_unit))}</div>` : '';
   if (r.error && r.value != null) {
@@ -247,15 +287,55 @@ async function load(force) {
   const vars = data.variables || [];
   vars.forEach(r => { lastVars[r.id] = r; });
   out.innerHTML = vars.length ? `<div class="cards-grid">` + vars.map(r => {
-    return `<article class="card" data-id="${esc(r.id)}" tabindex="0" role="button" aria-label="${esc(r.id)} ${esc(r.label || '')}"><div class="card-head"><span class="card-id">${r.icon ? `<span class="card-icon">${esc(r.icon)}</span>` : ''}${esc(r.id)}</span><span class="dim">${esc(r.source || '')}</span></div><div class="card-label dim">${esc(r.label || '')}</div>${cardBody(r)}<div class="card-foot"><span>${fmtChange(r)}</span><span class="dim">${esc(r.as_of || '—')}</span></div></article>`;
+    return `<article class="card" data-id="${esc(r.id)}" tabindex="0" role="button" aria-label="${esc(r.id)} ${esc(r.label || '')}">${cardInner(r)}</article>`;
   }).join('') + `</div>` : '<span class="dim">No variables.</span>';
   out.querySelectorAll('.card').forEach(card => {
     const pick = () => { if (card.dataset.id === selectedId) showGlobalNews(); else selectVariable(card.dataset.id, profile); };
     card.onclick = pick;
     card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
   });
+  out.querySelectorAll('.card-refresh').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); e.preventDefault(); refreshOne(btn.dataset.id); };
+  });
   globalNews = data.news || [];
   showGlobalNews();
+}
+async function refreshOne(id) { return refreshItem(id); }
+async function refreshItem(id) { return refreshVariable(id); }
+async function refreshVariable(id) { return refreshCard(id); }
+async function refreshCard(id) {
+  const profile = document.getElementById('profile').value.trim();
+  const currency = document.getElementById('currency').value;
+  const params = new URLSearchParams({variable: id, refresh: 'true'});
+  params.set('main_currency', currency === 'EUR' ? 'EUR' : 'USD');
+  if (profile) params.set('profile', profile);
+  const btn = document.querySelector(`.card-refresh[data-id="${CSS.escape ? CSS.escape(id) : id}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await fetch('/api/watcher/get?' + params.toString());
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+    const v = (data.variables || [])[0];
+    if (!v) throw new Error('no value returned');
+    lastVars[id] = v;
+    const card = document.querySelector(`.card[data-id="${CSS.escape ? CSS.escape(id) : id}"]`);
+    if (card) {
+      card.innerHTML = cardInner(v);
+      const b = card.querySelector('.card-refresh');
+      if (b) b.onclick = (e) => { e.stopPropagation(); e.preventDefault(); refreshOne(b.dataset.id); };
+    }
+    const g = document.getElementById('generated');
+    if (g && data.generated_at) g.textContent = 'updated ' + String(data.generated_at).slice(0,19).replace('T',' ');
+  } catch (e) {
+    const card = document.querySelector(`.card[data-id="${CSS.escape ? CSS.escape(id) : id}"]`);
+    if (card) {
+      // leave card as-is but could show error; do nothing destructive
+    }
+    console.error('refresh failed', e);
+  } finally {
+    const b2 = document.querySelector(`.card-refresh[data-id="${CSS.escape ? CSS.escape(id) : id}"]`);
+    if (b2) { b2.disabled = false; b2.textContent = '↻'; }
+  }
 }
 let tvRange = '1Y';
 let tvLabel = '1Y';
