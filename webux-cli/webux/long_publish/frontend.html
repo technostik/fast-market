@@ -267,8 +267,10 @@ const STEP_ICONS = { pending:'⏳', running:'⏳', done:'✅', error:'❌', skip
 
 function el(id){ return document.getElementById(id); }
 
+function currentProfile(){ return (window.fastmarketProfile && window.fastmarketProfile()) || ''; }
 async function loadConfig(){
-  const c = await fetch(API+'/config').then(r=>r.json()).catch(()=>({}));
+  const prof = currentProfile();
+  const c = await fetch(API+'/config'+(prof?'?profile='+encodeURIComponent(prof):'')).then(r=>r.json()).catch(()=>({}));
   await populateConfigPrompts();
   el('cfgSourcePath').value = c.video_source_path||'';
   el('cfgExt').value = c.video_extensions||'';
@@ -342,7 +344,8 @@ async function saveConfig(){
     rhythm_pause_paragraph: numOrNull('cfgRhyParagraph'),
     rhythm_crossfade: numOrNull('cfgRhyXfade'),
   };
-  const r = await fetch(API+'/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const prof = currentProfile();
+  const r = await fetch(API+'/config'+(prof?'?profile='+encodeURIComponent(prof):''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (!r.ok){
     const data = await r.json().catch(()=>({}));
     el('cfgMsg').textContent = 'error: ' + (data.detail || r.status);
@@ -514,6 +517,7 @@ function startBody(){
     pinned_comment_text: el('pinnedCommentText').value,
     thumbnail_overlay_title: el('thumbOverlayTitle').value,
     thumbnail_engine: el('thumbEngine').value,
+    profile: currentProfile(),
   };
 }
 
@@ -562,6 +566,7 @@ el('cfgToggle').addEventListener('click', ()=>{
   el('cfgToggle').textContent = p.style.display==='block' ? '⚙ Config (click to hide)' : '⚙ Config (click to show)';
 });
 el('cfgSave').addEventListener('click', saveConfig);
+
 
 // ── Thumbnail regeneration ──────────────────────────────────────────────────
 async function loadEngines(){

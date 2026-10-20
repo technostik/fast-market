@@ -1124,7 +1124,7 @@ async function uploadFile(file) {
   await fetch('/api/short_publish/pool/add', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ source: data.path })
+    body: JSON.stringify({ source: data.path, profile: currentProfile() })
   });
   refreshPool();
 }
@@ -1595,7 +1595,8 @@ async function addToPool() {
       ignore_post_publish: document.getElementById('ignorePostPublish').checked,
       do_pinned_comment: document.getElementById('doPinnedComment').checked,
       pinned_comment_text: document.getElementById('pinnedCommentText').value,
-      cut_time: document.getElementById('cutTime').value
+      cut_time: document.getElementById('cutTime').value,
+      profile: currentProfile()
     })
   });
   refreshPool();

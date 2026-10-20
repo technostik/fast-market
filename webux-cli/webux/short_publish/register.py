@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from common.core.profile import resolve_profile
+from common.core.paths import get_profiles_config_base
 from common.webux.base import WebuxPluginManifest
 
 from .models import (
@@ -49,6 +51,17 @@ from .pool import (
 
 router = APIRouter()
 
+
+@router.get("/profiles")
+async def list_profiles():
+    base = get_profiles_config_base()
+    names = []
+    if base.exists():
+        for p in sorted(base.iterdir()):
+            if p.is_dir():
+                names.append(p.name)
+    return {"profiles": names, "active": resolve_profile()}
+
 _load_pool_from_disk()
 _jobs: dict[str, Job] = {}
 
@@ -59,11 +72,13 @@ def _is_intermediate(path: Path) -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
-    pub = _load_publish_cfg()
+    if not profile:
+        profile = resolve_profile()
+    pub = _load_publish_cfg(profile)
     job_id = str(uuid.uuid4())
     meta = _load_meta(source)
     restored_files: dict[str, str] = {}
@@ -76,6 +91,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
     job = Job(
         job_id=job_id,
         source=source,
+        profile=profile,
         title_override=title_override,
         prompt_title=pub.get("default_title_prompt", "youtube-title"),
         prompt_summary=pub.get("default_description_prompt", "youtube-summary"),
@@ -115,8 +131,12 @@ async def _run_single_publish_job(source: str, description_prefix: str = "", sou
 # ── Config API ────────────────────────────────────────────────────────────────
 
 @router.get("/config")
-async def get_config():
-    pub = _load_publish_cfg()
+async def get_config(profile: str | None = Query(default=None)):
+    if not profile:
+        profile = resolve_profile()
+    from .utils import _profile_context
+    with _profile_context(profile):
+        pub = _load_publish_cfg()
     return {
         "video_source_path": pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH),
         "video_extensions": pub.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
@@ -155,24 +175,28 @@ class ConfigSaveRequest(BaseModel):
 
 
 @router.post("/config")
-async def save_config(req: ConfigSaveRequest):
-    pub = _load_publish_cfg()
-    pub["video_source_path"] = req.video_source_path
-    pub["video_extensions"] = req.video_extensions
-    pub["signature"] = req.signature
-    pub["signature_video_path"] = req.signature_video_path
-    pub["post_publish_script"] = req.post_publish_script
-    pub["transcript_script"] = req.transcript_script
-    pub["default_title_prompt"] = req.default_title_prompt
-    pub["default_description_prompt"] = req.default_description_prompt
-    pub["default_check_prompt"] = req.default_check_prompt
-    pub["transcript_mode"] = req.transcript_mode
-    pub["modal_usage_url"] = req.modal_usage_url
-    pub["short_pinned_comment_enabled"] = req.short_pinned_comment_enabled
-    pub["short_pinned_comment_text"] = req.short_pinned_comment_text
-    pub["language"] = req.language
-    pub["model"] = req.model
-    _save_publish_cfg(pub)
+async def save_config(req: ConfigSaveRequest, profile: str | None = Query(default=None)):
+    if not profile:
+        profile = resolve_profile()
+    from .utils import _profile_context
+    with _profile_context(profile):
+        pub = _load_publish_cfg()
+        pub["video_source_path"] = req.video_source_path
+        pub["video_extensions"] = req.video_extensions
+        pub["signature"] = req.signature
+        pub["signature_video_path"] = req.signature_video_path
+        pub["post_publish_script"] = req.post_publish_script
+        pub["transcript_script"] = req.transcript_script
+        pub["default_title_prompt"] = req.default_title_prompt
+        pub["default_description_prompt"] = req.default_description_prompt
+        pub["default_check_prompt"] = req.default_check_prompt
+        pub["transcript_mode"] = req.transcript_mode
+        pub["modal_usage_url"] = req.modal_usage_url
+        pub["short_pinned_comment_enabled"] = req.short_pinned_comment_enabled
+        pub["short_pinned_comment_text"] = req.short_pinned_comment_text
+        pub["language"] = req.language
+        pub["model"] = req.model
+        _save_publish_cfg(pub)
     return {"ok": True}
 
 
@@ -346,6 +370,7 @@ class StartRequest(BaseModel):
     language: str = ""
     model: str = ""
     privacy: str = "unlisted"
+    profile: str = ""
     description_prefix: str = ""
     source_urls: list[str] = []
     skip_upload: bool = False
@@ -357,6 +382,7 @@ class StartRequest(BaseModel):
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
     cut_time: str = ""
+    profile: str = ""
 
 
 class ResumeRequest(BaseModel):
@@ -379,6 +405,7 @@ class ResumeRequest(BaseModel):
     language: str = ""
     model: str = ""
     privacy: str = "unlisted"
+    profile: str = ""
     description_prefix: str = ""
     source_urls: list[str] = []
 
@@ -391,11 +418,13 @@ async def start(req: StartRequest):
     if is_no_signature_source(Path(source)):
         raise HTTPException(status_code=400, detail="Cannot publish a no_signature_* intermediate file as source")
 
-    pub = _load_publish_cfg()
+    profile = req.profile or resolve_profile()
+    pub = _load_publish_cfg(profile)
     job_id = str(uuid.uuid4())
     job = Job(
         job_id=job_id,
         source=source,
+        profile=profile,
         title_override=req.title,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
@@ -470,11 +499,13 @@ async def resume(req: ResumeRequest):
     completed_before = set(meta.get("completed_steps", []))
     skipped_before = set(meta.get("skipped_steps", []))
 
-    pub_cfg = _load_publish_cfg()
+    profile = req.profile or meta.get("profile") or resolve_profile()
+    pub_cfg = _load_publish_cfg(profile)
     job_id = str(uuid.uuid4())
     job = Job(
         job_id=job_id,
         source=source,
+        profile=profile,
         title_override=req.title,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
@@ -582,7 +613,8 @@ async def redo_post_publish(body: dict):
     if not Path(final_video).exists():
         raise HTTPException(status_code=400, detail=f"Final video not found: {final_video}")
 
-    pub = _load_publish_cfg()
+    profile = body.get("profile") or meta.get("profile") or resolve_profile()
+    pub = _load_publish_cfg(profile)
     completed_before = set(meta.get("completed_steps", []))
     skipped_before = set(meta.get("skipped_steps", []))
 
@@ -590,6 +622,7 @@ async def redo_post_publish(body: dict):
     job = Job(
         job_id=job_id,
         source=source,
+        profile=profile,
         prompt_title=pub.get("default_title_prompt", ""),
         prompt_summary=pub.get("default_description_prompt", ""),
         do_remove_silence=False,
@@ -680,11 +713,13 @@ async def run_transcript_script(body: dict):
     completed_before = set(meta.get("completed_steps", []))
     skipped_before = set(meta.get("skipped_steps", []))
 
-    pub = _load_publish_cfg()
+    profile = resolve_profile()
+    pub = _load_publish_cfg(profile)
     job_id = str(uuid.uuid4())
     job = Job(
         job_id=job_id,
         source=source,
+        profile=profile,
         prompt_title=pub.get("default_title_prompt", ""),
         prompt_summary=pub.get("default_description_prompt", ""),
         do_remove_silence=False,
@@ -736,11 +771,12 @@ class PoolAddRequest(BaseModel):
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
     cut_time: str = ""
+    profile: str = ""
 
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None)
     return {"ok": ok}
 
 

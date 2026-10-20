@@ -64,6 +64,7 @@ class Job:
     model: str
     privacy: str
     title_override: str = ""
+    profile: str = ""
     transcript_mode: str = "normal"
     prompt_check: str = ""
     description_prefix: str = ""

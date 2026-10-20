@@ -96,6 +96,7 @@ class Job:
     model: str
     privacy: str
     rhythm_silence: bool = False
+    profile: str = ""
     rhythm_params: dict[str, float] = field(default_factory=dict)
     cut_time: str = ""
     transcript_mode: str = "normal"

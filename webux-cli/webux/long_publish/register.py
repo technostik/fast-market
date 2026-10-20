@@ -11,6 +11,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from common import structlog
+from common.core.paths import get_profiles_config_base
+from common.core.profile import resolve_profile
 from common.webux.base import WebuxPluginManifest
 
 logger = structlog.get_logger(__name__)
@@ -73,15 +75,18 @@ def _validate_rhythm_options(rhythm_silence: bool, use_modal: bool, transcript_m
         )
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None) -> Job:
     """Create (but do not start) a publish Job. Respects publish config for
     default prompts etc."""
-    pub = _load_publish_cfg()
+    if not profile:
+        profile = resolve_profile()
+    pub = _load_publish_cfg(profile)
     job_id = str(uuid.uuid4())
     step_names = RHYTHM_STEP_NAMES if rhythm_silence else STEP_NAMES
     job = Job(
         job_id=job_id,
         source=source,
+        profile=profile,
         prompt_title=pub.get("default_title_prompt", "youtube-title"),
         prompt_summary=pub.get("default_description_prompt", "youtube-summary"),
         do_remove_silence=do_remove_silence,
@@ -106,12 +111,29 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
     return job
 
 
+# ── Profiles API ──────────────────────────────────────────────────────────────
+
+@router.get("/profiles")
+async def list_profiles():
+    base = get_profiles_config_base()
+    names = []
+    if base.exists():
+        for p in sorted(base.iterdir()):
+            if p.is_dir():
+                names.append(p.name)
+    return {"profiles": names, "active": resolve_profile()}
+
+
 # ── Config API ────────────────────────────────────────────────────────────────
 
 @router.get("/config")
-async def get_config():
-    _migrate_publish_cfg_if_needed()
-    pub = _load_publish_cfg()
+async def get_config(profile: str | None = Query(default=None)):
+    if not profile:
+        profile = resolve_profile()
+    from .utils import _profile_context
+    with _profile_context(profile):
+        _migrate_publish_cfg_if_needed()
+        pub = _load_publish_cfg()
     return {
         "video_source_path": pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH),
         "video_extensions": pub.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
@@ -185,38 +207,42 @@ def _rhythm_config_from_request(req: ConfigSaveRequest) -> dict:
 
 
 @router.post("/config")
-async def save_config(req: ConfigSaveRequest):
-    pub = _load_publish_cfg()
-    pub["video_source_path"] = req.video_source_path
-    pub["video_extensions"] = req.video_extensions
-    pub["signature"] = req.signature
-    pub["signature_video_path"] = req.signature_video_path
-    pub["default_title_prompt"] = req.default_title_prompt
-    pub["default_description_prompt"] = req.default_description_prompt
-    pub["default_thumbnail_prompt"] = req.default_thumbnail_prompt
-    pub["default_thumbnail_overlay_prompt"] = req.default_thumbnail_overlay_prompt
-    pub["thumbnail_engine"] = req.thumbnail_engine
-    pub["thumbnail_overlay_fg"] = req.thumbnail_overlay_fg
-    pub["thumbnail_overlay_bg"] = req.thumbnail_overlay_bg
-    pub["thumbnail_overlay_size_pct"] = req.thumbnail_overlay_size_pct
-    pub["thumbnail_overlay_offset"] = req.thumbnail_overlay_offset
-    pub["transcript_mode"] = req.transcript_mode
-    pub["transcript_model"] = req.transcript_model
-    pub["transcript_language"] = req.transcript_language
-    pub["long_pinned_comment_enabled"] = req.long_pinned_comment_enabled
-    pub["long_pinned_comment_text"] = req.long_pinned_comment_text
-    rhythm_cfg = _rhythm_config_from_request(req)
-    try:
-        rhythm_params_from_pub(rhythm_cfg)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    for key, value in rhythm_cfg.items():
-        if value is None:
-            pub.pop(key, None)  # cleared field = unset, keep the file tidy
-        else:
-            pub[key] = value
-    pub["modal_usage_url"] = req.modal_usage_url
-    _save_publish_cfg(pub)
+async def save_config(req: ConfigSaveRequest, profile: str | None = Query(default=None)):
+    if not profile:
+        profile = resolve_profile()
+    from .utils import _profile_context
+    with _profile_context(profile):
+        pub = _load_publish_cfg()
+        pub["video_source_path"] = req.video_source_path
+        pub["video_extensions"] = req.video_extensions
+        pub["signature"] = req.signature
+        pub["signature_video_path"] = req.signature_video_path
+        pub["default_title_prompt"] = req.default_title_prompt
+        pub["default_description_prompt"] = req.default_description_prompt
+        pub["default_thumbnail_prompt"] = req.default_thumbnail_prompt
+        pub["default_thumbnail_overlay_prompt"] = req.default_thumbnail_overlay_prompt
+        pub["thumbnail_engine"] = req.thumbnail_engine
+        pub["thumbnail_overlay_fg"] = req.thumbnail_overlay_fg
+        pub["thumbnail_overlay_bg"] = req.thumbnail_overlay_bg
+        pub["thumbnail_overlay_size_pct"] = req.thumbnail_overlay_size_pct
+        pub["thumbnail_overlay_offset"] = req.thumbnail_overlay_offset
+        pub["transcript_mode"] = req.transcript_mode
+        pub["transcript_model"] = req.transcript_model
+        pub["transcript_language"] = req.transcript_language
+        pub["long_pinned_comment_enabled"] = req.long_pinned_comment_enabled
+        pub["long_pinned_comment_text"] = req.long_pinned_comment_text
+        rhythm_cfg = _rhythm_config_from_request(req)
+        try:
+            rhythm_params_from_pub(rhythm_cfg)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        for key, value in rhythm_cfg.items():
+            if value is None:
+                pub.pop(key, None)  # cleared field = unset, keep the file tidy
+            else:
+                pub[key] = value
+        pub["modal_usage_url"] = req.modal_usage_url
+        _save_publish_cfg(pub)
     return {"ok": True}
 
 
@@ -418,6 +444,7 @@ class StartRequest(BaseModel):
     pinned_comment_text: str | None = None
     thumbnail_overlay_title: str = ""
     thumbnail_engine: str = ""
+    profile: str = ""
 
 
 class ResumeRequest(BaseModel):
@@ -426,6 +453,7 @@ class ResumeRequest(BaseModel):
     prompt_summary: str
     from_step: int = 3
     skip_upload: bool = False
+    profile: str = ""
     use_modal: bool = True
     do_normalize_volume: bool = False
     do_add_signature: bool = True
@@ -456,7 +484,8 @@ async def start(req: StartRequest):
     if not Path(source).exists():
         raise HTTPException(status_code=400, detail=f"File not found: {source}")
 
-    pub = _load_publish_cfg()
+    profile = req.profile or resolve_profile()
+    pub = _load_publish_cfg(profile)
     transcript_mode = pub.get("transcript_mode", "normal")
     _validate_rhythm_options(req.rhythm_silence, req.use_modal, transcript_mode, req.do_remove_silence)
     job_id = str(uuid.uuid4())
@@ -464,6 +493,7 @@ async def start(req: StartRequest):
     job = Job(
         job_id=job_id,
         source=source,
+        profile=profile,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
         do_remove_silence=req.do_remove_silence,
@@ -545,7 +575,8 @@ async def resume(req: ResumeRequest):
     completed_before = set(meta.get("completed_steps", []))
     skipped_before = set(meta.get("skipped_steps", []))
 
-    pub = _load_publish_cfg()
+    profile = req.profile or meta.get("profile") or resolve_profile()
+    pub = _load_publish_cfg(profile)
     transcript_mode = pub.get("transcript_mode", "normal")
     _validate_rhythm_options(req.rhythm_silence, req.use_modal, transcript_mode, req.do_remove_silence)
     job_id = str(uuid.uuid4())
@@ -553,6 +584,7 @@ async def resume(req: ResumeRequest):
     job = Job(
         job_id=job_id,
         source=source,
+        profile=profile,
         prompt_title=req.prompt_title,
         prompt_summary=req.prompt_summary,
         do_remove_silence=req.do_remove_silence,

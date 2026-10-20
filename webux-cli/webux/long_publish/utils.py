@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -15,9 +17,26 @@ from .models import DEFAULT_VIDEO_EXTENSIONS, LEGACY_VIDEO_EXTENSIONS
 logger = structlog.get_logger(__name__)
 
 
-def _load_publish_cfg() -> dict:
+def _profile_context(profile: str | None):
+    @contextlib.contextmanager
+    def _ctx():
+        old = os.environ.get("FASTMARKET_PROFILE")
+        if profile:
+            os.environ["FASTMARKET_PROFILE"] = profile
+        try:
+            yield
+        finally:
+            if old is None:
+                os.environ.pop("FASTMARKET_PROFILE", None)
+            else:
+                os.environ["FASTMARKET_PROFILE"] = old
+    return _ctx()
+
+
+def _load_publish_cfg(profile: str | None = None) -> dict:
     try:
-        cfg = load_tool_config("youtube")
+        with _profile_context(profile):
+            cfg = load_tool_config("youtube")
         return cfg.get("youtube", {}).get("publish", {})
     except Exception:
         return {}
@@ -41,35 +60,37 @@ def _needs_webm_migration(ext_str: str) -> bool:
     return set(_normalize_ext_list(ext_str)) == set(_normalize_ext_list(LEGACY_VIDEO_EXTENSIONS))
 
 
-def _migrate_publish_cfg_if_needed() -> bool:
+def _migrate_publish_cfg_if_needed(profile: str | None = None) -> bool:
     """Persist a legacy ``mp4,mkv`` config so it includes ``webm``.
 
     Returns True when a migration was written. Only the exact legacy value
     is touched — user-customized extension lists are left alone.
     """
-    cfg = load_tool_config("youtube")
-    youtube = cfg.get("youtube") or {}
-    if not isinstance(youtube, dict):
-        raise ConfigError("youtube config must be a mapping")
-    pub = youtube.get("publish") or {}
-    if not isinstance(pub, dict):
-        raise ConfigError("youtube.publish must be a mapping")
-    current = pub.get("video_extensions", "")
-    if not current or not _needs_webm_migration(current):
-        return False
-    updated = dict(pub)
-    updated["video_extensions"] = DEFAULT_VIDEO_EXTENSIONS
-    _save_publish_cfg(updated)
-    logger.info("long_publish_config_migrated", to=DEFAULT_VIDEO_EXTENSIONS)
-    return True
-
-
-def _save_publish_cfg(pub: dict) -> None:
-    try:
+    with _profile_context(profile):
         cfg = load_tool_config("youtube")
-        yt = cfg.setdefault("youtube", {})
-        yt["publish"] = pub
-        save_tool_config("youtube", cfg)
+        youtube = cfg.get("youtube") or {}
+        if not isinstance(youtube, dict):
+            raise ConfigError("youtube config must be a mapping")
+        pub = youtube.get("publish") or {}
+        if not isinstance(pub, dict):
+            raise ConfigError("youtube.publish must be a mapping")
+        current = pub.get("video_extensions", "")
+        if not current or not _needs_webm_migration(current):
+            return False
+        updated = dict(pub)
+        updated["video_extensions"] = DEFAULT_VIDEO_EXTENSIONS
+        _save_publish_cfg(updated)
+        logger.info("long_publish_config_migrated", to=DEFAULT_VIDEO_EXTENSIONS)
+        return True
+
+
+def _save_publish_cfg(pub: dict, profile: str | None = None) -> None:
+    try:
+        with _profile_context(profile):
+            cfg = load_tool_config("youtube")
+            yt = cfg.setdefault("youtube", {})
+            yt["publish"] = pub
+            save_tool_config("youtube", cfg)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save config: {exc}")
 
@@ -94,6 +115,8 @@ def _save_meta(job) -> None:
         meta["source_urls"] = job.source_urls
     if job.description_prefix:
         meta["description_prefix"] = job.description_prefix
+    if getattr(job, "profile", ""):
+        meta["profile"] = job.profile
     if job.thumbnail_overlay_title:
         meta["thumbnail_overlay_title"] = job.thumbnail_overlay_title
     if job.thumbnail_prompt:

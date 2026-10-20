@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -12,20 +14,38 @@ from fastapi import HTTPException
 from common.core.config import load_tool_config, save_tool_config
 
 
-def _load_publish_cfg() -> dict:
+def _profile_context(profile: str | None):
+    @contextlib.contextmanager
+    def _ctx():
+        old = os.environ.get("FASTMARKET_PROFILE")
+        if profile:
+            os.environ["FASTMARKET_PROFILE"] = profile
+        try:
+            yield
+        finally:
+            if old is None:
+                os.environ.pop("FASTMARKET_PROFILE", None)
+            else:
+                os.environ["FASTMARKET_PROFILE"] = old
+    return _ctx()
+
+
+def _load_publish_cfg(profile: str | None = None) -> dict:
     try:
-        cfg = load_tool_config("youtube")
+        with _profile_context(profile):
+            cfg = load_tool_config("youtube")
         return cfg.get("youtube", {}).get("publish", {})
     except Exception:
         return {}
 
 
-def _save_publish_cfg(pub: dict) -> None:
+def _save_publish_cfg(pub: dict, profile: str | None = None) -> None:
     try:
-        cfg = load_tool_config("youtube")
-        yt = cfg.setdefault("youtube", {})
-        yt["publish"] = pub
-        save_tool_config("youtube", cfg)
+        with _profile_context(profile):
+            cfg = load_tool_config("youtube")
+            yt = cfg.setdefault("youtube", {})
+            yt["publish"] = pub
+            save_tool_config("youtube", cfg)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save config: {exc}")
 
@@ -52,6 +72,8 @@ def _save_meta(job) -> None:
         meta["cut_time"] = job.cut_time
     if job.description_prefix:
         meta["description_prefix"] = job.description_prefix
+    if getattr(job, "profile", ""):
+        meta["profile"] = job.profile
     if job.transcript_text:
         meta["transcript_text"] = job.transcript_text
     if job.video_url:

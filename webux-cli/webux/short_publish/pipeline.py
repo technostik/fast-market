@@ -139,7 +139,7 @@ async def _maybe_post_pinned_comment(job: Job, video_id: str, step) -> None:
         return
     if getattr(job, "pinned_comment_id", ""):
         return  # idempotency: already posted (resume/retry)
-    pub_cfg = _load_publish_cfg()
+    pub_cfg = _load_publish_cfg(getattr(job, "profile", None))
     enabled, text = _pinned_comment_cfg(job, pub_cfg)
     if not enabled or not text:
         return
@@ -193,9 +193,16 @@ async def _maybe_post_pinned_comment(job: Job, video_id: str, step) -> None:
 
 async def _run_pipeline_from(job: Job, from_step: int) -> None:
     set_active_job(job)
+    old_profile = os.environ.get("FASTMARKET_PROFILE")
+    if getattr(job, "profile", ""):
+        os.environ["FASTMARKET_PROFILE"] = job.profile
     try:
         await _run_pipeline_core(job, from_step)
     finally:
+        if old_profile is None:
+            os.environ.pop("FASTMARKET_PROFILE", None)
+        else:
+            os.environ["FASTMARKET_PROFILE"] = old_profile
         clear_active_job()
 
 
@@ -206,7 +213,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         _save_meta(job)
         return
     stem = _stem(job.source)
-    pub_cfg = _load_publish_cfg()
+    pub_cfg = _load_publish_cfg(getattr(job, "profile", None))
     d = Path(pub_cfg.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH)).expanduser().resolve()
 
     for i in range(from_step):
@@ -465,7 +472,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
 
 
 async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, from_step: int = 3) -> None:
-    pub_cfg = _load_publish_cfg()
+    pub_cfg = _load_publish_cfg(getattr(job, "profile", None))
 
     if from_step <= 3:
         s3 = job.steps[3]
@@ -691,7 +698,7 @@ async def _run_post_publish_step(job: Job, final_video: str) -> None:
         job.end_time = time.time()
         _save_meta(job)
         return
-    pub_cfg = _load_publish_cfg()
+    pub_cfg = _load_publish_cfg(getattr(job, "profile", None))
     s5 = job.steps[5]
     s5.start_time = time.time()
     s5.status = "running"
@@ -770,7 +777,7 @@ async def _run_transcript_script(job: Job, transcript_path: str) -> None:
         job.end_time = time.time()
         _save_meta(job)
         return
-    pub_cfg = _load_publish_cfg()
+    pub_cfg = _load_publish_cfg(getattr(job, "profile", None))
     s6 = job.steps[6]
     s6.start_time = time.time()
     s6.status = "running"

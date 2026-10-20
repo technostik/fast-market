@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import DEFAULT_VIDEO_SOURCE_PATH, STEP_NAMES, is_no_signature_source
+from common.core.profile import resolve_profile
 from .utils import _load_publish_cfg, _load_meta, _get_video_duration_cli_sync
 
 
@@ -15,6 +16,7 @@ from .utils import _load_publish_cfg, _load_meta, _get_video_duration_cli_sync
 class PoolItem:
     source: str
     title_override: str = ""
+    profile: str = ""
     description_prefix: str = ""
     source_urls: list[str] = field(default_factory=list)
     skip_upload: bool = False
@@ -70,6 +72,7 @@ def _load_pool_from_disk():
         _pool = [
             PoolItem(
                 source=item["source"],
+                profile=item.get("profile", "") or resolve_profile(),
                 title_override=item.get("title_override", ""),
                 description_prefix=item.get("description_prefix", ""),
                 source_urls=item.get("source_urls", []),
@@ -110,6 +113,7 @@ def _save_pool_to_disk():
         "items": [
             {
                 "source": it.source,
+                "profile": it.profile,
                 "title_override": it.title_override,
                 "description_prefix": it.description_prefix,
                 "source_urls": it.source_urls,
@@ -173,14 +177,16 @@ def _update_meta_status(source: str, status: str):
         pass
 
 
-def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None) -> bool:
+def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None) -> bool:
     src = str(Path(source).expanduser().resolve())
     if is_no_signature_source(Path(src)):
         return False
     if any(item.source == src for item in _pool):
         return False
     source_urls = source_urls or []
-    item = PoolItem(source=src, title_override=title_override, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish, do_pinned_comment=do_pinned_comment, pinned_comment_text=pinned_comment_text, cut_time=cut_time, duration_seconds=_get_video_duration_cli_sync(src))
+    if not profile:
+        profile = resolve_profile()
+    item = PoolItem(source=src, profile=profile, title_override=title_override, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish, do_pinned_comment=do_pinned_comment, pinned_comment_text=pinned_comment_text, cut_time=cut_time, duration_seconds=_get_video_duration_cli_sync(src))
     _pool.append(item)
     _create_meta(src, description_prefix, source_urls)
     _save_pool_to_disk()
@@ -413,6 +419,7 @@ async def _pool_worker():
                 cut_time=next_item.cut_time,
                 do_pinned_comment=next_item.do_pinned_comment,
                 pinned_comment_text=next_item.pinned_comment_text,
+                profile=next_item.profile,
             )
             next_item.job_id = job.job_id
             _save_pool_to_disk()

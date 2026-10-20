@@ -6,6 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from common import structlog
+from common.core.paths import get_profiles_config_base
+from common.core.profile import resolve_profile
 from common.webux.base import WebuxPluginManifest
 from common.webux.theme import (
     DEFAULT_THEME,
@@ -95,6 +97,18 @@ _NAV_LAYOUT = (
 .webux-dropdown.open .webux-menu { display: block; }
 .webux-menu a { display: block; }
 .webux-nav .theme-select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  width: auto;
+  max-width: 170px;
+  flex-shrink: 0;
+}
+.webux-nav .profile-select {
   padding: 8px 10px;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -347,6 +361,30 @@ document.addEventListener('keydown', function (e) {
 </script>
 """
 
+_WEBUX_PROFILE_SCRIPT = """
+<script>
+(function(){
+  function getProfile(){ return localStorage.getItem('fastmarket_profile') || ''; }
+  function setProfile(p){ if (p) localStorage.setItem('fastmarket_profile', p); }
+  document.addEventListener('DOMContentLoaded', function(){
+    var sel = document.getElementById('webux-profile');
+    if (!sel) return;
+    var saved = getProfile();
+    if (saved) {
+      for (var i=0;i<sel.options.length;i++){
+        if (sel.options[i].value === saved){ sel.selectedIndex = i; break; }
+      }
+    }
+    sel.addEventListener('change', function(){
+      setProfile(sel.value);
+      location.reload();
+    });
+  });
+})();
+window.fastmarketProfile = function(){ return localStorage.getItem('fastmarket_profile') || (document.getElementById('webux-profile')?document.getElementById('webux-profile').value:''); };
+</script>
+"""
+
 _WEBUX_LLM_SCRIPT = """
 <script>
 // Global LLM provider + model switcher in the webux main toolbar.
@@ -549,6 +587,23 @@ def _build_nav(
             f'<div class="webux-menu">{"".join(items)}</div>'
             "</div>"
         )
+    # Profile selector (global), just before LLM selector
+    try:
+        base = get_profiles_config_base()
+        prof_names = [p.name for p in sorted(base.iterdir()) if p.is_dir()] if base.exists() else []
+    except Exception:
+        prof_names = []
+    active_prof = resolve_profile()
+    prof_options = "".join(
+        f'<option value="{_html.escape(name)}"'
+        f'{" selected" if name == active_prof else ""}>'
+        f'👤 {_html.escape(name)}</option>'
+        for name in prof_names
+    )
+    links.append(
+        f'<select id="webux-profile" class="profile-select" title="Profile (global)">'
+        f"{prof_options}</select>"
+    )
     default_provider, llm_info = _get_llm_nav_state()
     if llm_info:
         prov_options = "".join(
@@ -595,7 +650,7 @@ def _inject_nav(
     head_tags = _WEBUX_THEME_BOOT_SCRIPT + style_tag
     script_tag = (
         _WEBUX_EXIT_SCRIPT + _WEBUX_THEME_SCRIPT + _PROMPT_INFO_SCRIPT + _WEBUX_LLM_SCRIPT
-        + _WEBUX_NAV_SCRIPT
+        + _WEBUX_NAV_SCRIPT + _WEBUX_PROFILE_SCRIPT
     )
     if "</head>" in plugin_html:
         plugin_html = plugin_html.replace(
