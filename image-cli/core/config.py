@@ -56,6 +56,16 @@ def get_default_config() -> dict:
                 # forces this value; kept here for visibility / credentials.
                 "cf_model": "@cf/black-forest-labs/flux-2-klein-9b",
             },
+            "flux3": {
+                "model_path": "black-forest-labs/flux-3-image-klein",
+                "torch_dtype": "bfloat16",
+                "local_files_only": False,
+            },
+            "flux3cloud": {
+                "account_id": "",
+                "api_token": "",
+                "cf_model": "@cf/black-forest-labs/flux-3-image-klein",
+            },
         },
         "default_width": 1024,
         "default_height": 1024,

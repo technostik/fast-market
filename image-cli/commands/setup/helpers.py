@@ -10,9 +10,9 @@ from common.core.paths import get_tool_config
 from common.core.yaml_utils import dump_yaml
 from core.config import get_default_config
 
-_SUPPORTED_ENGINES = {"flux2", "qwen21", "qwen21turbo", "flux2cloud", "flux29bcloud"}
+_SUPPORTED_ENGINES = {"flux2", "qwen21", "qwen21turbo", "flux2cloud", "flux29bcloud", "flux3", "flux3cloud"}
 
-_CLOUD_ENGINES = {"flux2cloud", "flux29bcloud"}
+_CLOUD_ENGINES = {"flux2cloud", "flux29bcloud", "flux3cloud"}
 
 # Local engines whose config block carries a `quantization` key
 # (null/int8/int4). Preserved by add_engine instead of being dropped.
@@ -83,7 +83,7 @@ def list_engines(config: dict) -> None:
         if not isinstance(settings, dict):
             click.echo("    Model path: N/A")
             continue
-        if name in ("flux2cloud", "flux29bcloud"):
+        if name in ("flux2cloud", "flux29bcloud", "flux3cloud"):
             click.echo(f"    Model: {settings.get('cf_model', 'N/A')}")
             click.echo(
                 f"    Account: {settings.get('account_id', '') or '(not set)'}"
@@ -124,6 +124,9 @@ def add_engine(config_path: Path, config: dict, engine_name: str) -> None:
         if normalized == "flux29bcloud":
             cf_model = "@cf/black-forest-labs/flux-2-klein-9b"
             click.echo(f"Model pinned to: {cf_model} (fixed 4 steps).")
+        elif normalized == "flux3cloud":
+            cf_model = "@cf/black-forest-labs/flux-3-image-klein"
+            click.echo(f"Model pinned to: {cf_model}.")
         else:
             cf_model = click.prompt(
                 "Cloudflare model",
