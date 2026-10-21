@@ -257,17 +257,6 @@
         </div>
       </div>
 
-      <div class="cols2">
-        <div class="row">
-          <label>Title prompt</label>
-          <select id="promptTitle"></select>
-        </div>
-        <div class="row">
-          <label>Description prompt</label>
-          <select id="promptSummary"></select>
-        </div>
-      </div>
-
       <div class="row">
         <label>Force title (optional — overrides prompt)</label>
         <input type="text" id="manualTitle" placeholder="Leave empty to generate with LLM">
@@ -493,7 +482,39 @@ let currentJob = null;
 let pollTimer = null;
 
 function currentProfile(){ return (window.fastmarketProfile && window.fastmarketProfile()) || ''; }
+function defaultTitlePrompt(){ const el = document.getElementById('cfgTitlePrompt'); return (el && el.value) || window._defaultTitlePrompt || 'youtube-title'; }
+function defaultDescPrompt(){ const el = document.getElementById('cfgDescPrompt'); return (el && el.value) || window._defaultDescPrompt || 'youtube-summary'; }
 
+const UI_STATE_KEY = 'fastmarket_short_publish_ui_v1';
+const UI_STATE_IDS = [
+  'manualTitle','descPrefix','sourceUrls','skipUpload','cfgTranscriptMode',
+  'normalizeVolume','doCharisma','addSignature','ignorePostPublish','privacy',
+  'cutTime','doPinnedComment','pinnedCommentText','removeSilence','burnSubtitles',
+  'useModal','fileSelect'
+];
+
+function _uiState() {
+  try { return JSON.parse(localStorage.getItem(UI_STATE_KEY) || '{}'); } catch { return {}; }
+}
+function saveUiState() {
+  const state = _uiState();
+  for (const id of UI_STATE_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    state[id] = (el.type === 'checkbox') ? !!el.checked : el.value;
+  }
+  try { localStorage.setItem(UI_STATE_KEY, JSON.stringify(state)); } catch {}
+}
+function restoreUiState() {
+  const state = _uiState();
+  for (const id of UI_STATE_IDS) {
+    if (!(id in state)) continue;
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!state[id];
+    else el.value = state[id] ?? el.value;
+  }
+}
 function _isCheckOk(s) { return s.trim().replace(/[.!]+$/, '').toUpperCase() === 'OK'; }
 
 const SHORTS_MAX_SECONDS = 180;
@@ -536,7 +557,11 @@ async function loadVideos() {
     }
     if (!autoSelect) autoSelect = data.videos[0]?.path ?? null;
   }
-  if (autoSelect) {
+  const savedFile = _uiState().fileSelect;
+  if (savedFile && [...sel.options].some(o => o.value === savedFile)) {
+    sel.value = savedFile;
+    onFileSelected();
+  } else if (autoSelect) {
     sel.value = autoSelect;
     onFileSelected();
   }
@@ -613,16 +638,7 @@ async function loadPrompts() {
     fetch('/api/short_publish/config').catch(() => null)
   ]);
   if (!promptRes || !promptRes.ok) return;
-  const data = await promptRes.json();
-  const names = data.prompts || [];
-  const t = document.getElementById('promptTitle');
-  const s = document.getElementById('promptSummary');
-  t.innerHTML = '';
-  s.innerHTML = '';
-  for (const n of names) {
-    const o1 = document.createElement('option'); o1.value = n; o1.textContent = n; t.appendChild(o1);
-    const o2 = document.createElement('option'); o2.value = n; o2.textContent = n; s.appendChild(o2);
-  }
+  const names = (promptRes && promptRes.ok) ? ((await promptRes.json()).prompts || []) : [];
   let defTitle = 'youtube-title';
   let defDesc = 'youtube-summary';
   if (cfgRes && cfgRes.ok) {
@@ -632,12 +648,8 @@ async function loadPrompts() {
     const link = document.getElementById('modalUsageLink');
     if (link && cfg.modal_usage_url) link.href = cfg.modal_usage_url;
   }
-  if (names.includes(defTitle)) t.value = defTitle;
-  if (names.includes(defDesc)) s.value = defDesc;
-
-  // Auto-save chosen prompts as new defaults
-  t.onchange = () => savePromptDefaults(t.value, s.value);
-  s.onchange = () => savePromptDefaults(t.value, s.value);
+  window._defaultTitlePrompt = defTitle;
+  window._defaultDescPrompt = defDesc;
 }
 
 async function savePromptDefaults(title, desc) {
@@ -686,8 +698,8 @@ async function startJob() {
   const body = {
     source: src,
     title: document.getElementById('manualTitle').value,
-    prompt_title: document.getElementById('promptTitle').value,
-    prompt_summary: document.getElementById('promptSummary').value,
+    prompt_title: defaultTitlePrompt(),
+    prompt_summary: defaultDescPrompt(),
     do_remove_silence: document.getElementById('removeSilence').checked,
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
     transcript_mode: document.getElementById('cfgTranscriptMode').value,
@@ -958,8 +970,8 @@ async function doResume() {
   const body = {
     source,
     title: document.getElementById('manualTitle').value,
-    prompt_title: document.getElementById('promptTitle').value,
-    prompt_summary: document.getElementById('promptSummary').value,
+    prompt_title: defaultTitlePrompt(),
+    prompt_summary: defaultDescPrompt(),
     from_step: from,
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
     transcript_mode: document.getElementById('cfgTranscriptMode').value,
@@ -1604,6 +1616,7 @@ async function addToPool() {
   refreshPool();
   document.getElementById('manualTitle').value = '';
   document.getElementById('cutTime').value = '';
+  saveUiState();
 }
 
 let lastConsoleContent = '';
@@ -1690,11 +1703,17 @@ function applyPinnedDefaults(c) {
   if (!c) return;
   const cb = document.getElementById('doPinnedComment');
   const tx = document.getElementById('pinnedCommentText');
-  if (cb) cb.checked = !!c.short_pinned_comment_enabled;
+  const state = _uiState();
+  const hasSaved = Object.prototype.hasOwnProperty.call(state, 'doPinnedComment');
+  if (cb && !hasSaved) {
+    cb.checked = !!(c.short_pinned_comment_enabled || c.short_pinned_comment_text);
+  }
   if (tx && !tx.value) tx.value = c.short_pinned_comment_text || '';
+  saveUiState();
 }
 
 function init() {
+  restoreUiState();
   loadVideos();
   loadPrompts();
   fetch('/api/short_publish/config').then(r => r.ok ? r.json() : {}).then(applyPinnedDefaults).catch(() => {});
@@ -1702,6 +1721,13 @@ function init() {
   initPool();
   updateSubtitleDependency();
   document.getElementById('goBtn').disabled = false;
+  // Persist any UI choice change
+  for (const id of UI_STATE_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener('change', saveUiState);
+    el.addEventListener('input', saveUiState);
+  }
 }
 init();
 </script>

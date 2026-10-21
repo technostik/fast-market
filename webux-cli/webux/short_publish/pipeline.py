@@ -487,6 +487,30 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
                 return
             title_out = (s3.output or "").strip()
 
+            # Sanity check: YouTube titles must be < 100 chars. LLMs sometimes
+            # return a whole sentence/explanation; recover the real title if it
+            # was wrapped in quotes, otherwise fail loudly.
+            if len(title_out) > 99:
+                recovered = None
+                for q in ('"', "'"):
+                    last = title_out.rfind(q)
+                    if last > 0:
+                        prev = title_out.rfind(q, 0, last)
+                        if prev >= 0 and prev < last:
+                            cand = title_out[prev + 1:last].strip()
+                            if cand:
+                                recovered = cand
+                                break
+                if recovered:
+                    title_out = recovered
+                else:
+                    s3.end_time = time.time()
+                    s3.status = "error"
+                    job.status = "error"
+                    s3.output = (s3.output or "") + "\\n\\n⚠ Title too long (>99 chars) and no quoted title found in LLM response."
+                    _save_meta(job)
+                    return
+
         proc = await asyncio.create_subprocess_exec(
             _pr(), "apply", job.prompt_summary, f"transcript=@{transcript_path}",
             stdout=asyncio.subprocess.PIPE,
