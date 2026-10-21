@@ -492,6 +492,8 @@
 let currentJob = null;
 let pollTimer = null;
 
+function currentProfile(){ return (window.fastmarketProfile && window.fastmarketProfile()) || ''; }
+
 function _isCheckOk(s) { return s.trim().replace(/[.!]+$/, '').toUpperCase() === 'OK'; }
 
 const SHORTS_MAX_SECONDS = 180;
