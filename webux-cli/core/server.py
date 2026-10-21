@@ -406,7 +406,8 @@ async function webuxLoadModels(provider, currentModel) {
   loading.textContent = '… models';
   modelSel.appendChild(loading);
   try {
-    var r = await fetch('/api/system/llm/models?provider=' + encodeURIComponent(provider));
+    var prof = (window.fastmarketProfile && window.fastmarketProfile()) || '';
+    var r = await fetch('/api/system/llm/models?provider=' + encodeURIComponent(provider) + (prof ? '&profile=' + encodeURIComponent(prof) : ''));
     var d = await r.json();
     var models = (d && d.models) || [];
     var current = (d && d.current) || currentModel || '';
@@ -432,9 +433,10 @@ async function webuxLoadModels(provider, currentModel) {
 }
 async function webuxSetLlm(provider, model) {
   try {
-    var body = { provider: provider };
+    var prof = (window.fastmarketProfile && window.fastmarketProfile()) || '';
+    var body = { provider: provider, profile: prof };
     if (model) body.model = model;
-    var r = await fetch('/api/system/llm', {
+    var r = await fetch('/api/system/llm' + (prof ? '?profile=' + encodeURIComponent(prof) : ''), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -456,7 +458,8 @@ document.addEventListener('DOMContentLoaded', function () {
   var modelSel = document.getElementById('webux-llm-model');
   if (!provSel) return;
   // Sync with server (page may have been rendered before a switch elsewhere).
-  fetch('/api/system/llm').then(function (r) { return r.json(); }).then(function (d) {
+  var prof0 = (window.fastmarketProfile && window.fastmarketProfile()) || '';
+  fetch('/api/system/llm' + (prof0 ? '?profile=' + encodeURIComponent(prof0) : '')).then(function (r) { return r.json(); }).then(function (d) {
     if (d && d.default_provider && provSel.querySelector('option[value="' + d.default_provider + '"]')) {
       provSel.value = d.default_provider;
     }
@@ -472,7 +475,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var ok = await webuxSetLlm(provSel.value, null);
     if (ok) {
       try {
-        var r = await fetch('/api/system/llm');
+        var prof1 = (window.fastmarketProfile && window.fastmarketProfile()) || '';
+        var r = await fetch('/api/system/llm' + (prof1 ? '?profile=' + encodeURIComponent(prof1) : ''));
         var d = await r.json();
         var current = (d.providers && d.providers[provSel.value] && d.providers[provSel.value].model) || '';
         await webuxLoadModels(provSel.value, current);
@@ -840,11 +844,16 @@ def build_app(
         return {"ok": True, "theme": name}
 
     @app.get("/api/system/llm")
-    def get_llm() -> dict:
+    def get_llm(profile: str | None = None) -> dict:
         """List configured LLM providers (no secrets) + global default."""
         from common.core.config import load_llm_config, resolve_secret
+        from common.core.profile import resolve_profile
 
-        cfg = load_llm_config() or {}
+        if not profile:
+            profile = resolve_profile()
+        from webux.short_publish.utils import _profile_context
+        with _profile_context(profile):
+            cfg = load_llm_config() or {}
         providers = cfg.get("providers") or {}
         out: dict[str, dict] = {}
         for name, pcfg in providers.items():
@@ -863,7 +872,7 @@ def build_app(
         }
 
     @app.post("/api/system/llm")
-    def set_llm(payload: dict) -> dict:
+    def set_llm(payload: dict, profile: str | None = None) -> dict:
         """Switch global default_provider, optionally persisting model.
 
         Body: {"provider": "<name>", "model": "<optional model id>"}.
@@ -872,6 +881,13 @@ def build_app(
         from fastapi import HTTPException
 
         from common.core.config import load_llm_config, save_llm_config
+        from common.core.profile import resolve_profile
+        from webux.short_publish.utils import _profile_context
+
+        if not profile:
+            profile = (payload or {}).get("profile") if isinstance(payload, dict) else None
+        if not profile:
+            profile = resolve_profile()
 
         provider = str((payload or {}).get("provider") or "").strip()
         model = payload.get("model") if isinstance(payload, dict) else None
@@ -879,19 +895,20 @@ def build_app(
             model = str(model).strip()
         if not provider:
             raise HTTPException(status_code=400, detail="Missing 'provider'")
-        cfg = load_llm_config() or {}
-        providers = cfg.get("providers") or {}
-        if provider not in providers or not isinstance(providers[provider], dict):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown provider '{provider}'. "
-                f"Available: {', '.join(sorted(str(k) for k in providers))}",
-            )
-        if model:
-            providers[provider]["model"] = model
-        cfg["providers"] = providers
-        cfg["default_provider"] = provider
-        save_llm_config(cfg)
+        with _profile_context(profile):
+            cfg = load_llm_config() or {}
+            providers = cfg.get("providers") or {}
+            if provider not in providers or not isinstance(providers[provider], dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown provider '{provider}'. "
+                    f"Available: {', '.join(sorted(str(k) for k in providers))}",
+                )
+            if model:
+                providers[provider]["model"] = model
+            cfg["providers"] = providers
+            cfg["default_provider"] = provider
+            save_llm_config(cfg)
         logger.info("webux_llm_changed", provider=provider, model=model or "")
         return {
             "ok": True,
@@ -900,16 +917,21 @@ def build_app(
         }
 
     @app.get("/api/system/llm/models")
-    def list_llm_models(provider: str = "") -> dict:
+    def list_llm_models(provider: str = "", profile: str | None = None) -> dict:
         """Return live model ids for a provider (via /v1/models when possible).
 
         Never exposes API keys — resolution happens server-side.
         Falls back to the configured model when the endpoint is unreachable.
         """
         from common.core.config import load_llm_config
+        from common.core.profile import resolve_profile
         from common.llm.registry import discover_providers
+        from webux.short_publish.utils import _profile_context
 
-        cfg = load_llm_config() or {}
+        if not profile:
+            profile = resolve_profile()
+        with _profile_context(profile):
+            cfg = load_llm_config() or {}
         providers = cfg.get("providers") or {}
         name = (provider or str(cfg.get("default_provider") or "")).strip()
         current = ""

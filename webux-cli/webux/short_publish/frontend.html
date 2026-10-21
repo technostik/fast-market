@@ -635,7 +635,7 @@ function onFileSelected() {
 async function loadPrompts() {
   const [promptRes, cfgRes] = await Promise.all([
     fetch('/api/short_publish/list-prompts').catch(() => null),
-    fetch('/api/short_publish/config').catch(() => null)
+    fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).catch(() => null)
   ]);
   if (!promptRes || !promptRes.ok) return;
   const names = (promptRes && promptRes.ok) ? ((await promptRes.json()).prompts || []) : [];
@@ -655,9 +655,9 @@ async function loadPrompts() {
 async function savePromptDefaults(title, desc) {
   const body = { default_title_prompt: title, default_description_prompt: desc };
   // merge with current config to avoid overwriting other fields
-  const cur = await fetch('/api/short_publish/config').then(r => r.json()).catch(() => ({}));
+  const cur = await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).then(r => r.json()).catch(() => ({}));
   Object.assign(body, cur);
-  await fetch('/api/short_publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
 }
 
 async function populateConfigPrompts() {
@@ -1026,7 +1026,7 @@ async function showConfig() {
   const p = document.getElementById('configPanel');
   p.style.display = p.style.display === 'block' ? 'none' : 'block';
   if (p.style.display === 'block') {
-    const r = await fetch('/api/short_publish/config').catch(() => null);
+    const r = await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).catch(() => null);
     if (r && r.ok) {
       const c = await r.json();
       await populateConfigPrompts();
@@ -1069,7 +1069,7 @@ async function saveConfig() {
     language: document.getElementById('cfgLanguage').value,
     model: document.getElementById('cfgModel').value
   };
-  const r = await fetch('/api/short_publish/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const r = await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (r.ok) alert('Saved'); else alert('Save failed');
 }
 
@@ -1078,7 +1078,7 @@ async function toggleConfig() {
   const willShow = p.style.display !== 'block';
   p.style.display = willShow ? 'block' : 'none';
   if (willShow) {
-    const r = await fetch('/api/short_publish/config').catch(() => null);
+    const r = await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).catch(() => null);
     if (r && r.ok) {
       const c = await r.json();
       await populateConfigPrompts();
@@ -1716,7 +1716,7 @@ function init() {
   restoreUiState();
   loadVideos();
   loadPrompts();
-  fetch('/api/short_publish/config').then(r => r.ok ? r.json() : {}).then(applyPinnedDefaults).catch(() => {});
+  fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).then(r => r.ok ? r.json() : {}).then(applyPinnedDefaults).catch(() => {});
   initDropZone();
   initPool();
   updateSubtitleDependency();
