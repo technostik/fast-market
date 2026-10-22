@@ -153,6 +153,8 @@ async def get_config(profile: str | None = Query(default=None)):
         "short_pinned_comment_text": pub.get("short_pinned_comment_text", ""),
         "language": pub.get("language", "fr"),
         "model": pub.get("model", "medium"),
+        "archive_path": pub.get("archive_path", ""),
+        "trash_path": pub.get("trash_path", ""),
     }
 
 
@@ -172,7 +174,8 @@ class ConfigSaveRequest(BaseModel):
     short_pinned_comment_text: str = ""
     language: str = ""
     model: str = ""
-
+    archive_path: str = ""
+    trash_path: str = ""
 
 @router.post("/config")
 async def save_config(req: ConfigSaveRequest, profile: str | None = Query(default=None)):
@@ -196,6 +199,8 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["short_pinned_comment_text"] = req.short_pinned_comment_text
         pub["language"] = req.language
         pub["model"] = req.model
+        pub["archive_path"] = req.archive_path
+        pub["trash_path"] = req.trash_path
         _save_publish_cfg(pub)
     return {"ok": True}
 

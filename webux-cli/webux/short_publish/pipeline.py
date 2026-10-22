@@ -596,6 +596,7 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
                     no_sig_path = str(Path(final_video).parent / f"no_signature_{safe_name}{ext}")
                     if not Path(no_sig_path).exists() and Path(final_video).resolve() != Path(no_sig_path).resolve():
                         os.rename(final_video, no_sig_path)
+                    job.files["no_signature"] = no_sig_path
                     concat_out = str(Path(final_video).parent / f"{safe_name}{ext}")
                     concat_cmd = [_video(), "concat", no_sig_path, str(sig_path_obj), "-o", concat_out]
                     if job.use_modal:

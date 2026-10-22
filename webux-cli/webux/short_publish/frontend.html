@@ -175,6 +175,14 @@
       <input type="text" id="cfgTranscriptScript">
     </div>
     <div class="row">
+      <label>Archive directory (finished final videos moved here by "Clear finished")</label>
+      <input type="text" id="cfgArchivePath" placeholder="absolute path, leave empty to disable">
+    </div>
+    <div class="row">
+      <label>Trash directory (other files of finished videos moved here by "Clear finished")</label>
+      <input type="text" id="cfgTrashPath" placeholder="absolute path, leave empty to disable">
+    </div>
+    <div class="row">
       <div class="checkrow">
         <input type="checkbox" id="cfgPinnedEnabled">
         <label for="cfgPinnedEnabled" style="display:inline; margin:0;">Auto-post pinned comment after upload (pin manually in Studio)</label>
@@ -490,7 +498,7 @@ const UI_STATE_IDS = [
   'manualTitle','descPrefix','sourceUrls','skipUpload','cfgTranscriptMode',
   'normalizeVolume','doCharisma','addSignature','ignorePostPublish','privacy',
   'cutTime','doPinnedComment','pinnedCommentText','removeSilence','burnSubtitles',
-  'useModal','fileSelect'
+  'useModal'
 ];
 
 function _uiState() {
@@ -557,11 +565,7 @@ async function loadVideos() {
     }
     if (!autoSelect) autoSelect = data.videos[0]?.path ?? null;
   }
-  const savedFile = _uiState().fileSelect;
-  if (savedFile && [...sel.options].some(o => o.value === savedFile)) {
-    sel.value = savedFile;
-    onFileSelected();
-  } else if (autoSelect) {
+  if (autoSelect) {
     sel.value = autoSelect;
     onFileSelected();
   }
@@ -1039,6 +1043,8 @@ async function showConfig() {
       document.getElementById('cfgSignatureVideoPath').value = c.signature_video_path || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
+document.getElementById('cfgArchivePath').value = c.archive_path || '';
+document.getElementById('cfgTrashPath').value = c.trash_path || '';
       document.getElementById('cfgTranscriptMode').value = c.transcript_mode || 'normal';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
       document.getElementById('cfgPinnedEnabled').checked = !!c.short_pinned_comment_enabled;
@@ -1062,6 +1068,8 @@ async function saveConfig() {
     signature_video_path: document.getElementById('cfgSignatureVideoPath').value,
     post_publish_script: document.getElementById('cfgPostScript').value,
     transcript_script: document.getElementById('cfgTranscriptScript').value,
+     archive_path: document.getElementById('cfgArchivePath').value,
+     trash_path: document.getElementById('cfgTrashPath').value,
     transcript_mode: document.getElementById('cfgTranscriptMode').value,
     modal_usage_url: document.getElementById('cfgModalUsageUrl').value,
     short_pinned_comment_enabled: document.getElementById('cfgPinnedEnabled').checked,
@@ -1091,6 +1099,8 @@ async function toggleConfig() {
       document.getElementById('cfgSignatureVideoPath').value = c.signature_video_path || '';
       document.getElementById('cfgPostScript').value = c.post_publish_script || '';
       document.getElementById('cfgTranscriptScript').value = c.transcript_script || '';
+document.getElementById('cfgArchivePath').value = c.archive_path || '';
+document.getElementById('cfgTrashPath').value = c.trash_path || '';
       document.getElementById('cfgTranscriptMode').value = c.transcript_mode || 'normal';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
       document.getElementById('cfgPinnedEnabled').checked = !!c.short_pinned_comment_enabled;

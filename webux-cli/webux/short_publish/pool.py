@@ -7,9 +7,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import shutil
+
 from .models import DEFAULT_VIDEO_SOURCE_PATH, STEP_NAMES, is_no_signature_source
 from common.core.profile import resolve_profile
-from .utils import _load_publish_cfg, _load_meta, _get_video_duration_cli_sync
+from .utils import _load_publish_cfg, _load_meta, _meta_path, _get_video_duration_cli_sync
 
 
 @dataclass
@@ -534,8 +536,77 @@ def redo_unfinished():
         start_pool()
 
 
-def clear_finished():
+def _move_file_to_dir(src: Path, dest_dir: Path) -> None:
+    """Move ``src`` into ``dest_dir``, renaming on name collision."""
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+    dest = dest_dir / src.name
+    if dest.exists():
+        i = 1
+        while (dest_dir / f"{src.stem}_{i}{src.suffix}").exists():
+            i += 1
+        dest = dest_dir / f"{src.stem}_{i}{src.suffix}"
+    try:
+        shutil.move(str(src), str(dest))
+    except Exception:
+        pass
+
+
+def clear_finished(archive_path: str | None = None, trash_path: str | None = None):
     global _pool
+    pub = _load_publish_cfg()
+    if archive_path is None:
+        archive_path = pub.get("archive_path") or pub.get("archive_dir")
+    if trash_path is None:
+        trash_path = pub.get("trash_path") or pub.get("trash_dir")
+    archive_dir = Path(archive_path).expanduser() if archive_path else None
+    trash_dir = Path(trash_path).expanduser() if trash_path else None
+
+    finished_items = [it for it in _pool if it.status == "finished"]
+    if archive_dir or trash_dir:
+        for it in finished_items:
+            src = Path(it.source)
+            meta = _load_meta(str(src))
+            files = meta.get("files") or {}
+            final_video = files.get("final_video")
+
+            to_archive: list[Path] = []
+            if final_video:
+                fv = Path(final_video)
+                if fv.is_file():
+                    to_archive.append(fv)
+
+            to_trash: set[Path] = set()
+            for key, val in files.items():
+                if key == "final_video":
+                    continue
+                if not val:
+                    continue
+                p = Path(val)
+                if p.is_file():
+                    to_trash.add(p)
+            if src.is_file():
+                to_trash.add(src)
+            meta_path = _meta_path(str(src))
+            if meta_path.is_file():
+                to_trash.add(meta_path)
+            # no_signature_* intermediates are not tracked in meta files; sweep them.
+            try:
+                for candidate in src.parent.iterdir():
+                    if candidate.is_file() and candidate.name.lower().startswith("no_signature_"):
+                        to_trash.add(candidate)
+            except Exception:
+                pass
+
+            if archive_dir and to_archive:
+                for p in to_archive:
+                    _move_file_to_dir(p, archive_dir)
+            if trash_dir and to_trash:
+                for p in to_trash:
+                    _move_file_to_dir(p, trash_dir)
+
     _pool = [it for it in _pool if it.status != "finished"]
     _save_pool_to_disk()
 
