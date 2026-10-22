@@ -369,13 +369,23 @@ _WEBUX_PROFILE_SCRIPT = """
   document.addEventListener('DOMContentLoaded', function(){
     var sel = document.getElementById('webux-profile');
     if (!sel) return;
+    // Reflect the server's active profile by default: a saved value only wins
+    // if the user explicitly chose it (tracked by a flag), so a stale saved
+    // profile from a previous default never overrides the real current profile.
+    var serverActive = sel.value;
+    var userSet = localStorage.getItem('fastmarket_profile_user_set') === '1';
     var saved = getProfile();
+    if (!userSet) {
+      saved = serverActive;
+      setProfile(saved);
+    }
     if (saved) {
       for (var i=0;i<sel.options.length;i++){
         if (sel.options[i].value === saved){ sel.selectedIndex = i; break; }
       }
     }
     sel.addEventListener('change', function(){
+      localStorage.setItem('fastmarket_profile_user_set', '1');
       setProfile(sel.value);
       location.reload();
     });

@@ -578,6 +578,7 @@ document.getElementById('pgFirst').onclick = () => { newsPage = 0; renderNewsPag
 document.getElementById('pgPrev').onclick = () => { newsPage = Math.max(0, newsPage - 1); renderNewsPage(); };
 document.getElementById('pgNext').onclick = () => { newsPage = newsPage + 1; renderNewsPage(); };
 document.querySelectorAll('#rangeRow button').forEach(b => { b.onclick = () => { tvRange = b.dataset.range; tvLabel = b.textContent; if (selectedId) loadChart(selectedId); }; });
+try { var __wp = (window.fastmarketProfile && window.fastmarketProfile()) || ''; if (__wp) document.getElementById('profile').value = __wp; } catch (e) {}
 load(false);
 </script>
 </body></html>
