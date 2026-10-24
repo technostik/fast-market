@@ -1,0 +1,15 @@
+{
+  "done": [
+    "h4TdW8310og",
+    "q4s1XvELo00",
+    "Pbz70YIcffg",
+    "GUbDKs3fkSM",
+    "yTMF2_UUYmY"
+  ],
+  "failed": [
+    {
+      "handle": "TWzLBCyu8b8",
+      "error": "\u001b[0;31mERROR:\u001b[0m unable to download video data: HTTP Error 403: Forbidden"
+    }
+  ]
+}
