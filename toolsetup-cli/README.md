@@ -349,6 +349,8 @@ toolsetup autocomplete configure --force
 source ~/.config/fast-market/completions/fast-market.bash
 ```
 
+The generated file is what an interactive shell sources. It ignores a command that is not a Click completion script, so a `browser` or `skill` name collision cannot print or launch anything at startup. Regenerate with `--force` rather than hand-editing `eval` lines into that file.
+
 ## Development / Testing
 
 Integration tests run across the monorepo:

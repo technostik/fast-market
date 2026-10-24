@@ -50,6 +50,7 @@ Standalone CLI to configure global settings shared across all fast-market tools:
 - **reset-all overwrites everything**: `toolsetup reset-all` backs up then overwrites ALL tool configs discovered in the monorepo. Confirm with user before running.
 - **workdir locking**: the `webux yt_poster` tab reads `is_workdir_locked()` via `toolsetup workdir islocked`/`workdir-status`; forgetting to unlock blocks workdir navigation in the UI.
 - **autocomplete staleness**: completion scripts are generated once and cached in `~/.config/fast-market/completions/`. After adding new CLIs, re-run `toolsetup autocomplete configure --force`.
+- **completion name collisions**: `browser` on PATH may be browser-use, and `skill` may be procps. The generated script resolves the console script, closes stdin, drops stderr, and evals stdout only when it is a Click completion script. Do not replace it with `eval "$(_{CMD}_COMPLETE=bash_source cmd)"`. On a terminal that eval runs browser-use's welcome text, and the `<<'PY'` example in it launches Chrome.
 - **old vs new workdir**: `toolsetup clean-workdir` operates on the simple `workdir` path (single dir). `toolsetup workdir new/list/prev/last` operates on the `workdir_root`/`workdir` hierarchy. These are different config keys.
 
 ## 🧪 Tests

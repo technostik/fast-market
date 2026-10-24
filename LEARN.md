@@ -26,3 +26,9 @@
 
 - `completed_steps` in `*-long-meta.json` is the resume log. The next run starts at the first index that is neither completed nor skipped. For this video that is step 3, Generate thumbnail.
 - An empty thumbnail engine follows the image CLI default. On this profile that default is `flux2cloud`, so a retry without picking `flux2` hits the same quota.
+
+## 2026-10-24 — shell completion startup
+
+- `eval "$(_{CMD}_COMPLETE=bash_source cmd)"` is unsafe to source from an interactive shell. `browser` on PATH is browser-use. On a terminal it prints a welcome text to stdout, and the indented `<<'PY'` example in that text launches Chrome.
+- Close stdin, drop stderr, and eval only when the output contains a Click completion marker (`complete -`, `compdef `, `complete --`). Skip paths under `browser-use`.
+- A backslash-newline inside `export LD_LIBRARY_PATH=...` keeps the next line's indent as a second argument. Keep that assignment on one line.
