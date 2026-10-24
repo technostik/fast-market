@@ -13,6 +13,7 @@ _COIN_MAP = {
     'dogecoin': 'DOGE',
     'cardano': 'ADA',
     'litecoin': 'LTC',
+    'zcash': 'ZEC',
 }
 
 def _split(symbol: str) -> tuple[str, str]:

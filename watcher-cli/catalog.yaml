@@ -99,6 +99,17 @@ variables:
   news_topics:
   - bitcoin_regulation
   tradingview: BITSTAMP:BTCUSD
+- id: zcash
+  label: Zcash (EUR)
+  provider: kraken
+  symbol: zcash:eur
+  unit: EUR
+  max_age: 1d
+  icon: "\U0001F512"
+  news_topics:
+  - zcash_privacy
+  - zcash_regulation
+  tradingview: BITSTAMP:ZECUSD
 - id: spacex
   label: SpaceX (SPCX, Nasdaq, daily, Yahoo)
   provider: yahoo
@@ -164,6 +175,14 @@ news_topics:
 - id: bitcoin_regulation
   label: Bitcoin & regulation
   query: bitcoin regulation
+  lang: en
+- id: zcash_privacy
+  label: Zcash & privacy
+  query: zcash privacy
+  lang: en
+- id: zcash_regulation
+  label: Zcash & regulation
+  query: zcash regulation
   lang: en
 - id: spacex_spcx
   label: SpaceX & SPCX

@@ -355,7 +355,7 @@ function clearNative(msg) {
   c.getContext('2d').clearRect(0, 0, c.width, c.height);
   if (msg != null) document.getElementById('detailStats').textContent = msg;
 }
-const DEFAULT_TV = {fr_10y: 'TVC:FR10Y', us_10y: 'TVC:US10Y', uk_10y: 'TVC:GB10Y', de_10y: 'TVC:DE10Y', brent: 'TVC:UKOIL', wti: 'TVC:USOIL', napoleon: 'OANDA:XAUUSD', gold_spot: 'OANDA:XAUUSD', gold: 'OANDA:XAUUSD', nasdaq: 'NASDAQ:IXIC', bitcoin: 'BITSTAMP:BTCUSD', spacex: 'NASDAQ:SPCX', eurusd: 'OANDA:EURUSD'};
+const DEFAULT_TV = {fr_10y: 'TVC:FR10Y', us_10y: 'TVC:US10Y', uk_10y: 'TVC:GB10Y', de_10y: 'TVC:DE10Y', brent: 'TVC:UKOIL', wti: 'TVC:USOIL', napoleon: 'OANDA:XAUUSD', gold_spot: 'OANDA:XAUUSD', gold: 'OANDA:XAUUSD', nasdaq: 'NASDAQ:IXIC', bitcoin: 'BITSTAMP:BTCUSD', zcash: 'BITSTAMP:ZECUSD', spacex: 'NASDAQ:SPCX', eurusd: 'OANDA:EURUSD'};
 function tvSymbolFor(id) { return (lastVars[id] || {}).tradingview || DEFAULT_TV[id] || null; }
 function eurValueOf(r) {
   if (!r || r.value == null) return null;

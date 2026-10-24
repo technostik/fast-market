@@ -12,6 +12,7 @@ _COIN_MAP = {
     'dogecoin': 'DOGE',
     'cardano': 'ADA',
     'litecoin': 'LTC',
+    'zcash': 'ZEC',
 }
 
 def _base_currency(coin: str) -> str:
