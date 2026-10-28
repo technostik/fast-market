@@ -31,16 +31,7 @@ input[type=range] { flex:1; padding:0; }
 <body>
 <main class="webux-page">
   <h2>🖼️ YT Thumbnail composer</h2>
-  <div class="hint" style="margin-bottom:10px">Compose a 1280×720 thumbnail from up to 4 source images (multi-image compose via <code>-R</code> refs), re-apply overlay text in the long_publish style, then iterate with small edits. Files live next to the video (<code>&lt;stem&gt;_thumb[_overlay]_&lt;N&gt;</code>) and share the <code>*-long-meta.json</code> keys with Long Publish.</div>
-
-  <div class="card">
-    <div class="row">
-      <label>Video source dir</label><input id="srcDir" type="text"><button id="refreshBtn">↻ Refresh</button>
-    </div>
-    <div class="row">
-      <label>Video</label><select id="videoSel"><option value="">— select —</option></select>
-    </div>
-  </div>
+  <div class="hint" style="margin-bottom:10px">Compose a 1280×720 thumbnail from up to 4 source images (multi-image compose via <code>-R</code> refs), re-apply overlay text in the long_publish style, then iterate with small edits. A video is required only to push the result to YouTube. Until then, files are saved in the video folder as <code>thumbnail_draft_thumb[_overlay]_&lt;N&gt;</code>.</div>
 
   <div class="grid">
     <div>
@@ -103,6 +94,13 @@ input[type=range] { flex:1; padding:0; }
       </div>
       <div class="card">
         <h3>🚀 Publish</h3>
+        <div class="row">
+          <label>Video source dir</label><input id="srcDir" type="text"><button id="refreshBtn">↻ Refresh</button>
+        </div>
+        <div class="row">
+          <label>Video</label><select id="videoSel"><option value="">— select to push —</option></select>
+        </div>
+        <div class="hint">Required only for “Push thumbnail to YouTube”. Compose, edit and overlay work with no video selected.</div>
         <div class="row"><button id="pushBtn">⬆ Push thumbnail to YouTube</button></div>
         <div class="row"><span id="pushOut" class="hint"></span></div>
       </div>
@@ -237,13 +235,15 @@ async function loadVideos() {
   });
   status(`Loaded ${(d.videos || []).length} videos from ${dir}`, 'ok');
 }
+function rememberThumb(path, base) {
+  if (path) { el('curImg').src = imgUrl(path); window._currentThumb = path; }
+  else { el('curImg').removeAttribute('src'); window._currentThumb = ''; }
+  if (base) el('baseImg').src = imgUrl(base); else el('baseImg').removeAttribute('src');
+}
 async function refreshCurrent() {
-  const src = el('videoSel').value;
-  if (!src) return;
-  const r = await fetch(API + '/history?source=' + encodeURIComponent(src));
+  const r = await fetch(API + '/history');
   const d = await r.json();
-  if (d.current) el('curImg').src = imgUrl(d.current); else el('curImg').removeAttribute('src');
-  if (d.base) el('baseImg').src = imgUrl(d.base); else el('baseImg').removeAttribute('src');
+  rememberThumb(d.current, d.base);
   const strip = el('histStrip'); strip.innerHTML = '';
   (d.versions || []).slice().reverse().forEach(v => {
     const im = document.createElement('img'); im.src = imgUrl(v.path); im.title = v.name;
@@ -259,15 +259,12 @@ async function refreshCurrent() {
 }
 
 el('refreshBtn').onclick = loadVideos;
-el('videoSel').onchange = refreshCurrent;
 el('strengthInp').oninput = () => { el('strengthVal').textContent = Number(el('strengthInp').value).toFixed(2); };
 
 el('uploadBtn').onclick = async () => {
   const files = el('uploadFiles').files;
   if (!files.length) { status('Pick files first', 'err'); return; }
-  if (!el('videoSel').value) { status('Select a video first (uploads are stored next to it)', 'err'); return; }
   const fd = new FormData();
-  fd.append('source', el('videoSel').value);
   [...files].slice(0, 4).forEach(f => fd.append('files', f));
   status('Uploading…');
   const r = await fetch(API + '/upload-sources', { method: 'POST', body: fd });
@@ -278,26 +275,23 @@ el('uploadBtn').onclick = async () => {
 };
 
 el('composeBtn').onclick = async () => {
-  const src = el('videoSel').value;
-  if (!src) { status('Select a video first', 'err'); return; }
   const refs = sourcePaths();
   if (!el('promptInp').value.trim()) { status('Enter a prompt', 'err'); return; }
-  const body = { source: src, prompt: el('promptInp').value.trim(), engine: el('engineSel').value,
+  const body = { prompt: el('promptInp').value.trim(), engine: el('engineSel').value,
     sources: refs, title: el('ovTitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
   status('Composing… (live log in the Console below)');
   const d = await runJob(API + '/compose', body, el('composeOut'), 'Composing…');
   clearBusy();
   if (!d) return;
   el('composeOut').textContent = `Done v${d.version} (${String(d.thumbnail).split('/').pop()})`;
+  window._currentThumb = d.thumbnail || '';
   await refreshCurrent();
   status(`Composed ${d.thumbnail}`, 'ok');
 };
 
 el('editBtn').onclick = async () => {
-  const src = el('videoSel').value;
-  if (!src) { status('Select a video first', 'err'); return; }
   if (!el('editPrompt').value.trim()) { status('Describe the small change', 'err'); return; }
-  const body = { source: src, prompt: el('editPrompt').value.trim(), base: window._pickedBase || '',
+  const body = { prompt: el('editPrompt').value.trim(), base: window._pickedBase || '',
     engine: el('engineSel').value, strength: Number(el('strengthInp').value),
     title: el('ovTitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
   status('Editing… (live log in the Console below)');
@@ -311,10 +305,8 @@ el('editBtn').onclick = async () => {
 };
 
 el('overlayBtn').onclick = async () => {
-  const src = el('videoSel').value;
-  if (!src) { status('Select a video first', 'err'); return; }
   if (!el('ovTitle').value.trim()) { status('Enter an overlay title', 'err'); return; }
-  const body = { source: src, base: window._pickedBase || '', title: el('ovTitle').value.trim(), overlay: overlayOpts() };
+  const body = { base: window._pickedBase || '', title: el('ovTitle').value.trim(), overlay: overlayOpts() };
   status('Applying overlay… (live log in the Console below)');
   const d = await runJob(API + '/overlay', body, el('overlayOut'), 'Applying…');
   clearBusy();
@@ -329,7 +321,7 @@ el('pushBtn').onclick = async () => {
   const src = el('videoSel').value;
   if (!src) { status('Select a video first', 'err'); return; }
   el('pushOut').textContent = 'Pushing…';
-  const r = await fetch(API + '/push-thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: src }) });
+  const r = await fetch(API + '/push-thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: src, thumbnail: window._currentThumb || '' }) });
   const d = await r.json();
   if (!r.ok) { el('pushOut').textContent = ''; status(d.detail || 'Push failed', 'err'); return; }
   el('pushOut').textContent = `Pushed to ${d.video_id}`;
@@ -337,6 +329,6 @@ el('pushBtn').onclick = async () => {
 };
 
 buildSlots([]);
-(async () => { await loadConfig(); await loadEngines(); await loadVideos(); })();
+(async () => { await loadConfig(); await loadEngines(); await loadVideos(); await refreshCurrent(); })();
 </script>
 </body></html>

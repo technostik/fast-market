@@ -201,6 +201,39 @@ class TestConfigEndpoint:
         assert captured["cmd"].count("-R") == 1
         assert str(ref.resolve()) in captured["cmd"]
 
+    def test_compose_without_video_uses_draft(
+        self, video_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Compose does not need a selected video. Output lands in the draft workspace."""
+        import asyncio
+
+        fake_out = video_dir / "gen_raw.png"
+        fake_out.write_bytes(b"fake-png")
+
+        async def fake_run(job_id: str, cmd: list[str]):
+            return json.dumps({"path": str(fake_out.resolve())})
+
+        monkeypatch.setattr(yt_thumb, "_run_and_log", fake_run)
+
+        async def _go():
+            body = await yt_thumb.compose(
+                yt_thumb.ComposeRequest(source="", prompt="a scene", sources=[])
+            )
+            return await self._run_job_to_end(body["job_id"])
+
+        status = asyncio.run(_go())
+        assert status["status"] == "done"
+        assert status["result"]["thumbnail"].endswith("thumbnail_draft_thumb_overlay_1.png")
+        assert (video_dir / "thumbnail_draft-long-meta.json").exists()
+
+    def test_push_requires_video(self, video_dir: Path):
+        import asyncio
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(yt_thumb.push_thumbnail(yt_thumb.PushRequest(source="")))
+        assert exc.value.status_code == 400
+
     def test_edit_requires_prompt(self, video_dir: Path):
         import asyncio
         from fastapi import HTTPException

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import random
 import socket
 import sys
@@ -32,6 +33,22 @@ KNOWN_CF_MODELS = {
 #: parameter must NOT be sent for these (Cloudflare rejects/ignores it).
 FIXED_STEPS_MODELS = frozenset({CF_MODEL_9B})
 FIXED_STEPS = 4
+
+
+def apply_cloudflare_credentials(config: EngineConfig) -> None:
+    """Fill empty Cloudflare credentials from the environment.
+
+    Config values win. Blank ``account_id`` / ``api_token`` fall back to
+    ``CLOUDFLARE_ACCOUNT_ID`` and ``CLOUDFLARE_API_TOKEN``, after the project
+    ``.env`` is loaded. A reference image does not change this.
+    """
+    from common.core.config import ensure_project_env_loaded
+
+    ensure_project_env_loaded()
+    if not config.account_id:
+        config.account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "") or ""
+    if not config.api_token:
+        config.api_token = os.environ.get("CLOUDFLARE_API_TOKEN", "") or ""
 
 
 def _encode_multipart(fields: dict[str, str], files: dict[str, bytes], boundary: str) -> bytes:
@@ -85,13 +102,16 @@ class Flux2CloudEnginePlugin(ImageEnginePlugin):
 
     def generate(self, request: ImageGenRequest, verbose: bool = False) -> Image.Image:
         """Generate an image using Cloudflare Workers AI."""
+        apply_cloudflare_credentials(self.config)
         if not self.config.account_id:
             raise ValueError(
-                "flux2cloud: account_id is required in engines.flux2cloud config"
+                f"{self.name}: account_id is required in engines.{self.name} "
+                "config or CLOUDFLARE_ACCOUNT_ID"
             )
         if not self.config.api_token:
             raise ValueError(
-                "flux2cloud: api_token is required in engines.flux2cloud config"
+                f"{self.name}: api_token is required in engines.{self.name} "
+                "config or CLOUDFLARE_API_TOKEN"
             )
 
         def _vlog(message: str, elapsed: float | None = None) -> None:

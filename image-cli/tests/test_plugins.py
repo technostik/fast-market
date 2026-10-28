@@ -95,6 +95,88 @@ class TestFlux2Plugin:
         plugin = Flux2EnginePlugin({"model_path": ""})
         assert plugin.validate_model_path() is False
 
+    def test_resolve_prefers_configured_directory(self, tmp_path: Path):
+        from plugins.flux2.plugin import resolve_flux2_weights
+
+        model = tmp_path / "klein"
+        model.mkdir()
+        (model / "model_index.json").write_text("{}")
+        path, local_only = resolve_flux2_weights(
+            str(model), hf_hub=tmp_path / "empty-hub", extra_dirs=[]
+        )
+        assert path == str(model.resolve())
+        assert local_only is True
+
+    def test_resolve_falls_back_to_local_klein_cache(self, tmp_path: Path):
+        """A hub id that is not cached uses the local Klein 4B snapshot."""
+        from plugins.flux2.plugin import CANONICAL_KLEIN_REPO, resolve_flux2_weights
+
+        snap = (
+            tmp_path
+            / "hub"
+            / ("models--" + CANONICAL_KLEIN_REPO.replace("/", "--"))
+            / "snapshots"
+            / "abc"
+        )
+        snap.mkdir(parents=True)
+        (snap / "model_index.json").write_text("{}")
+        path, local_only = resolve_flux2_weights(
+            "black-forest-labs/FLUX.2-12B", hf_hub=tmp_path / "hub", extra_dirs=[]
+        )
+        assert path == str(snap)
+        assert local_only is True
+
+    def test_resolve_keeps_unknown_id_when_nothing_local(self, tmp_path: Path):
+        from plugins.flux2.plugin import resolve_flux2_weights
+
+        path, local_only = resolve_flux2_weights(
+            "org/not-downloaded", hf_hub=tmp_path / "hub", extra_dirs=[]
+        )
+        assert path == "org/not-downloaded"
+        assert local_only is False
+
+
+class TestFlux2CloudCredentials:
+    def test_blank_config_uses_env(self, monkeypatch: pytest.MonkeyPatch):
+        from core.models import EngineConfig
+        from plugins.flux2cloud.plugin import apply_cloudflare_credentials
+
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct-from-env")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok-from-env")
+        config = EngineConfig(account_id="", api_token="")
+        apply_cloudflare_credentials(config)
+        assert config.account_id == "acct-from-env"
+        assert config.api_token == "tok-from-env"
+
+    def test_config_wins_over_env(self, monkeypatch: pytest.MonkeyPatch):
+        from core.models import EngineConfig
+        from plugins.flux2cloud.plugin import apply_cloudflare_credentials
+
+        monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct-from-env")
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok-from-env")
+        config = EngineConfig(account_id="acct-from-cfg", api_token="tok-from-cfg")
+        apply_cloudflare_credentials(config)
+        assert config.account_id == "acct-from-cfg"
+        assert config.api_token == "tok-from-cfg"
+
+    def test_missing_credentials_name_the_engine(self, monkeypatch: pytest.MonkeyPatch):
+        from PIL import Image
+
+        from core.models import ImageGenRequest
+        from plugins.flux29bcloud.plugin import Flux29bCloudEnginePlugin
+        from plugins.flux2cloud.plugin import Flux2CloudEnginePlugin
+
+        monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID", raising=False)
+        monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+        request = ImageGenRequest(
+            prompt="a scene",
+            reference_images=[Image.new("RGB", (8, 8), "red")],
+        )
+        with pytest.raises(ValueError, match=r"engines\.flux29bcloud"):
+            Flux29bCloudEnginePlugin({"account_id": "", "api_token": ""}).generate(request)
+        with pytest.raises(ValueError, match=r"engines\.flux2cloud"):
+            Flux2CloudEnginePlugin({"account_id": "", "api_token": ""}).generate(request)
+
 
 class TestQwen21Plugin:
     """Test Qwen-Image-2.1 plugin implementation."""

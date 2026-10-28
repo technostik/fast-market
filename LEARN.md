@@ -27,6 +27,13 @@
 - `completed_steps` in `*-long-meta.json` is the resume log. The next run starts at the first index that is neither completed nor skipped. For this video that is step 3, Generate thumbnail.
 - An empty thumbnail engine follows the image CLI default. On this profile that default is `flux2cloud`, so a retry without picking `flux2` hits the same quota.
 
+## 2026-10-28 — yt thumbnail engines
+
+- Active profile `techno_sophia` stored `engines.flux2.model_path: black-forest-labs/FLUX.2-12B`. That repo 404s. The local Klein 4B weights are `~/YouTools/flux2-klein-4b` and the Hugging Face snapshot `black-forest-labs/FLUX.2-klein-4B`. `flux2` now prefers those when the configured id is not on disk.
+- The same profile had empty `flux29bcloud.account_id` / `api_token`, and no `flux2cloud` block. The interactive shell had `CLOUDFLARE_ACCOUNT_ID`, but `webux serve` did not, so the thumbnail subprocess still failed. Cloud plugins now fall back to those env vars, and the profile file holds the values the server can read.
+- A reference image does not change either failure. Both errors happen before the image is posted.
+- Thumbnail compose no longer requires a video. The video picker lives in Publish and is checked only on push.
+
 ## 2026-10-24 — shell completion startup
 
 - `eval "$(_{CMD}_COMPLETE=bash_source cmd)"` is unsafe to source from an interactive shell. `browser` on PATH is browser-use. On a terminal it prints a welcome text to stdout, and the indented `<<'PY'` example in that text launches Chrome.

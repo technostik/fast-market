@@ -31,6 +31,11 @@ IMG2IMG_ENGINES = frozenset({"flux2", "qwen21", "qwen21turbo"})
 #: Uploaded/accepted source-image extensions for multi-image compose.
 SOURCE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
+#: Workspace used when no video is selected. Generation, edit, overlay and
+#: uploads write ``<DRAFT_STEM>_thumb_*`` / ``_src_*`` in the video source
+#: dir. Push is the only action that needs a real video.
+DRAFT_STEM = "thumbnail_draft"
+
 _IMAGE_MIME = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -192,6 +197,17 @@ def _resolve_video(source_raw: str, root: Path) -> Path:
     return source
 
 
+def _work_source(source_raw: str, root: Path) -> Path:
+    """Video file when one is selected, otherwise the draft anchor.
+
+    The draft anchor is not a file. Its stem names thumbnails and the
+    sidecar meta written next to the videos.
+    """
+    if not (source_raw or "").strip():
+        return root / DRAFT_STEM
+    return _resolve_video(source_raw, root)
+
+
 def _resolve_image_param(value: str, root: Path) -> Path:
     """Resolve an image path parameter with containment + existence checks."""
     p = _assert_inside(Path(value), root)
@@ -331,7 +347,7 @@ async def list_videos(
 @router.get("/history")
 async def history(source: str = Query(default="")):
     root = _source_dir()
-    src = _resolve_video(source, root)
+    src = _work_source(source, root)
     stem = src.stem
     thumbs = sorted(
         (f for f in src.parent.glob(f"{stem}_thumb_*.*") if f.is_file()),
@@ -495,7 +511,7 @@ async def compose(req: ComposeRequest):
     ``{"thumbnail", "base", "version"}`` result.
     """
     root = _source_dir()
-    source = _resolve_video(req.source, root)
+    source = _work_source(req.source, root)
     prompt = (req.prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="A prompt is required to compose")
@@ -574,7 +590,7 @@ async def edit(req: EditRequest):
     back as a ``-R`` reference since they have no img2img.
     """
     root = _source_dir()
-    source = _resolve_video(req.source, root)
+    source = _work_source(req.source, root)
     prompt = (req.prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Describe the small change to apply")
@@ -665,7 +681,7 @@ async def overlay(req: OverlayRequest):
     (Re)applies overlay text on the base image — same style as long_publish.
     """
     root = _source_dir()
-    source = _resolve_video(req.source, root)
+    source = _work_source(req.source, root)
     title = (req.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Provide an overlay title")
@@ -729,7 +745,7 @@ async def upload_sources(
     """
     root = _source_dir()
     src = _resolve_video(source, root) if source.strip() else None
-    stem = src.stem if src is not None else "shared"
+    stem = src.stem if src is not None else DRAFT_STEM
     out_dir = src.parent if src is not None else root
 
     saved: list[str] = []
@@ -756,7 +772,12 @@ async def push_thumbnail(req: PushRequest):
     root = _source_dir()
     source = _resolve_video(req.source, root)
     meta = _load_meta(source)
-    thumb = req.thumbnail.strip() or (meta.get("files", {}) or {}).get("thumbnail", "")
+    if req.thumbnail.strip():
+        thumb = str(_resolve_image_param(req.thumbnail.strip(), root))
+    else:
+        thumb = (meta.get("files", {}) or {}).get("thumbnail", "")
+        if thumb:
+            thumb = str(_resolve_image_param(thumb, root))
     if not thumb or not Path(thumb).expanduser().exists():
         raise HTTPException(status_code=400, detail="No thumbnail available to push")
     video_url = meta.get("video_url", "")

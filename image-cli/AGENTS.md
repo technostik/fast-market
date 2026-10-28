@@ -164,6 +164,12 @@ available_formats:
 - Plugin system mirrors corpus-agent pattern
 - Config uses XDG paths from common
 
+## Pitfalls
+
+- `flux2` is the local Klein engine. If `engines.flux2.model_path` is not a directory (and that repo is not in the Hugging Face cache), generation loads the local `black-forest-labs/FLUX.2-klein-4B` snapshot or `~/YouTools/flux2-klein-4b` instead of downloading the configured id.
+- Cloudflare engines (`flux2cloud`, `flux29bcloud`, `flux3cloud`) read `account_id` / `api_token` from their own `engines.<name>` block, then `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`. A blank string in the active profile does not count as set. The webux process does not inherit a shell export unless those variables are in its environment or written into the profile. A reference image is unrelated: the credential check runs before the image is sent.
+- YT Thumbnail compose / edit / overlay / upload do not need a selected video. They write `thumbnail_draft_*` in the video source directory. Only “Push thumbnail to YouTube” requires a video, and it sends the thumbnail currently on screen.
+
 ## Do's
 
 - Use `build_engine()` from helpers to construct engine
