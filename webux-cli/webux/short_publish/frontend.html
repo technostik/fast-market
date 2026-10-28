@@ -1522,7 +1522,9 @@ async function browserScreenshot() {
 }
 
 async function poolAction(action) {
-  await fetch(`/api/short_publish/pool/${action}`, { method: 'POST' });
+  const prof = currentProfile();
+  const qs = prof ? '?profile=' + encodeURIComponent(prof) : '';
+  await fetch(`/api/short_publish/pool/${action}` + qs, { method: 'POST' });
   refreshPool();
 }
 

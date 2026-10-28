@@ -554,9 +554,9 @@ def _move_file_to_dir(src: Path, dest_dir: Path) -> None:
         pass
 
 
-def clear_finished(archive_path: str | None = None, trash_path: str | None = None):
+def clear_finished(archive_path: str | None = None, trash_path: str | None = None, profile: str | None = None):
     global _pool
-    pub = _load_publish_cfg()
+    pub = _load_publish_cfg(profile)
     if archive_path is None:
         archive_path = pub.get("archive_path") or pub.get("archive_dir")
     if trash_path is None:

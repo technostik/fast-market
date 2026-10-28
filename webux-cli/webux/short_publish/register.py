@@ -835,8 +835,10 @@ async def pool_redo():
 
 
 @router.post("/pool/clear-finished")
-async def pool_clear_finished():
-    clear_finished()
+async def pool_clear_finished(profile: str | None = Query(default=None)):
+    if not profile:
+        profile = resolve_profile()
+    clear_finished(profile=profile)
     return {"ok": True}
 
 
