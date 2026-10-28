@@ -226,6 +226,43 @@ class TestConfigEndpoint:
         assert status["result"]["thumbnail"].endswith("thumbnail_draft_thumb_overlay_1.png")
         assert (video_dir / "thumbnail_draft-long-meta.json").exists()
 
+    def test_compose_applies_config_overlay_when_form_is_blank(
+        self, video_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A closed config panel still supplies red text on a tall black band."""
+        import asyncio
+
+        captured: dict = {}
+        fake_out = video_dir / "gen_raw.png"
+        fake_out.write_bytes(b"fake-png")
+
+        async def fake_run(job_id: str, cmd: list[str]):
+            captured["cmd"] = cmd
+            return json.dumps({"path": str(fake_out.resolve())})
+
+        monkeypatch.setattr(yt_thumb, "_run_and_log", fake_run)
+        monkeypatch.setattr(yt_thumb, "_publish_cfg", lambda: {
+            "video_source_path": str(video_dir),
+            "thumbnail_overlay_fg": "red",
+            "thumbnail_overlay_bg": "black",
+            "thumbnail_overlay_effect": "band",
+            "thumbnail_overlay_band_size": 33,
+        })
+
+        async def _go():
+            body = await yt_thumb.compose(
+                yt_thumb.ComposeRequest(source="", prompt="a scene", sources=[])
+            )
+            return await self._run_job_to_end(body["job_id"])
+
+        status = asyncio.run(_go())
+        assert status["status"] == "done"
+        cmd = captured["cmd"]
+        assert cmd[cmd.index("--overlay-fg") + 1] == "red"
+        assert cmd[cmd.index("--overlay-bg") + 1] == "black"
+        assert cmd[cmd.index("--overlay-effect") + 1] == "band"
+        assert cmd[cmd.index("--overlay-band-size") + 1] == "33"
+
     def test_push_requires_video(self, video_dir: Path):
         import asyncio
         from fastapi import HTTPException

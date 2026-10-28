@@ -84,6 +84,49 @@ def _migrate_publish_cfg_if_needed(profile: str | None = None) -> bool:
         return True
 
 
+def append_overlay_flags(
+    cmd: list[str],
+    fg: str = "",
+    bg: str = "",
+    effect: str = "",
+    size_pct: float = 0,
+    offset: int = 0,
+    band_size: int = 0,
+) -> list[str]:
+    """Append image-CLI overlay flags. Empty values stay omitted so the
+    image config default applies for that one field."""
+    if fg:
+        cmd += ["--overlay-fg", str(fg)]
+    if bg:
+        cmd += ["--overlay-bg", str(bg)]
+    if effect:
+        cmd += ["--overlay-effect", str(effect)]
+    if size_pct:
+        cmd += ["--overlay-size-pct", str(size_pct)]
+    if offset:
+        cmd += ["--overlay-offset", str(offset)]
+    if band_size:
+        cmd += ["--overlay-band-size", str(int(band_size))]
+    return cmd
+
+
+def publish_overlay(pub: dict) -> tuple[str, str, str, float, int, int]:
+    """Overlay settings from the long-publish config panel.
+
+    ``(fg, bg, effect, size_pct, offset, band_size)``. Blank fields are
+    empty so the caller can let the image CLI default fill them.
+    """
+    pub = pub or {}
+    return (
+        str(pub.get("thumbnail_overlay_fg") or "").strip(),
+        str(pub.get("thumbnail_overlay_bg") or "").strip(),
+        str(pub.get("thumbnail_overlay_effect") or "").strip(),
+        float(pub.get("thumbnail_overlay_size_pct") or 0),
+        int(pub.get("thumbnail_overlay_offset") or 0),
+        int(pub.get("thumbnail_overlay_band_size") or 0),
+    )
+
+
 def _save_publish_cfg(pub: dict, profile: str | None = None) -> None:
     try:
         with _profile_context(profile):

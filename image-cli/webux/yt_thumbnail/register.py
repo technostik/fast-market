@@ -72,6 +72,52 @@ def _image_overlay_defaults() -> dict:
         return {}
 
 
+def _overlay_defaults() -> dict:
+    """Config-panel overlay, then the image CLI overlay group.
+
+    The long-publish config panel (``thumbnail_overlay_*``) is the thumbnail
+    style. It wins over the image CLI group. Empty panel fields fall through.
+    """
+    pub = _publish_cfg()
+    img = _image_overlay_defaults()
+
+    def pick(pub_key: str, img_key: str, default=""):
+        value = pub.get(pub_key)
+        if value in (None, "", 0):
+            value = img.get(img_key, default)
+        return value if value not in (None, "") else default
+
+    return {
+        "fg": str(pick("thumbnail_overlay_fg", "fg") or ""),
+        "bg": str(pick("thumbnail_overlay_bg", "bg") or ""),
+        "effect": str(pick("thumbnail_overlay_effect", "effect") or ""),
+        "style": str(img.get("style") or ""),
+        "band_size": int(pick("thumbnail_overlay_band_size", "band_size", 0) or 0),
+        "size_pct": float(pick("thumbnail_overlay_size_pct", "size_pct", 0) or 0),
+        "offset": int(pick("thumbnail_overlay_offset", "offset_pct", 0) or 0),
+        "position": (
+            f"{img.get('vpos', 'bottom')}-{img.get('hpos', 'center')}"
+            if img.get("vpos") or img.get("hpos")
+            else ""
+        ),
+    }
+
+
+def _fill_overlay(ov: OverlayOptions) -> OverlayOptions:
+    """Blank request fields take the config-panel / image overlay defaults."""
+    defaults = _overlay_defaults()
+    return OverlayOptions(
+        fg=(ov.fg or "").strip() or defaults["fg"],
+        bg=(ov.bg or "").strip() or defaults["bg"],
+        effect=(ov.effect or "").strip() or defaults["effect"],
+        style=(ov.style or "").strip() or defaults["style"],
+        band_size=ov.band_size or defaults["band_size"],
+        size_pct=ov.size_pct or defaults["size_pct"],
+        offset=ov.offset or defaults["offset"],
+        position=(ov.position or "").strip() or defaults["position"],
+    )
+
+
 def _source_dir() -> Path:
     pub = _publish_cfg()
     d = Path(pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH)).expanduser()
@@ -269,22 +315,11 @@ class PushRequest(BaseModel):
 @router.get("/config")
 async def get_config():
     pub = _publish_cfg()
-    ov = _image_overlay_defaults()
     return {
         "video_source_path": pub.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH),
         "video_extensions": pub.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
         "thumbnail_engine": pub.get("thumbnail_engine", ""),
-        "overlay_defaults": {
-            "fg": ov.get("fg", ""),
-            "bg": ov.get("bg", ""),
-            "effect": ov.get("effect", ""),
-            "style": ov.get("style", ""),
-            "position": (
-                f"{ov.get('vpos', 'bottom')}-{ov.get('hpos', 'center')}"
-                if ov.get("vpos") or ov.get("hpos")
-                else ""
-            ),
-        },
+        "overlay_defaults": _overlay_defaults(),
     }
 
 
@@ -540,7 +575,7 @@ async def _compose_worker(
         out_dir = source.parent
         stem = source.stem
         version = _next_version(out_dir, stem)
-        ov = req.overlay
+        ov = _fill_overlay(req.overlay)
         cmd = [
             _image(), "generate", prompt,
             "--size", "youtube", "-F", "json", "-v",
@@ -627,7 +662,7 @@ async def _edit_worker(
         out_dir = source.parent
         stem = source.stem
         version = _next_version(out_dir, stem)
-        ov = req.overlay
+        ov = _fill_overlay(req.overlay)
         overlay_title = req.title.strip() or meta.get("thumbnail_overlay_title", "").strip()
 
         cmd = [_image(), "generate", prompt, "--size", "youtube", "-F", "json", "-v",
@@ -713,7 +748,7 @@ async def _overlay_worker(
         out_dir = source.parent
         stem = source.stem
         version = int(meta.get("thumbnail_version", 0) or 0)
-        ov = req.overlay
+        ov = _fill_overlay(req.overlay)
         cmd = [_image(), "overlay", base, "--title", title, "-F", "json"]
         cmd = _overlay_opts(
             cmd, ov.fg.strip(), ov.bg.strip(), ov.effect.strip(), ov.style.strip(),

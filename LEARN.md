@@ -27,6 +27,12 @@
 - `completed_steps` in `*-long-meta.json` is the resume log. The next run starts at the first index that is neither completed nor skipped. For this video that is step 3, Generate thumbnail.
 - An empty thumbnail engine follows the image CLI default. On this profile that default is `flux2cloud`, so a retry without picking `flux2` hits the same quota.
 
+## 2026-10-28 — thumbnail overlay defaults
+
+- Blue text on a small green band is the image CLI built-in overlay (`fg: blue`, `bg: light green`, `band_size: 8`). The long-publish config panel had red/black on the `joriel` profile only, and the publish pipeline passed fg/bg but never the band height.
+- Thumbnail generation now applies `thumbnail_overlay_fg/bg/effect/band_size/size_pct/offset` even when the panel is closed. Active profile `techno_sophia` stores red, black, band, 33% height. The image `overlay:` group matches, so a bare `image generate --title` does too.
+- In Long Publish the source video sits in the Upload box. Thumbnail regenerate still runs with no video; Update YouTube stays disabled until one is selected.
+
 ## 2026-10-28 — yt thumbnail engines
 
 - Active profile `techno_sophia` stored `engines.flux2.model_path: black-forest-labs/FLUX.2-12B`. That repo 404s. The local Klein 4B weights are `~/YouTools/flux2-klein-4b` and the Hugging Face snapshot `black-forest-labs/FLUX.2-klein-4B`. `flux2` now prefers those when the configured id is not on disk.

@@ -541,12 +541,11 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             cmd += ["--engine", thumb_engine]
         if overlay_title:
             cmd += ["--title", overlay_title]
-        overlay_fg = pub_cfg.get("thumbnail_overlay_fg", "").strip()
-        overlay_bg = pub_cfg.get("thumbnail_overlay_bg", "").strip()
-        if overlay_fg:
-            cmd += ["--overlay-fg", overlay_fg]
-        if overlay_bg:
-            cmd += ["--overlay-bg", overlay_bg]
+        # Config-panel overlay (red on a tall black band, when that is what
+        # was saved) applies even if the panel is closed.
+        from .utils import append_overlay_flags, publish_overlay
+        fg, bg, effect, size_pct, offset, band_size = publish_overlay(pub_cfg)
+        cmd = append_overlay_flags(cmd, fg, bg, effect, size_pct, offset, band_size)
 
         rc, full_stdout = await _run_capture(s3, *cmd)
         if _finish_step(job, s3, rc):

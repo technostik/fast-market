@@ -206,9 +206,14 @@ async function loadConfig() {
   const r = await fetch(API + '/config'); const c = await r.json();
   el('srcDir').value = c.video_source_path || '';
   const d = c.overlay_defaults || {};
-  if (d.fg) el('ovFg').placeholder = d.fg + ' (image default)';
-  if (d.bg) el('ovBg').placeholder = d.bg + ' (image default)';
-  if (d.effect) el('ovEffect').value = '';
+  if (d.fg) el('ovFg').value = d.fg;
+  if (d.bg) el('ovBg').value = d.bg;
+  if (d.effect) el('ovEffect').value = d.effect;
+  if (d.style) el('ovStyle').value = d.style;
+  if (d.position) el('ovPos').value = d.position;
+  if (d.band_size) el('ovBand').value = d.band_size;
+  if (d.size_pct) el('ovSizePct').value = d.size_pct;
+  if (d.offset) el('ovOffset').value = d.offset;
   window._thumbEngine = c.thumbnail_engine || '';
 }
 async function loadEngines() {

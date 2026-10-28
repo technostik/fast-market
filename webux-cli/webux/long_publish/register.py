@@ -146,6 +146,8 @@ async def get_config(profile: str | None = Query(default=None)):
         "thumbnail_engine": pub.get("thumbnail_engine", ""),
         "thumbnail_overlay_fg": pub.get("thumbnail_overlay_fg", ""),
         "thumbnail_overlay_bg": pub.get("thumbnail_overlay_bg", ""),
+        "thumbnail_overlay_effect": pub.get("thumbnail_overlay_effect", ""),
+        "thumbnail_overlay_band_size": pub.get("thumbnail_overlay_band_size", 0),
         "thumbnail_overlay_size_pct": pub.get("thumbnail_overlay_size_pct", 0),
         "thumbnail_overlay_offset": pub.get("thumbnail_overlay_offset", 0),
         "transcript_mode": pub.get("transcript_mode", "normal"),
@@ -176,6 +178,8 @@ class ConfigSaveRequest(BaseModel):
     thumbnail_engine: str = ""
     thumbnail_overlay_fg: str = ""
     thumbnail_overlay_bg: str = ""
+    thumbnail_overlay_effect: str = ""
+    thumbnail_overlay_band_size: int = 0
     thumbnail_overlay_size_pct: float = 0
     thumbnail_overlay_offset: int = 0
     transcript_mode: str = "normal"
@@ -224,6 +228,8 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["thumbnail_engine"] = req.thumbnail_engine
         pub["thumbnail_overlay_fg"] = req.thumbnail_overlay_fg
         pub["thumbnail_overlay_bg"] = req.thumbnail_overlay_bg
+        pub["thumbnail_overlay_effect"] = req.thumbnail_overlay_effect
+        pub["thumbnail_overlay_band_size"] = req.thumbnail_overlay_band_size
         pub["thumbnail_overlay_size_pct"] = req.thumbnail_overlay_size_pct
         pub["thumbnail_overlay_offset"] = req.thumbnail_overlay_offset
         pub["transcript_mode"] = req.transcript_mode
@@ -790,6 +796,7 @@ class RegenThumbRequest(BaseModel):
     overlay_fg: str = ""
     overlay_bg: str = ""
     overlay_effect: str = ""
+    overlay_band_size: int = 0    # band height as % of the image (0 = config / image default)
     overlay_size_pct: float = 0   # font size multiplier vs default (0 = use default)
     overlay_offset: int = 0       # shift text + band down by this % of image height
 
@@ -809,29 +816,27 @@ def _parse_generate_output(text: str) -> tuple[str, str]:
     return data.get("path", ""), data.get("base_path", "")
 
 
-def _resolve_overlay(req: RegenThumbRequest, pub_cfg: dict) -> tuple[str, str, str, float, int]:
-    """Resolve overlay fg/bg/effect/size_pct/offset: the form value wins, else
-    the publish config (``thumbnail_overlay_fg`` / ``thumbnail_overlay_bg`` / ...)."""
-    fg = (req.overlay_fg or pub_cfg.get("thumbnail_overlay_fg", "") or "").strip()
-    bg = (req.overlay_bg or pub_cfg.get("thumbnail_overlay_bg", "") or "").strip()
-    effect = (req.overlay_effect or pub_cfg.get("thumbnail_overlay_effect", "") or "").strip()
-    size_pct = req.overlay_size_pct or float(pub_cfg.get("thumbnail_overlay_size_pct", 0) or 0)
-    offset = req.overlay_offset or int(pub_cfg.get("thumbnail_overlay_offset", 0) or 0)
-    return fg, bg, effect, size_pct, offset
+def _resolve_overlay(req: RegenThumbRequest, pub_cfg: dict) -> tuple[str, str, str, float, int, int]:
+    """Form value wins, otherwise the config panel (``thumbnail_overlay_*``)."""
+    from .utils import publish_overlay
+
+    cfg_fg, cfg_bg, cfg_effect, cfg_size, cfg_offset, cfg_band = publish_overlay(pub_cfg)
+    fg = (req.overlay_fg or cfg_fg).strip()
+    bg = (req.overlay_bg or cfg_bg).strip()
+    effect = (req.overlay_effect or cfg_effect).strip()
+    size_pct = req.overlay_size_pct or cfg_size
+    offset = req.overlay_offset or cfg_offset
+    band_size = req.overlay_band_size or cfg_band
+    return fg, bg, effect, size_pct, offset, band_size
 
 
-def _append_overlay_opts(cmd: list[str], fg: str, bg: str, effect: str, size_pct: float = 0, offset: int = 0) -> list[str]:
-    if fg:
-        cmd += ["--overlay-fg", fg]
-    if bg:
-        cmd += ["--overlay-bg", bg]
-    if effect:
-        cmd += ["--overlay-effect", effect]
-    if size_pct:
-        cmd += ["--overlay-size-pct", str(size_pct)]
-    if offset:
-        cmd += ["--overlay-offset", str(offset)]
-    return cmd
+def _append_overlay_opts(
+    cmd: list[str], fg: str, bg: str, effect: str,
+    size_pct: float = 0, offset: int = 0, band_size: int = 0,
+) -> list[str]:
+    from .utils import append_overlay_flags
+
+    return append_overlay_flags(cmd, fg, bg, effect, size_pct, offset, band_size)
 
 
 def _get_next_thumbnail_version(out_dir: Path, stem: str) -> int:
@@ -981,7 +986,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
 
     image_prompt = req.image_prompt.strip()
     overlay_title = req.overlay_title.strip()
-    fg, bg, effect, size_pct, offset = _resolve_overlay(req, pub_cfg)
+    fg, bg, effect, size_pct, offset, band_size = _resolve_overlay(req, pub_cfg)
 
     # Decide what to do based on the explicit mode (or auto-detect).
     if req.mode == "image":
@@ -1030,7 +1035,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
             cmd += ["--engine", thumb_engine]
         if overlay_title:
             cmd += ["--title", overlay_title]
-        cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
+        cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset, band_size)
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
@@ -1056,7 +1061,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
 
         if base_exists:
             cmd = [_image(), "overlay", str(Path(base).expanduser().resolve()), "--title", overlay_title, "-F", "json"]
-            cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
+            cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset, band_size)
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
@@ -1085,7 +1090,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
             cmd = [_image(), "generate", fallback_prompt, "--size", "youtube", "-F", "json", "--output-dir", str(out_dir), "--title", overlay_title]
             if thumb_engine:
                 cmd += ["--engine", thumb_engine]
-            cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
+            cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset, band_size)
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
@@ -1236,13 +1241,13 @@ async def replace_base_image(
         _shutil.copy2(src_img, target)
     new_base = str(target.resolve())
 
-    fg, bg, effect, size_pct, offset = _resolve_overlay_defaults(meta, pub_cfg)
+    fg, bg, effect, size_pct, offset, band_size = _resolve_overlay_defaults(meta, pub_cfg)
     overlay_title = meta.get("thumbnail_overlay_title", "").strip()
 
     new_path = new_base
     if overlay_title:
         cmd = [_image(), "overlay", new_base, "--title", overlay_title, "-F", "json"]
-        cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset)
+        cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset, band_size)
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
@@ -1280,15 +1285,18 @@ async def replace_base_image(
     return {"thumbnail": new_path, "base": new_base}
 
 
-def _resolve_overlay_defaults(meta: dict, pub_cfg: dict) -> tuple[str, str, str, float, int]:
-    """Resolve overlay fg/bg/effect/size_pct/offset from the stored meta first,
-    then the publish config defaults."""
-    fg = (meta.get("thumbnail_overlay_fg", "") or pub_cfg.get("thumbnail_overlay_fg", "") or "").strip()
-    bg = (meta.get("thumbnail_overlay_bg", "") or pub_cfg.get("thumbnail_overlay_bg", "") or "").strip()
-    effect = (meta.get("thumbnail_overlay_effect", "") or pub_cfg.get("thumbnail_overlay_effect", "") or "").strip()
-    size_pct = float(meta.get("thumbnail_overlay_size_pct", 0) or pub_cfg.get("thumbnail_overlay_size_pct", 0) or 0)
-    offset = int(meta.get("thumbnail_overlay_offset", 0) or pub_cfg.get("thumbnail_overlay_offset", 0) or 0)
-    return fg, bg, effect, size_pct, offset
+def _resolve_overlay_defaults(meta: dict, pub_cfg: dict) -> tuple[str, str, str, float, int, int]:
+    """Meta wins, then the config panel."""
+    from .utils import publish_overlay
+
+    cfg_fg, cfg_bg, cfg_effect, cfg_size, cfg_offset, cfg_band = publish_overlay(pub_cfg)
+    fg = (str(meta.get("thumbnail_overlay_fg") or "") or cfg_fg).strip()
+    bg = (str(meta.get("thumbnail_overlay_bg") or "") or cfg_bg).strip()
+    effect = (str(meta.get("thumbnail_overlay_effect") or "") or cfg_effect).strip()
+    size_pct = float(meta.get("thumbnail_overlay_size_pct") or 0) or cfg_size
+    offset = int(meta.get("thumbnail_overlay_offset") or 0) or cfg_offset
+    band_size = int(meta.get("thumbnail_overlay_band_size") or 0) or cfg_band
+    return fg, bg, effect, size_pct, offset, band_size
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────

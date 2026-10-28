@@ -56,7 +56,12 @@ def test_config_roundtrip_overlay_defaults(store):
 def test_resolve_overlay_defaults_falls_back_to_config(store):
     store["thumbnail_overlay_size_pct"] = 130
     store["thumbnail_overlay_offset"] = 15
-    fg, bg, effect, size_pct, offset = reg._resolve_overlay_defaults({}, store)
+    store["thumbnail_overlay_fg"] = "red"
+    store["thumbnail_overlay_bg"] = "black"
+    store["thumbnail_overlay_effect"] = "band"
+    store["thumbnail_overlay_band_size"] = 33
+    fg, bg, effect, size_pct, offset, band = reg._resolve_overlay_defaults({}, store)
+    assert (fg, bg, effect, band) == ("red", "black", "band", 33)
     assert size_pct == 130
     assert offset == 15
 
@@ -72,7 +77,7 @@ def _make_source(tmp_path: Path, overlay_title: str = "") -> str:
 def test_replace_base_image(tmp_path, store, monkeypatch):
     monkeypatch.setattr(reg, "_image", lambda: "image")
     monkeypatch.setattr(reg, "_resolve_overlay_defaults",
-                        lambda meta, cfg: ("", "", "", 0, 0))
+                        lambda meta, cfg: ("", "", "", 0, 0, 0))
     monkeypatch.setattr(reg, "_append_overlay_opts", lambda *a, **k: [])
 
     from PIL import Image

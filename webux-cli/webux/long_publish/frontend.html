@@ -123,13 +123,18 @@
     </div>
     <div class="row"><label>Thumbnail engine (image model)</label><input id="cfgThumbEngine" type="text" placeholder="leave empty for default"></div>
     <div class="cols2">
-      <div class="row"><label>Thumbnail overlay text color (fg)</label><input id="cfgThumbFg" type="text" placeholder="e.g. white / #ff0000"></div>
+      <div class="row"><label>Thumbnail overlay text color (fg)</label><input id="cfgThumbFg" type="text" placeholder="e.g. red"></div>
       <div class="row"><label>Thumbnail overlay background (bg)</label><input id="cfgThumbBg" type="text" placeholder="e.g. black / none"></div>
+    </div>
+    <div class="cols2">
+      <div class="row"><label>Overlay effect</label><select id="cfgThumbEffect"><option value="">— image default —</option><option>none</option><option>box</option><option>shadow</option><option>band</option></select></div>
+      <div class="row"><label>Band height (% of image)</label><input id="cfgThumbBand" type="number" min="1" max="80" step="1" placeholder="33 = a tall band"></div>
     </div>
     <div class="cols2">
       <div class="row"><label>Default overlay font size (× %)</label><input id="cfgThumbSizePct" type="number" min="10" max="400" step="5" placeholder="100 = default"></div>
       <div class="row"><label>Default overlay drop offset (% down)</label><input id="cfgThumbOffset" type="number" min="-50" max="80" step="1" placeholder="0 = default"></div>
     </div>
+    <div class="hint" style="margin-bottom:8px">These overlay settings apply automatically to every thumbnail (Publish and YT Thumbnail), even when this panel is closed.</div>
     <div class="row"><label>Modal usage URL</label><input id="cfgModalUrl" type="text"></div>
     <div class="checkrow"><input type="checkbox" id="cfgPinnedEnabled"><label style="margin:0">Auto-post pinned comment after upload (pin manually in Studio)</label></div>
     <div class="row"><label>Default pinned comment (long videos)</label><textarea id="cfgPinnedText" rows="2" placeholder="Posted automatically after each long upload"></textarea></div>
@@ -139,15 +144,6 @@
 
   <div class="main-layout">
     <div class="main-left">
-      <div class="row">
-        <label>Source video</label>
-        <select id="videoSel"><option value="">— select —</option></select>
-      </div>
-      <div class="video-wrap" id="videoWrap">
-        <video id="videoEl" controls></video>
-        <div class="video-name" id="videoName"></div>
-      </div>
-
       <div class="options-grid">
         <div class="opt checkrow"><label for="silenceMode" style="margin:0" title="Rhythm transcribes first (word-level JSON), then cuts silences while keeping speech rhythm. Local-only: unchecks 'Use Modal'.">Silences</label><select id="silenceMode"><option value="remove" selected>Remove silence</option><option value="rhythm">🎵 Rhythm (transcript first)</option><option value="keep">Keep silences</option></select></div>
         <div class="opt checkrow"><input type="checkbox" id="doNormalize"><label style="margin:0">Normalize volume</label></div>
@@ -173,10 +169,21 @@
       <div class="opt checkrow"><input type="checkbox" id="doPinnedComment"><label style="margin:0" title="Posts the comment right after upload (video still unlisted). Pin it manually in Studio via the comment link.">Post pinned comment after upload</label></div>
       <div class="row"><label>Pinned comment (overrides config default)</label><textarea id="pinnedCommentText" rows="2" placeholder="Leave empty to use the config default"></textarea></div>
 
-      <div class="publish-actions">
-        <button class="btn-go" id="startBtn">▶ Publish</button>
-        <button class="btn-resume" id="retryBtn" disabled title="Select a video that already has a publish log">↻ Retry</button>
-        <select id="thumbEngine" class="inline-select" title="Thumbnail engine for this run"></select>
+      <div class="upload-box" style="margin:12px 0;padding:10px;border:1px solid var(--border);border-radius:8px;">
+        <div class="row" style="margin-bottom:6px"><strong>Upload</strong> <span class="hint">The video is required only here, to process this file and send it to YouTube. Thumbnail tools below work with nothing selected.</span></div>
+        <div class="row">
+          <label>Video</label>
+          <select id="videoSel"><option value="">— select to upload —</option></select>
+        </div>
+        <div class="video-wrap" id="videoWrap">
+          <video id="videoEl" controls></video>
+          <div class="video-name" id="videoName"></div>
+        </div>
+        <div class="publish-actions">
+          <button class="btn-go" id="startBtn">▶ Publish</button>
+          <button class="btn-resume" id="retryBtn" disabled title="Select a video that already has a publish log">↻ Retry</button>
+          <select id="thumbEngine" class="inline-select" title="Thumbnail engine for this run"></select>
+        </div>
       </div>
 
       <div class="resume-box" id="resumeBox">
@@ -215,15 +222,16 @@
         <div class="row"><label>Drop offset (% down) <span class="hint">e.g. 10 = band + text +10%</span></label><input id="regenOffset" type="number" min="-50" max="80" step="1" placeholder="0 = default"></div>
       </div>
       <div class="cols2">
-        <div class="row">
-          <label>Select video (optional) — only needed to update YouTube</label>
-          <select id="thumbVidSel"><option value="">— select video (optional) —</option></select>
-        </div>
         <div class="row" style="align-self:flex-end; gap:8px;">
           <button class="btn-sec" id="regenImgBtn">🖼 Regenerate image</button>
           <button class="btn-sec" id="regenOverlayBtn">🏷 Regenerate overlay</button>
-          <button class="btn-go" id="pushYtBtn" disabled>🛠 Update YouTube</button>
         </div>
+      </div>
+      <div class="upload-box" style="margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:8px;">
+        <div class="row"><label>Video — required only to push this thumbnail to YouTube</label>
+          <select id="thumbVidSel"><option value="">— select to push —</option></select>
+        </div>
+        <div class="row"><button class="btn-go" id="pushYtBtn" disabled>🛠 Update YouTube</button></div>
       </div>
       <div class="row">
         <label>Replace base image (no overlay) from disk</label>
@@ -283,6 +291,8 @@ async function loadConfig(){
   el('cfgThumbEngine').value = c.thumbnail_engine||'';
   el('cfgThumbFg').value = c.thumbnail_overlay_fg||'';
   el('cfgThumbBg').value = c.thumbnail_overlay_bg||'';
+  el('cfgThumbEffect').value = c.thumbnail_overlay_effect||'';
+  el('cfgThumbBand').value = c.thumbnail_overlay_band_size||'';
   el('cfgThumbSizePct').value = c.thumbnail_overlay_size_pct||0;
   el('cfgThumbOffset').value = c.thumbnail_overlay_offset||0;
   el('cfgModalUrl').value = c.modal_usage_url||'';
@@ -328,6 +338,8 @@ async function saveConfig(){
     thumbnail_engine: el('cfgThumbEngine').value,
     thumbnail_overlay_fg: el('cfgThumbFg').value,
     thumbnail_overlay_bg: el('cfgThumbBg').value,
+    thumbnail_overlay_effect: el('cfgThumbEffect').value,
+    thumbnail_overlay_band_size: Number(el('cfgThumbBand').value) || 0,
     thumbnail_overlay_size_pct: Number(el('cfgThumbSizePct').value) || 0,
     thumbnail_overlay_offset: Number(el('cfgThumbOffset').value) || 0,
     long_pinned_comment_enabled: el('cfgPinnedEnabled').checked,
@@ -522,7 +534,7 @@ function startBody(){
 }
 
 el('startBtn').addEventListener('click', async ()=>{
-  if (!el('videoSel').value){ alert('Select a source video'); return; }
+  if (!el('videoSel').value){ alert('Select a video to upload'); return; }
   const r = await fetch(API+'/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(startBody()) });
   const data = await r.json();
   currentJob = data.job_id;
@@ -601,17 +613,19 @@ async function loadThumbVideos(){
   if (cur) sel.value = cur;
   applyDraftThumb(data.draft);
 }
+function pushReady(thumb){
+  el('pushYtBtn').dataset.thumbnail = thumb || '';
+  el('pushYtBtn').disabled = !(thumb && el('thumbVidSel').value);
+}
 function applyDraftThumb(draft){
   if (el('thumbVidSel').value) return;
   if (draft && draft.thumbnail){
     el('thumbCur').src = API+'/download?file='+encodeURIComponent(draft.thumbnail)+'&t='+Date.now();
     el('thumbCurWrap').style.display='block';
-    el('pushYtBtn').dataset.thumbnail = draft.thumbnail;
-    el('pushYtBtn').disabled = false;
+    pushReady(draft.thumbnail);
   } else {
     el('thumbCurWrap').style.display='none';
-    el('pushYtBtn').dataset.thumbnail = '';
-    el('pushYtBtn').disabled = true;
+    pushReady('');
   }
 }
 el('thumbVidSel').addEventListener('change', ()=>{
@@ -623,17 +637,14 @@ el('thumbVidSel').addEventListener('change', ()=>{
       if (v && v.thumbnail){
         el('thumbCurWrap').style.display='block';
         el('thumbCur').src = API+'/download?file='+encodeURIComponent(v.thumbnail)+'&t='+Date.now();
-        el('pushYtBtn').dataset.thumbnail = v.thumbnail;
-        el('pushYtBtn').disabled = false;
+        pushReady(v.thumbnail);
       } else if (data.draft && data.draft.thumbnail){
         el('thumbCurWrap').style.display='block';
         el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.draft.thumbnail)+'&t='+Date.now();
-        el('pushYtBtn').dataset.thumbnail = data.draft.thumbnail;
-        el('pushYtBtn').disabled = false;
+        pushReady(data.draft.thumbnail);
       } else {
         el('thumbCurWrap').style.display='none';
-        el('pushYtBtn').dataset.thumbnail = '';
-        el('pushYtBtn').disabled = true;
+        pushReady('');
       }
     });
 });
@@ -656,8 +667,10 @@ function regenThumbnail(mode){
       image_prompt: imagePrompt,
       engine: el('regenEngine').value,
       overlay_title: title,
-      overlay_fg: el('regenFg').value,
-      overlay_bg: el('regenBg').value,
+      overlay_fg: el('regenFg').value || el('cfgThumbFg').value,
+      overlay_bg: el('regenBg').value || el('cfgThumbBg').value,
+      overlay_effect: el('cfgThumbEffect').value,
+      overlay_band_size: Number(el('cfgThumbBand').value) || 0,
       overlay_size_pct: sizePct,
       overlay_offset: offset,
     };
@@ -667,8 +680,7 @@ function regenThumbnail(mode){
     el('regenOut').textContent = 'Done. New thumbnail: '+data.thumbnail;
     el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.thumbnail)+'&t='+Date.now();
     el('thumbCurWrap').style.display='block';
-    el('pushYtBtn').dataset.thumbnail = data.thumbnail;
-    el('pushYtBtn').disabled = false;
+    pushReady(data.thumbnail);
   };
 }
 el('regenImgBtn').addEventListener('click', regenThumbnail('image'));
@@ -689,8 +701,7 @@ el('replaceBaseBtn').addEventListener('click', async ()=>{
   el('regenOut').textContent = 'Done. New base: '+data.base;
   el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.thumbnail)+'&t='+Date.now();
   el('thumbCurWrap').style.display='block';
-  el('pushYtBtn').dataset.thumbnail = data.thumbnail;
-  el('pushYtBtn').disabled = false;
+  pushReady(data.thumbnail);
 });
 el('pushYtBtn').addEventListener('click', async ()=>{
   const source = el('thumbVidSel').value;
