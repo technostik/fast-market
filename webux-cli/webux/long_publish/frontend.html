@@ -166,6 +166,7 @@
       <div class="row"><label>Cut time (optional — trims the video tail at this point before processing)</label><input id="cutTime" type="text" placeholder="MM:SS (e.g. 1:30) — leave empty to skip"></div>
       <div class="row"><label>Source URLs (one per line)</label><textarea id="sourceUrls" rows="2"></textarea></div>
       <div class="row" id="overlayRow"><label>Thumbnail overlay title (optional, overrides prompt)</label><input id="thumbOverlayTitle" type="text"></div>
+      <div class="row"><label>Thumbnail overlay subtitle (optional — same font, one third smaller, top, centered, no band)</label><input id="thumbOverlaySubtitle" type="text"></div>
       <div class="opt checkrow"><input type="checkbox" id="doPinnedComment"><label style="margin:0" title="Posts the comment right after upload (video still unlisted). Pin it manually in Studio via the comment link.">Post pinned comment after upload</label></div>
       <div class="row"><label>Pinned comment (overrides config default)</label><textarea id="pinnedCommentText" rows="2" placeholder="Leave empty to use the config default"></textarea></div>
 
@@ -173,7 +174,10 @@
         <div class="row" style="margin-bottom:6px"><strong>Upload</strong> <span class="hint">The video is required only here, to process this file and send it to YouTube. Thumbnail tools below work with nothing selected.</span></div>
         <div class="row">
           <label>Video</label>
-          <select id="videoSel"><option value="">— select to upload —</option></select>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select id="videoSel" style="flex:1; width:auto; min-width:0;"><option value="">— select to upload —</option></select>
+            <button type="button" class="btn-sec" id="refreshVideosBtn" title="Reload the list and select the latest video" style="padding:4px 8px; flex-shrink:0;">🔄</button>
+          </div>
         </div>
         <div class="video-wrap" id="videoWrap">
           <video id="videoEl" controls></video>
@@ -213,6 +217,7 @@
         <div class="row"><label>Image engine</label><select id="regenEngine"><option value="">— config default —</option></select></div>
         <div class="row"><label>New overlay title <span class="hint">(used by "Regenerate overlay")</span></label><input id="regenOverlayTitle" type="text"></div>
       </div>
+      <div class="row"><label>Subtitle <span class="hint">(optional — top, centered, no band; empty keeps the stored one)</span></label><input id="regenOverlaySubtitle" type="text"></div>
       <div class="cols2">
         <div class="row"><label>Text color (fg)</label><input id="regenFg" type="text" placeholder="from config if empty"></div>
         <div class="row"><label>Background (bg)</label><input id="regenBg" type="text" placeholder="from config if empty"></div>
@@ -369,7 +374,7 @@ async function saveConfig(){
   await loadThumbVideos();
 }
 
-async function loadVideos(){
+async function loadVideos(selectLatest){
   const path = el('cfgSourcePath').value || '';
   const ext = el('cfgExt').value || '';
   const r = await fetch(API+'/list-videos?path='+encodeURIComponent(path)+'&extensions='+encodeURIComponent(ext)).catch(()=>null);
@@ -378,8 +383,13 @@ async function loadVideos(){
   const opts = (v)=>`<option value="${v.path}" ${v.resumable?'data-resumable="1"':''}>${v.name}${v.resumable?' ↻':''}</option>`;
   const sel = el('videoSel');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— select —</option>' + videos.map(opts).join('');
-  if (cur) sel.value = cur;
+  sel.innerHTML = '<option value="">— select to upload —</option>' + videos.map(opts).join('');
+  // The list is newest first, so the latest video is the first entry.
+  const pick = (selectLatest && videos.length) ? videos[0].path : (videos.some(v=>v.path===cur) ? cur : '');
+  if (pick){
+    sel.value = pick;
+    if (pick !== cur) sel.dispatchEvent(new Event('change'));
+  }
 }
 
 // Gate the quick prompt on transcript availability for the selected video.
@@ -437,6 +447,7 @@ async function populateConfigPrompts(){
   } catch(e){ /* list-prompts unavailable */ }
 }
 
+el('refreshVideosBtn').addEventListener('click', ()=>loadVideos(true));
 el('videoSel').addEventListener('change', ()=>{
   const path = el('videoSel').value;
   if (path){
@@ -504,6 +515,7 @@ async function checkResume(source){
   el('descPrefix').value = data.description_prefix||'';
   el('sourceUrls').value = (data.source_urls||[]).join('\n');
   el('thumbOverlayTitle').value = data.thumbnail_overlay_title||'';
+  el('thumbOverlaySubtitle').value = data.thumbnail_overlay_subtitle||'';
 }
 
 function startBody(){
@@ -528,6 +540,7 @@ function startBody(){
     do_pinned_comment: el('doPinnedComment').checked,
     pinned_comment_text: el('pinnedCommentText').value,
     thumbnail_overlay_title: el('thumbOverlayTitle').value,
+    thumbnail_overlay_subtitle: el('thumbOverlaySubtitle').value,
     thumbnail_engine: el('thumbEngine').value,
     profile: currentProfile(),
   };
@@ -667,6 +680,7 @@ function regenThumbnail(mode){
       image_prompt: imagePrompt,
       engine: el('regenEngine').value,
       overlay_title: title,
+      overlay_subtitle: el('regenOverlaySubtitle').value,
       overlay_fg: el('regenFg').value || el('cfgThumbFg').value,
       overlay_bg: el('regenBg').value || el('cfgThumbBg').value,
       overlay_effect: el('cfgThumbEffect').value,

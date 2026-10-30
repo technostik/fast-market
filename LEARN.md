@@ -27,6 +27,12 @@
 - `completed_steps` in `*-long-meta.json` is the resume log. The next run starts at the first index that is neither completed nor skipped. For this video that is step 3, Generate thumbnail.
 - An empty thumbnail engine follows the image CLI default. On this profile that default is `flux2cloud`, so a retry without picking `flux2` hits the same quota.
 
+## 2026-10-28 — thumbnail subtitle and video refresh
+
+- `image overlay` / `image generate` take `--subtitle`. It is a second pass on the same family and style, at two thirds of the title's resolved point size, top-centered, effect `none`. It is skipped when `--title` is empty.
+- Long Publish and YT Thumbnail send that flag from their subtitle fields. A blank regenerate/edit field keeps `thumbnail_overlay_subtitle` from the meta; Apply overlay in YT Thumbnail treats a blank field as clearing it.
+- The Upload video list is newest-first (`mtime` descending). The 🔄 button reloads it and selects `videos[0]`. The 10s poll keeps the current selection.
+
 ## 2026-10-28 — thumbnail overlay defaults
 
 - Blue text on a small green band is the image CLI built-in overlay (`fg: blue`, `bg: light green`, `band_size: 8`). The long-publish config panel had red/black on the `joriel` profile only, and the publish pipeline passed fg/bg but never the band height.

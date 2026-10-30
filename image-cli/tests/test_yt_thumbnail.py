@@ -300,13 +300,14 @@ class TestConfigEndpoint:
         yt_thumb._save_meta(src, {"title": "hello"})
         meta = yt_thumb._update_meta_after(
             src, "/t/v_thumb_overlay_1.png", "/t/v_thumb_1.png", 1,
-            prompt="a scene", overlay_title="SALE",
+            prompt="a scene", overlay_title="SALE", overlay_subtitle="detail",
         )
         assert meta["title"] == "hello"  # other keys preserved
         assert meta["files"]["thumbnail"] == "/t/v_thumb_overlay_1.png"
         assert meta["files"]["thumbnail_base"] == "/t/v_thumb_1.png"
         assert meta["thumbnail_prompt"] == "a scene"
         assert meta["thumbnail_overlay_title"] == "SALE"
+        assert meta["thumbnail_overlay_subtitle"] == "detail"
         stored = json.loads((video_dir / "video-long-meta.json").read_text())
         assert stored["thumbnail_version"] == 1
 

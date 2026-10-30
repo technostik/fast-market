@@ -113,6 +113,11 @@ def test_needs_webm_migration(raw, expected):
     assert pub_utils._needs_webm_migration(raw) is expected
 
 
+def test_append_subtitle_flag():
+    assert pub_utils.append_subtitle_flag(["image", "overlay"], "  ") == ["image", "overlay"]
+    assert pub_utils.append_subtitle_flag(["image"], " line ") == ["image", "--subtitle", "line"]
+
+
 def test_needs_webm_migration_rejects_non_string():
     with pytest.raises(ConfigError):
         pub_utils._needs_webm_migration(["mp4", "mkv"])

@@ -293,6 +293,10 @@ def resolve_font_path(family: str, style: str = "normal") -> str:
     return "PIL default font"
 
 
+# One third smaller than the title's resolved point size (two thirds of it).
+_SUBTITLE_SIZE_RATIO = 2 / 3
+
+
 def _draw_band(draw: ImageDraw.ImageDraw, rect: tuple[int, int, int, int], bg: RGB, peak: int = 235) -> None:
     """Draw a full-width horizontal band with a wide Gaussian (reverse-U) curve.
 
@@ -323,11 +327,15 @@ def apply_text_overlay(
     cfg: TextOverlayConfig,
     font_family: str | None = None,
     font_style: str | None = None,
+    subtitle: str = "",
 ) -> Image.Image:
     """Superimpose ``cfg.text`` onto ``image`` and return a new image.
 
     Effects are drawn using the background color (``cfg.bg``); when ``bg``
     resolves to ``None`` the background effect is skipped.
+
+    A non-empty ``subtitle`` is a second pass: the same family and style,
+    one third smaller, top-centered, with no band and no offset.
     """
     if not cfg.enabled or not cfg.text:
         return image
@@ -418,4 +426,26 @@ def apply_text_overlay(
     combined = Image.alpha_composite(base, overlay)
     if image.mode != "RGBA":
         combined = combined.convert(image.mode)
+
+    sub = (subtitle or "").strip()
+    if sub:
+        sub_cfg = TextOverlayConfig(
+            enabled=True,
+            text=sub,
+            vpos="top",
+            hpos="center",
+            size=str(max(4, int(round(font_size * _SUBTITLE_SIZE_RATIO)))),
+            fg=cfg.fg,
+            bg="none",
+            effect="none",
+            style=style,
+            size_pct=100,
+            offset_pct=0,
+        )
+        combined = apply_text_overlay(
+            combined,
+            sub_cfg,
+            font_family=family,
+            font_style=style,
+        )
     return combined

@@ -110,6 +110,7 @@ class Job:
     pinned_comment_text: str = ""
     source_urls: list[str] = field(default_factory=list)
     thumbnail_overlay_title: str = ""
+    thumbnail_overlay_subtitle: str = ""
     thumbnail_prompt: str = ""
     thumbnail_engine: str = ""
     stop_requested: bool = False

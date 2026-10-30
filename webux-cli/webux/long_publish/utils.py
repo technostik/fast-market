@@ -84,6 +84,17 @@ def _migrate_publish_cfg_if_needed(profile: str | None = None) -> bool:
         return True
 
 
+def append_subtitle_flag(cmd: list[str], subtitle: str = "") -> list[str]:
+    """Append ``--subtitle`` when the text is non-empty.
+
+    The image CLI draws it only together with ``--title``.
+    """
+    text = (subtitle or "").strip()
+    if text:
+        cmd += ["--subtitle", text]
+    return cmd
+
+
 def append_overlay_flags(
     cmd: list[str],
     fg: str = "",
@@ -162,6 +173,8 @@ def _save_meta(job) -> None:
         meta["profile"] = job.profile
     if job.thumbnail_overlay_title:
         meta["thumbnail_overlay_title"] = job.thumbnail_overlay_title
+    if getattr(job, "thumbnail_overlay_subtitle", ""):
+        meta["thumbnail_overlay_subtitle"] = job.thumbnail_overlay_subtitle
     if job.thumbnail_prompt:
         meta["thumbnail_prompt"] = job.thumbnail_prompt
     if job.do_generate_thumbnail is not True:

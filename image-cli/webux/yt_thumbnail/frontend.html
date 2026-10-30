@@ -82,6 +82,7 @@ input[type=range] { flex:1; padding:0; }
       <div class="card">
         <h3>🏷️ Overlay text (long_publish style)</h3>
         <div class="row"><label>Title</label><input id="ovTitle" type="text"></div>
+        <div class="row"><label>Subtitle</label><input id="ovSubtitle" type="text" placeholder="optional — same font, ⅓ smaller, top, centered, no band"></div>
         <div class="row"><label>Text color (fg)</label><input id="ovFg" type="text" placeholder="e.g. white / #ff0000"></div>
         <div class="row"><label>Background (bg)</label><input id="ovBg" type="text" placeholder="e.g. black / none"></div>
         <div class="row"><label>Effect</label><select id="ovEffect"><option value="">— default —</option><option>none</option><option>box</option><option>shadow</option><option>band</option></select></div>
@@ -249,6 +250,8 @@ async function refreshCurrent() {
   const r = await fetch(API + '/history');
   const d = await r.json();
   rememberThumb(d.current, d.base);
+  if (d.overlay_title && !el('ovTitle').value) el('ovTitle').value = d.overlay_title;
+  if (d.overlay_subtitle && !el('ovSubtitle').value) el('ovSubtitle').value = d.overlay_subtitle;
   const strip = el('histStrip'); strip.innerHTML = '';
   (d.versions || []).slice().reverse().forEach(v => {
     const im = document.createElement('img'); im.src = imgUrl(v.path); im.title = v.name;
@@ -283,7 +286,7 @@ el('composeBtn').onclick = async () => {
   const refs = sourcePaths();
   if (!el('promptInp').value.trim()) { status('Enter a prompt', 'err'); return; }
   const body = { prompt: el('promptInp').value.trim(), engine: el('engineSel').value,
-    sources: refs, title: el('ovTitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
+    sources: refs, title: el('ovTitle').value.trim(), subtitle: el('ovSubtitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
   status('Composing… (live log in the Console below)');
   const d = await runJob(API + '/compose', body, el('composeOut'), 'Composing…');
   clearBusy();
@@ -298,7 +301,7 @@ el('editBtn').onclick = async () => {
   if (!el('editPrompt').value.trim()) { status('Describe the small change', 'err'); return; }
   const body = { prompt: el('editPrompt').value.trim(), base: window._pickedBase || '',
     engine: el('engineSel').value, strength: Number(el('strengthInp').value),
-    title: el('ovTitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
+    title: el('ovTitle').value.trim(), subtitle: el('ovSubtitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
   status('Editing… (live log in the Console below)');
   const d = await runJob(API + '/edit', body, el('editOut'), 'Editing…');
   clearBusy();
@@ -311,7 +314,7 @@ el('editBtn').onclick = async () => {
 
 el('overlayBtn').onclick = async () => {
   if (!el('ovTitle').value.trim()) { status('Enter an overlay title', 'err'); return; }
-  const body = { base: window._pickedBase || '', title: el('ovTitle').value.trim(), overlay: overlayOpts() };
+  const body = { base: window._pickedBase || '', title: el('ovTitle').value.trim(), subtitle: el('ovSubtitle').value.trim(), overlay: overlayOpts() };
   status('Applying overlay… (live log in the Console below)');
   const d = await runJob(API + '/overlay', body, el('overlayOut'), 'Applying…');
   clearBusy();

@@ -42,6 +42,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.argument("IMAGE", type=click.Path(exists=True))
     @click.option("--title", "-T", required=True, help="Text to superimpose on the image")
     @click.option(
+        "--subtitle",
+        default="",
+        help="Optional second line: same font, one third smaller, top center, no band",
+    )
+    @click.option(
         "--position",
         type=click.Choice(_POSITIONS),
         default=None,
@@ -112,6 +117,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         ctx,
         image,
         title,
+        subtitle,
         position,
         output,
         overlay_size,
@@ -153,6 +159,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             overlay_cfg,
             font_family=config.overlay.font,
             font_style=overlay_style or config.overlay.style,
+            subtitle=subtitle or "",
         )
 
         click.echo(

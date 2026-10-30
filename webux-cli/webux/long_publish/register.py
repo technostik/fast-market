@@ -42,6 +42,7 @@ from .utils import (
     _ass_to_plain_text,
     _validate_urls,
     _extract_video_id,
+    append_subtitle_flag,
 )
 from .pipeline import _run_pipeline_from, _run_job_safely  # noqa: E402
 
@@ -75,7 +76,7 @@ def _validate_rhythm_options(rhythm_silence: bool, use_modal: bool, transcript_m
         )
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", thumbnail_overlay_subtitle: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None) -> Job:
     """Create (but do not start) a publish Job. Respects publish config for
     default prompts etc."""
     if not profile:
@@ -105,6 +106,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_pinned_comment=do_pinned_comment if do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=pinned_comment_text if pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
         thumbnail_overlay_title=thumbnail_overlay_title,
+        thumbnail_overlay_subtitle=thumbnail_overlay_subtitle,
         steps=[Step(name=n) for n in step_names],
     )
     _jobs[job_id] = job
@@ -449,6 +451,7 @@ class StartRequest(BaseModel):
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
     thumbnail_overlay_title: str = ""
+    thumbnail_overlay_subtitle: str = ""
     thumbnail_engine: str = ""
     profile: str = ""
 
@@ -473,6 +476,7 @@ class ResumeRequest(BaseModel):
     description_prefix: str = ""
     source_urls: list[str] = []
     thumbnail_overlay_title: str = ""
+    thumbnail_overlay_subtitle: str = ""
     thumbnail_engine: str = ""
 
 
@@ -520,6 +524,7 @@ async def start(req: StartRequest):
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
         thumbnail_overlay_title=req.thumbnail_overlay_title,
+        thumbnail_overlay_subtitle=req.thumbnail_overlay_subtitle,
         thumbnail_engine=req.thumbnail_engine.strip(),
         steps=[Step(name=n) for n in step_names],
     )
@@ -611,6 +616,7 @@ async def resume(req: ResumeRequest):
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
         thumbnail_overlay_title=req.thumbnail_overlay_title or meta.get("thumbnail_overlay_title", ""),
+        thumbnail_overlay_subtitle=req.thumbnail_overlay_subtitle or meta.get("thumbnail_overlay_subtitle", ""),
         thumbnail_engine=req.thumbnail_engine.strip(),
         steps=[Step(name=n) for n in step_names],
         files=files,
@@ -667,6 +673,7 @@ async def check_resume(body: dict):
         "source_urls": meta.get("source_urls", []),
         "description_prefix": meta.get("description_prefix", ""),
         "thumbnail_overlay_title": meta.get("thumbnail_overlay_title", ""),
+        "thumbnail_overlay_subtitle": meta.get("thumbnail_overlay_subtitle", ""),
     }
 
 
@@ -717,6 +724,7 @@ async def review_info(body: dict):
         "description_prefix": meta.get("description_prefix", ""),
         "source_urls": meta.get("source_urls", []),
         "thumbnail_overlay_title": meta.get("thumbnail_overlay_title", ""),
+        "thumbnail_overlay_subtitle": meta.get("thumbnail_overlay_subtitle", ""),
         "video_url": meta.get("video_url", ""),
         "studio_url": meta.get("studio_url", ""),
         "pinned_comment_id": meta.get("pinned_comment_id", ""),
@@ -783,6 +791,7 @@ async def list_thumbnails(
             "thumbnail": draft_thumb,
             "base": draft_files.get("thumbnail_base", ""),
             "overlay_title": draft.get("thumbnail_overlay_title", ""),
+            "overlay_subtitle": draft.get("thumbnail_overlay_subtitle", ""),
         } if draft_thumb else None,
     }
 
@@ -793,6 +802,7 @@ class RegenThumbRequest(BaseModel):
     image_prompt: str = ""   # explicit base image prompt (full regeneration)
     engine: str = ""         # image generation engine override (empty = use config default)
     overlay_title: str = ""  # overlay text to (re)apply (optional)
+    overlay_subtitle: str = ""  # second line; empty keeps the stored subtitle
     overlay_fg: str = ""
     overlay_bg: str = ""
     overlay_effect: str = ""
@@ -986,6 +996,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
 
     image_prompt = req.image_prompt.strip()
     overlay_title = req.overlay_title.strip()
+    overlay_subtitle = req.overlay_subtitle.strip() or str(meta.get("thumbnail_overlay_subtitle") or "").strip()
     fg, bg, effect, size_pct, offset, band_size = _resolve_overlay(req, pub_cfg)
 
     # Decide what to do based on the explicit mode (or auto-detect).
@@ -1035,6 +1046,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
             cmd += ["--engine", thumb_engine]
         if overlay_title:
             cmd += ["--title", overlay_title]
+            cmd = append_subtitle_flag(cmd, overlay_subtitle)
         cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset, band_size)
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -1061,6 +1073,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
 
         if base_exists:
             cmd = [_image(), "overlay", str(Path(base).expanduser().resolve()), "--title", overlay_title, "-F", "json"]
+            cmd = append_subtitle_flag(cmd, overlay_subtitle)
             cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset, band_size)
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -1090,6 +1103,7 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
             cmd = [_image(), "generate", fallback_prompt, "--size", "youtube", "-F", "json", "--output-dir", str(out_dir), "--title", overlay_title]
             if thumb_engine:
                 cmd += ["--engine", thumb_engine]
+            cmd = append_subtitle_flag(cmd, overlay_subtitle)
             cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset, band_size)
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -1111,6 +1125,10 @@ async def regenerate_thumbnail(req: RegenThumbRequest):
     meta["thumbnail_version"] = new_version
     if overlay_title:
         meta["thumbnail_overlay_title"] = overlay_title
+        if overlay_subtitle:
+            meta["thumbnail_overlay_subtitle"] = overlay_subtitle
+        else:
+            meta.pop("thumbnail_overlay_subtitle", None)
     try:
         if source:
             p = Path(source).parent / f"{Path(source).stem}-long-meta.json"
@@ -1243,10 +1261,12 @@ async def replace_base_image(
 
     fg, bg, effect, size_pct, offset, band_size = _resolve_overlay_defaults(meta, pub_cfg)
     overlay_title = meta.get("thumbnail_overlay_title", "").strip()
+    overlay_subtitle = str(meta.get("thumbnail_overlay_subtitle") or "").strip()
 
     new_path = new_base
     if overlay_title:
         cmd = [_image(), "overlay", new_base, "--title", overlay_title, "-F", "json"]
+        cmd = append_subtitle_flag(cmd, overlay_subtitle)
         cmd = _append_overlay_opts(cmd, fg, bg, effect, size_pct, offset, band_size)
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

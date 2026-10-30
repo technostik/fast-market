@@ -126,6 +126,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Text to superimpose on the generated image",
     )
     @click.option(
+        "--subtitle",
+        default=None,
+        help="Optional second line, drawn with --title: same font, one third smaller, top center, no band",
+    )
+    @click.option(
         "--position",
         type=click.Choice(
             [
@@ -227,6 +232,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         output_dir,
         fmt,
         title,
+        subtitle,
         position,
         overlay_size,
         overlay_fg,
@@ -360,6 +366,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             )
             base_path = result.path
 
+            if (subtitle or "").strip() and not title:
+                click.echo("--subtitle is ignored unless --title is set", err=True)
+
             if title:
                 vpos = config.overlay.vpos
                 hpos = config.overlay.hpos
@@ -386,6 +395,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     overlay_cfg,
                     font_family=config.overlay.font,
                     font_style=overlay_style or config.overlay.style,
+                    subtitle=subtitle or "",
                 )
 
                 # Save the overlayed image separately; keep the base (no-overlay)

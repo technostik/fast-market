@@ -37,6 +37,7 @@ class TestCLICommands:
         assert "--size" in result.output
         assert "--steps" in result.output
         assert "--title" in result.output
+        assert "--subtitle" in result.output
         assert "--position" in result.output
         assert "--overlay-effect" in result.output
         assert "--overlay-bg" in result.output
@@ -76,6 +77,7 @@ class TestCLICommands:
         assert result.exit_code == 0
         assert "IMAGE" in result.output
         assert "--title" in result.output
+        assert "--subtitle" in result.output
         assert "--position" in result.output
         assert "--overlay-effect" in result.output
         assert "--overlay-style" in result.output

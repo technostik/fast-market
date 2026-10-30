@@ -173,6 +173,59 @@ class TestApplyTextOverlay:
         g_top, g_bottom = self._ink_rows(bigger)
         assert (g_bottom - g_top) > (b_bottom - b_top)
 
+    def test_blank_subtitle_is_a_noop(self):
+        cfg = TextOverlayConfig(
+            enabled=True, text="TITLE", size="48", fg="white",
+            bg="none", effect="none",
+        )
+        plain = apply_text_overlay(self._img(), cfg, font_family="DejaVuSans")
+        blank = apply_text_overlay(self._img(), cfg, font_family="DejaVuSans", subtitle="  ")
+        assert list(plain.getdata()) == list(blank.getdata())
+
+    def test_subtitle_is_smaller_top_centered_and_has_no_band(self):
+        img = Image.new("RGB", (900, 500), (0, 0, 0))
+        cfg = TextOverlayConfig(
+            enabled=True, text="TITLE", vpos="bottom", hpos="center",
+            size="90", fg="white", bg="red", effect="band", band_size=30,
+        )
+        out = apply_text_overlay(img, cfg, font_family="DejaVuSans", subtitle="TITLE")
+        arr = out.load()
+        white_xs = []
+        red = 0
+        for y in range(110):
+            for x in range(900):
+                p = arr[x, y]
+                if p[0] > 200 and p[1] > 200 and p[2] > 200:
+                    white_xs.append(x)
+                elif p[0] > 150 and p[1] < 80 and p[2] < 80:
+                    red += 1
+        assert len(white_xs) > 20
+        assert red == 0
+        assert abs((min(white_xs) + max(white_xs)) / 2 - 450) < 40
+
+        title_only = apply_text_overlay(
+            img,
+            TextOverlayConfig(
+                enabled=True, text="TITLE", vpos="bottom", hpos="center",
+                size="90", fg="white", bg="none", effect="none",
+            ),
+            font_family="DejaVuSans",
+        )
+
+        def ink_height(im, y0, y1):
+            pixels = im.load()
+            ys = [
+                y for y in range(y0, y1)
+                for x in range(0, 900, 2)
+                if pixels[x, y] != (0, 0, 0)
+            ]
+            return (max(ys) - min(ys) + 1) if ys else 0
+
+        title_h = ink_height(title_only, 250, 500)
+        sub_h = ink_height(out, 0, 160)
+        assert title_h > 0 and sub_h > 0
+        assert 0.5 < (sub_h / title_h) < 0.85
+
 
 class TestSaveOutput:
     def test_default_suffix(self, tmp_path):

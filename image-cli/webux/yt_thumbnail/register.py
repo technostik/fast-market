@@ -282,6 +282,7 @@ class ComposeRequest(BaseModel):
     steps: int | None = None
     guidance: float | None = None
     title: str = ""  # overlay text applied at generation time
+    subtitle: str = ""  # second line; empty means none on this compose
     overlay: OverlayOptions = OverlayOptions()
 
 
@@ -295,6 +296,7 @@ class EditRequest(BaseModel):
     steps: int | None = None
     guidance: float | None = None
     title: str = ""  # re-applied overlay after the edit (empty = keep stored)
+    subtitle: str = ""  # empty = keep the stored subtitle
     overlay: OverlayOptions = OverlayOptions()
 
 
@@ -302,6 +304,7 @@ class OverlayRequest(BaseModel):
     source: str = ""
     base: str = ""  # empty = current thumbnail_base (else explicit image path)
     title: str = ""
+    subtitle: str = ""  # empty clears the subtitle on this apply
     overlay: OverlayOptions = OverlayOptions()
 
 
@@ -373,6 +376,7 @@ async def list_videos(
             "thumbnail_base": base,
             "video_url": meta.get("video_url", ""),
             "overlay_title": meta.get("thumbnail_overlay_title", ""),
+            "overlay_subtitle": meta.get("thumbnail_overlay_subtitle", ""),
             "prompt": meta.get("thumbnail_prompt", ""),
             "has_thumbnail": bool(thumb and Path(thumb).expanduser().exists()),
         })
@@ -393,6 +397,8 @@ async def history(source: str = Query(default="")):
         "source": str(src),
         "current": (meta.get("files", {}) or {}).get("thumbnail", ""),
         "base": (meta.get("files", {}) or {}).get("thumbnail_base", ""),
+        "overlay_title": meta.get("thumbnail_overlay_title", ""),
+        "overlay_subtitle": meta.get("thumbnail_overlay_subtitle", ""),
         "versions": [
             {"path": str(f.resolve()), "name": f.name, "mtime": f.stat().st_mtime}
             for f in thumbs
@@ -521,7 +527,7 @@ async def job_status(job_id: str):
 
 def _update_meta_after(
     source: Path, new_path: str, new_base: str, version: int,
-    prompt: str = "", overlay_title: str = "",
+    prompt: str = "", overlay_title: str = "", overlay_subtitle: str | None = None,
 ) -> dict:
     meta = _load_meta(source)
     files = dict(meta.get("files", {}) or {})
@@ -534,6 +540,12 @@ def _update_meta_after(
         meta["thumbnail_prompt"] = prompt
     if overlay_title:
         meta["thumbnail_overlay_title"] = overlay_title
+    if overlay_subtitle is not None:
+        text = overlay_subtitle.strip()
+        if text:
+            meta["thumbnail_overlay_subtitle"] = text
+        else:
+            meta.pop("thumbnail_overlay_subtitle", None)
     _save_meta(source, meta)
     return meta
 
@@ -591,8 +603,12 @@ async def _compose_worker(
             cmd += ["--steps", str(req.steps)]
         if req.guidance is not None:
             cmd += ["--guidance-scale", str(req.guidance)]
-        if req.title.strip():
-            cmd += ["--title", req.title.strip()]
+        title = req.title.strip()
+        subtitle = req.subtitle.strip()
+        if title:
+            cmd += ["--title", title]
+            if subtitle:
+                cmd += ["--subtitle", subtitle]
         cmd = _overlay_opts(
             cmd, ov.fg.strip(), ov.bg.strip(), ov.effect.strip(), ov.style.strip(),
             ov.band_size, ov.size_pct, ov.offset, ov.position.strip(),
@@ -607,7 +623,10 @@ async def _compose_worker(
         if not new_path or not Path(new_path).expanduser().exists():
             raise RuntimeError("output path not found in command output")
         new_path, new_base = _place_thumb(out_dir, stem, new_path, new_base, version)
-        _update_meta_after(source, new_path, new_base, version, prompt, req.title.strip())
+        _update_meta_after(
+            source, new_path, new_base, version, prompt, title,
+            overlay_subtitle=subtitle if title else None,
+        )
         _finish_job(
             job_id,
             {"thumbnail": new_path, "base": new_base, "version": version},
@@ -664,6 +683,7 @@ async def _edit_worker(
         version = _next_version(out_dir, stem)
         ov = _fill_overlay(req.overlay)
         overlay_title = req.title.strip() or meta.get("thumbnail_overlay_title", "").strip()
+        overlay_subtitle = req.subtitle.strip() or str(meta.get("thumbnail_overlay_subtitle") or "").strip()
 
         cmd = [_image(), "generate", prompt, "--size", "youtube", "-F", "json", "-v",
                "--output-dir", str(out_dir)]
@@ -683,6 +703,8 @@ async def _edit_worker(
             cmd += ["-R", base]
         if overlay_title:
             cmd += ["--title", overlay_title]
+            if overlay_subtitle:
+                cmd += ["--subtitle", overlay_subtitle]
         cmd = _overlay_opts(
             cmd, ov.fg.strip(), ov.bg.strip(), ov.effect.strip(), ov.style.strip(),
             ov.band_size, ov.size_pct, ov.offset, ov.position.strip(),
@@ -697,7 +719,10 @@ async def _edit_worker(
         if not new_path or not Path(new_path).expanduser().exists():
             raise RuntimeError("output path not found in command output")
         new_path, new_base = _place_thumb(out_dir, stem, new_path, new_base, version)
-        _update_meta_after(source, new_path, new_base or base, version, prompt, overlay_title)
+        _update_meta_after(
+            source, new_path, new_base or base, version, prompt, overlay_title,
+            overlay_subtitle=overlay_subtitle if overlay_title else None,
+        )
         _finish_job(
             job_id,
             {
@@ -749,7 +774,10 @@ async def _overlay_worker(
         stem = source.stem
         version = int(meta.get("thumbnail_version", 0) or 0)
         ov = _fill_overlay(req.overlay)
+        subtitle = req.subtitle.strip()
         cmd = [_image(), "overlay", base, "--title", title, "-F", "json"]
+        if subtitle:
+            cmd += ["--subtitle", subtitle]
         cmd = _overlay_opts(
             cmd, ov.fg.strip(), ov.bg.strip(), ov.effect.strip(), ov.style.strip(),
             ov.band_size, ov.size_pct, ov.offset, ov.position.strip(),
@@ -762,7 +790,7 @@ async def _overlay_worker(
         # Overlay reuses the current version slot (same base, new text).
         new_path, renamed_base = _place_thumb(out_dir, stem, new_path, base, version or 1)
         _update_meta_after(source, new_path, renamed_base or base, version or 1,
-                           overlay_title=title)
+                           overlay_title=title, overlay_subtitle=subtitle)
         _finish_job(job_id, {"thumbnail": new_path, "base": renamed_base or base})
     except Exception as exc:
         _finish_job(job_id, error=str(exc))

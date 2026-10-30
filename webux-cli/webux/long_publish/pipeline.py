@@ -543,7 +543,9 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             cmd += ["--title", overlay_title]
         # Config-panel overlay (red on a tall black band, when that is what
         # was saved) applies even if the panel is closed.
-        from .utils import append_overlay_flags, publish_overlay
+        from .utils import append_overlay_flags, append_subtitle_flag, publish_overlay
+        if overlay_title:
+            cmd = append_subtitle_flag(cmd, job.thumbnail_overlay_subtitle)
         fg, bg, effect, size_pct, offset, band_size = publish_overlay(pub_cfg)
         cmd = append_overlay_flags(cmd, fg, bg, effect, size_pct, offset, band_size)
 
