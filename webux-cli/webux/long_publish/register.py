@@ -22,6 +22,7 @@ from .models import (
     Step,
     STEP_NAMES,
     RHYTHM_STEP_NAMES,
+    MAX_TITLE_LEN,
     rhythm_params_from_pub,
     DEFAULT_VIDEO_SOURCE_PATH,
     DEFAULT_VIDEO_EXTENSIONS,
@@ -44,7 +45,7 @@ from .utils import (
     _extract_video_id,
     append_subtitle_flag,
 )
-from .pipeline import _run_pipeline_from, _run_job_safely  # noqa: E402
+from .pipeline import _run_pipeline_from, _run_job_safely, _compose_description  # noqa: E402
 
 router = APIRouter()
 
@@ -76,7 +77,29 @@ def _validate_rhythm_options(rhythm_silence: bool, use_modal: bool, transcript_m
         )
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", thumbnail_overlay_subtitle: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None) -> Job:
+def _validate_manual_title(title_override: str, rhythm_silence: bool) -> str:
+    """Validate a forced title; returns it stripped (``""`` = AI-generated).
+
+    A forced title disables the Whisper pass, so rhythm mode (which cuts with
+    the word-level transcript) cannot run with it.
+    """
+    title = (title_override or "").strip()
+    if not title:
+        return ""
+    if len(title) > MAX_TITLE_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Manual title is {len(title)} chars; YouTube allows {MAX_TITLE_LEN}. Shorten it before running.",
+        )
+    if rhythm_silence:
+        raise HTTPException(
+            status_code=400,
+            detail="A manual title disables rhythm silence mode (it needs the word-level transcript). Pick 'Remove silence' or clear the title.",
+        )
+    return title
+
+
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", thumbnail_overlay_subtitle: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, title_override: str = "", description_override: str = "", profile: str | None = None) -> Job:
     """Create (but do not start) a publish Job. Respects publish config for
     default prompts etc."""
     if not profile:
@@ -98,6 +121,8 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         privacy=privacy,
         description_prefix=description_prefix,
         source_urls=source_urls or [],
+        title_override=title_override,
+        description_override=description_override,
         skip_upload=skip_upload,
         use_modal=use_modal,
         do_normalize_volume=do_normalize_volume,
@@ -453,6 +478,8 @@ class StartRequest(BaseModel):
     thumbnail_overlay_title: str = ""
     thumbnail_overlay_subtitle: str = ""
     thumbnail_engine: str = ""
+    title_override: str = ""
+    description_override: str = ""
     profile: str = ""
 
 
@@ -478,6 +505,10 @@ class ResumeRequest(BaseModel):
     thumbnail_overlay_title: str = ""
     thumbnail_overlay_subtitle: str = ""
     thumbnail_engine: str = ""
+    # None = caller omitted the field (fall back to the meta log);
+    # "" = explicitly cleared (back to AI generation).
+    title_override: str | None = None
+    description_override: str | None = None
 
 
 def _job_rhythm_params(pub: dict) -> dict[str, float]:
@@ -498,6 +529,8 @@ async def start(req: StartRequest):
     pub = _load_publish_cfg(profile)
     transcript_mode = pub.get("transcript_mode", "normal")
     _validate_rhythm_options(req.rhythm_silence, req.use_modal, transcript_mode, req.do_remove_silence)
+    title_override = _validate_manual_title(req.title_override, req.rhythm_silence)
+    description_override = (req.description_override or "").strip()
     job_id = str(uuid.uuid4())
     step_names = RHYTHM_STEP_NAMES if req.rhythm_silence else STEP_NAMES
     job = Job(
@@ -516,6 +549,8 @@ async def start(req: StartRequest):
         privacy=req.privacy,
         description_prefix=req.description_prefix,
         source_urls=_validate_urls(req.source_urls),
+        title_override=title_override,
+        description_override=description_override,
         skip_upload=req.skip_upload,
         use_modal=req.use_modal,
         do_normalize_volume=req.do_normalize_volume,
@@ -556,8 +591,20 @@ async def resume(req: ResumeRequest):
 
     from_step = max(1, min(req.from_step, len(STEP_NAMES) - 1))
 
-    # Validate required artifacts exist for the requested entry point
-    if from_step >= 2:
+    # Manual mode carries over from the meta log so Retry keeps a forced title
+    # even when it is omitted; sending "" explicitly returns to AI mode.
+    title_override = _validate_manual_title(
+        req.title_override if req.title_override is not None else str(meta.get("title_override", "") or ""),
+        req.rhythm_silence,
+    )
+    description_override = str(
+        (req.description_override if req.description_override is not None
+         else meta.get("description_override", "")) or ""
+    ).strip()
+
+    # A manual title needs no transcript, so a run that skipped step 1 can
+    # still resume from step 2.
+    if from_step >= 2 and not (title_override and not req.rhythm_silence):
         txt = files.get("transcript_txt", "")
         if not txt or not Path(txt).exists():
             ass = files.get("transcript", "")
@@ -571,7 +618,7 @@ async def resume(req: ResumeRequest):
             else:
                 raise HTTPException(status_code=400, detail="Transcript text not found; cannot resume from step 2+")
     if from_step >= 3:
-        if not meta.get("title"):
+        if not meta.get("title") and not title_override:
             raise HTTPException(status_code=400, detail="Title not found in saved state; cannot resume from thumbnail step")
     if from_step >= 4:
         fv = files.get("final_video", "")
@@ -580,7 +627,7 @@ async def resume(req: ResumeRequest):
     if from_step >= 5:
         if not (files.get("final_video") and Path(files.get("final_video", "")).exists()):
             raise HTTPException(status_code=400, detail="Final video not found; cannot resume from upload")
-        if not meta.get("title") or not meta.get("description"):
+        if not (meta.get("title") or title_override) or not (meta.get("description") or description_override):
             raise HTTPException(status_code=400, detail="Title/description not found; cannot resume from upload")
 
     completed_before = set(meta.get("completed_steps", []))
@@ -592,6 +639,21 @@ async def resume(req: ResumeRequest):
     _validate_rhythm_options(req.rhythm_silence, req.use_modal, transcript_mode, req.do_remove_silence)
     job_id = str(uuid.uuid4())
     step_names = RHYTHM_STEP_NAMES if req.rhythm_silence else STEP_NAMES
+
+    # Step 2 rebuilds both fields when it runs; past it, a manual value
+    # supplied now wins over the stored one.
+    title = meta.get("title", "")
+    description = meta.get("description", "")
+    if from_step > 2 and title_override:
+        title = title_override
+    if from_step > 2 and description_override:
+        description = _compose_description(
+            req.description_prefix or str(meta.get("description_prefix", "") or ""),
+            _validate_urls(req.source_urls) or list(meta.get("source_urls", [])),
+            description_override,
+            str(pub.get("signature", "")).strip(),
+        )
+
     job = Job(
         job_id=job_id,
         source=source,
@@ -608,6 +670,8 @@ async def resume(req: ResumeRequest):
         privacy=req.privacy,
         description_prefix=req.description_prefix,
         source_urls=_validate_urls(req.source_urls),
+        title_override=title_override,
+        description_override=description_override,
         skip_upload=req.skip_upload,
         use_modal=req.use_modal,
         do_normalize_volume=req.do_normalize_volume,
@@ -620,8 +684,8 @@ async def resume(req: ResumeRequest):
         thumbnail_engine=req.thumbnail_engine.strip(),
         steps=[Step(name=n) for n in step_names],
         files=files,
-        title=meta.get("title", ""),
-        description=meta.get("description", ""),
+        title=title,
+        description=description,
         transcript_text=meta.get("transcript_text", ""),
     )
     job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
@@ -672,6 +736,8 @@ async def check_resume(body: dict):
         "description": meta.get("description", ""),
         "source_urls": meta.get("source_urls", []),
         "description_prefix": meta.get("description_prefix", ""),
+        "title_override": meta.get("title_override", ""),
+        "description_override": meta.get("description_override", ""),
         "thumbnail_overlay_title": meta.get("thumbnail_overlay_title", ""),
         "thumbnail_overlay_subtitle": meta.get("thumbnail_overlay_subtitle", ""),
     }
@@ -723,6 +789,8 @@ async def review_info(body: dict):
         "transcript_text": transcript_text,
         "description_prefix": meta.get("description_prefix", ""),
         "source_urls": meta.get("source_urls", []),
+        "title_override": meta.get("title_override", ""),
+        "description_override": meta.get("description_override", ""),
         "thumbnail_overlay_title": meta.get("thumbnail_overlay_title", ""),
         "thumbnail_overlay_subtitle": meta.get("thumbnail_overlay_subtitle", ""),
         "video_url": meta.get("video_url", ""),

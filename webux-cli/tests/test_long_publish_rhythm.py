@@ -84,7 +84,7 @@ def test_start_rhythm_without_remove_silence_rejected(tmp_path: Path, monkeypatc
 
 def test_start_rhythm_with_transcript_none_rejected(tmp_path: Path, monkeypatch):
     _no_real_pipeline(monkeypatch)
-    monkeypatch.setattr(reg, "_load_publish_cfg", lambda: {"transcript_mode": "none"})
+    monkeypatch.setattr(reg, "_load_publish_cfg", lambda profile=None: {"transcript_mode": "none"})
     with _client() as client:
         response = client.post("/start", json={
             "source": str(_src(tmp_path)),
@@ -99,7 +99,7 @@ def test_start_rhythm_with_transcript_none_rejected(tmp_path: Path, monkeypatch)
 
 def test_start_rhythm_ok_sets_flag_and_step_names(tmp_path: Path, monkeypatch):
     _no_real_pipeline(monkeypatch)
-    monkeypatch.setattr(reg, "_load_publish_cfg", lambda: _pub_with_rhythm())
+    monkeypatch.setattr(reg, "_load_publish_cfg", lambda profile=None: _pub_with_rhythm())
     with _client() as client:
         response = client.post("/start", json={
             "source": str(_src(tmp_path)),
@@ -116,7 +116,7 @@ def test_start_rhythm_ok_sets_flag_and_step_names(tmp_path: Path, monkeypatch):
 
 def test_start_default_is_backward_compatible(tmp_path: Path, monkeypatch):
     _no_real_pipeline(monkeypatch)
-    monkeypatch.setattr(reg, "_load_publish_cfg", lambda: _pub_with_rhythm())
+    monkeypatch.setattr(reg, "_load_publish_cfg", lambda profile=None: _pub_with_rhythm())
     with _client() as client:
         response = client.post("/start", json={
             "source": str(_src(tmp_path)),
@@ -170,7 +170,7 @@ def test_config_rhythm_roundtrip(monkeypatch):
         store.clear()  # production replaces the publish section wholesale
         store.update(pub)
 
-    monkeypatch.setattr(reg, "_load_publish_cfg", lambda: dict(store))
+    monkeypatch.setattr(reg, "_load_publish_cfg", lambda profile=None: dict(store))
     monkeypatch.setattr(reg, "_save_publish_cfg", _save)
     monkeypatch.setattr(reg, "_migrate_publish_cfg_if_needed", lambda: False)
     with _client() as client:
@@ -199,7 +199,7 @@ def test_config_rhythm_roundtrip(monkeypatch):
 
 def test_config_invalid_rhythm_rejected(monkeypatch):
     store = {}
-    monkeypatch.setattr(reg, "_load_publish_cfg", lambda: dict(store))
+    monkeypatch.setattr(reg, "_load_publish_cfg", lambda profile=None: dict(store))
     monkeypatch.setattr(reg, "_save_publish_cfg", lambda pub: store.update(pub))
     monkeypatch.setattr(reg, "_migrate_publish_cfg_if_needed", lambda: False)
     with _client() as client:
@@ -215,7 +215,7 @@ def test_start_uses_pub_rhythm_params_and_cut_time(tmp_path: Path, monkeypatch):
     _no_real_pipeline(monkeypatch)
     monkeypatch.setattr(
         reg, "_load_publish_cfg",
-        lambda: _pub_with_rhythm(rhythm_pause_sentence=0.6, rhythm_crossfade=0.005),
+        lambda profile=None: _pub_with_rhythm(rhythm_pause_sentence=0.6, rhythm_crossfade=0.005),
     )
     with _client() as client:
         response = client.post("/start", json={
@@ -236,7 +236,7 @@ def test_start_invalid_pub_rhythm_rejected(tmp_path: Path, monkeypatch):
     _no_real_pipeline(monkeypatch)
     monkeypatch.setattr(
         reg, "_load_publish_cfg",
-        lambda: _pub_with_rhythm(rhythm_pause_inline="fast"),
+        lambda profile=None: _pub_with_rhythm(rhythm_pause_inline="fast"),
     )
     with _client() as client:
         response = client.post("/start", json={
@@ -252,7 +252,7 @@ def test_start_invalid_pub_rhythm_rejected(tmp_path: Path, monkeypatch):
 
 def test_start_cut_time_defaults_empty(tmp_path: Path, monkeypatch):
     _no_real_pipeline(monkeypatch)
-    monkeypatch.setattr(reg, "_load_publish_cfg", lambda: _pub_with_rhythm())
+    monkeypatch.setattr(reg, "_load_publish_cfg", lambda profile=None: _pub_with_rhythm())
     with _client() as client:
         response = client.post("/start", json={
             "source": str(_src(tmp_path)),
@@ -295,7 +295,7 @@ def _run_core(tmp_path: Path, monkeypatch, recorded: list, **job_kwargs):
     src = _src(tmp_path)
     monkeypatch.setattr(pipe, "_run", _fake_run_factory(recorded))
     monkeypatch.setattr(
-        pipe, "_load_publish_cfg", lambda: {"video_source_path": str(tmp_path)}
+        pipe, "_load_publish_cfg", lambda profile=None: {"video_source_path": str(tmp_path)}
     )
     monkeypatch.setattr(pipe, "_pr", lambda: "/nonexistent/prompt-bin")
     job = Job(

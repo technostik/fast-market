@@ -19,6 +19,9 @@ DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
 DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv,webm"
 LEGACY_VIDEO_EXTENSIONS = "mp4,mkv"
 
+#: YouTube's hard limit for a video title.
+MAX_TITLE_LEN = 100
+
 _INTERMEDIATE_RE = re.compile(r"_(nosilence|cut|subtitled|volume_normalized|no_signature)$", re.IGNORECASE)
 
 # Output file keys surfaced per step in the UI (index aligns with STEP_NAMES).
@@ -101,6 +104,11 @@ class Job:
     cut_time: str = ""
     transcript_mode: str = "normal"
     description_prefix: str = ""
+    # Manual mode: a non-empty title_override skips the Whisper pass, both
+    # LLM calls and the thumbnail step. A non-empty description_override
+    # only replaces the LLM summary (naming mirrors short_publish).
+    title_override: str = ""
+    description_override: str = ""
     skip_upload: bool = False
     use_modal: bool = True
     do_normalize_volume: bool = False

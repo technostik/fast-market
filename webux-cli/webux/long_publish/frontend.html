@@ -142,6 +142,26 @@
     <span id="cfgMsg" class="hint"></span>
   </div>
 
+  <div class="upload-box" style="margin:12px 0;padding:10px;border:1px solid var(--border);border-radius:8px;">
+    <div class="row" style="margin-bottom:6px"><strong>Upload</strong> <span class="hint">The video is required only here, to process this file and send it to YouTube. Thumbnail tools below work with nothing selected.</span></div>
+    <div class="row">
+      <label>Video</label>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <select id="videoSel" style="flex:1; width:auto; min-width:0;"><option value="">— select to upload —</option></select>
+        <button type="button" class="btn-sec" id="refreshVideosBtn" title="Reload the list and select the latest video" style="padding:4px 8px; flex-shrink:0;">🔄</button>
+      </div>
+    </div>
+    <div class="video-wrap" id="videoWrap">
+      <video id="videoEl" controls></video>
+      <div class="video-name" id="videoName"></div>
+    </div>
+    <div class="publish-actions">
+      <button class="btn-go" id="startBtn">▶ Publish</button>
+      <button class="btn-resume" id="retryBtn" disabled title="Select a video that already has a publish log">↻ Retry</button>
+      <select id="thumbEngine" class="inline-select" title="Thumbnail engine for this run"></select>
+    </div>
+  </div>
+
   <div class="main-layout">
     <div class="main-left">
       <div class="options-grid">
@@ -162,33 +182,16 @@
           </select>
         </div>
       </div>
+      <div class="row"><label>Title <span class="hint">(optional — manual mode: no Whisper, no AI title/summary, no thumbnail)</span></label><input id="forcedTitle" type="text" placeholder="leave empty to generate the title &amp; summary with AI" oninput="updateManualMode()"></div>
+      <div class="row"><label>Description <span class="hint">(optional — replaces the AI summary; prefix/sources/signature still apply)</span></label><textarea id="forcedDesc" rows="3" placeholder="leave empty to use the AI summary"></textarea></div>
+      <div class="hint" id="manualHint" style="display:none;margin:-2px 0 10px">✍ Manual mode: the Whisper pass, the title/summary LLM calls and the thumbnail step are skipped. Build a thumbnail in the YT Thumbnail tab.</div>
       <div class="row"><label>Description prefix</label><textarea id="descPrefix" rows="2"></textarea></div>
       <div class="row"><label>Cut time (optional — trims the video tail at this point before processing)</label><input id="cutTime" type="text" placeholder="MM:SS (e.g. 1:30) — leave empty to skip"></div>
       <div class="row"><label>Source URLs (one per line)</label><textarea id="sourceUrls" rows="2"></textarea></div>
       <div class="row" id="overlayRow"><label>Thumbnail overlay title (optional, overrides prompt)</label><input id="thumbOverlayTitle" type="text"></div>
-      <div class="row"><label>Thumbnail overlay subtitle (optional — same font, one third smaller, top, centered, no band)</label><input id="thumbOverlaySubtitle" type="text"></div>
+      <div class="row" id="overlaySubRow"><label>Thumbnail overlay subtitle (optional — same font, one third smaller, top, centered, no band)</label><input id="thumbOverlaySubtitle" type="text"></div>
       <div class="opt checkrow"><input type="checkbox" id="doPinnedComment"><label style="margin:0" title="Posts the comment right after upload (video still unlisted). Pin it manually in Studio via the comment link.">Post pinned comment after upload</label></div>
       <div class="row"><label>Pinned comment (overrides config default)</label><textarea id="pinnedCommentText" rows="2" placeholder="Leave empty to use the config default"></textarea></div>
-
-      <div class="upload-box" style="margin:12px 0;padding:10px;border:1px solid var(--border);border-radius:8px;">
-        <div class="row" style="margin-bottom:6px"><strong>Upload</strong> <span class="hint">The video is required only here, to process this file and send it to YouTube. Thumbnail tools below work with nothing selected.</span></div>
-        <div class="row">
-          <label>Video</label>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <select id="videoSel" style="flex:1; width:auto; min-width:0;"><option value="">— select to upload —</option></select>
-            <button type="button" class="btn-sec" id="refreshVideosBtn" title="Reload the list and select the latest video" style="padding:4px 8px; flex-shrink:0;">🔄</button>
-          </div>
-        </div>
-        <div class="video-wrap" id="videoWrap">
-          <video id="videoEl" controls></video>
-          <div class="video-name" id="videoName"></div>
-        </div>
-        <div class="publish-actions">
-          <button class="btn-go" id="startBtn">▶ Publish</button>
-          <button class="btn-resume" id="retryBtn" disabled title="Select a video that already has a publish log">↻ Retry</button>
-          <select id="thumbEngine" class="inline-select" title="Thumbnail engine for this run"></select>
-        </div>
-      </div>
 
       <div class="resume-box" id="resumeBox">
         <div id="resumeInfo" style="font-size:12px;color:var(--dim);margin-bottom:8px;"></div>
@@ -327,6 +330,37 @@ function updateSignatureAvailability() {
   cb.disabled = !avail;
   cb.checked = cb.checked && avail;
   cb.style.opacity = avail ? '1' : '0.4';
+}
+
+// Manual mode: a forced title removes every AI input of the run, so the
+// thumbnail step (needs a transcript) and rhythm mode (needs the word-level
+// transcript) are switched off while the field is non-empty.
+let thumbCheckedBeforeManual = true;
+function manualTitleActive(){ return !!((el('forcedTitle')||{}).value || '').trim(); }
+function updateManualMode(){
+  const on = manualTitleActive();
+  const thumb = el('doThumb');
+  if (on){
+    thumbCheckedBeforeManual = thumb.checked;
+    thumb.checked = false;
+  } else if (thumb.disabled){
+    thumb.checked = thumbCheckedBeforeManual;
+  }
+  thumb.disabled = on;
+  for (const id of ['thumbOverlayTitle','thumbOverlaySubtitle','thumbEngine']){
+    const f = el(id);
+    if (!f) continue;
+    f.disabled = on;
+    f.style.opacity = on ? '0.4' : '1';
+  }
+  const sm = el('silenceMode');
+  if (sm){
+    const rhythmOpt = sm.querySelector('option[value="rhythm"]');
+    if (rhythmOpt) rhythmOpt.disabled = on;
+    if (on && sm.value === 'rhythm') sm.value = 'remove';
+  }
+  el('manualHint').style.display = on ? 'block' : 'none';
+  updateOverlayRow();
 }
 
 async function saveConfig(){
@@ -514,6 +548,9 @@ async function checkResume(source){
   el('resumeInfo').textContent = info.join('  •  ');
   el('descPrefix').value = data.description_prefix||'';
   el('sourceUrls').value = (data.source_urls||[]).join('\n');
+  el('forcedTitle').value = data.title_override||'';
+  el('forcedDesc').value = data.description_override||'';
+  updateManualMode();
   el('thumbOverlayTitle').value = data.thumbnail_overlay_title||'';
   el('thumbOverlaySubtitle').value = data.thumbnail_overlay_subtitle||'';
 }
@@ -537,6 +574,8 @@ function startBody(){
     skip_upload: el('skipUpload').checked,
     description_prefix: el('descPrefix').value,
     source_urls: el('sourceUrls').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    title_override: el('forcedTitle').value,
+    description_override: el('forcedDesc').value,
     do_pinned_comment: el('doPinnedComment').checked,
     pinned_comment_text: el('pinnedCommentText').value,
     thumbnail_overlay_title: el('thumbOverlayTitle').value,
@@ -730,7 +769,10 @@ el('pushYtBtn').addEventListener('click', async ()=>{
 });
 
 function updateOverlayRow(){
-  el('overlayRow').style.display = el('doThumb').checked ? 'block' : 'none';
+  const show = el('doThumb').checked;
+  el('overlayRow').style.display = show ? 'block' : 'none';
+  const sub = el('overlaySubRow');
+  if (sub) sub.style.display = show ? 'block' : 'none';
 }
 el('doThumb').addEventListener('change', updateOverlayRow);
 
@@ -816,6 +858,7 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
   if (el('doPinnedComment')) el('doPinnedComment').checked = el('cfgPinnedEnabled').checked;
   if (el('pinnedCommentText') && !el('pinnedCommentText').value) el('pinnedCommentText').value = el('cfgPinnedText').value||'';
   updateOverlayRow();
+  updateManualMode();
   await loadVideos();
   await loadPrompts();
   await loadEngines();

@@ -51,3 +51,10 @@
 - `eval "$(_{CMD}_COMPLETE=bash_source cmd)"` is unsafe to source from an interactive shell. `browser` on PATH is browser-use. On a terminal it prints a welcome text to stdout, and the indented `<<'PY'` example in that text launches Chrome.
 - Close stdin, drop stderr, and eval only when the output contains a Click completion marker (`complete -`, `compdef `, `complete --`). Skip paths under `browser-use`.
 - A backslash-newline inside `export LD_LIBRARY_PATH=...` keeps the next line's indent as a second argument. Keep that assignment on one line.
+
+## 2026-10-30 — long_publish manual title
+
+- A forced title removes every AI input of the run: no Whisper, no title/summary LLM, no thumbnail. The thumbnail step is dropped because its image prompt is built from the transcript — the YT Thumbnail tab covers that case.
+- A description override alone only replaces the summary call; the title prompt still runs, so Whisper stays.
+- The rhythm option is disabled in the UI and rejected with HTTP 400 on the API: rhythm mode cuts with the word-level transcript that manual mode never produces.
+- `title_override` / `description_override` live in `*-long-meta.json`, so Retry keeps the manual title after the field is cleared.

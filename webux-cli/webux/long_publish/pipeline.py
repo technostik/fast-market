@@ -87,6 +87,24 @@ async def _run_tracked(job: Job, step, *cmd: str):
     return _finish_step(job, step, rc)
 
 
+def _compose_description(prefix: str, source_urls: list[str], body: str, signature: str) -> str:
+    """Assemble the YouTube description: prefix, sources, body, signature.
+
+    ``body`` is the LLM summary on a normal run and the manual description
+    when one was supplied — an empty body block is omitted entirely.
+    """
+    parts = []
+    if (prefix or "").strip():
+        parts.append(prefix.strip())
+    if source_urls:
+        parts.append("Sources:\n" + "\n".join(f"- {u}" for u in source_urls))
+    if (body or "").strip():
+        parts.append(body.strip())
+    if (signature or "").strip():
+        parts.append(signature.strip())
+    return "\n\n".join(parts)
+
+
 def _pinned_comment_cfg(job: Job, pub_cfg: dict) -> tuple[bool, str]:
     """Resolve pinned-comment setting: per-job override wins, else config default."""
     text = (getattr(job, "pinned_comment_text", "") or "").strip()
@@ -330,9 +348,14 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
     ass_path = str(d / f"{stem}.ass")
     txt_path = str(d / f"{stem}_transcript.txt")
     skip_transcript = job.transcript_mode == "none"
+    # Manual mode: a forced title needs no transcript at all, so the Whisper
+    # pass is skipped. Rhythm mode cuts with the word-level transcript, so it
+    # keeps step 1 (the API rejects that combination; this is a guard only).
+    manual_title = (job.title_override or "").strip()
+    manual_mode = bool(manual_title) and not getattr(job, "rhythm_silence", False)
 
     # ── Step 1: Extract transcript (modal-aware) ──────────────────────────────
-    if from_step <= 1 and not skip_transcript:
+    if from_step <= 1 and not skip_transcript and not manual_mode:
         s1 = job.steps[1]
         s1.start_time = time.time()
         s1.status = "running"
@@ -407,10 +430,13 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         job.transcript_text = plain
         _save_meta(job)
     else:
-        if skip_transcript and from_step <= 1:
+        if (skip_transcript or manual_mode) and from_step <= 1:
             s1 = job.steps[1]
             s1.status = "skipped"
-            s1.output = "Skipped (no transcript selected)"
+            s1.output = (
+                "Skipped (manual title — no Whisper pass)"
+                if manual_mode else "Skipped (no transcript selected)"
+            )
             _save_meta(job)
         ass_path = job.files.get("transcript") or ass_path
         txt_path = job.files.get("transcript_txt") or txt_path
@@ -425,63 +451,68 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         s2.start_time = time.time()
         s2.status = "running"
 
-        if await _run_tracked(job, s2, _pr(), "apply", job.prompt_title, f"transcript=@{txt_path}"):
-            return
-        title_out = (s2.output or "").strip()
+        manual_desc = (job.description_override or "").strip()
 
-        proc = await asyncio.create_subprocess_exec(
-            _pr(), "apply", job.prompt_summary, f"transcript=@{txt_path}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        set_active_proc(proc)
-        try:
-            async def _stream(stream, prefix):
-                buf = b""
-                while True:
-                    chunk = await stream.read(4096)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    while b"\n" in buf:
-                        raw, buf = buf.split(b"\n", 1)
-                        text = raw.decode(errors="replace").rstrip()
+        if manual_title:
+            # Manual mode: no title LLM call at all.
+            title_out = manual_title
+            s2.output = f"✍ Manual title (no LLM): {manual_title}"
+        elif await _run_tracked(job, s2, _pr(), "apply", job.prompt_title, f"transcript=@{txt_path}"):
+            return
+        else:
+            title_out = (s2.output or "").strip()
+
+        if manual_desc or manual_title:
+            # Manual mode: no summary LLM call at all.
+            raw_description = manual_desc
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                _pr(), "apply", job.prompt_summary, f"transcript=@{txt_path}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            set_active_proc(proc)
+            try:
+                async def _stream(stream, prefix):
+                    buf = b""
+                    while True:
+                        chunk = await stream.read(4096)
+                        if not chunk:
+                            break
+                        buf += chunk
+                        while b"\n" in buf:
+                            raw, buf = buf.split(b"\n", 1)
+                            text = raw.decode(errors="replace").rstrip()
+                            if text:
+                                if s2.output:
+                                    s2.output += "\n"
+                                s2.output += f"{prefix}{text}"
+                    if buf:
+                        text = buf.decode(errors="replace").rstrip()
                         if text:
                             if s2.output:
                                 s2.output += "\n"
                             s2.output += f"{prefix}{text}"
-                if buf:
-                    text = buf.decode(errors="replace").rstrip()
-                    if text:
-                        if s2.output:
-                            s2.output += "\n"
-                        s2.output += f"{prefix}{text}"
 
-            await asyncio.gather(
-                _stream(proc.stdout, ""),
-                _stream(proc.stderr, "[err] "),
-                proc.wait(),
-            )
-        finally:
-            clear_active_proc()
-        if _abort_if_stopped(job, s2):
-            return
-        if proc.returncode:
-            s2.end_time = time.time(); s2.status = "error"; job.status = "error"; _save_meta(job); return
+                await asyncio.gather(
+                    _stream(proc.stdout, ""),
+                    _stream(proc.stderr, "[err] "),
+                    proc.wait(),
+                )
+            finally:
+                clear_active_proc()
+            if _abort_if_stopped(job, s2):
+                return
+            if proc.returncode:
+                s2.end_time = time.time(); s2.status = "error"; job.status = "error"; _save_meta(job); return
 
-        raw_description = (s2.output or "").strip()
+            raw_description = (s2.output or "").strip()
+
         signature = pub_cfg.get("signature", "").strip()
-        parts = []
-        if job.description_prefix.strip():
-            parts.append(job.description_prefix.strip())
-        if job.source_urls:
-            sources_block = "Sources:\n" + "\n".join(f"- {u}" for u in job.source_urls)
-            parts.append(sources_block)
-        parts.append(raw_description)
-        if signature:
-            parts.append(signature)
         job.title = title_out.strip()
-        job.description = "\n\n".join(parts)
+        job.description = _compose_description(
+            job.description_prefix, job.source_urls, raw_description, signature
+        )
 
         safe_name = _sanitize_filename(job.title)
         ext = Path(current_video).suffix or ".mp4"
@@ -499,10 +530,13 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             except Exception:
                 transcript_text = "(transcript unavailable)"
         elif not transcript_text:
-            transcript_text = "(transcript unavailable)"
+            transcript_text = (
+                "(no transcript — manual title)" if manual_mode else "(transcript unavailable)"
+            )
 
         s2.output = (
-            f"Title: {job.title}\n\n"
+            ("✍ Manual title — no LLM calls\n\n" if manual_title else "")
+            + f"Title: {job.title}\n\n"
             f"Description:\n{job.description}\n\n"
             f"Transcript:\n{transcript_text}"
         )
@@ -517,7 +551,15 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             current_video = fv
 
     # ── Step 3: Generate thumbnail image (optional) ────────────────────────────
-    if not job.do_generate_thumbnail:
+    if from_step <= 3 and manual_title:
+        # No transcript means no image prompt for the thumbnail generator.
+        job.steps[3].status = "skipped"
+        job.steps[3].output = (
+            "Skipped (manual title — no transcript to build the image prompt; "
+            "generate one in the YT Thumbnail tab)"
+        )
+        _save_meta(job)
+    elif not job.do_generate_thumbnail:
         job.steps[3].status = "skipped"
         job.steps[3].output = "Thumbnail generation disabled"
         _save_meta(job)

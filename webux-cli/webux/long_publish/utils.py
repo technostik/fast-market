@@ -169,6 +169,10 @@ def _save_meta(job) -> None:
         meta["source_urls"] = job.source_urls
     if job.description_prefix:
         meta["description_prefix"] = job.description_prefix
+    if getattr(job, "title_override", ""):
+        meta["title_override"] = job.title_override
+    if getattr(job, "description_override", ""):
+        meta["description_override"] = job.description_override
     if getattr(job, "profile", ""):
         meta["profile"] = job.profile
     if job.thumbnail_overlay_title:
