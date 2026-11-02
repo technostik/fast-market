@@ -1237,7 +1237,11 @@ async function refreshPool() {
         }
       }
       if (item.studio_url) {
-        html += `<div><a href="${item.studio_url}" target="_blank" style="color:var(--link);font-size:12px;">✏️ Edit in Studio</a></div>`;
+        const usedProfile = item.profile || currentProfile();
+        const profileTip = usedProfile
+          ? `Published with profile: ${usedProfile}`
+          : 'Published profile unknown';
+        html += `<div><a href="${item.studio_url}" target="_blank" title="${profileTip.replace(/"/g, '&quot;')}" style="color:var(--link);font-size:12px;">✏️ Edit in Studio</a></div>`;
       }
       if ((item.status === 'error' || item.status === 'stopped') && item.error_message) {
         html += `<div style="font-size:11px;color:var(--err,#e06c75);margin-top:2px;white-space:pre-wrap;word-break:break-word;">⚠ ${item.error_message}</div>`;

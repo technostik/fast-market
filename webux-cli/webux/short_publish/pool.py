@@ -74,7 +74,7 @@ def _load_pool_from_disk():
         _pool = [
             PoolItem(
                 source=item["source"],
-                profile=item.get("profile", "") or resolve_profile(),
+                profile=item.get("profile") or _load_meta(item["source"]).get("profile") or resolve_profile(),
                 title_override=item.get("title_override", ""),
                 description_prefix=item.get("description_prefix", ""),
                 source_urls=item.get("source_urls", []),
@@ -337,6 +337,9 @@ def get_pool_state() -> dict:
     for it in _pool:
         item_dict = {
             "source": it.source,
+            # Profile (YouTube account) chosen when the item was added to the pool.
+            # Older entries may only carry it in their meta log.
+            "profile": it.profile or _load_meta(it.source).get("profile") or resolve_profile(),
             "title_override": it.title_override,
             "description_prefix": it.description_prefix,
             "source_urls": it.source_urls,
