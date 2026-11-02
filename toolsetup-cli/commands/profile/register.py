@@ -10,6 +10,7 @@ import click
 from common.core.profile import (
     SHARED,
     DEFAULT_PROFILE,
+    ENV_VAR,
     read_active_pointer,
     write_active_pointer,
     validate_profile_name,
@@ -86,6 +87,35 @@ def _rewrite_profile_paths(profile_dir: Path, into: str, roots: dict[str, Path])
             text = re.sub(pattern, profile, text)
         if text != original:
             path.write_text(text, encoding="utf-8")
+            click.echo(f"  rewrote {path.relative_to(profile_dir)}")
+
+
+def _rewrite_profile_name_refs(profile_dir: Path, old: str, new: str) -> None:
+    """Rewrite absolute ``profiles/<old>/`` references inside a profile's files.
+
+    Configs frequently store per-profile absolute paths (YouTube credentials,
+    corpus DB, reference images…). After the directory is renamed those paths
+    would point at the old name, so replace them with the new one.
+    """
+    pattern = re.compile(
+        r"(?<![\w.-])" + re.escape(f"profiles/{old}") + r"(?=[/\\]|$)"
+    )
+    for path in profile_dir.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in _TEXT_EXTENSIONS:
+            continue
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if b"\x00" in raw[:4096]:
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        rewritten = pattern.sub(f"profiles/{new}", text)
+        if rewritten != text:
+            path.write_text(rewritten, encoding="utf-8")
             click.echo(f"  rewrote {path.relative_to(profile_dir)}")
 
 
@@ -204,6 +234,59 @@ def register():
             if src_dirs[kind].exists():
                 shutil.copytree(src_dirs[kind], dst_dirs[kind])
         click.echo(f"Cloned '{src}' → '{dst}'.")
+
+    # ── rename ────────────────────────────────────────────────────────────
+    @profile_cmd.command("rename")
+    @click.argument("old")
+    @click.argument("new")
+    def profile_rename(old, new):
+        """Rename profile OLD to NEW (config + data + cache).
+
+        Per-profile absolute paths in OLD's config files are rewritten, and the
+        active-profile pointer follows the rename when OLD was active.
+        """
+        if SHARED in (old, new):
+            raise click.ClickException(f"'{SHARED}' is reserved.")
+        for n in (old, new):
+            try:
+                validate_profile_name(n)
+            except ProfileError as exc:
+                raise click.ClickException(str(exc))
+        if old == new:
+            raise click.ClickException("Source and destination names are identical.")
+
+        old_dirs = _profile_dirs(old)
+        new_dirs = _profile_dirs(new)
+        existing = {kind: d for kind, d in old_dirs.items() if d.exists()}
+        if not existing:
+            raise click.ClickException(f"Profile '{old}' does not exist.")
+        if any(d.exists() for d in new_dirs.values()):
+            raise click.ClickException(f"Profile '{new}' already exists.")
+
+        was_active = resolve_profile() == old
+        for kind, src in existing.items():
+            dst = new_dirs[kind]
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            src.rename(dst)
+            click.echo(f"  renamed {kind}: {src} → {dst}")
+
+        for dst in new_dirs.values():
+            if dst.exists():
+                _rewrite_profile_name_refs(dst, old, new)
+
+        if was_active:
+            write_active_pointer(new)
+            click.echo(f"Active profile updated: '{old}' → '{new}'.")
+        if os.environ.get(ENV_VAR) == old:
+            click.echo(
+                f"Warning: {ENV_VAR} is set to '{old}' in this shell; "
+                f"update it to '{new}' to keep using the renamed profile."
+            )
+        click.echo(f"Renamed profile '{old}' → '{new}'.")
+        click.echo(
+            "Note: data files outside the profile roots that store the old name "
+            "(e.g. short-publish pool/meta JSON) are not rewritten."
+        )
 
     # ── delete ────────────────────────────────────────────────────────────
     @profile_cmd.command("delete")
