@@ -227,6 +227,7 @@ async def list_videos(
     path: str | None = Query(default=None),
     extensions: str | None = Query(default=None),
     profile: str | None = Query(default=None),
+    show_all: bool = Query(default=False),
 ):
     if not path or not extensions:
         # Resolve the profile's publish config so the page picker shows the
@@ -272,12 +273,12 @@ async def list_videos(
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                if meta.get("status") == "finished":
+                if not show_all and meta.get("status") == "finished":
                     continue
                 completed = set(meta.get("completed_steps", []))
                 skipped = set(meta.get("skipped_steps", []))
                 passed = completed | skipped
-                if set(range(len(STEP_NAMES))).issubset(passed):
+                if not show_all and set(range(len(STEP_NAMES))).issubset(passed):
                     continue  # all steps done via immediate publish (no pool "finished" marker)
                 available = [c + 1 for c in passed if c + 1 < len(STEP_NAMES)]
                 resumable = bool(available)

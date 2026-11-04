@@ -260,6 +260,9 @@
                <option value="">— or select from list —</option>
              </select>
              <button type="button" class="btn-sec" onclick="loadVideos()" style="padding:4px 8px; flex-shrink:0;">🔄</button>
+             <label class="checkrow" style="margin:0; font-size:12px;">
+               <input type="checkbox" id="showAllVideos" style="margin:0;"> Show all
+             </label>
              <button type="button" class="btn-sec" onclick="previewSource()" style="padding:4px 8px; flex-shrink:0;">👁</button>
            </div>
         </div>
@@ -568,7 +571,12 @@ async function loadVideos() {
   const sel = document.getElementById('fileSelect');
   sel.innerHTML = '<option value="">— select —</option>';
   const prof = pageProfile();
-  const r = await fetch('/api/short_publish/list-videos' + (prof ? '?profile=' + encodeURIComponent(prof) : '')).catch(() => null);
+  const showAll = document.getElementById('showAllVideos')?.checked || false;
+  const params = new URLSearchParams();
+  if (prof) params.set('profile', prof);
+  if (showAll) params.set('show_all', 'true');
+  const qs = params.toString() ? '?' + params.toString() : '';
+  const r = await fetch('/api/short_publish/list-videos' + qs).catch(() => null);
   if (!r || !r.ok) return;
   const data = await r.json();
   for (const v of data.videos || []) {
