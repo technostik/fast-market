@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -54,6 +55,14 @@ _jobs: dict[str, Job] = {}
 
 def _is_intermediate(path: Path) -> bool:
     return bool(_INTERMEDIATE_RE.search(path.stem))
+
+
+def _is_busy() -> bool:
+    """True while a publish job is active (feeds GET /api/system/busy)."""
+    return any(
+        job.status not in ("done", "error", "stopped")
+        for job in list(_jobs.values())
+    )
 
 
 def _validate_rhythm_options(rhythm_silence: bool, use_modal: bool, transcript_mode: str, do_remove_silence: bool) -> None:
@@ -370,12 +379,18 @@ async def list_videos(
 # ── Prompt list API ───────────────────────────────────────────────────────────
 
 @router.get("/list-prompts")
-async def list_prompts():
+async def list_prompts(profile: str | None = Query(default=None)):
     pr = _pr()
+    # Scope the prompt CLI to the requested profile without mutating the
+    # process-wide FASTMARKET_PROFILE (a running job may own it).
+    env = dict(os.environ)
+    if profile:
+        env["FASTMARKET_PROFILE"] = profile
     proc = await asyncio.create_subprocess_exec(
         pr, "list", "--names-only",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
     stdout, _ = await proc.communicate()
     names = [n.strip() for n in stdout.decode(errors="replace").splitlines() if n.strip()]
@@ -726,6 +741,7 @@ async def check_resume(body: dict):
     return {
         "can_resume": bool(available),
         "meta_exists": meta_exists,
+        "profile": meta.get("profile", ""),
         "next_step": next_step,
         "step_names": STEP_NAMES,
         "available_from_steps": available,
@@ -1400,4 +1416,5 @@ def register(config: dict) -> WebuxPluginManifest:
         frontend_html=html,
         order=46,
         lazy=True,
+        busy_check=_is_busy,
     )

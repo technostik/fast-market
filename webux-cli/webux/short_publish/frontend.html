@@ -358,7 +358,9 @@
         <textarea id="pinnedCommentText" rows="2" placeholder="Leave empty to use the config default"></textarea>
       </div>
 
-      <div style="display:flex; gap:8px; margin-top:8px;">
+      <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
+        <label for="jobProfile" style="display:inline; margin:0; white-space:nowrap;" title="Profile used by this page: config, prompts and the YouTube account of the next job. Defaults to the toolbar profile.">Profile</label>
+        <select id="jobProfile" data-profile-lock title="Profile used by this page (defaults to the toolbar profile)" style="width:auto; max-width:160px; flex-shrink:0;"></select>
         <button class="btn-go" onclick="startJob()" id="goBtn">Publish (immediate)</button>
         <button class="btn-sec" onclick="addToPool()" id="addPoolBtn">Add to pool</button>
         <button class="btn-resume" onclick="resumeJob()" id="resumeBtn" style="display:none;">Resume from step…</button>
@@ -490,6 +492,21 @@ let currentJob = null;
 let pollTimer = null;
 
 function currentProfile(){ return (window.fastmarketProfile && window.fastmarketProfile()) || ''; }
+function pageProfile(){
+  const sel = document.getElementById('jobProfile');
+  return (sel && sel.value) || currentProfile();
+}
+async function loadPageProfiles(){
+  const sel = document.getElementById('jobProfile');
+  if (!sel) return;
+  const r = await fetch('/api/short_publish/profiles').catch(() => null);
+  const data = (r && r.ok) ? await r.json() : { profiles: [], active: '' };
+  const names = data.profiles || [];
+  const wanted = currentProfile() || data.active || '';
+  sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
+  if (names.includes(wanted)) sel.value = wanted;
+  else if (data.active) sel.value = data.active;
+}
 function defaultTitlePrompt(){ const el = document.getElementById('cfgTitlePrompt'); return (el && el.value) || window._defaultTitlePrompt || 'youtube-title'; }
 function defaultDescPrompt(){ const el = document.getElementById('cfgDescPrompt'); return (el && el.value) || window._defaultDescPrompt || 'youtube-summary'; }
 
@@ -546,7 +563,8 @@ function fmtDurationChip(secs) {
 async function loadVideos() {
   const sel = document.getElementById('fileSelect');
   sel.innerHTML = '<option value="">— select —</option>';
-  const r = await fetch('/api/short_publish/list-videos').catch(() => null);
+  const prof = pageProfile();
+  const r = await fetch('/api/short_publish/list-videos' + (prof ? '?profile=' + encodeURIComponent(prof) : '')).catch(() => null);
   if (!r || !r.ok) return;
   const data = await r.json();
   for (const v of data.videos || []) {
@@ -637,9 +655,11 @@ function onFileSelected() {
 }
 
 async function loadPrompts() {
+  const prof = pageProfile();
+  const qs = prof ? '?profile=' + encodeURIComponent(prof) : '';
   const [promptRes, cfgRes] = await Promise.all([
-    fetch('/api/short_publish/list-prompts').catch(() => null),
-    fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).catch(() => null)
+    fetch('/api/short_publish/list-prompts' + qs).catch(() => null),
+    fetch('/api/short_publish/config' + qs).catch(() => null)
   ]);
   if (!promptRes || !promptRes.ok) return;
   const names = (promptRes && promptRes.ok) ? ((await promptRes.json()).prompts || []) : [];
@@ -659,14 +679,15 @@ async function loadPrompts() {
 async function savePromptDefaults(title, desc) {
   const body = { default_title_prompt: title, default_description_prompt: desc };
   // merge with current config to avoid overwriting other fields
-  const cur = await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).then(r => r.json()).catch(() => ({}));
+  const cur = await fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : '')).then(r => r.json()).catch(() => ({}));
   Object.assign(body, cur);
-  await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  await fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
 }
 
 async function populateConfigPrompts() {
   try {
-    const r = await fetch('/api/short_publish/list-prompts');
+    const prof = pageProfile();
+    const r = await fetch('/api/short_publish/list-prompts' + (prof ? '?profile=' + encodeURIComponent(prof) : ''));
     if (!r.ok) return;
     const data = await r.json();
     const names = data.prompts || [];
@@ -718,7 +739,8 @@ async function startJob() {
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
     do_pinned_comment: document.getElementById('doPinnedComment').checked,
     pinned_comment_text: document.getElementById('pinnedCommentText').value,
-    cut_time: document.getElementById('cutTime').value
+    cut_time: document.getElementById('cutTime').value,
+    profile: pageProfile()
   };
   // Immediate publish (only if pool not running)
   const poolState = await fetch('/api/short_publish/pool').then(r => r.json()).catch(() => ({}));
@@ -942,6 +964,9 @@ function showResumeOptions(source, data) {
   }
   area.style.display = 'block';
   area.dataset.source = source;
+  // Resume must keep the profile the run started with (the meta log owns it);
+  // never let a page-picker change move a half-processed video to another account.
+  area.dataset.profile = data.profile || '';
   // Warn if upload (step 4) was done but not in completed_steps
   const markDiv = document.getElementById('resumeMarkDone');
   const uploadDone = data.completed_steps && data.completed_steps.includes(4);
@@ -989,7 +1014,8 @@ async function doResume() {
     description_prefix: document.getElementById('descPrefix').value,
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
     do_pinned_comment: document.getElementById('doPinnedComment').checked,
-    pinned_comment_text: document.getElementById('pinnedCommentText').value
+    pinned_comment_text: document.getElementById('pinnedCommentText').value,
+    profile: area.dataset.profile || pageProfile()
   };
   const r = await fetch('/api/short_publish/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (!r.ok) { alert('Resume failed'); return; }
@@ -1030,7 +1056,7 @@ async function showConfig() {
   const p = document.getElementById('configPanel');
   p.style.display = p.style.display === 'block' ? 'none' : 'block';
   if (p.style.display === 'block') {
-    const r = await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).catch(() => null);
+    const r = await fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : '')).catch(() => null);
     if (r && r.ok) {
       const c = await r.json();
       await populateConfigPrompts();
@@ -1077,7 +1103,7 @@ async function saveConfig() {
     language: document.getElementById('cfgLanguage').value,
     model: document.getElementById('cfgModel').value
   };
-  const r = await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const r = await fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (r.ok) alert('Saved'); else alert('Save failed');
 }
 
@@ -1086,7 +1112,7 @@ async function toggleConfig() {
   const willShow = p.style.display !== 'block';
   p.style.display = willShow ? 'block' : 'none';
   if (willShow) {
-    const r = await fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).catch(() => null);
+    const r = await fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : '')).catch(() => null);
     if (r && r.ok) {
       const c = await r.json();
       await populateConfigPrompts();
@@ -1148,7 +1174,7 @@ async function uploadFile(file) {
   await fetch('/api/short_publish/pool/add', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ source: data.path, profile: currentProfile() })
+    body: JSON.stringify({ source: data.path, profile: pageProfile() })
   });
   refreshPool();
 }
@@ -1626,7 +1652,7 @@ async function addToPool() {
       do_pinned_comment: document.getElementById('doPinnedComment').checked,
       pinned_comment_text: document.getElementById('pinnedCommentText').value,
       cut_time: document.getElementById('cutTime').value,
-      profile: currentProfile()
+      profile: pageProfile()
     })
   });
   refreshPool();
@@ -1728,15 +1754,28 @@ function applyPinnedDefaults(c) {
   saveUiState();
 }
 
-function init() {
+async function init() {
   restoreUiState();
+  await loadPageProfiles();
   loadVideos();
   loadPrompts();
-  fetch('/api/short_publish/config' + (currentProfile() ? '?profile=' + encodeURIComponent(currentProfile()) : '')).then(r => r.ok ? r.json() : {}).then(applyPinnedDefaults).catch(() => {});
+  fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : '')).then(r => r.ok ? r.json() : {}).then(applyPinnedDefaults).catch(() => {});
   initDropZone();
   initPool();
   updateSubtitleDependency();
   document.getElementById('goBtn').disabled = false;
+  // The page picker drives every profile-scoped call on this page: reload the
+  // config-derived defaults, prompts and video list when it changes. The
+  // toolbar locks it while an operation runs (data-profile-lock).
+  const profSel = document.getElementById('jobProfile');
+  if (profSel) profSel.addEventListener('change', async () => {
+    await loadPrompts();
+    const prof = pageProfile();
+    const c = await fetch('/api/short_publish/config' + (prof ? '?profile=' + encodeURIComponent(prof) : ''))
+      .then(r => r.ok ? r.json() : {}).catch(() => ({}));
+    applyPinnedDefaults(c);
+    loadVideos();
+  });
   // Persist any UI choice change
   for (const id of UI_STATE_IDS) {
     const el = document.getElementById(id);

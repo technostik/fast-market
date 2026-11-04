@@ -156,6 +156,8 @@
       <div class="video-name" id="videoName"></div>
     </div>
     <div class="publish-actions">
+      <label for="jobProfile" style="display:inline; margin:0; white-space:nowrap;" title="Profile used by this page: config, prompts and the YouTube account of the next job. Defaults to the toolbar profile.">Profile</label>
+      <select id="jobProfile" data-profile-lock title="Profile used by this page (defaults to the toolbar profile)" style="width:auto; max-width:160px; flex-shrink:0;"></select>
       <button class="btn-go" id="startBtn">▶ Publish</button>
       <button class="btn-resume" id="retryBtn" disabled title="Select a video that already has a publish log">↻ Retry</button>
       <select id="thumbEngine" class="inline-select" title="Thumbnail engine for this run"></select>
@@ -279,13 +281,29 @@ const API = '/api/long_publish';
 let currentJob = null;
 let pollTimer = null;
 let nextRetryStep = null;
+let nextRetryProfile = null;
 const STEP_ICONS = { pending:'⏳', running:'⏳', done:'✅', error:'❌', skipped:'⏭', stopped:'⏹' };
 
 function el(id){ return document.getElementById(id); }
 
 function currentProfile(){ return (window.fastmarketProfile && window.fastmarketProfile()) || ''; }
+function pageProfile(){
+  const sel = el('jobProfile');
+  return (sel && sel.value) || currentProfile();
+}
+async function loadPageProfiles(){
+  const sel = el('jobProfile');
+  if (!sel) return;
+  const r = await fetch(API+'/profiles').catch(()=>null);
+  const data = (r && r.ok) ? await r.json() : {profiles:[], active:''};
+  const names = data.profiles || [];
+  const wanted = currentProfile() || data.active || '';
+  sel.innerHTML = names.map(n=>`<option value="${n}">${n}</option>`).join('');
+  if (names.includes(wanted)) sel.value = wanted;
+  else if (data.active) sel.value = data.active;
+}
 async function loadConfig(){
-  const prof = currentProfile();
+  const prof = pageProfile();
   const c = await fetch(API+'/config'+(prof?'?profile='+encodeURIComponent(prof):'')).then(r=>r.json()).catch(()=>({}));
   await populateConfigPrompts();
   el('cfgSourcePath').value = c.video_source_path||'';
@@ -395,7 +413,7 @@ async function saveConfig(){
     rhythm_pause_paragraph: numOrNull('cfgRhyParagraph'),
     rhythm_crossfade: numOrNull('cfgRhyXfade'),
   };
-  const prof = currentProfile();
+  const prof = pageProfile();
   const r = await fetch(API+'/config'+(prof?'?profile='+encodeURIComponent(prof):''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (!r.ok){
     const data = await r.json().catch(()=>({}));
@@ -443,7 +461,8 @@ async function refreshQuickPrompt(){
   if (hasTranscript) qc.value = data.transcript_text;
 }
 async function loadPrompts(){
-  const r = await fetch(API+'/list-prompts').catch(()=>null);
+  const prof = pageProfile();
+  const r = await fetch(API+'/list-prompts'+(prof?'?profile='+encodeURIComponent(prof):'')).catch(()=>null);
   const data = r ? await r.json() : {prompts:[]};
   const opts = '<option value="">— prompt —</option>' + (data.prompts||[]).map(p=>`<option>${p}</option>`).join('');
   el('quickPromptSel').innerHTML = opts;
@@ -451,7 +470,8 @@ async function loadPrompts(){
 
 async function populateConfigPrompts(){
   try {
-    const r = await fetch(API+'/list-prompts').catch(()=>null);
+    const prof = pageProfile();
+    const r = await fetch(API+'/list-prompts'+(prof?'?profile='+encodeURIComponent(prof):'')).catch(()=>null);
     const data = r ? await r.json() : {prompts:[]};
     const names = data.prompts||[];
     const ids = ['cfgTitlePrompt','cfgDescPrompt','cfgThumbPrompt','cfgThumbOverlay'];
@@ -503,6 +523,7 @@ function setRetry(data){
   const step = data && Number.isInteger(data.next_step) ? data.next_step : null;
   if (!data || !data.meta_exists){
     nextRetryStep = null;
+    nextRetryProfile = null;
     retry.disabled = true;
     retry.textContent = '↻ Retry';
     retry.title = 'No publish log for this video yet';
@@ -510,6 +531,7 @@ function setRetry(data){
   }
   if (step == null){
     nextRetryStep = null;
+    nextRetryProfile = null;
     retry.disabled = true;
     retry.textContent = '↻ Retry';
     retry.title = 'Every step in the publish log is already done';
@@ -517,12 +539,14 @@ function setRetry(data){
   }
   if (step === 0){
     nextRetryStep = null;
+    nextRetryProfile = null;
     retry.disabled = true;
     retry.textContent = '↻ Retry';
     retry.title = 'Nothing completed yet — use Publish';
     return;
   }
   nextRetryStep = step;
+  nextRetryProfile = (data && data.profile) || null;
   retry.disabled = false;
   retry.textContent = '↻ Retry from ' + (names[step] || ('step '+step));
   retry.title = 'Continue from the first step that is not done in the long-meta log';
@@ -581,7 +605,7 @@ function startBody(){
     thumbnail_overlay_title: el('thumbOverlayTitle').value,
     thumbnail_overlay_subtitle: el('thumbOverlaySubtitle').value,
     thumbnail_engine: el('thumbEngine').value,
-    profile: currentProfile(),
+    profile: pageProfile(),
   };
 }
 
@@ -598,6 +622,9 @@ el('retryBtn').addEventListener('click', async ()=>{
   if (!source || nextRetryStep == null) return;
   const body = startBody();
   body.from_step = nextRetryStep;
+  // Retry keeps the profile persisted in the meta log: a page-picker change
+  // must never move a half-processed video to another YouTube account.
+  body.profile = nextRetryProfile || body.profile;
   const r = await fetch(API+'/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await r.json().catch(()=>({}));
   if (!r.ok || !data.job_id){ alert(data.detail || 'Retry failed'); return; }
@@ -610,6 +637,7 @@ el('resumeBtn').addEventListener('click', async ()=>{
   if (!source) return;
   const body = startBody();
   body.from_step = parseInt(el('resumeStep').value, 10);
+  body.profile = nextRetryProfile || body.profile;
   const r = await fetch(API+'/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await r.json();
   if (data.job_id){ currentJob = data.job_id; startPoll(); }
@@ -854,6 +882,7 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
 
 // init
 (async ()=>{
+  await loadPageProfiles();
   await loadConfig();
   if (el('doPinnedComment')) el('doPinnedComment').checked = el('cfgPinnedEnabled').checked;
   if (el('pinnedCommentText') && !el('pinnedCommentText').value) el('pinnedCommentText').value = el('cfgPinnedText').value||'';
@@ -864,6 +893,15 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
   await loadEngines();
   await loadThumbVideos();
   await refreshQuickPrompt();
+  // The page picker drives every profile-scoped call on this page.
+  // data-profile-lock freezes it while an operation runs.
+  if (el('jobProfile')) el('jobProfile').addEventListener('change', async ()=>{
+    await loadConfig();
+    await loadVideos();
+    await loadThumbVideos();
+    await loadPrompts();
+    await refreshQuickPrompt();
+  });
   setInterval(loadVideos, 10000);
 })();
 </script>

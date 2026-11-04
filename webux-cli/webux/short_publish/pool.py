@@ -322,6 +322,15 @@ def clear_pool_cut_time(source: str) -> None:
             return
 
 
+def is_busy() -> bool:
+    """Cheap, side-effect-free probe: True while the pool worker is active.
+
+    Deliberately does not call ``get_pool_state()``: that function auto-starts
+    the worker, which a polling toolbar must never trigger.
+    """
+    return bool(_pool_state["running"])
+
+
 def get_pool_state() -> dict:
     # Auto-start the pool worker only if it is not explicitly stopped and
     # there is work to do. After an explicit Stop, _pool_auto_start is False so

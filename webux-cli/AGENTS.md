@@ -41,6 +41,7 @@ Each `register(config: dict) -> WebuxPluginManifest` must provide:
 | `order` | Integer for tab ordering (lower = leftmost) |
 | `lazy` | `True` by default — defers router mount to first request |
 | `group` | Toolbar dropdown group (e.g. `"Publish"`); empty = hub fallback mapping, then `"More"` |
+| `busy_check` | Optional `Callable[[], bool]` — True while a long operation runs. Aggregated by `GET /api/system/busy`; the hub disables the profile switcher while any plugin is busy. Must be cheap and side-effect free (never call a status helper that auto-starts work). |
 
 Tabs are bucketed into toolbar dropdowns (Workspace 📁, Publish 📤, Create 🎨,
 Observe 👁, More 🧩) in `core/server.py` (`_WEBUX_GROUP_ORDER`,
@@ -54,6 +55,7 @@ Observe 👁, More 🧩) in `core/server.py` (`_WEBUX_GROUP_ORDER`,
 - Root `/` redirects to first discovered plugin tab
 - `/shell` fallback page lists all tabs
 - `POST /api/system/exit` → graceful shutdown
+- `GET /api/system/busy` → `{"busy": bool, "active": [plugin, ...]}` aggregating every manifest's `busy_check`
 
 ## 🔒 Security Rules
 - Every filesystem endpoint must call `_assert_path_safe(resolved_path, roots)` before read/write
@@ -80,6 +82,8 @@ Observe 👁, More 🧩) in `core/server.py` (`_WEBUX_GROUP_ORDER`,
 - **yt_poster subprocess path**: calls `youtube` and `prompt` CLIs — they must be in `PATH` and configured. Missing CLI → HTTP 500 with the subprocess error in the response.
 - **workdir not configured**: `yt_poster` and `fileviewer` return HTTP 404 when `workdir` is absent from `~/.config/fast-market/common/config.yaml`. Run `toolsetup workdir init <path>` first.
 - **plugin order**: `order` in `WebuxPluginManifest` controls tab position; lower numbers appear leftmost. Default ordering: fileviewer=30, skill_runner=20, yt_poster=40, monitor=20.
+- **profile switching is locked while anything runs**: the toolbar script polls `/api/system/busy` every 3s and disables `#webux-profile` (and every `[data-profile-lock]` page picker). It re-checks once more on `change` before writing `localStorage`/reloading, so a stale poll cannot let a switch through. `busy_check` probes must be side-effect free — e.g. short_publish reads `pool._pool_state["running"]`, never `get_pool_state()` (which auto-starts the worker).
+- **page profile pickers beat the toolbar**: `short_publish` and `long_publish` each have a `#jobProfile` selector defaulting to `currentProfile()` (toolbar). It drives every profile-scoped call on the page: config GET/POST, `/list-prompts?profile=`, `/list-videos?profile=` (short_publish), start/add-to-pool. Resume/Retry ignore it and use the profile persisted in the meta log so a half-processed video never moves account.
 - **short_publish pool duration is the processed file**: the pool row must show the renamed/concatenated clip (`upload_duration_seconds`, measured after step 3) — never the source-file length (`duration_seconds`). Source length belongs on the file picker only.
 - **short_publish pool rows keep their add-time profile**: the YouTube account is chosen when "Add to pool" is clicked and stored on the pool item (and in the meta log). `get_pool_state()` must expose `profile` for every item so the pool's "Edit in Studio" link can show it on hover; old entries fall back to the meta log, then the active profile.
 - **long_publish video extensions are shared**: `youtube.publish.video_extensions` is the same key short_publish reads. The long-publish default is `mp4,mkv,webm`. A stored value that is exactly the legacy `mp4,mkv` (any order or spacing) is rewritten to that default on `GET /config`. Any other saved list, including one that drops `webm` on purpose, is left unchanged.

@@ -701,4 +701,5 @@ def register(config: dict) -> WebuxPluginManifest:
         frontend_html=_HTML,
         order=70,
         lazy=True,
+        busy_check=is_running,
     )

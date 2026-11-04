@@ -47,6 +47,7 @@ when imports are unavoidable).
 - Always set lazy=True unless you have a specific reason not to
 - Keep register() fast — defer heavy imports inside router handlers
 - Use /api/{name}/ prefix for all API routes (the hub mounts them there)
+- Implement `busy_check` when the plugin can run long jobs, so the hub can lock profile switching
 - Test your plugin independently before wiring the entry point
 
 ## Don'ts

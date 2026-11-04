@@ -364,8 +364,33 @@ document.addEventListener('keydown', function (e) {
 _WEBUX_PROFILE_SCRIPT = """
 <script>
 (function(){
+  var busy = false;
+  var busyLabel = '';
   function getProfile(){ return localStorage.getItem('fastmarket_profile') || ''; }
   function setProfile(p){ if (p) localStorage.setItem('fastmarket_profile', p); }
+  function busyMessage(){
+    return 'Profile locked: ' + (busyLabel || 'an operation is running') +
+      ' is running. Wait for it to finish before switching profile.';
+  }
+  function applyBusy(state){
+    busy = !!(state && state.busy);
+    busyLabel = ((state && state.active) || []).join(', ');
+    var els = document.querySelectorAll('#webux-profile, [data-profile-lock]');
+    for (var i = 0; i < els.length; i++){
+      var el = els[i];
+      if (!('titleIdle' in el.dataset)) el.dataset.titleIdle = el.title || '';
+      el.disabled = busy;
+      el.title = busy ? busyMessage() : (el.dataset.titleIdle || '');
+      el.style.opacity = busy ? '0.5' : '';
+      el.style.cursor = busy ? 'not-allowed' : '';
+    }
+  }
+  function checkBusy(){
+    return fetch('/api/system/busy')
+      .then(function(r){ return r.ok ? r.json() : {busy:false, active:[]}; })
+      .then(function(d){ applyBusy(d); return busy; })
+      .catch(function(){ return busy; });
+  }
   document.addEventListener('DOMContentLoaded', function(){
     var sel = document.getElementById('webux-profile');
     if (!sel) return;
@@ -384,11 +409,22 @@ _WEBUX_PROFILE_SCRIPT = """
         if (sel.options[i].value === saved){ sel.selectedIndex = i; break; }
       }
     }
+    var accepted = sel.value;
     sel.addEventListener('change', function(){
-      localStorage.setItem('fastmarket_profile_user_set', '1');
-      setProfile(sel.value);
-      location.reload();
+      // A poll may be up to 3s stale: re-verify before reloading, and revert
+      // the select when an operation is actually running.
+      if (busy){ sel.value = accepted; alert(busyMessage()); return; }
+      var wanted = sel.value;
+      checkBusy().then(function(isBusy){
+        if (isBusy){ sel.value = accepted; alert(busyMessage()); return; }
+        accepted = wanted;
+        localStorage.setItem('fastmarket_profile_user_set', '1');
+        setProfile(wanted);
+        location.reload();
+      });
     });
+    checkBusy();
+    setInterval(checkBusy, 3000);
   });
 })();
 window.fastmarketProfile = function(){ return localStorage.getItem('fastmarket_profile') || (document.getElementById('webux-profile')?document.getElementById('webux-profile').value:''); };
@@ -967,6 +1003,28 @@ def build_app(
             methods=["GET"],
             response_class=HTMLResponse,
         )
+
+    @app.get("/api/system/busy")
+    def system_busy() -> dict:
+        """Aggregate every plugin's long-running probe (side-effect free).
+
+        The toolbar polls this to lock profile switching while an operation
+        runs: a profile switch reloads the page and can change the profile the
+        server resolves for profile-scoped requests.
+        """
+        active: list[str] = []
+        for plugin in manifests.values():
+            check = getattr(plugin, "busy_check", None)
+            if not callable(check):
+                continue
+            try:
+                if check():
+                    active.append(plugin.name)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "webux_busy_check_failed", plugin=plugin.name, error=str(exc)
+                )
+        return {"busy": bool(active), "active": active}
 
     @app.post("/api/system/exit")
     def exit_server() -> dict[str, bool]:

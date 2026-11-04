@@ -26,6 +26,11 @@ router = APIRouter()
 
 _jobs: dict[str, ScanJob] = {}
 
+
+def _is_busy() -> bool:
+    """True while any scan/normalize job runs (feeds GET /api/system/busy)."""
+    return any(job.status == "running" for job in list(_jobs.values()))
+
 _CONCURRENCY = 3
 
 _MIME = {
@@ -528,4 +533,5 @@ def register(config: dict) -> WebuxPluginManifest:
         frontend_html=html,
         order=70,
         lazy=True,
+        busy_check=_is_busy,
     )

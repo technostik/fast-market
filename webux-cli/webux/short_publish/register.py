@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -47,6 +48,7 @@ from .pool import (
     _load_pool_from_disk,
     clear_finished,
     rerun_check,
+    is_busy as pool_is_busy,
 )
 
 router = APIRouter()
@@ -67,6 +69,19 @@ _jobs: dict[str, Job] = {}
 
 def _is_intermediate(path: Path) -> bool:
     return bool(_INTERMEDIATE_RE.search(path.stem))
+
+
+def _is_busy() -> bool:
+    """True while the pool worker or an immediate publish job is active.
+
+    Feeds ``GET /api/system/busy`` so the toolbar locks profile switching.
+    """
+    if pool_is_busy():
+        return True
+    return any(
+        job.status not in ("done", "error", "stopped")
+        for job in list(_jobs.values())
+    )
 
 
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
@@ -209,9 +224,16 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
 
 @router.get("/list-videos")
 async def list_videos(
-    path: str = Query(default=DEFAULT_VIDEO_SOURCE_PATH),
-    extensions: str = Query(default=DEFAULT_VIDEO_EXTENSIONS),
+    path: str | None = Query(default=None),
+    extensions: str | None = Query(default=None),
+    profile: str | None = Query(default=None),
 ):
+    if not path or not extensions:
+        # Resolve the profile's publish config so the page picker shows the
+        # videos of the profile it is editing, not the server-wide one.
+        pub = _load_publish_cfg(profile) if profile else {}
+        path = path or pub.get("video_source_path") or DEFAULT_VIDEO_SOURCE_PATH
+        extensions = extensions or pub.get("video_extensions") or DEFAULT_VIDEO_EXTENSIONS
     d = Path(path).expanduser()
     if not d.exists() or not d.is_dir():
         return {"videos": [], "error": f"Directory not found: {path}"}
@@ -275,12 +297,18 @@ async def list_videos(
 # ── Prompt list API ───────────────────────────────────────────────────────────
 
 @router.get("/list-prompts")
-async def list_prompts():
+async def list_prompts(profile: str | None = Query(default=None)):
     pr = _pr()
+    # Scope the prompt CLI to the requested profile without mutating the
+    # process-wide FASTMARKET_PROFILE (a running job may own it).
+    env = dict(os.environ)
+    if profile:
+        env["FASTMARKET_PROFILE"] = profile
     proc = await asyncio.create_subprocess_exec(
         pr, "list", "--names-only",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
     stdout, _ = await proc.communicate()
     names = [n.strip() for n in stdout.decode(errors="replace").splitlines() if n.strip()]
@@ -571,6 +599,7 @@ async def check_resume(body: dict):
     ]
     return {
         "can_resume": bool(available),
+        "profile": meta.get("profile", ""),
         "available_from_steps": available,
         "completed_steps": sorted(completed),
         "skipped_steps": sorted(skipped),
@@ -930,4 +959,5 @@ def register(config: dict) -> WebuxPluginManifest:
         frontend_html=html,
         order=45,
         lazy=True,
+        busy_check=_is_busy,
     )
