@@ -375,14 +375,27 @@ _WEBUX_PROFILE_SCRIPT = """
   function applyBusy(state){
     busy = !!(state && state.busy);
     busyLabel = ((state && state.active) || []).join(', ');
+    var active = (state && state.active) || [];
     var els = document.querySelectorAll('#webux-profile, [data-profile-lock]');
     for (var i = 0; i < els.length; i++){
       var el = els[i];
       if (!('titleIdle' in el.dataset)) el.dataset.titleIdle = el.title || '';
-      el.disabled = busy;
-      el.title = busy ? busyMessage() : (el.dataset.titleIdle || '');
-      el.style.opacity = busy ? '0.5' : '';
-      el.style.cursor = busy ? 'not-allowed' : '';
+      // A picker may tolerate its own plugin being busy. short_publish uses
+      // this so the pool combo stays usable: the queue is sequential, so the
+      // next video can be queued for another channel while the current one
+      // uploads. Any other running plugin still locks it.
+      var allow = (el.dataset.profileLockAllow || '').split(',')
+        .map(function(s){ return s.trim(); })
+        .filter(Boolean);
+      var blockers = active.filter(function(n){ return allow.indexOf(n) === -1; });
+      var locked = blockers.length > 0;
+      el.disabled = locked;
+      el.title = locked
+        ? ('Profile locked: ' + (blockers.join(', ') || 'an operation is running') +
+           ' is running. Wait for it to finish before switching profile.')
+        : (el.dataset.titleIdle || '');
+      el.style.opacity = locked ? '0.5' : '';
+      el.style.cursor = locked ? 'not-allowed' : '';
     }
   }
   function checkBusy(){

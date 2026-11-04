@@ -114,7 +114,9 @@ class Job:
     do_normalize_volume: bool = False
     do_add_signature: bool = True
     do_generate_thumbnail: bool = True
-    do_pinned_comment: bool = False
+    # None = follow the profile's publish config, True/False = explicit choice
+    # from the run form (an unticked box must really disable the comment).
+    do_pinned_comment: bool | None = None
     pinned_comment_text: str = ""
     source_urls: list[str] = field(default_factory=list)
     thumbnail_overlay_title: str = ""

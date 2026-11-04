@@ -350,17 +350,17 @@
       <div class="row">
         <div class="checkrow">
           <input type="checkbox" id="doPinnedComment">
-          <label for="doPinnedComment" style="display:inline; margin:0;" title="Posts the comment right after upload (video still unlisted). Pin it manually in Studio via the comment link.">Post pinned comment after upload</label>
+          <label for="doPinnedComment" style="display:inline; margin:0;" title="Seeded from the selected profile's config. Uncheck to skip the comment for this job even if the profile enables it.">Post pinned comment after upload</label>
         </div>
       </div>
       <div class="row">
-        <label>Pinned comment (overrides config default)</label>
-        <textarea id="pinnedCommentText" rows="2" placeholder="Leave empty to use the config default"></textarea>
+        <label title="Pre-filled from the selected profile's config; edits apply to this run only.">Pinned comment (this run, from the selected profile)</label>
+        <textarea id="pinnedCommentText" rows="2" placeholder="Loaded from the profile's config — edit to override this run"></textarea>
       </div>
 
       <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;">
         <label for="jobProfile" style="display:inline; margin:0; white-space:nowrap;" title="Profile used by this page: config, prompts and the YouTube account of the next job. Defaults to the toolbar profile.">Profile</label>
-        <select id="jobProfile" data-profile-lock title="Profile used by this page (defaults to the toolbar profile)" style="width:auto; max-width:160px; flex-shrink:0;"></select>
+        <select id="jobProfile" data-profile-lock data-profile-lock-allow="short_publish" title="Profile used by this page (defaults to the toolbar profile)" style="width:auto; max-width:160px; flex-shrink:0;"></select>
         <button class="btn-go" onclick="startJob()" id="goBtn">Publish (immediate)</button>
         <button class="btn-sec" onclick="addToPool()" id="addPoolBtn">Add to pool</button>
         <button class="btn-resume" onclick="resumeJob()" id="resumeBtn" style="display:none;">Resume from step…</button>
@@ -511,11 +511,15 @@ function defaultTitlePrompt(){ const el = document.getElementById('cfgTitlePromp
 function defaultDescPrompt(){ const el = document.getElementById('cfgDescPrompt'); return (el && el.value) || window._defaultDescPrompt || 'youtube-summary'; }
 
 const UI_STATE_KEY = 'fastmarket_short_publish_ui_v1';
+// The pinned-comment fields are deliberately NOT persisted here: they are an
+// override of the *selected profile's* config, so restoring them from a single
+// global blob would carry one channel's comment onto another channel's video.
+// They are re-seeded from the page profile's config on load and on every
+// profile change (see applyPinnedDefaults).
 const UI_STATE_IDS = [
   'manualTitle','descPrefix','sourceUrls','skipUpload','cfgTranscriptMode',
   'normalizeVolume','doCharisma','addSignature','ignorePostPublish','privacy',
-  'cutTime','doPinnedComment','pinnedCommentText','removeSilence','burnSubtitles',
-  'useModal'
+  'cutTime','removeSilence','burnSubtitles','useModal'
 ];
 
 function _uiState() {
@@ -1013,8 +1017,11 @@ async function doResume() {
     privacy: document.getElementById('privacy').value,
     description_prefix: document.getElementById('descPrefix').value,
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
-    do_pinned_comment: document.getElementById('doPinnedComment').checked,
-    pinned_comment_text: document.getElementById('pinnedCommentText').value,
+    // Resume follows the profile persisted in the meta log, so the pinned
+    // comment must come from that profile's config — never from the page box,
+    // which may now show another channel.
+    do_pinned_comment: null,
+    pinned_comment_text: '',
     profile: area.dataset.profile || pageProfile()
   };
   const r = await fetch('/api/short_publish/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -1104,7 +1111,15 @@ async function saveConfig() {
     model: document.getElementById('cfgModel').value
   };
   const r = await fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : ''), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  if (r.ok) alert('Saved'); else alert('Save failed');
+  if (r.ok) {
+    // Keep the run form aligned with the config that was just saved for this
+    // profile (the box is seeded from it).
+    applyPinnedDefaults({
+      short_pinned_comment_enabled: body.short_pinned_comment_enabled,
+      short_pinned_comment_text: body.short_pinned_comment_text
+    });
+    alert('Saved');
+  } else alert('Save failed');
 }
 
 async function toggleConfig() {
@@ -1745,13 +1760,11 @@ function applyPinnedDefaults(c) {
   if (!c) return;
   const cb = document.getElementById('doPinnedComment');
   const tx = document.getElementById('pinnedCommentText');
-  const state = _uiState();
-  const hasSaved = Object.prototype.hasOwnProperty.call(state, 'doPinnedComment');
-  if (cb && !hasSaved) {
-    cb.checked = !!(c.short_pinned_comment_enabled || c.short_pinned_comment_text);
-  }
-  if (tx && !tx.value) tx.value = c.short_pinned_comment_text || '';
-  saveUiState();
+  const cfgText = c.short_pinned_comment_text || '';
+  // Always reseed from the selected profile: this box overrides that profile's
+  // default, so a value typed for another channel must never be reused here.
+  if (cb) cb.checked = !!(c.short_pinned_comment_enabled || cfgText);
+  if (tx) tx.value = cfgText;
 }
 
 async function init() {

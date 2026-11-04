@@ -106,13 +106,17 @@ def _compose_description(prefix: str, source_urls: list[str], body: str, signatu
 
 
 def _pinned_comment_cfg(job: Job, pub_cfg: dict) -> tuple[bool, str]:
-    """Resolve pinned-comment setting: per-job override wins, else config default."""
+    """Resolve pinned-comment setting: per-job override wins, else config default.
+
+    ``do_pinned_comment`` is tri-state: ``None`` means "follow the profile's
+    config" (job created outside the run form), while an explicit ``False``
+    disables the comment even when the config enables it.
+    """
     text = (getattr(job, "pinned_comment_text", "") or "").strip()
-    enabled = bool(getattr(job, "do_pinned_comment", False))
+    choice = getattr(job, "do_pinned_comment", None)
+    enabled = bool(pub_cfg.get("long_pinned_comment_enabled", False)) if choice is None else bool(choice)
     if not text:
         text = str(pub_cfg.get("long_pinned_comment_text", "") or "").strip()
-    if not getattr(job, "do_pinned_comment", False):
-        enabled = bool(pub_cfg.get("long_pinned_comment_enabled", False))
     return enabled, text
 
 

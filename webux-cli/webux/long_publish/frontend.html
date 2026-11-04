@@ -324,6 +324,7 @@ async function loadConfig(){
   el('cfgModalUrl').value = c.modal_usage_url||'';
   el('cfgPinnedEnabled').checked = !!c.long_pinned_comment_enabled;
   el('cfgPinnedText').value = c.long_pinned_comment_text||'';
+  applyPinnedDefaults(c);
   el('cfgLang').value = c.transcript_language||'fr';
   el('cfgModel').value = c.transcript_model||'medium';
   el('cfgGroq').checked = (c.transcript_mode==='groq');
@@ -341,6 +342,19 @@ function signatureAvailable() {
   const p = el('cfgSigVideo');
   return !!(p && p.value.trim());
 }
+
+// The run-level pinned comment box is an override of the *selected profile's*
+// config. Reseed it from that config on every load / profile change so a value
+// typed for another channel can never be posted on this one.
+function applyPinnedDefaults(c){
+  if (!c) return;
+  const cb = el('doPinnedComment');
+  const tx = el('pinnedCommentText');
+  const text = c.long_pinned_comment_text || '';
+  if (cb) cb.checked = !!(c.long_pinned_comment_enabled || text);
+  if (tx) tx.value = text;
+}
+
 function updateSignatureAvailability() {
   const cb = el('doSignature');
   if (!cb) return;
@@ -421,6 +435,12 @@ async function saveConfig(){
   } else {
     el('cfgMsg').textContent = 'saved';
     setTimeout(()=>el('cfgMsg').textContent='', 1500);
+    // The run box mirrors this profile's config, so refresh it from the values
+    // that were just saved.
+    applyPinnedDefaults({
+      long_pinned_comment_enabled: body.long_pinned_comment_enabled,
+      long_pinned_comment_text: body.long_pinned_comment_text,
+    });
   }
   await loadVideos();
   await loadThumbVideos();
@@ -623,8 +643,12 @@ el('retryBtn').addEventListener('click', async ()=>{
   const body = startBody();
   body.from_step = nextRetryStep;
   // Retry keeps the profile persisted in the meta log: a page-picker change
-  // must never move a half-processed video to another YouTube account.
+  // must never move a half-processed video to another YouTube account. For the
+  // same reason the pinned comment comes from that profile's config, not from
+  // the page box (which may show another channel).
   body.profile = nextRetryProfile || body.profile;
+  body.do_pinned_comment = null;
+  body.pinned_comment_text = '';
   const r = await fetch(API+'/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await r.json().catch(()=>({}));
   if (!r.ok || !data.job_id){ alert(data.detail || 'Retry failed'); return; }
@@ -638,6 +662,10 @@ el('resumeBtn').addEventListener('click', async ()=>{
   const body = startBody();
   body.from_step = parseInt(el('resumeStep').value, 10);
   body.profile = nextRetryProfile || body.profile;
+  // Resume belongs to the meta profile, so it follows that profile's pinned
+  // comment config instead of whatever the page box currently shows.
+  body.do_pinned_comment = null;
+  body.pinned_comment_text = '';
   const r = await fetch(API+'/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await r.json();
   if (data.job_id){ currentJob = data.job_id; startPoll(); }
@@ -884,8 +912,6 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
 (async ()=>{
   await loadPageProfiles();
   await loadConfig();
-  if (el('doPinnedComment')) el('doPinnedComment').checked = el('cfgPinnedEnabled').checked;
-  if (el('pinnedCommentText') && !el('pinnedCommentText').value) el('pinnedCommentText').value = el('cfgPinnedText').value||'';
   updateOverlayRow();
   updateManualMode();
   await loadVideos();

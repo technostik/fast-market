@@ -74,7 +74,9 @@ class Job:
     do_charisma: bool = True
     do_add_signature: bool = True
     do_ignore_post_publish: bool = False
-    do_pinned_comment: bool = False
+    # None = follow the profile's publish config, True/False = explicit choice
+    # from the run form (an unticked box must really disable the comment).
+    do_pinned_comment: bool | None = None
     pinned_comment_text: str = ""
     cut_time: str = ""
     source_urls: list[str] = field(default_factory=list)
