@@ -83,7 +83,7 @@ def _abort_if_stopped(job: Job, step) -> bool:
 
 
 async def _run_tracked(job: Job, step, *cmd: str):
-    rc, _ = await _run(step, *cmd)
+    rc, _ = await _run(job, step, *cmd)
     return _finish_step(job, step, rc)
 
 
@@ -139,11 +139,13 @@ async def _maybe_post_pinned_comment(job: Job, video_id: str, step) -> None:
     if not enabled or not text:
         return
     try:
+        from .utils import _job_env
         proc = await asyncio.create_subprocess_exec(
             _yt(), "comment-post", video_id,
             "--text", text, "--format", "json",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_job_env(job),
         )
         set_active_proc(proc)
         try:
@@ -208,7 +210,7 @@ async def _generate_image_prompt(job: Job, transcript_path: str, pub_cfg: dict) 
     video title."""
     name = pub_cfg.get("default_thumbnail_prompt", "").strip()
     if name and transcript_path and Path(transcript_path).exists():
-        rc, out = await _run(None, _pr(), "apply", name, f"transcript=@{transcript_path}")
+        rc, out = await _run(job, None, _pr(), "apply", name, f"transcript=@{transcript_path}")
         if rc == 0 and out.strip():
             return out.strip()
     if transcript_path and Path(transcript_path).exists():
@@ -242,7 +244,7 @@ async def _generate_from_storyboard_prompt(transcript_path: str) -> str:
             template = template.replace(f"{{{k}}}", str(v))
         # Escape remaining braces (prompt CLI uses {var}) then expose {content}.
         prompt_text = template.replace("{", "{{").replace("}", "}}") + "{content}"
-        rc, out = await _run(None, _pr(), "apply", prompt_text, f"content=@{transcript_path}")
+        rc, out = await _run(job, None, _pr(), "apply", prompt_text, f"content=@{transcript_path}")
         if rc == 0 and out.strip():
             return out.strip()
     except Exception:
@@ -255,7 +257,7 @@ async def _generate_overlay_title(job: Job, transcript_path: str, pub_cfg: dict)
     prompt applied to the transcript; empty when none configured."""
     name = pub_cfg.get("default_thumbnail_overlay_prompt", "").strip()
     if name and transcript_path and Path(transcript_path).exists():
-        rc, out = await _run(None, _pr(), "apply", name, f"transcript=@{transcript_path}")
+        rc, out = await _run(job, None, _pr(), "apply", name, f"transcript=@{transcript_path}")
         if rc == 0 and out.strip():
             return out.strip()
     return ""
@@ -470,10 +472,12 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             # Manual mode: no summary LLM call at all.
             raw_description = manual_desc
         else:
+            from .utils import _job_env
             proc = await asyncio.create_subprocess_exec(
                 _pr(), "apply", job.prompt_summary, f"transcript=@{txt_path}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_job_env(job),
             )
             set_active_proc(proc)
             try:
@@ -688,7 +692,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         thumb = job.files.get("thumbnail", "")
         if thumb and Path(thumb).exists():
             cmd += ["--thumbnail", thumb]
-        rc, url_out = await _run(s5, *cmd)
+        rc, url_out = await _run(job, s5, *cmd)
         if _finish_step(job, s5, rc):
             return
 

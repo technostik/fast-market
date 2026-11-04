@@ -22,12 +22,38 @@ Guides you through configuring LLM providers and setting a global default workdi
 
 | Config | Path |
 |--------|------|
-| Common (workdir) | `~/.config/fast-market/common/config.yaml` |
-| LLM providers | `~/.config/fast-market/common/llm/config.yaml` |
-| YouTube | `~/.config/fast-market/youtube/config.yaml` |
-| Agent | `~/.config/fast-market/agent/config.yaml` |
+| Common (workdir) | `~/.config/fast-market/profiles/<profile>/common/config.yaml` |
+| LLM providers | `~/.config/fast-market/profiles/<profile>/common/llm/config.yaml` |
+| YouTube | `~/.config/fast-market/profiles/<profile>/common/youtube/config.yaml` |
+| Agent | `~/.config/fast-market/profiles/<profile>/common/agent/config.yaml` |
 | Completions | `~/.config/fast-market/completions/` |
-| Data | `~/.local/share/fast-market/` |
+| Data | `~/.local/share/fast-market/profiles/<profile>/` |
+
+> **Note**: All configs are scoped to the active profile (`FASTMARKET_PROFILE` or `~/.config/fast-market/active_profile`). A `_shared` profile is merged as a base under each profile.
+
+---
+
+## ⚠️ YouTube OAuth Setup for New Profiles
+
+When creating a **new profile** that uses YouTube (upload, comments, etc.), you must configure OAuth consent:
+
+### Option A: Share existing OAuth app (quick, for testing)
+1. Run setup: `FASTMARKET_PROFILE=newprofile toolsetup`
+2. Copy `client_secret.json` from an existing profile:
+   ```bash
+   cp ~/.config/fast-market/profiles/existing/common/youtube/client_secret.json \
+      ~/.config/fast-market/profiles/newprofile/common/youtube/client_secret.json
+   ```
+3. **In Google Cloud Console → APIs & Services → OAuth consent screen → Test users**, add the new account's email
+4. Authenticate: `FASTMARKET_PROFILE=newprofile youtube setup refresh-auth`
+
+### Option B: Separate OAuth app per profile (recommended for production)
+1. In Google Cloud Console → Credentials → Create OAuth client ID (Web app)
+2. Download JSON → save as `~/.config/fast-market/profiles/newprofile/common/youtube/client_secret.json`
+3. Set `channel_id` in `config.yaml`
+4. Authenticate: `FASTMARKET_PROFILE=newprofile youtube setup refresh-auth`
+
+> **Why separate apps?** Each profile = separate YouTube channel = separate token file. Sharing `client_secret.json` means both profiles share the same `token.json`, so only one account can be authenticated at a time.
 
 ## CLI Reference
 

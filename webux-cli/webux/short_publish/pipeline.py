@@ -108,7 +108,7 @@ async def _run_tracked(job: Job, step, *cmd: str):
     Streams stdout/stderr into the step output, registers the process so a
     stop request can terminate it, then finalizes the step. Returns True when
     the pipeline must abort (error or stop)."""
-    rc, _ = await _run(step, *cmd)
+    rc, _ = await _run(job, step, *cmd)
     return _finish_step(job, step, rc)
 
 
@@ -151,6 +151,7 @@ async def _maybe_post_pinned_comment(job: Job, video_id: str, step) -> None:
             "--text", text, "--format", "json",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_job_env(job),
         )
         set_active_proc(proc)
         try:
@@ -317,6 +318,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             norm_proc = await asyncio.create_subprocess_exec(
                 *norm_cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                env=_job_env(job),
             )
             set_active_proc(norm_proc)
             try:
@@ -340,6 +342,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
                 charisma_proc = await asyncio.create_subprocess_exec(
                     *charisma_cmd,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    env=_job_env(job),
                 )
                 set_active_proc(charisma_proc)
                 try:
@@ -368,6 +371,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             measure_proc = await asyncio.create_subprocess_exec(
                 *measure_cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                env=_job_env(job),
             )
             set_active_proc(measure_proc)
             try:
@@ -517,6 +521,7 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             _pr(), "apply", job.prompt_summary, f"transcript=@{transcript_path}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_job_env(job),
         )
         set_active_proc(proc)
         try:
@@ -562,6 +567,7 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
                     _pr(), "apply", job.prompt_check, f"transcript=@{transcript_path}",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    env=_job_env(job),
                 )
                 set_active_proc(chk_proc)
                 try:
@@ -687,7 +693,7 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             _save_meta(job)
             return
         rc, url_out = await _run(
-            s4, _yt(), "upload", final_video,
+            job, s4, _yt(), "upload", final_video,
             "--title", job.title,
             "--description", job.description,
             "--privacy", job.privacy,
@@ -742,7 +748,7 @@ async def _run_post_publish_step(job: Job, final_video: str) -> None:
                     "bash", str(script_path), final_for_script,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=os.environ.copy(),
+                    env=_job_env(job),
                 )
                 set_active_proc(proc)
 
@@ -820,7 +826,7 @@ async def _run_transcript_script(job: Job, transcript_path: str) -> None:
                     "bash", str(script_path), transcript_path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=os.environ.copy(),
+                    env=_job_env(job),
                 )
                 set_active_proc(proc)
 

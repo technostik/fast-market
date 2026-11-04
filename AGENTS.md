@@ -61,3 +61,16 @@ Set `timeout: 0` in `SKILL.md` frontmatter to disable L2 for a specific skill.
 - A batch operation needs more LLM time: set `llm_call_timeout: 0` in agent config or pass `--timeout 0`.
 - `monitor run` cron budget needs adjusting: edit `timeout.max` in `monitor/config.yaml`.
 - Do NOT simply raise the global `default_timeout` beyond 900s — use per-skill overrides.
+
+---
+
+## 📋 Quick Reference: YouTube Multi-Account OAuth
+
+When creating a new profile for a **different Google account**:
+
+1. `FASTMARKET_PROFILE=newprofile toolsetup`  (auto-creates YouTube config)
+2. Copy or create `client_secret.json` in `~/.config/fast-market/profiles/newprofile/common/youtube/`
+3. **If sharing OAuth app**: Add the new email as **test user** in Google Cloud Console → OAuth consent screen
+4. `FASTMARKET_PROFILE=newprofile youtube setup refresh-auth`
+
+**Docs**: [README.md#-youtube-oauth-for-multi-account-profiles](README.md#-youtube-oauth-for-multi-account-profiles), [youtube-cli/README.md](youtube-cli/README.md#oauth-consent-screen-for-multiple-profilesaccounts), [toolsetup-cli/README.md](toolsetup-cli/README.md#️-youtube-oauth-setup-for-new-profiles)

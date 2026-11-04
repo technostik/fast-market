@@ -17,11 +17,14 @@ pip install -e .
 
 ## Configuration
 
-The tool follows XDG specifications for configuration:
-- Config: `~/.config/fast-market/common/youtube/config.yaml`
+The tool follows XDG specifications for configuration, scoped to the active profile:
+
+- Config: `~/.config/fast-market/profiles/<profile>/common/youtube/config.yaml`
 - Cache: `~/.cache/youtube-videos/`
-- OAuth token: `~/.config/fast-market/common/youtube/token.json`
-- Client secrets: `~/.config/fast-market/common/youtube/client_secret.json`
+- OAuth token: `~/.config/fast-market/profiles/<profile>/common/youtube/token.json`
+- Client secrets: `~/.config/fast-market/profiles/<profile>/common/youtube/client_secret.json`
+
+> **Note**: Config is merged from `_shared` → active profile. Run `toolsetup --show-path` to see actual paths.
 
 ### First-time Setup
 
@@ -29,7 +32,7 @@ The tool follows XDG specifications for configuration:
 youtube setup wizard
 ```
 
-This creates a default configuration at `~/.config/fast-market/common/youtube/config.yaml`.
+This creates a default configuration at `~/.config/fast-market/profiles/<profile>/common/youtube/config.yaml`.
 
 ### Getting Google OAuth Credentials
 
@@ -40,8 +43,26 @@ This creates a default configuration at `~/.config/fast-market/common/youtube/co
    - Application type: Desktop application
 5. Download the JSON file and save as `client_secret.json`:
    ```bash
-   mv ~/Downloads/client_secret.json ~/.config/fast-market/common/youtube/
+   mv ~/Downloads/client_secret.json ~/.config/fast-market/profiles/<profile>/common/youtube/
    ```
+
+### ⚠️ OAuth Consent Screen for Multiple Profiles/Accounts
+
+If you use **multiple profiles** (different YouTube channels/accounts):
+
+| Scenario | Action Required |
+|----------|-----------------|
+| **Same Google account, different profiles** | Share `client_secret.json`, but each profile gets its own `token.json` |
+| **Different Google accounts** | **Each account needs its own OAuth client** OR add the new email as a **test user** on the existing app's OAuth consent screen |
+
+**For different accounts (e.g., `account1@gmail.com` + `account2@gmail.com`):**
+
+1. Create new profile: `FASTMARKET_PROFILE=technostik toolsetup`
+2. Copy shared `client_secret.json` OR create new OAuth client
+3. **In Google Cloud Console → APIs & Services → OAuth consent screen → Test users**, add `account2@gmail.com`
+4. Authenticate: `FASTMARKET_PROFILE=technostik youtube setup refresh-auth`
+
+> Without adding the test user, you'll get: `Erreur 403 : access_denied - Auto-tube n'a pas terminé la procédure de validation de Google`
 
 ### Verify Setup
 

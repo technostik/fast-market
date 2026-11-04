@@ -319,6 +319,7 @@ async def list_prompts(profile: str | None = Query(default=None)):
 class QuickPromptRequest(BaseModel):
     prompt_name: str
     content: str
+    profile: str | None = None
 
 
 @router.post("/quick-prompt")
@@ -327,10 +328,14 @@ async def quick_prompt(req: QuickPromptRequest):
         f.write(req.content)
         tmp = f.name
     try:
+        from .utils import _job_env
+        class _JobProxy:
+            profile = req.profile or resolve_profile()
         proc = await asyncio.create_subprocess_exec(
             _pr(), "apply", req.prompt_name, f"content=@{tmp}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_job_env(_JobProxy()),
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode:

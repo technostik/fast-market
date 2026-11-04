@@ -624,12 +624,12 @@ def clear_finished(archive_path: str | None = None, trash_path: str | None = Non
 
 
 async def rerun_check(source: str) -> str | None:
-    from .utils import _pr, _stem
+    from .utils import _pr, _stem, _job_env
     src = str(Path(source).expanduser().resolve())
     item = next((it for it in _pool if it.source == src), None)
     if not item:
         return None
-    pub = _load_publish_cfg()
+    pub = _load_publish_cfg(item.profile)
     check_prompt = pub.get("default_check_prompt", "").strip()
     if not check_prompt:
         return None
@@ -637,10 +637,14 @@ async def rerun_check(source: str) -> str | None:
     txt_path = d / f"{_stem(src)}_transcript.txt"
     if not txt_path.exists():
         return None
+    # Create a minimal job-like object for _job_env
+    class _JobProxy:
+        profile = item.profile
     proc = await asyncio.create_subprocess_exec(
         _pr(), "apply", check_prompt, f"transcript=@{txt_path}",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_job_env(_JobProxy()),
     )
     stdout, _ = await proc.communicate()
     result = stdout.decode(errors="replace").strip() if proc.returncode == 0 else None

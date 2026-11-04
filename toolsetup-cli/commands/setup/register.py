@@ -559,21 +559,29 @@ def _print_env_reminder(provider: str, settings: dict):
 
 def _run_wizard():
     """Interactive first-time setup wizard."""
+    from common.core.config import load_llm_config, load_common_config
     llm_plugin = get_plugin("llm")
     workdir_plugin = get_plugin("workdir")
+    youtube_plugin = get_plugin("youtube")
 
-    llm_cfg = llm_plugin.load()
+    # Use merged config for display (includes _shared)
+    merged_llm = load_llm_config()
     common_cfg = workdir_plugin.load()
 
     click.echo("=== fast-market common setup ===\n")
 
-    existing = llm_cfg.get("providers", {})
+    existing = merged_llm.get("providers", {})
     if existing:
-        click.echo("Current providers:")
+        click.echo("Current providers (from _shared + profile):")
         for name in existing:
-            marker = " (default)" if name == llm_cfg.get("default_provider") else ""
+            marker = " (default)" if name == merged_llm.get("default_provider") else ""
             click.echo(f"  - {name}{marker}")
-        if not click.confirm("\nAdd or reconfigure a provider?", default=False):
+        if not click.confirm("\nAdd or reconfigure a provider in this profile?", default=False):
+            # Ensure YouTube config exists even if user skips LLM setup
+            yt_cfg = youtube_plugin.load()
+            if not yt_cfg:
+                youtube_plugin.save(youtube_plugin.default_config())
+                click.echo(f"  YouTube: {youtube_plugin.config_path()} (created with defaults)")
             click.echo("\nSetup complete. Use 'toolsetup --show' to review.")
             return
 
@@ -601,11 +609,17 @@ def _run_wizard():
     llm_plugin.save(llm_cfg)
     workdir_plugin.save(common_cfg)
 
+    # Ensure YouTube common sub-config exists
+    yt_cfg = youtube_plugin.load()
+    if not yt_cfg:
+        youtube_plugin.save(youtube_plugin.default_config())
+
     click.echo("\nConfig saved to:")
-    click.echo(f"  LLM:    {llm_plugin.config_path()}")
+    click.echo(f"  LLM:     {llm_plugin.config_path()}")
     click.echo(f"  workdir: {workdir_plugin.config_path()}")
+    click.echo(f"  YouTube: {youtube_plugin.config_path()} (created with defaults)")
     _print_env_reminder(provider, settings)
-    click.echo("\nYou can now use: prompt, task, skill")
+    click.echo("\nYou can now use: prompt, task, skill, youtube")
     click.echo("Add more providers: toolsetup llm add <provider>")
 
 

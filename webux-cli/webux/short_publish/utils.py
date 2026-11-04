@@ -161,6 +161,19 @@ def _extract_video_id(url: str) -> str:
     return m.group(1) if m else ""
 
 
+def _job_env(job) -> dict:
+    """Return environment dict for a job with correct FASTMARKET_PROFILE.
+
+    Creates a copy of os.environ with FASTMARKET_PROFILE set to the job's profile,
+    so subprocesses inherit the correct profile regardless of concurrent jobs.
+    """
+    import os
+    env = os.environ.copy()
+    if getattr(job, "profile", ""):
+        env["FASTMARKET_PROFILE"] = job.profile
+    return env
+
+
 def _ass_to_plain_text(ass_path: str) -> str:
     import re
     lines = []
@@ -251,13 +264,14 @@ def _validate_urls(urls: list[str]) -> list[str]:
     return result
 
 
-async def _run(step, *cmd: str):
+async def _run(job, step, *cmd: str):
     from .state import set_active_proc, clear_active_proc
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_job_env(job),
     )
     set_active_proc(proc)
     try:

@@ -134,6 +134,25 @@ Secrets are stored inline in each profile's `config.yaml` (resolved before any
 `api_key_env` fallback), so free-service keys differ per persona while a shared
 key can live once in `_shared`.
 
+---
+
+### ⚠️ YouTube OAuth for Multi-Account Profiles
+
+When using **different Google accounts** across profiles (e.g., `account1@gmail.com` + `account2@gmail.com`):
+
+1. **Create the new profile**: `FASTMARKET_PROFILE=technostik toolsetup`
+2. **Configure YouTube**: Each profile needs `client_secret.json` and `channel_id` in `~/.config/fast-market/profiles/<profile>/common/youtube/`
+3. **Add test user in Google Cloud Console** (if sharing OAuth app):
+   - Go to **APIs & Services → OAuth consent screen → Test users**
+   - Add the new account's email (e.g., `account2@gmail.com`)
+4. **Authenticate**: `FASTMARKET_PROFILE=technostik youtube setup refresh-auth`
+
+> Without adding the test user, you'll get: `Erreur 403: access_denied - Auto-tube n'a pas terminé la procédure de validation de Google`
+
+> **Recommendation**: For production, create a separate OAuth client per profile (different `client_secret.json`) so each has its own token and no test user limits apply.
+
+---
+
 ### First-time Setup
 
 Run the toolsetup wizard to configure LLM providers:

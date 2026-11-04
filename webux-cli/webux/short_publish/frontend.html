@@ -1628,7 +1628,7 @@ async function applyQuickPrompt() {
   const r = await fetch('/api/short_publish/quick-prompt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt_name: promptName, content })
+    body: JSON.stringify({ prompt_name: promptName, content, profile: pageProfile() })
   }).catch(() => null);
   if (!r || !r.ok) {
     statusEl.textContent = '❌ Request failed';
