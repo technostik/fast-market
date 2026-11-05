@@ -339,7 +339,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
     @click.option(
         "--threshold", "-t",
-        default=-65.0, show_default=True,
+        default=-50.0, show_default=True,
         help="Silence threshold in dB",
     )
     @click.option("--modal/--local", default=False, show_default=True, help="Run this step on Modal instead of locally.")
