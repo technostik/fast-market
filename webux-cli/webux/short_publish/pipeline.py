@@ -24,6 +24,7 @@ from .utils import (
     SHORTS_MAX_SECONDS,
     _run,
     _extract_video_id,
+    _job_env,
 )
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
 from .pool import clear_pool_cut_time, set_item_upload_duration

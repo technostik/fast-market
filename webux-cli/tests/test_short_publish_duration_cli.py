@@ -144,6 +144,12 @@ def test_save_meta_persists_processed_duration(tmp_path, monkeypatch):
     assert meta["upload_duration_seconds"] == 88.0
 
 
+def test_pipeline_imports_job_env():
+    from webux.short_publish import pipeline as sp_pipeline
+
+    assert sp_pipeline._job_env is sp_utils._job_env
+
+
 def test_record_processed_duration_probes_given_path_not_source(tmp_path, monkeypatch):
     import asyncio
     from webux.short_publish.models import Job, Step, STEP_NAMES
