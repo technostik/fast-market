@@ -104,10 +104,13 @@ def _is_snapped(snapshot_root: Path, source_type: str) -> bool:
 
 
 def _should_skip_file(path: Path) -> bool:
-    """Check if a file should be skipped during snapshot (e.g., .bak* files)."""
+    """Check if a file/directory should be skipped during snapshot."""
     name = path.name
     # Skip .bak, .bak.1, .bak.2, etc.
     if name == ".bak" or name.startswith(".bak."):
+        return True
+    # Skip pre-restore backup directories created during restore
+    if name.startswith("pre-restore-") or ".pre-restore-" in name:
         return True
     # Check if any part of the name has .bak extension pattern
     # e.g., file.yaml.bak, file.yaml.bak.1
@@ -115,6 +118,92 @@ def _should_skip_file(path: Path) -> bool:
     for i, part in enumerate(parts):
         if part == "bak":
             return True
+    return False
+
+
+def _should_skip_dir(path: Path) -> bool:
+    """Check if a directory should be entirely skipped during snapshot."""
+    name = path.name
+    # Skip Chrome cache directories that are large and regenerated
+    chrome_cache_dirs = {
+        "optimization_guide_model_store",
+        "component_crx_cache",
+        "WasmTtsEngine",
+        "OnDeviceHeadSuggestModel",
+        "GPUPersistentCache",
+        "OptimizationHints",
+        "OptimizationGuideModelsManifest",
+        "SegmentationPlatform",
+        "segmentation_platform",
+        "Subresource Filter",
+        "Subresource_Filter",
+        "GrpcCache",
+        "HttpCache",
+        "ShaderCache",
+        "GPUCache",
+        "CodeCache",
+        "ScriptCache",
+        "ServiceWorkerCache",
+        "CacheStorage",
+        "FileTypePolicies",
+        "CertificateRevocation",
+        "CaptchaProviders",
+        "AmountExtractionHeuristicRegexes",
+        "ActorSafetyLists",
+        "Crowd Deny",
+        "FirstPartySetsPreloaded",
+        "MEIPreload",
+        "NativeMessagingHosts",
+        "OnDeviceHeadSuggestModel",
+        "OptimizationGuideModelsManifest",
+        "OptimizationHints",
+        "OriginTrials",
+        "PKIMetadata",
+        "PrivacySandboxAttestationsPreloaded",
+        "SafetyTips",
+        "SSLErrorAssistant",
+        "TrustTokenKeyCommitments",
+        "ZxcvbnData",
+        "hyphen-data",
+        "WidevineCdm",
+        "VariationsSafeSeedV2",
+        "VariationsSeedV2",
+        "Variations",
+        "Last Version",
+        "Local State",
+        "Safe Browsing",
+        "GPUPersistentCache",
+    }
+    if name in chrome_cache_dirs:
+        return True
+    # Skip pre-restore backup directories
+    if name.startswith("pre-restore-") or ".pre-restore-" in name:
+        return True
+    # Skip directories with .bak pattern
+    if name == ".bak" or name.startswith(".bak."):
+        return True
+    parts = name.split(".")
+    for part in parts:
+        if part == "bak":
+            return True
+    return False
+
+
+def _is_chrome_profile_dir(path: Path) -> bool:
+    """Check if a directory is a Chrome profile or video directory that should be excluded."""
+    # Check if path matches profiles/<profile>/browser/chrome-profile
+    try:
+        parts = path.parts
+        # Look for pattern: .../profiles/<something>/browser/chrome-profile
+        for i, part in enumerate(parts):
+            if part == "profiles" and i + 3 < len(parts):
+                if parts[i + 2] == "browser" and parts[i + 3] == "chrome-profile":
+                    return True
+                # Also exclude video directory under profiles
+                if parts[i + 2] == "video":
+                    return True
+    except (IndexError, AttributeError):
+        pass
     return False
 
 
@@ -148,7 +237,7 @@ def _is_snapshot_storage_dir(item: Path) -> bool:
 
 
 def _copy_tree_no_bak(src: Path, dst: Path, skip_paths: set[Path] | None = None) -> int:
-    """Recursively copy directory tree, skipping .bak* files.
+    """Recursively copy directory tree, skipping .bak* files and cache directories.
 
     Returns number of items copied.
     """
@@ -156,7 +245,18 @@ def _copy_tree_no_bak(src: Path, dst: Path, skip_paths: set[Path] | None = None)
     count = 0
 
     for item in src.iterdir():
+        # Check file-level skip patterns
         if _should_skip_file(item) or _is_under_skip_path(item, skip_paths):
+            continue
+
+        # Check directory-level skip patterns (for directories)
+        if item.is_dir() and _should_skip_dir(item):
+            click.echo(f"Skipping cache directory: {item.name}")
+            continue
+
+        # Skip Chrome profile and video directories (too large, regenerated)
+        if item.is_dir() and _is_chrome_profile_dir(item):
+            click.echo(f"Warning: Skipping Chrome profile/video directory (too large, regenerated): {item.name}")
             continue
 
         if _is_snapshot_storage_dir(item):
@@ -168,12 +268,18 @@ def _copy_tree_no_bak(src: Path, dst: Path, skip_paths: set[Path] | None = None)
             count += _copy_tree_no_bak(item, item_dst, skip_paths)
         elif item.is_file() or item.is_symlink():
             if item.is_symlink():
-                # Follow symlink and copy target
-                real_src = item.resolve()
-                if real_src.is_dir():
-                    count += _copy_tree_no_bak(real_src, item_dst, skip_paths)
-                else:
-                    shutil.copy2(str(item), str(item_dst))
+                # Check if symlink target exists
+                try:
+                    real_src = item.resolve(strict=True)
+                    # Target exists, copy the target
+                    if real_src.is_dir():
+                        count += _copy_tree_no_bak(real_src, item_dst, skip_paths)
+                    else:
+                        shutil.copy2(str(item), str(item_dst))
+                        count += 1
+                except (OSError, RuntimeError):
+                    # Broken symlink - copy as symlink
+                    shutil.copy2(str(item), str(item_dst), follow_symlinks=False)
                     count += 1
             else:
                 shutil.copy2(str(item), str(item_dst))
@@ -227,6 +333,16 @@ def _copy_source_to_snapshot(
                     click.echo(f"Skipping backup: {item.name}")
                     continue
 
+                # Skip cache directories
+                if item.is_dir() and _should_skip_dir(item):
+                    click.echo(f"Skipping cache directory: {item.name}")
+                    continue
+
+                # Skip Chrome profile and video directories (too large, regenerated)
+                if item.is_dir() and _is_chrome_profile_dir(item):
+                    click.echo(f"Warning: Skipping Chrome profile/video directory (too large, regenerated): {item.name}")
+                    continue
+
                 if _is_under_skip_path(item, skip_paths):
                     click.echo(f"Skipping snapshot storage: {item.name}")
                     continue
@@ -260,6 +376,11 @@ def _copy_source_to_snapshot(
                 click.echo(f"Skipping backup: {target}")
                 continue
 
+            # Skip Chrome profile and video directories (too large, regenerated)
+            if src.is_dir() and _is_chrome_profile_dir(src):
+                click.echo(f"Warning: Skipping Chrome profile/video directory (too large, regenerated): {target}")
+                continue
+
             # Ensure parent directory exists in target
             dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -281,13 +402,19 @@ def _copy_source_to_snapshot(
                     snap_count += count + 1
             else:
                 if src.is_symlink():
-                    # Follow the symlink and copy the target
-                    real_src = src.resolve()
-                    if real_src.is_dir():
-                        count = _copy_tree_no_bak(real_src, dst, skip_paths)
-                        snap_count += count + 1
-                    else:
-                        shutil.copy2(str(real_src), str(dst))
+                    # Check if symlink target exists
+                    try:
+                        real_src = src.resolve(strict=True)
+                        # Target exists, copy the target
+                        if real_src.is_dir():
+                            count = _copy_tree_no_bak(real_src, dst, skip_paths)
+                            snap_count += count + 1
+                        else:
+                            shutil.copy2(str(real_src), str(dst))
+                            snap_count += 1
+                    except (OSError, RuntimeError):
+                        # Broken symlink - copy as symlink
+                        shutil.copy2(str(src), str(dst), follow_symlinks=False)
                         snap_count += 1
                 else:
                     shutil.copy2(str(src), str(dst))
@@ -317,6 +444,15 @@ def _restore_from_snapshot(
     if snap_all:
         # Restore entire directory contents
         for item in list(snapshot_dir.iterdir()):
+            # Skip pre-restore directories in the snapshot (backward compatibility)
+            if _should_skip_dir(item):
+                continue
+
+            # Skip Chrome profile and video directories (not in backup, would be regenerated)
+            if item.is_dir() and _is_chrome_profile_dir(item):
+                click.echo(f"Skipping Chrome profile/video directory during restore: {item.name}")
+                continue
+
             dst = source / item.name
 
             # If there's already something there, back it up
@@ -339,7 +475,11 @@ def _restore_from_snapshot(
             if item.is_dir() and not item.is_symlink():
                 if dst.exists():
                     shutil.rmtree(str(dst))
-                shutil.copytree(str(item), str(dst))
+                # Preserve symlinks in the directory tree
+                shutil.copytree(str(item), str(dst), symlinks=True)
+            elif item.is_symlink():
+                # Copy symlink as symlink
+                shutil.copy2(str(item), str(dst), follow_symlinks=False)
             else:
                 shutil.copy2(str(item), str(dst))
 
@@ -353,6 +493,11 @@ def _restore_from_snapshot(
 
             if not dst.exists():
                 click.echo(f"Warning: snapped file not found: {dst}")
+                continue
+
+            # Skip Chrome profile and video directories (not in backup, would be regenerated)
+            if dst.is_dir() and _is_chrome_profile_dir(dst):
+                click.echo(f"Skipping Chrome profile/video directory during restore: {target}")
                 continue
 
             # If there's already something there, back it up
@@ -375,7 +520,11 @@ def _restore_from_snapshot(
             if dst.is_dir() and not dst.is_symlink():
                 if src.exists():
                     shutil.rmtree(str(src))
-                shutil.copytree(str(dst), str(src))
+                # Preserve symlinks in the directory tree
+                shutil.copytree(str(dst), str(src), symlinks=True)
+            elif dst.is_symlink():
+                # Copy symlink as symlink
+                shutil.copy2(str(dst), str(src), follow_symlinks=False)
             else:
                 shutil.copy2(str(dst), str(src))
 
