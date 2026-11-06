@@ -493,6 +493,7 @@ def test_rhythm_defaults_match_code_constants():
         DEFAULT_PAUSE_PARAGRAPH,
         DEFAULT_PAUSE_SENTENCE,
         DEFAULT_TOLERANCE,
+        DEFAULT_MIN_SILENCE_DURATION,
     )
 
     assert RHYTHM_DEFAULTS == {
@@ -503,6 +504,7 @@ def test_rhythm_defaults_match_code_constants():
         "pause_sentence": DEFAULT_PAUSE_SENTENCE,
         "pause_paragraph": DEFAULT_PAUSE_PARAGRAPH,
         "crossfade": DEFAULT_CROSSFADE,
+        "min_silence_duration": DEFAULT_MIN_SILENCE_DURATION,
     }
     assert RHYTHM_DEFAULTS["paragraph_threshold"] == 0
 

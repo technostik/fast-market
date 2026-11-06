@@ -42,6 +42,7 @@ RHYTHM_KEYS = (
     "pause_sentence",
     "pause_paragraph",
     "crossfade",
+    "min_silence_duration",
 )
 
 RHYTHM_DEFAULTS: dict[str, float] = {
@@ -52,6 +53,7 @@ RHYTHM_DEFAULTS: dict[str, float] = {
     "pause_sentence": DEFAULT_PAUSE_SENTENCE,
     "pause_paragraph": DEFAULT_PAUSE_PARAGRAPH,
     "crossfade": DEFAULT_CROSSFADE,
+    "min_silence_duration": 150.0,
 }
 
 

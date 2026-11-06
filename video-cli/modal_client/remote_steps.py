@@ -16,6 +16,7 @@ def _run_media_pipeline_impl(
     video_name: str,
     do_remove_silence: bool = True,
     threshold: float = -65.0,
+    min_silence_duration: float = 150.0,
     do_transcribe: bool = True,
     ass_bytes: bytes | None = None,
     do_burn_subtitles: bool = True,
@@ -60,7 +61,7 @@ def _run_media_pipeline_impl(
         if do_remove_silence:
             out_path = os.path.join(tmpdir, f"{stem}_nosilence.mp4")
             current_path, original_duration, final_duration = _remove_silence(
-                current_path, out_path, threshold
+                current_path, out_path, threshold, min_silence_duration
             )
 
         # ── Step 1: Transcribe → ASS ──────────────────────────────────────────
@@ -108,6 +109,7 @@ def run_media_pipeline(
     video_name: str,
     do_remove_silence: bool = True,
     threshold: float = -65.0,
+    min_silence_duration: float = 150.0,
     do_transcribe: bool = True,
     ass_bytes: bytes | None = None,
     do_burn_subtitles: bool = True,
@@ -117,18 +119,19 @@ def run_media_pipeline(
     use_groq: bool = False,
 ) -> dict:
     return _run_media_pipeline_impl(
-        video_bytes, video_name, do_remove_silence, threshold, do_transcribe,
-        ass_bytes, do_burn_subtitles, language, model_size, subtitle_size, use_groq
+        video_bytes, video_name, do_remove_silence, threshold, min_silence_duration,
+        do_transcribe, ass_bytes, do_burn_subtitles, language, model_size, subtitle_size, use_groq
     )
 
 
 @app.function(image=base_image, timeout=1800, secrets=[modal.Secret.from_dotenv()])
-def remote_remove_silence(video_bytes: bytes, video_name: str, threshold: float = -65.0) -> dict:
+def remote_remove_silence(video_bytes: bytes, video_name: str, threshold: float = -65.0, min_silence_duration: float = 150.0) -> dict:
     return _run_media_pipeline_impl(
         video_bytes,
         video_name,
         do_remove_silence=True,
         threshold=threshold,
+        min_silence_duration=min_silence_duration,
         do_transcribe=False,
         ass_bytes=None,
         do_burn_subtitles=False,
@@ -391,6 +394,7 @@ def _remove_silence(
     input_path: str,
     output_path: str,
     threshold: float,
+    min_silence_duration: float = 150.0,
 ) -> tuple[str, float, float]:
     import numpy as np
     from moviepy import concatenate_videoclips
@@ -405,6 +409,21 @@ def _remove_silence(
     if not segments:
         video.close()
         raise SilentVideoError(input_path)
+
+    # Expand each non-silent segment by min_silence_duration/2 on each side
+    # to keep a slice of silence for natural flow
+    if min_silence_duration > 0:
+        pad = (min_silence_duration / 1000.0) / 2.0  # seconds per side
+        expanded = []
+        for i, (start, end) in enumerate(segments):
+            new_start = max(0.0, start - pad)
+            new_end = min(original_duration, end + pad)
+            # Merge with previous if overlapping
+            if expanded and new_start <= expanded[-1][1] + 1e-6:
+                expanded[-1] = (expanded[-1][0], new_end)
+            else:
+                expanded.append((new_start, new_end))
+        segments = expanded
 
     clips = [video.subclipped(start, end) for start, end in segments]
     final = concatenate_videoclips(clips)

@@ -3,8 +3,8 @@
     "duration": 6.166
   },
   "silence_removal": {
-    "reported_duration": 4.033333333333333,
-    "probed_duration": 4.033333
+    "reported_duration": 4.816666666666667,
+    "probed_duration": 4.816009
   },
   "subtitle_burn": {
     "probed_duration": 6.066667

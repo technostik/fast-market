@@ -5,6 +5,8 @@ from pathlib import Path
 import click
 
 from commands.base import CommandManifest
+from commands.remove_silence.config import resolve_rhythm_params
+from commands.remove_silence.transcript import DEFAULT_MIN_SILENCE_DURATION
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
@@ -16,6 +18,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--language", "-l", default="fr", show_default=True, help="Language code or 'auto'")
     @click.option("--model", "-m", default="medium", show_default=True, help="Whisper model size")
     @click.option("--font-size", default=96, show_default=True, help="Subtitle font size")
+    @click.option("--min-silence-duration", type=float, default=None,
+                  help="Milliseconds to keep around each non-silent segment "
+                       f"(default: {DEFAULT_MIN_SILENCE_DURATION:.0f}ms, or remove_silence.min_silence_duration in config).")
     @click.option("--modal/--local", default=False, show_default=True, help="Run all media steps on Modal instead of locally")
     def pipeline_cmd(
         input_file: str,
@@ -25,6 +30,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         language: str,
         model: str,
         font_size: int,
+        min_silence_duration: float | None,
         modal: bool,
     ):
         """Run remove-silence -> extract-transcript -> burn-subtitles."""
@@ -35,6 +41,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
         ass_path = d / f"{input_path.stem}.ass"
         output_path = Path(output).resolve() if output else d / f"{input_path.stem}_subtitled.mp4"
 
+        # Resolve min_silence_duration from CLI > config > defaults
+        rhythm = resolve_rhythm_params({"min_silence_duration": min_silence_duration})
+        min_silence = rhythm["min_silence_duration"]
+
         if modal:
             try:
                 from modal_client.app import app
@@ -44,7 +54,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             click.echo("Running full video pipeline on Modal...", err=True)
             with app.run():
                 result = run_media_pipeline.remote(
-                    input_path.read_bytes(), input_path.name, True, threshold,
+                    input_path.read_bytes(), input_path.name, True, threshold, min_silence,
                     True, None, True, language, model, font_size, False,
                 )
             output_path.write_bytes(result["video_bytes"])
@@ -55,7 +65,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             from commands.extract_transcript.register import generate_karaoke_ass
             from commands.burn_subtitles.register import burn_ass_subtitles
             click.echo("Removing silence...", err=True)
-            remove_silence_simple(str(input_path), str(no_silence), threshold, progress_cb=None)
+            remove_silence_simple(str(input_path), str(no_silence), threshold, min_silence_duration=min_silence, progress_cb=None)
             click.echo("Extracting transcript...", err=True)
             generate_karaoke_ass(str(no_silence), str(ass_path), language, model, font_size, progress_cb=None)
             click.echo("Burning subtitles...", err=True)

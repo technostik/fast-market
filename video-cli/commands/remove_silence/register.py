@@ -15,6 +15,7 @@ from commands.remove_silence.transcript import (
     DEFAULT_PAUSE_PARAGRAPH,
     DEFAULT_PAUSE_SENTENCE,
     DEFAULT_TOLERANCE,
+    DEFAULT_MIN_SILENCE_DURATION,
 )
 
 
@@ -64,12 +65,16 @@ def remove_silence_simple(
     input_file: str,
     output_file: str,
     threshold: float,
+    min_silence_duration: float = DEFAULT_MIN_SILENCE_DURATION,
     progress_cb=None,
 ) -> tuple[str, float, float]:
     """
     Remove silence from a video — direct port of TrimsilencesPlugin.remove_silence_simple.
     Returns (output_file, original_duration, final_duration).
     Raises RuntimeError on failure.
+    
+    min_silence_duration: milliseconds to keep around each non-silent segment
+    (split evenly before and after) to maintain natural speech flow.
     """
     import numpy as np
     from moviepy import concatenate_videoclips
@@ -87,6 +92,21 @@ def remove_silence_simple(
     if not segments:
         video.close()
         raise SilentVideoError(input_file)
+
+    # Expand each non-silent segment by min_silence_duration/2 on each side
+    # to keep a slice of silence for natural flow
+    if min_silence_duration > 0:
+        pad = (min_silence_duration / 1000.0) / 2.0  # seconds per side
+        expanded = []
+        for i, (start, end) in enumerate(segments):
+            new_start = max(0.0, start - pad)
+            new_end = min(original_duration, end + pad)
+            # Merge with previous if overlapping
+            if expanded and new_start <= expanded[-1][1] + 1e-6:
+                expanded[-1] = (expanded[-1][0], new_end)
+            else:
+                expanded.append((new_start, new_end))
+        segments = expanded
 
     clips = []
     for i, (start, end) in enumerate(segments):
@@ -339,7 +359,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
     @click.option(
         "--threshold", "-t",
-        default=-50.0, show_default=True,
+        default=-55.0, show_default=True,
         help="Silence threshold in dB",
     )
     @click.option("--modal/--local", default=False, show_default=True, help="Run this step on Modal instead of locally.")
@@ -370,6 +390,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--crossfade", type=float, default=None,
                   help="Short audio fade (s) at each cut to avoid clicks (transcript mode only) "
                        f"(default: {DEFAULT_CROSSFADE}, or remove_silence.crossfade in config).")
+    @click.option("--min-silence-duration", type=float, default=None,
+                  help="Milliseconds to keep around each non-silent segment (simple mode only) "
+                       f"(default: {DEFAULT_MIN_SILENCE_DURATION:.0f}ms, or remove_silence.min_silence_duration in config).")
     @click.option("--dry-run", is_flag=True, default=False,
                   help="Detect silences and print the pause table without writing any file.")
     @click.option("--reset-config", is_flag=True, default=False, is_eager=True,
@@ -380,7 +403,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         use_transcript: str | None, transcript_tolerance: float | None,
         paragraph_threshold: float | None, pause_inline: float | None, pause_comma: float | None,
         pause_sentence: float | None, pause_paragraph: float | None, crossfade: float | None,
-        dry_run: bool,
+        min_silence_duration: float | None, dry_run: bool,
     ):
         """Remove silence from a video (RMS-based, exact YouTools algorithm).
 
@@ -447,15 +470,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 )
             click.echo(str(output_path))
             return
+        # Resolve min_silence_duration from CLI > config > defaults
+        from commands.remove_silence.config import resolve_rhythm_params
+        rhythm = resolve_rhythm_params({"min_silence_duration": min_silence_duration})
+        min_silence = rhythm["min_silence_duration"]
+        
         if modal:
             from commands.remote import run_remote_remove_silence
-            result = run_remote_remove_silence(input_path, output_path, threshold)
+            result = run_remote_remove_silence(input_path, output_path, threshold, min_silence_duration=min_silence)
             orig_dur = result.get("original_duration") or 0
             final_dur = result.get("final_duration") or 0
         else:
             try:
                 _, orig_dur, final_dur = remove_silence_simple(
-                    str(input_path), str(output_path), threshold, progress_cb=None
+                    str(input_path), str(output_path), threshold, min_silence_duration=min_silence, progress_cb=None
                 )
             except SilentVideoError as exc:
                 raise click.ClickException(str(exc)) from exc

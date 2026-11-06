@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 
 
-def run_remote_remove_silence(input_path: Path, output_path: Path, threshold: float) -> dict:
+def run_remote_remove_silence(input_path: Path, output_path: Path, threshold: float, min_silence_duration: float = 150.0) -> dict:
     try:
         from modal_client.app import app, spawn_and_get
         from modal_client.remote_steps import SilentVideoError, remote_remove_silence
@@ -15,7 +15,7 @@ def run_remote_remove_silence(input_path: Path, output_path: Path, threshold: fl
     try:
         with app.run():
             result = spawn_and_get(
-                remote_remove_silence, input_path.read_bytes(), input_path.name, threshold
+                remote_remove_silence, input_path.read_bytes(), input_path.name, threshold, min_silence_duration
             )
     except SilentVideoError as exc:
         raise click.ClickException(str(exc)) from exc
