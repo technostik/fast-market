@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -56,43 +57,108 @@ def _meta_path(source: str) -> Path:
 
 
 def _save_meta(job) -> None:
+    existing = _load_meta(job.source)
     meta: dict = {
         "source": job.source,
         "completed_steps": [i for i, s in enumerate(job.steps) if s.status == "done"],
         "skipped_steps": [i for i, s in enumerate(job.steps) if s.status == "skipped"],
         "files": job.files,
     }
-    if job.title:
-        meta["title"] = job.title
-    if job.description:
-        meta["description"] = job.description
+
+    def _set(key: str, value) -> None:
+        """Write the job value, else keep what the meta already knows.
+
+        Jobs created outside the run form (redo post-publish, resume, re-upload)
+        do not carry every processed-video fact; rebuilding the meta from scratch
+        used to erase them.
+        """
+        if value:
+            meta[key] = value
+        elif existing.get(key):
+            meta[key] = existing[key]
+
+    _set("title", job.title)
+    _set("description", job.description)
+    _set("description_raw", getattr(job, "description_raw", ""))
+    _set("transcript_text", job.transcript_text)
+    _set("description_prefix", job.description_prefix)
     if job.source_urls:
         meta["source_urls"] = job.source_urls
     if job.cut_time:
+        # Never carried over: cut_time is a one-time operation.
         meta["cut_time"] = job.cut_time
-    if job.description_prefix:
-        meta["description_prefix"] = job.description_prefix
     if getattr(job, "profile", ""):
         meta["profile"] = job.profile
-    if job.transcript_text:
-        meta["transcript_text"] = job.transcript_text
-    if job.video_url:
-        meta["video_url"] = job.video_url
+    elif existing.get("profile"):
+        meta["profile"] = existing["profile"]
+
+    # The latest successful upload stays visible until the next one succeeds.
+    video_url = str(job.video_url or existing.get("video_url", "") or "")
+    if video_url:
+        meta["video_url"] = video_url
     if job.studio_url:
         meta["studio_url"] = job.studio_url
-    if getattr(job, "pinned_comment_id", ""):
-        meta["pinned_comment_id"] = job.pinned_comment_id
-    if getattr(job, "pinned_comment_url", ""):
-        meta["pinned_comment_url"] = job.pinned_comment_url
+    elif not job.video_url and existing.get("studio_url"):
+        meta["studio_url"] = existing["studio_url"]
+
+    # A pinned comment belongs to one specific video: keep the previous one only
+    # while that video is still the latest upload (a re-upload must not inherit
+    # the old channel's comment id and skip posting on the new channel).
+    same_video = bool(video_url) and video_url == str(existing.get("video_url", "") or "")
+    pinned_id = getattr(job, "pinned_comment_id", "") or (
+        existing.get("pinned_comment_id", "") if same_video else ""
+    )
+    pinned_url = getattr(job, "pinned_comment_url", "") or (
+        existing.get("pinned_comment_url", "") if same_video else ""
+    )
+    if pinned_id:
+        meta["pinned_comment_id"] = pinned_id
+    if pinned_url:
+        meta["pinned_comment_url"] = pinned_url
+
     if job.check_result is not None:
         meta["check_result"] = job.check_result
+    elif existing.get("check_result") is not None:
+        meta["check_result"] = existing["check_result"]
     if getattr(job, "upload_duration_seconds", None) is not None:
         meta["upload_duration_seconds"] = job.upload_duration_seconds
+    elif existing.get("upload_duration_seconds") is not None:
+        meta["upload_duration_seconds"] = existing["upload_duration_seconds"]
+
+    meta["uploads"] = _merge_upload_history(job, existing)
     try:
         with open(_meta_path(job.source), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+def _merge_upload_history(job, existing: dict) -> list[dict]:
+    """Return the per-source upload history, keeping every channel the video
+    was published to (a re-upload must never erase the previous upload).
+
+    The current upload is appended once per distinct ``video_url``; a later save
+    (e.g. after the pinned comment is posted) updates that same entry.
+    """
+    uploads = [dict(u) for u in (existing.get("uploads") or []) if isinstance(u, dict)]
+    video_url = (job.video_url or "").strip()
+    if not video_url:
+        return uploads
+    entry = next((u for u in uploads if (u.get("video_url") or "") == video_url), None)
+    if entry is None:
+        entry = {"video_url": video_url, "at": time.time()}
+        uploads.append(entry)
+    if getattr(job, "profile", ""):
+        entry["profile"] = job.profile
+    if job.studio_url:
+        entry["studio_url"] = job.studio_url
+    if getattr(job, "privacy", ""):
+        entry["privacy"] = job.privacy
+    if getattr(job, "pinned_comment_id", ""):
+        entry["pinned_comment_id"] = job.pinned_comment_id
+    if getattr(job, "pinned_comment_url", ""):
+        entry["pinned_comment_url"] = job.pinned_comment_url
+    return uploads
 
 
 def _load_meta(source: str) -> dict:

@@ -27,7 +27,7 @@ from .utils import (
     _job_env,
 )
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
-from .pool import clear_pool_cut_time, set_item_upload_duration
+from .pool import clear_pool_cut_time, set_item_upload_duration, set_item_upload_result
 
 
 async def _run_job_safely(coro, job: Job) -> None:
@@ -211,7 +211,9 @@ async def _run_pipeline_from(job: Job, from_step: int) -> None:
 
 
 async def _run_pipeline_core(job: Job, from_step: int) -> None:
-    if not Path(job.source).expanduser().exists():
+    # A re-upload (from_step >= 4) only needs the processed final video, not the
+    # original source: that file may have been archived/moved after publishing.
+    if from_step < 4 and not Path(job.source).expanduser().exists():
         job.status = "error"
         job.end_time = time.time()
         _save_meta(job)
@@ -559,6 +561,7 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         if signature:
             parts.append(signature)
         job.title = title_out.strip()
+        job.description_raw = raw_description
         job.description = "\n\n".join(parts)
 
         # Optional content check — non-blocking, just a warning
@@ -645,7 +648,8 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
         s3.end_time = time.time(); s3.status = "done"
         _save_meta(job)
     else:
-        job.steps[3].status = "skipped"
+        if job.steps[3].status == "pending":
+            job.steps[3].status = "skipped"
 
     if from_step > 4:
         # Upload already done — skip it, preserve existing status from meta
@@ -713,6 +717,15 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             job.studio_url = ""
         _save_meta(job)
         await _maybe_post_pinned_comment(job, video_id, s4)
+        # Keep an existing pool row in sync when the upload was launched outside
+        # the pool worker (re-upload to another channel).
+        set_item_upload_result(
+            job.source,
+            profile=getattr(job, "profile", "") or "",
+            video_url=job.video_url,
+            studio_url=job.studio_url,
+            title=job.title,
+        )
 
     if not job.do_ignore_post_publish:
         await _run_post_publish_step(job, final_video)

@@ -85,6 +85,9 @@ class Job:
     files: dict[str, str] = field(default_factory=dict)
     title: str = ""
     description: str = ""
+    # LLM description before the channel signature is appended. Persisted in the
+    # meta log so a re-upload can re-apply *another* profile's signature.
+    description_raw: str = ""
     transcript_text: str = ""
     check_result: str | None = None
     status: str = "running"

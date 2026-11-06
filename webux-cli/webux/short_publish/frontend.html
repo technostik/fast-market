@@ -42,9 +42,27 @@
     /* pool */
     .pool { border:1px solid var(--border); border-radius:8px; padding:10px; margin:12px 0; background:var(--bg2); }
     .pool h3 { margin:0 0 8px; font-size:14px; }
+    /* compact header: title + status left, primary controls right */
+    .pool-head { display:flex; align-items:center; justify-content:space-between;
+                 gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+    .pool-head h3 { margin:0; display:flex; align-items:center; gap:6px; }
+    .pool-status { font-size:11px; color:var(--dim); }
+    .pool-head-actions { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+    .pool-mini { padding:3px 8px; font-size:11px; }
     .pool-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:13px; border-bottom:1px solid var(--border); }
     .pool-row:last-child { border-bottom:none; }
+    .pool-actions { display:flex; gap:4px; align-items:center; flex-shrink:0; }
     .pool-actions button { padding:2px 6px; font-size:11px; }
+    /* overflow menu: keeps the row to primary actions + one ⋯ */
+    .pool-menu-wrap { position:relative; display:inline-block; }
+    .pool-menu { position:absolute; right:0; top:100%; z-index:60; min-width:210px;
+                 background:var(--bg); border:1px solid var(--border); border-radius:6px;
+                 box-shadow:0 8px 24px rgba(0,0,0,.45); padding:4px; display:none; }
+    .pool-menu.open { display:block; }
+    .pool-menu button { display:block; width:100%; text-align:left; padding:5px 8px;
+                        font-size:12px; font-weight:500; background:transparent;
+                        color:var(--text); border-radius:4px; }
+    .pool-menu button:hover { background:var(--bg3); }
     .video-wrap { border:1px solid var(--border); border-radius:8px; overflow:hidden;
                   background:#000; display:none; }
     .video-wrap video { width:100%; height:220px; object-fit:contain; display:block; }
@@ -227,16 +245,23 @@
   </div>
 
   <div class="pool">
-    <h3>📋 Publish Pool <span id="poolStatus" style="font-size:11px;color:var(--dim);"></span></h3>
-    <div style="margin-bottom:8px;">
-      <button id="poolStart" class="btn-go">▶ Start</button>
-      <button id="poolStop" class="btn-sec">⏹ Stop</button>
-      <button id="poolSkip" class="btn-sec">⏭ Skip</button>
-      <button id="poolRedo" class="btn-sec">🔄 Redo</button>
-      <button id="poolClear" class="btn-sec" style="margin-left:8px;">🧹 Clear finished</button>
-      <button id="browserStartSilent" class="btn-sec" style="margin-left:8px;" onclick="browserStartSilent()">🚀 Start browser</button>
-      <button id="browserStartVisible" class="btn-sec" onclick="browserStartVisible()">🖥 Start browser (visible)</button>
-      <button id="browserScreenshot" class="btn-sec" onclick="browserScreenshot()">📸 Screenshot</button>
+    <div class="pool-head">
+      <h3>📋 Publish Pool <span id="poolStatus" class="pool-status"></span></h3>
+      <div class="pool-head-actions">
+        <button id="poolStart" class="btn-go pool-mini" title="Start the queue">▶ Start</button>
+        <button id="poolStop" class="btn-sec pool-mini" title="Stop the queue">⏹ Stop</button>
+        <button id="poolSkip" class="btn-sec pool-mini" title="Skip the current video">⏭ Skip</button>
+        <button id="poolRedo" class="btn-sec pool-mini" title="Requeue every unfinished video">🔄 Redo</button>
+        <span class="pool-menu-wrap">
+          <button id="poolMore" class="btn-sec pool-mini" title="More pool actions">⋯</button>
+          <div id="poolMoreMenu" class="pool-menu">
+            <button id="poolClear">🧹 Clear finished</button>
+            <button id="browserStartSilent" onclick="browserStartSilent()">🚀 Start browser</button>
+            <button id="browserStartVisible" onclick="browserStartVisible()">🖥 Start browser (visible)</button>
+            <button id="browserScreenshot" onclick="browserScreenshot()">📸 Screenshot</button>
+          </div>
+        </span>
+      </div>
     </div>
     <div id="browserScreenshotPreview" style="display:none; margin-bottom:8px;">
       <div style="display:flex; justify-content:flex-end; margin-bottom:4px;">
@@ -439,6 +464,7 @@
       <div id="reviewTranscript" class="review-content"></div>
       <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">
         <button class="btn-sec" style="font-size:11px;padding:4px 10px;" onclick="openQuickPrompt()">⚡ Quick prompt</button>
+        <button id="reviewReuploadBtn" class="btn-sec" style="font-size:11px;padding:4px 10px;display:none;" onclick="openReuploadModal()">🔁 Re-upload to…</button>
         <button id="runTranscriptBtn" class="btn-sec" style="font-size:11px;padding:4px 10px;display:none;" onclick="runTranscriptScript()">▶ Run script on transcript</button>
         <span id="runTranscriptStatus" style="font-size:11px;color:var(--dim);display:none;"></span>
       </div>
@@ -475,6 +501,52 @@
         <strong>Result:</strong>
         <textarea id="qpResult" class="review-content" style="min-height:100px;resize:vertical;font-family:monospace;width:100%;box-sizing:border-box;" readonly></textarea>
         <button class="btn-sec" style="margin-top:4px;font-size:11px;padding:3px 10px;" onclick="copyQuickPromptResult()">📋 Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Re-upload to another channel modal -->
+  <div id="reuploadModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h3 style="margin:0;font-size:15px;">🔁 Re-upload to another channel</h3>
+        <button class="btn-sec" style="padding:2px 8px;font-size:12px;" onclick="closeReuploadModal()">✕</button>
+      </div>
+
+      <div id="reuploadInfo" style="font-size:12px;color:var(--dim);margin-bottom:10px;white-space:pre-wrap;"></div>
+
+      <div class="row">
+        <label>Target channel</label>
+        <select id="reuploadProfile" onchange="loadReuploadProfileDefaults()"></select>
+      </div>
+      <div class="row">
+        <label>Privacy on the target channel</label>
+        <select id="reuploadPrivacy">
+          <option value="unlisted">unlisted</option>
+          <option value="private">private</option>
+          <option value="public">public</option>
+        </select>
+      </div>
+      <div class="checkrow">
+        <input type="checkbox" id="reuploadPostPublish" checked>
+        <label for="reuploadPostPublish" style="display:inline;margin:0;">Run the target channel's post-publish script</label>
+      </div>
+      <div id="reuploadPostScriptInfo" style="font-size:11px;color:var(--dim);margin:-2px 0 8px 24px;"></div>
+      <div class="checkrow">
+        <input type="checkbox" id="reuploadPinnedComment">
+        <label for="reuploadPinnedComment" style="display:inline;margin:0;">Post a pinned comment on the target channel</label>
+      </div>
+      <div class="row">
+        <label>Pinned comment (target channel's default, editable for this run)</label>
+        <textarea id="reuploadPinnedText" rows="2"></textarea>
+      </div>
+
+      <div id="reuploadOldUpload" style="font-size:12px;color:var(--warn);margin:10px 0;white-space:pre-wrap;"></div>
+      <div id="reuploadStatus" style="font-size:12px;color:var(--dim);margin-bottom:8px;min-height:16px;"></div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn-sec" onclick="closeReuploadModal()">Cancel</button>
+        <button id="reuploadConfirm" class="btn-go" onclick="doReupload()">Re-upload</button>
       </div>
     </div>
   </div>
@@ -784,6 +856,9 @@ async function pollStatus() {
   if (j.status === 'done' || j.status === 'error') {
     showResult(j);
     document.getElementById('resumeBtn').style.display = 'none';
+    // Re-upload runs outside the pool worker: refresh its row (profile, Watch,
+    // Studio links) once the job is terminal.
+    refreshPool();
     return;
   }
   pollTimer = setTimeout(pollStatus, 1500);
@@ -929,6 +1004,12 @@ function updateReviewBox(job, source) {
     statusEl.style.display = 'none';
   } else {
     runBtn.style.display = 'none';
+  }
+
+  // Re-upload is relevant once the video actually exists on a channel.
+  const reuploadBtn = document.getElementById('reviewReuploadBtn');
+  if (reuploadBtn) {
+    reuploadBtn.style.display = (_reviewSource && job.title && job.video_url) ? 'inline-block' : 'none';
   }
 }
 
@@ -1314,10 +1395,41 @@ async function refreshPool() {
     const actionsEl = document.createElement('span');
     actionsEl.className = 'pool-actions';
     if (isDone) {
-      actionsEl.appendChild(mkPoolBtn('Redo post-publish only', '📮', poolRedoPostPublish));
-      actionsEl.appendChild(mkPoolBtn('Show info', '📋', poolShowInfo));
-      actionsEl.appendChild(mkPoolBtn('Run transcript script', '📜', poolRunTranscriptScript));
-      actionsEl.appendChild(mkPoolBtn('Rerun content check', '🔍', poolRerunCheck));
+      // Secondary actions live in one ⋯ menu: the row only shows primary
+      // actions (Redo/Retry/Remove) plus this single control.
+      const menuWrap = document.createElement('span');
+      menuWrap.className = 'pool-menu-wrap';
+      const menuBtn = document.createElement('button');
+      menuBtn.textContent = '⋯';
+      menuBtn.title = 'More actions';
+      const menu = document.createElement('div');
+      menu.className = 'pool-menu';
+      const mkMenuItem = (text, fn) => {
+        const b = document.createElement('button');
+        b.textContent = text;
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          menu.classList.remove('open');
+          fn(item.source);
+        });
+        return b;
+      };
+      if (item.video_url) {
+        menu.appendChild(mkMenuItem('🔁 Re-upload to another channel…', poolReupload));
+      }
+      menu.appendChild(mkMenuItem('📮 Redo post-publish only', poolRedoPostPublish));
+      menu.appendChild(mkMenuItem('📋 Show info', poolShowInfo));
+      menu.appendChild(mkMenuItem('📜 Run transcript script', poolRunTranscriptScript));
+      menu.appendChild(mkMenuItem('🔍 Rerun content check', poolRerunCheck));
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.pool-menu.open').forEach(m => {
+          if (m !== menu) m.classList.remove('open');
+        });
+        menu.classList.toggle('open');
+      });
+      menuWrap.append(menuBtn, menu);
+      actionsEl.appendChild(menuWrap);
     }
     actionsEl.appendChild(mkPoolBtn('Redo', '🔄', poolRedoItem));
     if (st === 'error' || st === 'stopped') {
@@ -1386,6 +1498,119 @@ async function poolRedoPostPublish(source) {
   });
   const data = await r.json();
   if (data.job_id) currentJob = data.job_id;
+  refreshPool();
+}
+
+/* ── Re-upload to another channel ─────────────────────── */
+let _reuploadSource = null;
+
+function poolReupload(source) {
+  openReuploadModal(source);
+}
+
+async function openReuploadModal(source) {
+  const src = source || _reviewSource;
+  if (!src) { alert('Select a video first'); return; }
+  const r = await fetch('/api/short_publish/check-resume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: src })
+  }).catch(() => null);
+  if (!r || !r.ok) { alert('Could not load this video\'s meta log'); return; }
+  const info = await r.json();
+  if (!info.final_video) {
+    alert('No processed final video — re-upload needs a completed step 3.');
+    return;
+  }
+
+  const pr = await fetch('/api/short_publish/profiles').catch(() => null);
+  const pdata = (pr && pr.ok) ? await pr.json() : { profiles: [] };
+  const profiles = pdata.profiles || [];
+  const current = info.profile || '';
+  // Put channels other than the current one first: this is a "wrong channel" fix.
+  const ordered = profiles.filter(p => p !== current).concat(profiles.filter(p => p === current));
+  if (!ordered.length) { alert('No YouTube profile configured'); return; }
+
+  _reuploadSource = src;
+  const sel = document.getElementById('reuploadProfile');
+  sel.innerHTML = ordered.map(p =>
+    `<option value="${p}">${p}${p === current ? ' (current upload)' : ''}</option>`
+  ).join('');
+  sel.value = ordered[0];
+
+  const fileName = (info.final_video || '').split('/').pop();
+  const dur = info.upload_duration_seconds != null
+    ? ' · ⏱ ' + fmtDuration(info.upload_duration_seconds) : '';
+  document.getElementById('reuploadInfo').textContent =
+    `Reuses steps 0-3 without re-processing: ${info.title || fileName}${dur}\n` +
+    `Current upload: ${current || 'unknown channel'}`;
+
+  const oldEl = document.getElementById('reuploadOldUpload');
+  if (info.video_url) {
+    const watch = `<a href="${info.video_url}" target="_blank" style="color:var(--link);">watch</a>`;
+    const studio = info.studio_url
+      ? ` — <a href="${info.studio_url}" target="_blank" style="color:var(--link);">delete or unlist it manually in Studio</a>`
+      : '';
+    oldEl.innerHTML = `⚠ The current upload (${watch}) stays online${studio}.`;
+  } else {
+    oldEl.textContent = '';
+  }
+  document.getElementById('reuploadStatus').textContent = '';
+  document.getElementById('reuploadConfirm').disabled = false;
+  await loadReuploadProfileDefaults();
+  document.getElementById('reuploadModal').style.display = 'flex';
+}
+
+function closeReuploadModal() {
+  document.getElementById('reuploadModal').style.display = 'none';
+}
+
+async function loadReuploadProfileDefaults() {
+  const prof = document.getElementById('reuploadProfile').value;
+  if (!prof) return;
+  const r = await fetch('/api/short_publish/config?profile=' + encodeURIComponent(prof)).catch(() => null);
+  const c = (r && r.ok) ? await r.json() : {};
+  document.getElementById('reuploadPrivacy').value = c.privacy || 'unlisted';
+  document.getElementById('reuploadPostPublish').checked = true;
+  const info = document.getElementById('reuploadPostScriptInfo');
+  info.style.color = 'var(--dim)';
+  info.textContent = c.post_publish_script
+    ? 'Script: ' + c.post_publish_script
+    : 'No post-publish script configured for this profile — the step will be skipped.';
+  document.getElementById('reuploadPinnedComment').checked =
+    !!(c.short_pinned_comment_enabled || c.short_pinned_comment_text);
+  document.getElementById('reuploadPinnedText').value = c.short_pinned_comment_text || '';
+}
+
+async function doReupload() {
+  if (!_reuploadSource) return;
+  const btn = document.getElementById('reuploadConfirm');
+  const statusEl = document.getElementById('reuploadStatus');
+  btn.disabled = true;
+  statusEl.textContent = '⏳ Starting re-upload…';
+  const body = {
+    source: _reuploadSource,
+    profile: document.getElementById('reuploadProfile').value,
+    privacy: document.getElementById('reuploadPrivacy').value,
+    run_post_publish: document.getElementById('reuploadPostPublish').checked,
+    do_pinned_comment: document.getElementById('reuploadPinnedComment').checked,
+    pinned_comment_text: document.getElementById('reuploadPinnedText').value,
+  };
+  const r = await fetch('/api/short_publish/reupload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).catch(() => null);
+  if (!r || !r.ok) {
+    const d = r ? await r.json().catch(() => ({})) : {};
+    statusEl.textContent = '❌ ' + (d.detail || 'Re-upload failed');
+    btn.disabled = false;
+    return;
+  }
+  const data = await r.json();
+  currentJob = data.job_id;
+  closeReuploadModal();
+  pollStatus();
   refreshPool();
 }
 
@@ -1738,6 +1963,22 @@ function initPool() {
   document.getElementById('poolSkip').onclick = () => poolAction('skip');
   document.getElementById('poolRedo').onclick = () => poolAction('redo');
   document.getElementById('poolClear').onclick = () => poolAction('clear-finished');
+  // Compact header: the secondary actions live in the same ⋯ menu as pool rows.
+  const moreBtn = document.getElementById('poolMore');
+  const moreMenu = document.getElementById('poolMoreMenu');
+  if (moreBtn && moreMenu) {
+    moreBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.pool-menu.open').forEach(m => {
+        if (m !== moreMenu) m.classList.remove('open');
+      });
+      moreMenu.classList.toggle('open');
+    });
+  }
+  // Any click outside an overflow menu closes it.
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.pool-menu.open').forEach(m => m.classList.remove('open'));
+  });
   setInterval(_tickElapsed, 1000);
   refreshPool();
 }

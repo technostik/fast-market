@@ -311,6 +311,42 @@ def set_item_upload_duration(source: str, seconds: float) -> None:
             return
 
 
+def set_item_upload_result(
+    source: str,
+    profile: str = "",
+    video_url: str = "",
+    studio_url: str = "",
+    title: str = "",
+) -> None:
+    """Point an existing pool item at its latest successful upload.
+
+    Re-uploads run outside the pool worker, so the worker's post-run bookkeeping
+    never happens: without this the row would keep the old channel/profile and
+    the old ▶ Watch / ✏️ Studio links.
+    """
+    src = str(Path(source).expanduser().resolve())
+    src_raw = str(Path(source).expanduser())
+    for it in _pool:
+        if it.source not in (src, src_raw):
+            continue
+        changed = False
+        if profile and it.profile != profile:
+            it.profile = profile
+            changed = True
+        if video_url and it.video_url != video_url:
+            it.video_url = video_url
+            changed = True
+        if studio_url and it.studio_url != studio_url:
+            it.studio_url = studio_url
+            changed = True
+        if title and it.title != title:
+            it.title = title
+            changed = True
+        if changed:
+            _save_pool_to_disk()
+        return
+
+
 def clear_pool_cut_time(source: str) -> None:
     """Reset the one-time cut_time on a pool item so the video is not re-cut on
     a later resume/requeue. No-op when the item has no pending cut_time."""

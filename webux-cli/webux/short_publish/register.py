@@ -130,6 +130,11 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         steps=[Step(name=n) for n in STEP_NAMES],
         upload_duration_seconds=meta.get("upload_duration_seconds"),
         files=restored_files,
+        title=meta.get("title", ""),
+        description=meta.get("description", ""),
+        description_raw=meta.get("description_raw", ""),
+        transcript_text=meta.get("transcript_text", ""),
+        check_result=meta.get("check_result"),
     )
     job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
     job.pinned_comment_url = str(meta.get("pinned_comment_url", "") or "")
@@ -168,6 +173,7 @@ async def get_config(profile: str | None = Query(default=None)):
         "short_pinned_comment_text": pub.get("short_pinned_comment_text", ""),
         "language": pub.get("language", "fr"),
         "model": pub.get("model", "medium"),
+        "privacy": pub.get("privacy", "unlisted"),
         "archive_path": pub.get("archive_path", ""),
         "trash_path": pub.get("trash_path", ""),
     }
@@ -615,6 +621,11 @@ async def check_resume(body: dict):
         "source_urls": meta.get("source_urls", []),
         "description_prefix": meta.get("description_prefix", ""),
         "cut_time": meta.get("cut_time", ""),
+        "uploads": meta.get("uploads", []),
+        "video_url": meta.get("video_url", ""),
+        "studio_url": meta.get("studio_url", ""),
+        "final_video": files.get("final_video", ""),
+        "upload_duration_seconds": meta.get("upload_duration_seconds"),
     }
 
 
@@ -692,6 +703,168 @@ async def redo_post_publish(body: dict):
     _jobs[job_id] = job
     asyncio.create_task(_run_job_safely(_run_post_publish_step(job, final_video), job))
     return {"job_id": job_id}
+
+
+class ReuploadRequest(BaseModel):
+    source: str
+    profile: str
+    privacy: str = ""
+    run_post_publish: bool = True
+    do_pinned_comment: bool | None = None
+    pinned_comment_text: str | None = None
+
+
+def _rebuild_description(meta: dict, target_profile: str) -> tuple[str, str]:
+    """Return ``(description, raw_description)`` for a re-upload on ``target_profile``.
+
+    The stored description already carries the *original* channel's signature, so
+    rebuild it from the raw LLM output and append the target profile's signature.
+    Legacy metas (no ``description_raw``) fall back to stripping the old profile's
+    signature suffix when it matches.
+    """
+    pub = _load_publish_cfg(target_profile)
+    raw = str(meta.get("description_raw", "") or "").strip()
+    if not raw:
+        desc = str(meta.get("description", "") or "").strip()
+        old_profile = str(meta.get("profile", "") or "")
+        old_sig = ""
+        if old_profile:
+            old_sig = str(_load_publish_cfg(old_profile).get("signature", "") or "").strip()
+        if old_sig and desc.endswith(old_sig):
+            desc = desc[: -len(old_sig)].rstrip()
+        raw = desc
+
+    parts: list[str] = []
+    prefix = str(meta.get("description_prefix", "") or "").strip()
+    if prefix:
+        parts.append(prefix)
+    urls = _validate_urls(list(meta.get("source_urls") or []))
+    if urls:
+        parts.append("Sources:\n" + "\n".join(f"- {u}" for u in urls))
+    if raw:
+        parts.append(raw)
+    signature = str(pub.get("signature", "") or "").strip()
+    if signature:
+        parts.append(signature)
+    return "\n\n".join(parts), raw
+
+
+@router.post("/reupload")
+async def reupload(req: ReuploadRequest):
+    """Publish an already-uploaded short again on another channel.
+
+    Starts the pipeline at the upload step with the target profile: steps 0-3
+    (processing, transcript, subtitles, title/description) are reused from the
+    meta log, so nothing is regenerated. The previous upload stays online (the
+    YouTube CLI has no delete call) and is kept in ``uploads`` history.
+    """
+    source = str(Path(req.source).expanduser().resolve())
+    target = (req.profile or "").strip()
+    base = get_profiles_config_base()
+    if not target or not (base / target).is_dir():
+        raise HTTPException(status_code=400, detail=f"Unknown target profile: {target or '(empty)'}")
+    if _is_busy():
+        raise HTTPException(
+            status_code=409,
+            detail="A publish job is already running. Wait for it to finish, then re-upload.",
+        )
+
+    meta = _load_meta(source)
+    files = dict(meta.get("files") or {})
+    final_video = str(files.get("final_video", "") or "")
+    if not final_video or not Path(final_video).expanduser().exists():
+        raise HTTPException(
+            status_code=400,
+            detail="Processed final video not found; re-upload requires a completed step 3.",
+        )
+    title = str(meta.get("title", "") or "").strip()
+    if not title:
+        raise HTTPException(
+            status_code=400,
+            detail="No generated title in the meta log; use Resume to generate it first.",
+        )
+    completed = set(meta.get("completed_steps", []))
+    if 4 not in completed:
+        raise HTTPException(
+            status_code=400,
+            detail="This video has not been uploaded yet; use Publish or Resume instead.",
+        )
+
+    pub = _load_publish_cfg(target)
+    description, raw = _rebuild_description(meta, target)
+    privacy = (req.privacy or str(pub.get("privacy", "") or "")).strip() or "unlisted"
+    urls = _validate_urls(list(meta.get("source_urls") or []))
+
+    previous = {
+        "profile": str(meta.get("profile", "") or ""),
+        "video_url": str(meta.get("video_url", "") or ""),
+        "studio_url": str(meta.get("studio_url", "") or ""),
+    }
+    uploads = [u for u in (meta.get("uploads") or []) if isinstance(u, dict)]
+    for key in ("profile", "video_url", "studio_url"):
+        if not previous[key]:
+            for u in reversed(uploads):
+                if u.get(key):
+                    previous[key] = str(u[key])
+                    break
+
+    job = Job(
+        job_id=str(uuid.uuid4()),
+        source=source,
+        profile=target,
+        prompt_title=pub.get("default_title_prompt", "youtube-title"),
+        prompt_summary=pub.get("default_description_prompt", "youtube-summary"),
+        prompt_check=pub.get("default_check_prompt", ""),
+        do_remove_silence=False,
+        do_burn_subtitles=False,
+        transcript_mode="normal",
+        language=pub.get("language", "fr"),
+        model=pub.get("model", "medium"),
+        privacy=privacy,
+        description_prefix=meta.get("description_prefix", ""),
+        source_urls=urls,
+        skip_upload=False,
+        use_modal=True,
+        do_normalize_volume=False,
+        do_charisma=False,
+        do_add_signature=False,
+        do_ignore_post_publish=not req.run_post_publish,
+        do_pinned_comment=(
+            req.do_pinned_comment
+            if req.do_pinned_comment is not None
+            else bool(pub.get("short_pinned_comment_enabled", False))
+        ),
+        pinned_comment_text=(
+            req.pinned_comment_text
+            if req.pinned_comment_text is not None
+            else str(pub.get("short_pinned_comment_text", "") or "")
+        ),
+        cut_time="",
+        steps=[Step(name=n) for n in STEP_NAMES],
+        files=files,
+        title=title,
+        description=description,
+        description_raw=raw,
+        transcript_text=meta.get("transcript_text", ""),
+        check_result=meta.get("check_result"),
+        upload_duration_seconds=meta.get("upload_duration_seconds"),
+    )
+    skipped = set(meta.get("skipped_steps", []))
+    for i in range(4):
+        if i in completed:
+            job.steps[i].status = "done"
+        elif i in skipped:
+            job.steps[i].status = "skipped"
+
+    _jobs[job.job_id] = job
+    asyncio.create_task(_run_job_safely(_run_pipeline_from(job, 4), job))
+    return {
+        "job_id": job.job_id,
+        "profile": target,
+        "title": title,
+        "description": description,
+        "previous": previous,
+    }
 
 
 @router.post("/review-info")
