@@ -515,4 +515,4 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         click.echo(str(output_path))
 
-    return CommandManifest(name="extract-transcript", click_command=extract_transcript_cmd)
+    return CommandManifest(name="extract-transcript", click_command=extract_transcript_cmd, aliases=("transcribe",))

@@ -19,7 +19,9 @@ def _load() -> None:
     logging.basicConfig(level=logging.CRITICAL, force=True)
     command_manifests = discover_commands(None, tool_root=_TOOL_ROOT)
     for cmd in command_manifests.values():
-        main.add_command(cmd.click_command)
+        main.add_command(cmd.click_command, name=cmd.name)
+        for alias in getattr(cmd, "aliases", ()):
+            main.add_command(cmd.click_command, name=alias)
 
 
 # Load .env from repo root and ensure CWD is repo root before any

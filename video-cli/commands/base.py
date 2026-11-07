@@ -14,9 +14,11 @@ class CommandManifest:
         click_command: A fully-decorated @click.command.
         api_router:    Optional FastAPI APIRouter.
         frontend_js:   Optional JS snippet.
+        aliases:       Optional extra CLI names for the same command.
     """
 
     name: str
     click_command: Any
     api_router: Any | None = None
     frontend_js: str | None = None
+    aliases: tuple[str, ...] = ()
