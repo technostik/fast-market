@@ -89,7 +89,7 @@ Detect silent audio with an RMS threshold and write the remaining clips as H.264
 |--------|-------|-------------|---------|
 | `INPUT_FILE` | — | Existing input video | required |
 | `--output` | `-o` | Output path | `<stem>_nosilence<suffix>` next to the input |
-| `--threshold` | `-t` | Silence threshold in dB | `-65.0` |
+| `--threshold` | `-t` | Silence threshold in dB | `-55.0` + config |
 | `--modal` / `--local` | — | Run on Modal or locally | `--local` |
 | `--use-transcript` | — | Timestamped transcript (word-level JSON preferred, else JSON/SRT segments); keep natural speech pauses instead of removing every silence | off |
 | `--transcript-tolerance` | — | Max gap (s) between a word end and a silence start for alignment | `0.3` + config |
@@ -99,14 +99,15 @@ Detect silent audio with an RMS threshold and write the remaining clips as H.264
 | `--pause-sentence` | — | Seconds kept after a sentence end | `0.45` + config |
 | `--pause-paragraph` | — | Seconds kept after a paragraph end | `0.90` + config |
 | `--crossfade` | — | Short audio fade (s) at each cut to avoid clicks (transcript mode only) | `0.008` + config |
+| `--min-silence-duration` | — | Silences longer than this (ms) are cut down to exactly this value, split evenly on both sides; shorter/equal silences kept whole (simple mode only) | `150` + config |
 | `--dry-run` | — | Print the pause table without writing any file (requires `--use-transcript`) | off |
 | `--reset-config` | — | Reset the rhythm-silence section of the video config file to defaults and exit | — |
 
-The local implementation fails if the input has no detectable non-silent audio or if the resulting video is not shorter than the source.
+The local implementation fails if the input has no detectable non-silent audio. If no silence exceeds `min_silence_duration` (i.e., every pause is shorter than or equal to it), the output is a byte-for-byte copy of the input and 0 % is reported.
 
-Without `--use-transcript` every detected silence is removed. With `--use-transcript`, silences are detected exactly as usual on the original file, then each one is classified from the word ending just before it (sentence end, comma, or mid-sentence hesitation; a sentence-end silence longer than `--paragraph-threshold` counts as a paragraph pause — the default `0` means infinite, so paragraphs only apply when you set a threshold) and shortened to the matching target — never longer than the original. The kept portion sits next to the following word to preserve the breath before a sentence, and video/audio are cut from the same intervals so they stay in sync. When the transcript has no punctuation or a silence cannot be aligned, classification falls back to the original duration (`<0.8` s hesitation, `0.8–1.5` s sentence, longer paragraph — or sentence when the paragraph threshold is infinite). Transcript mode and `--dry-run` are local-only.
+Without `--use-transcript`, every silence **longer than** `--min-silence-duration` is cut down to exactly that duration (half kept before the cut, half after); silences shorter than or equal to it are left untouched so the rhythm stays natural. With `--use-transcript`, silences are detected exactly as usual on the original file, then each one is classified from the word ending just before it (sentence end, comma, or mid-sentence hesitation; a sentence-end silence longer than `--paragraph-threshold` counts as a paragraph pause — the default `0` means infinite, so paragraphs only apply when you set a threshold) and shortened to the matching target — never longer than the original. The kept portion sits next to the following word to preserve the breath before a sentence, and video/audio are cut from the same intervals so they stay in sync. When the transcript has no punctuation or a silence cannot be aligned, classification falls back to the original duration (`<0.8` s hesitation, `0.8–1.5` s sentence, longer paragraph — or sentence when the paragraph threshold is infinite). Transcript mode and `--dry-run` are local-only.
 
-Rhythm parameters resolve as CLI option > config file > built-in default. The config file is the `remove_silence` section of `~/.config/fast-market/profiles/<profile>/video/config.yaml`; the effective values used for a run are printed to stderr. Reset them with:
+Rhythm parameters resolve as CLI option > config file > built-in default. The config file is the `remove_silence` section of `~/.config/fast-market/profiles/<profile>/video/config.yaml`, with `~/.config/fast-market/profiles/_shared/video/config.yaml` merged underneath (profile wins) so one shared setup applies to every profile; the effective values used for a run are printed to stderr together with the config files they came from. Reset them with:
 
 ```bash
 video remove-silence --reset-config

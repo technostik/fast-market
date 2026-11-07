@@ -28,6 +28,7 @@ from commands.remove_silence.transcript import (  # noqa: E402
     find_prev_word,
     kept_duration,
     load_transcript,
+    plan_kept_ranges,
     punctuation_kind,
 )
 
@@ -457,6 +458,111 @@ def test_dry_run_prints_table_and_writes_nothing(test_video, tmp_path):
     assert callable(format_dry_run_table)
 
 
+# ── Simple-mode kept ranges (min_silence_duration semantics) ────────────────
+
+def test_plan_kept_ranges_keeps_short_gaps_whole():
+    # Two speech runs: 1-2s and 2.1-3s. Gap between them = 100ms <= 150ms (kept whole).
+    # Leading silence = 1000ms > 150ms (cut to 150ms, 75ms before speech).
+    # Trailing silence = 4.0-3.0 = 1000ms > 150ms (cut to 150ms, 75ms after speech).
+    kept = plan_kept_ranges([(1.0, 2.0), (2.1, 3.0)], duration=4.0)
+    # The 100ms gap is kept whole, so the two ranges merge.
+    assert len(kept) == 1
+    assert kept[0] == (pytest.approx(0.925), pytest.approx(3.075))
+
+
+def test_plan_kept_ranges_keeps_short_gaps_whole_no_merge():
+    # Leading 50ms, speech 0.05-1.0, gap 100ms (kept whole), speech 1.1-2.0, trailing 50ms.
+    # All gaps <= 150ms so everything merges into one.
+    kept = plan_kept_ranges([(0.05, 1.0), (1.1, 2.0)], duration=2.05)
+    assert len(kept) == 1
+    assert kept[0] == (pytest.approx(0.0), pytest.approx(2.05))
+
+    # To see separate segments, need a gap > 150ms:
+    # Gap 200ms between runs -> cut to 150ms (75ms each side), segments stay separate.
+    kept = plan_kept_ranges([(0.05, 1.0), (2.2, 3.0)], duration=3.05)
+    assert len(kept) == 2
+    assert kept[0] == (pytest.approx(0.0), pytest.approx(1.075))
+    assert kept[1] == (pytest.approx(2.125), pytest.approx(3.05))
+
+
+def test_plan_kept_ranges_cuts_long_gaps_to_min_silence():
+    # Speech runs separated by a 2 s gap (> 150 ms): cut to 150ms total (75ms each side).
+    # Leading: 1.0-0=1s > 150ms -> 75ms before first speech.
+    # Trailing: 6.0-5.0=1s > 150ms -> 75ms after last speech.
+    kept = plan_kept_ranges([(1.0, 2.0), (4.0, 5.0)], duration=6.0)
+    assert kept == [
+        (pytest.approx(0.925), pytest.approx(2.075)),
+        (pytest.approx(3.925), pytest.approx(5.075)),
+    ]
+
+
+def test_plan_kept_ranges_huge_min_silence_keeps_everything():
+    # A value larger than the video means nothing exceeds it; everything kept.
+    kept = plan_kept_ranges([(0.5, 1.0), (2.0, 2.5)], duration=3.0, min_silence_duration_ms=5_555_500)
+    assert kept == [(0.0, pytest.approx(3.0))]
+
+
+def test_plan_kept_ranges_exact_threshold_keeps_whole_gap():
+    # Gap == 150 ms: <= max_keep, so whole gap kept.
+    # Leading 1s > 150ms -> 75ms before. Trailing 1s > 150ms -> 75ms after.
+    kept = plan_kept_ranges([(1.0, 2.0), (2.15, 3.0)], duration=4.0, min_silence_duration_ms=150)
+    assert kept == [(pytest.approx(0.925), pytest.approx(3.075))]
+
+
+def test_plan_kept_ranges_leading_trailing_silence():
+    # Leading 50 ms (< 150ms, kept whole), then speech, then 1s gap (cut to 150ms),
+    # then speech, then trailing 50ms (< 150ms, kept whole).
+    kept = plan_kept_ranges([(0.05, 1.0), (2.0, 3.0)], duration=3.05)
+    assert kept == [
+        (pytest.approx(0.0), pytest.approx(1.075)),
+        (pytest.approx(1.925), pytest.approx(3.05)),
+    ]
+
+    # Leading 200 ms (> 150ms) -> cut to 150ms (75ms kept at start).
+    # Then speech, then 1s gap (cut to 150ms), then speech, then 200ms trailing (cut to 150ms).
+    kept = plan_kept_ranges([(0.2, 1.0), (2.0, 3.0)], duration=3.2)
+    assert kept == [
+        (pytest.approx(0.125), pytest.approx(1.075)),
+        (pytest.approx(1.925), pytest.approx(3.075)),
+    ]
+
+    # Segments with NO gap between them (adjacent): merged into one.
+    kept = plan_kept_ranges([(0.0, 1.0), (1.0, 2.0)], duration=2.0)
+    assert kept == [(0.0, pytest.approx(2.0))]
+
+
+# ── _shared profile layering (common cache) ─────────────────────────────────
+
+def test_shared_tool_config_is_merged_under_profile(tmp_path, monkeypatch):
+    import yaml
+
+    monkeypatch.delenv("FASTMARKET_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("FASTMARKET_PROFILE", "someone")
+    monkeypatch.chdir(tmp_path)
+
+    profiles = tmp_path / "xdg" / "fast-market" / "profiles"
+    (profiles / "_shared" / "video").mkdir(parents=True)
+    (profiles / "_shared" / "video" / "config.yaml").write_text(
+        yaml.safe_dump({
+            "remove_silence": {"min_silence_duration": 900, "threshold": -42.0},
+        }),
+        encoding="utf-8",
+    )
+    (profiles / "someone" / "video").mkdir(parents=True)
+    (profiles / "someone" / "video" / "config.yaml").write_text(
+        yaml.safe_dump({"remove_silence": {"pause_inline": 0.33}}),
+        encoding="utf-8",
+    )
+
+    from commands.remove_silence.config import load_rhythm_config
+
+    params = load_rhythm_config()
+    assert params["min_silence_duration"] == 900
+    assert params["threshold"] == pytest.approx(-42.0)
+    assert params["pause_inline"] == pytest.approx(0.33)
+
+
 # ── Rhythm config file (precedence + reset) ─────────────────────────────────
 
 def _write_video_yaml(path: Path, mapping: dict) -> Path:
@@ -484,7 +590,7 @@ def _patch_config_path(monkeypatch, tmp_path: Path) -> Path:
 
 
 def test_rhythm_defaults_match_code_constants():
-    from commands.remove_silence.config import RHYTHM_DEFAULTS
+    from commands.remove_silence.config import DEFAULT_THRESHOLD, RHYTHM_DEFAULTS
     from commands.remove_silence.transcript import (
         DEFAULT_CROSSFADE,
         DEFAULT_PARAGRAPH_THRESHOLD,
@@ -497,6 +603,7 @@ def test_rhythm_defaults_match_code_constants():
     )
 
     assert RHYTHM_DEFAULTS == {
+        "threshold": DEFAULT_THRESHOLD,
         "transcript_tolerance": DEFAULT_TOLERANCE,
         "paragraph_threshold": DEFAULT_PARAGRAPH_THRESHOLD,
         "pause_inline": DEFAULT_PAUSE_INLINE,

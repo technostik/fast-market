@@ -7,6 +7,7 @@ from typing import List, Tuple
 import click
 
 from commands.base import CommandManifest
+from commands.remove_silence.config import DEFAULT_THRESHOLD
 from commands.remove_silence.transcript import (
     DEFAULT_CROSSFADE,
     DEFAULT_PARAGRAPH_THRESHOLD,
@@ -71,15 +72,20 @@ def remove_silence_simple(
     """
     Remove silence from a video — direct port of TrimsilencesPlugin.remove_silence_simple.
     Returns (output_file, original_duration, final_duration).
-    Raises RuntimeError on failure.
-    
-    min_silence_duration: milliseconds to keep around each non-silent segment
-    (split evenly before and after) to maintain natural speech flow.
+    Raises SilentVideoError on a fully silent input.
+
+    min_silence_duration: milliseconds. Silences longer than this are cut down
+    to exactly this duration (split evenly on both sides of the cut); shorter
+    silences are kept in full. When no silence exceeds this threshold, the
+    input is copied unchanged.
     """
+    import shutil
+
     import numpy as np
     from moviepy import concatenate_videoclips
 
     from commands.media_open import open_video_clip
+    from commands.remove_silence.transcript import plan_kept_ranges
 
     video = open_video_clip(input_file)
     original_duration = video.duration
@@ -93,23 +99,21 @@ def remove_silence_simple(
         video.close()
         raise SilentVideoError(input_file)
 
-    # Expand each non-silent segment by min_silence_duration/2 on each side
-    # to keep a slice of silence for natural flow
-    if min_silence_duration > 0:
-        pad = (min_silence_duration / 1000.0) / 2.0  # seconds per side
-        expanded = []
-        for i, (start, end) in enumerate(segments):
-            new_start = max(0.0, start - pad)
-            new_end = min(original_duration, end + pad)
-            # Merge with previous if overlapping
-            if expanded and new_start <= expanded[-1][1] + 1e-6:
-                expanded[-1] = (expanded[-1][0], new_end)
-            else:
-                expanded.append((new_start, new_end))
-        segments = expanded
+    kept = plan_kept_ranges(segments, original_duration, min_silence_duration)
+
+    # Nothing exceeds the threshold: pass the input through untouched.
+    if (
+        len(kept) == 1
+        and kept[0][0] <= 1e-6
+        and kept[0][1] >= original_duration - 1e-6
+    ):
+        video.close()
+        if os.path.abspath(input_file) != os.path.abspath(output_file):
+            shutil.copyfile(input_file, output_file)
+        return output_file, original_duration, original_duration
 
     clips = []
-    for i, (start, end) in enumerate(segments):
+    for start, end in kept:
         clip = video.subclipped(start, end)
         clips.append(clip)
 
@@ -270,6 +274,16 @@ def remove_silence_transcript(
         pause_paragraph=pause_paragraph,
     )
 
+    # Nothing long enough to cut: pass the input through untouched.
+    planned = sum(end - start for start, end in keeps)
+    if planned >= original_duration - 1e-6:
+        import shutil
+
+        video.close()
+        if os.path.abspath(input_file) != os.path.abspath(output_file):
+            shutil.copyfile(input_file, output_file)
+        return output_file, original_duration, original_duration
+
     clips = []
     for start, end in keeps:
         clip = video.subclipped(start, end)
@@ -333,22 +347,28 @@ def _format_effective_params(params: dict, source: str) -> str:
     paragraph = "infinite" if threshold <= 0 else f"{threshold:.2f}s"
     return (
         "Rhythm params "
-        f"(tolerance={params['transcript_tolerance']:.2f}s "
+        f"(threshold={params['threshold']:g}dB "
+        f"tolerance={params['transcript_tolerance']:.2f}s "
         f"paragraph>{paragraph} "
         f"inline={params['pause_inline']:.2f}s "
         f"comma={params['pause_comma']:.2f}s "
         f"sentence={params['pause_sentence']:.2f}s "
         f"paragraph={params['pause_paragraph']:.2f}s "
-        f"crossfade={params['crossfade']*1000:.0f}ms) [{source}]"
+        f"crossfade={params['crossfade']*1000:.0f}ms "
+        f"min_silence={params['min_silence_duration']:.0f}ms) [{source}]"
     )
 
 
 def _effective_params_and_source(cli_values: dict) -> tuple[dict, str]:
     """Resolve CLI > config file > defaults; returns (params, source label)."""
-    from commands.remove_silence.config import config_file_path, resolve_rhythm_params
+    from commands.remove_silence.config import config_file_paths, resolve_rhythm_params
     params = resolve_rhythm_params(cli_values)
-    path = config_file_path()
-    source = f"config: {path}" if path.exists() else "defaults (no config file)"
+    existing = [p for p in config_file_paths() if p.exists()]
+    source = (
+        ", ".join(f"config: {p}" for p in existing)
+        if existing
+        else "defaults (no config file)"
+    )
     if any(v is not None for v in cli_values.values()):
         source += ", CLI overrides applied"
     return params, source
@@ -359,8 +379,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
     @click.option(
         "--threshold", "-t",
-        default=-55.0, show_default=True,
-        help="Silence threshold in dB",
+        type=float, default=None,
+        help="Silence threshold in dB "
+             f"(default: {DEFAULT_THRESHOLD:g}, or remove_silence.threshold in config).",
     )
     @click.option("--modal/--local", default=False, show_default=True, help="Run this step on Modal instead of locally.")
     @click.option(
@@ -391,7 +412,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                   help="Short audio fade (s) at each cut to avoid clicks (transcript mode only) "
                        f"(default: {DEFAULT_CROSSFADE}, or remove_silence.crossfade in config).")
     @click.option("--min-silence-duration", type=float, default=None,
-                  help="Milliseconds to keep around each non-silent segment (simple mode only) "
+                  help="Silences longer than this (ms) are cut down to exactly this value, "
+                       "split evenly on both sides; shorter/equal silences kept whole (simple mode only) "
                        f"(default: {DEFAULT_MIN_SILENCE_DURATION:.0f}ms, or remove_silence.min_silence_duration in config).")
     @click.option("--dry-run", is_flag=True, default=False,
                   help="Detect silences and print the pause table without writing any file.")
@@ -427,6 +449,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         click.echo(f"Removing silence from {input_path.name}...", err=True)
         if use_transcript:
             rhythm, source = _effective_params_and_source({
+                "threshold": threshold,
                 "transcript_tolerance": transcript_tolerance,
                 "paragraph_threshold": paragraph_threshold,
                 "pause_inline": pause_inline,
@@ -436,6 +459,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 "crossfade": crossfade,
             })
             click.echo(_format_effective_params(rhythm, source), err=True)
+            threshold = rhythm["threshold"]
             try:
                 if dry_run:
                     _, _, reports = plan_transcript_cuts(
@@ -470,9 +494,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 )
             click.echo(str(output_path))
             return
-        # Resolve min_silence_duration from CLI > config > defaults
-        from commands.remove_silence.config import resolve_rhythm_params
-        rhythm = resolve_rhythm_params({"min_silence_duration": min_silence_duration})
+        # Resolve threshold and min_silence_duration from CLI > config > defaults
+        rhythm, source = _effective_params_and_source({
+            "threshold": threshold,
+            "min_silence_duration": min_silence_duration,
+        })
+        click.echo(_format_effective_params(rhythm, source), err=True)
+        threshold = rhythm["threshold"]
         min_silence = rhythm["min_silence_duration"]
         
         if modal:

@@ -41,6 +41,9 @@ DEFAULT_PAUSE_SENTENCE = 0.45
 DEFAULT_PAUSE_PARAGRAPH = 0.90
 DEFAULT_CROSSFADE = 0.008
 DEFAULT_HESITATION_MAX = 0.8
+# Simple mode: silence (milliseconds) to keep when cutting a longer silence.
+# A silence longer than this is cut down to exactly this value (split evenly
+# on both sides). Silences shorter or equal are kept in full.
 DEFAULT_MIN_SILENCE_DURATION = 150.0  # ms
 
 _SENTENCE_END = {".", "!", "?", "…"}
@@ -365,6 +368,61 @@ def kept_duration(
 
 
 # ── Keep-segment computation ────────────────────────────────────────────────
+
+def plan_kept_ranges(
+    non_silent: list[tuple[float, float]],
+    duration: float,
+    min_silence_duration_ms: float = DEFAULT_MIN_SILENCE_DURATION,
+) -> list[tuple[float, float]]:
+    """Kept intervals for the simple (RMS-only) cut.
+
+    ``min_silence_duration_ms`` is the maximum silence to keep between
+    speech segments. Silences shorter than or equal to this are kept in full.
+    Longer silences are cut down to exactly ``min_silence_duration_ms``,
+    split evenly on both sides of the cut. Leading and trailing silence
+    follow the same rule (capped at the same value). The result is sorted,
+    non-overlapping, and contained in ``[0, duration]``.
+    """
+    if not non_silent:
+        return []
+    duration = max(float(duration), 0.0)
+    max_keep = max(float(min_silence_duration_ms), 0.0) / 1000.0
+
+    kept: list[tuple[float, float]] = []
+    last = len(non_silent) - 1
+    for i, (start, end) in enumerate(non_silent):
+        # Left side: from previous end (or 0) to this start
+        if i == 0:
+            prev_end = 0.0
+        else:
+            prev_end = non_silent[i - 1][1]
+        left_gap = start - prev_end
+        if left_gap <= max_keep:
+            left = prev_end  # keep the whole gap
+        else:
+            left = start - max_keep / 2.0  # keep half on this side
+
+        # Right side: from this end to next start (or duration)
+        if i == last:
+            next_start = duration
+        else:
+            next_start = non_silent[i + 1][0]
+        right_gap = next_start - end
+        if right_gap <= max_keep:
+            right = next_start  # keep the whole gap
+        else:
+            right = end + max_keep / 2.0  # keep half on this side
+
+        # Clamp
+        left = max(0.0, left)
+        right = min(duration, right)
+
+        if kept and left <= kept[-1][1] + 1e-9:
+            kept[-1] = (kept[-1][0], max(kept[-1][1], right))
+        else:
+            kept.append((left, right))
+    return kept
+
 
 def build_keep_segments(
     non_silent: list[tuple[float, float]],

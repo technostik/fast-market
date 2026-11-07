@@ -396,6 +396,11 @@ def _remove_silence(
     threshold: float,
     min_silence_duration: float = 150.0,
 ) -> tuple[str, float, float]:
+    """Modal worker: cut silences longer than min_silence_duration (ms) down to exactly
+    that value (half on each side); shorter/equal silences kept in full."""
+    import os
+    import shutil
+
     import numpy as np
     from moviepy import concatenate_videoclips
 
@@ -410,25 +415,47 @@ def _remove_silence(
         video.close()
         raise SilentVideoError(input_path)
 
-    # Expand each non-silent segment by min_silence_duration/2 on each side
-    # to keep a slice of silence for natural flow
-    if min_silence_duration > 0:
-        pad = (min_silence_duration / 1000.0) / 2.0  # seconds per side
-        expanded = []
-        for i, (start, end) in enumerate(segments):
-            new_start = max(0.0, start - pad)
-            new_end = min(original_duration, end + pad)
-            # Merge with previous if overlapping
-            if expanded and new_start <= expanded[-1][1] + 1e-6:
-                expanded[-1] = (expanded[-1][0], new_end)
-            else:
-                expanded.append((new_start, new_end))
-        segments = expanded
+    # Silences longer than min_silence_duration are cut down to exactly
+    # that value (split evenly on both sides); shorter silences kept in full.
+    max_keep = max(min_silence_duration, 0.0) / 1000.0
+    kept: list[tuple[float, float]] = []
+    last = len(segments) - 1
+    for i, (start, end) in enumerate(segments):
+        if i == 0:
+            prev_end = 0.0
+        else:
+            prev_end = segments[i - 1][1]
+        left_gap = start - prev_end
+        if left_gap <= max_keep:
+            left = prev_end
+        else:
+            left = start - max_keep / 2.0
+        if i == last:
+            next_start = original_duration
+        else:
+            next_start = segments[i + 1][0]
+        right_gap = next_start - end
+        if right_gap <= max_keep:
+            right = next_start
+        else:
+            right = end + max_keep / 2.0
+        left = max(0.0, left)
+        right = min(original_duration, right)
+        if kept and left <= kept[-1][1] + 1e-9:
+            kept[-1] = (kept[-1][0], max(kept[-1][1], right))
+        else:
+            kept.append((left, right))
 
-    clips = [video.subclipped(start, end) for start, end in segments]
+    # Nothing exceeds the threshold: write the input through unchanged.
+    if len(kept) == 1 and kept[0][0] <= 1e-6 and kept[0][1] >= original_duration - 1e-6:
+        video.close()
+        if os.path.abspath(input_path) != os.path.abspath(output_path):
+            shutil.copyfile(input_path, output_path)
+        return output_path, original_duration, original_duration
+
+    clips = [video.subclipped(start, end) for start, end in kept]
     final = concatenate_videoclips(clips)
 
-    import os
     temp_audio = os.path.join(os.path.dirname(os.path.abspath(output_path)), "temp-audio.m4a")
     final.write_videofile(
         output_path,

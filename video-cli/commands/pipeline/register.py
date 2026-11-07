@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 
 from commands.base import CommandManifest
-from commands.remove_silence.config import resolve_rhythm_params
+from commands.remove_silence.config import DEFAULT_THRESHOLD, resolve_rhythm_params
 from commands.remove_silence.transcript import DEFAULT_MIN_SILENCE_DURATION
 
 
@@ -14,13 +14,16 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.argument("input_file", type=click.Path(exists=True))
     @click.option("--output", "-o", type=click.Path(), default=None, help="Final subtitled output path")
     @click.option("--workdir", type=click.Path(file_okay=False), default=None, help="Directory for intermediate files")
-    @click.option("--threshold", "-t", default=-65.0, show_default=True, help="Silence threshold in dB")
+    @click.option("--threshold", "-t", type=float, default=None,
+                  help="Silence threshold in dB "
+                       f"(default: {DEFAULT_THRESHOLD:g}, or remove_silence.threshold in config)")
     @click.option("--language", "-l", default="fr", show_default=True, help="Language code or 'auto'")
     @click.option("--model", "-m", default="medium", show_default=True, help="Whisper model size")
     @click.option("--font-size", default=96, show_default=True, help="Subtitle font size")
     @click.option("--min-silence-duration", type=float, default=None,
-                  help="Milliseconds to keep around each non-silent segment "
-                       f"(default: {DEFAULT_MIN_SILENCE_DURATION:.0f}ms, or remove_silence.min_silence_duration in config).")
+                  help="Silences longer than this (ms) are cut down to exactly this value, "
+                       "split evenly on both sides; shorter/equal silences kept whole "
+                       f"(default: {DEFAULT_MIN_SILENCE_DURATION:.0f}ms, or remove_silence.min_silence_duration in config)")
     @click.option("--modal/--local", default=False, show_default=True, help="Run all media steps on Modal instead of locally")
     def pipeline_cmd(
         input_file: str,
@@ -41,8 +44,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         ass_path = d / f"{input_path.stem}.ass"
         output_path = Path(output).resolve() if output else d / f"{input_path.stem}_subtitled.mp4"
 
-        # Resolve min_silence_duration from CLI > config > defaults
-        rhythm = resolve_rhythm_params({"min_silence_duration": min_silence_duration})
+        # Resolve threshold and min_silence_duration from CLI > config > defaults
+        rhythm = resolve_rhythm_params({
+            "threshold": threshold,
+            "min_silence_duration": min_silence_duration,
+        })
+        threshold = rhythm["threshold"]
         min_silence = rhythm["min_silence_duration"]
 
         if modal:

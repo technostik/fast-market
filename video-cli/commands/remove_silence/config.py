@@ -6,6 +6,8 @@ The config file is the tool config (``~/.config/fast-market/profiles/<profile>/v
 section ``remove_silence``:
 
     remove_silence:
+      threshold: -55.0
+      min_silence_duration: 150
       transcript_tolerance: 0.3
       paragraph_threshold: 0
       pause_inline: 0.1
@@ -35,6 +37,7 @@ from commands.remove_silence.transcript import (
 CONFIG_SECTION = "remove_silence"
 
 RHYTHM_KEYS = (
+    "threshold",
     "transcript_tolerance",
     "paragraph_threshold",
     "pause_inline",
@@ -45,7 +48,10 @@ RHYTHM_KEYS = (
     "min_silence_duration",
 )
 
+DEFAULT_THRESHOLD = -55.0  # dB
+
 RHYTHM_DEFAULTS: dict[str, float] = {
+    "threshold": DEFAULT_THRESHOLD,
     "transcript_tolerance": DEFAULT_TOLERANCE,
     "paragraph_threshold": DEFAULT_PARAGRAPH_THRESHOLD,
     "pause_inline": DEFAULT_PAUSE_INLINE,
@@ -56,6 +62,9 @@ RHYTHM_DEFAULTS: dict[str, float] = {
     "min_silence_duration": 150.0,
 }
 
+# Keys where a negative value is meaningful (silence threshold in dB).
+_NEGATIVE_ALLOWED = {"threshold"}
+
 
 def config_file_path() -> Path:
     """Path of the video tool config file (parent dirs created on call)."""
@@ -64,13 +73,21 @@ def config_file_path() -> Path:
     return get_tool_config_path("video")
 
 
+def config_file_paths() -> tuple[Path, Path]:
+    """(shared, active-profile) video config files. Either may be absent."""
+    from common.core.paths import _profile_config_root
+    from common.core.profile import SHARED
+
+    return _profile_config_root(SHARED) / "video" / "config.yaml", config_file_path()
+
+
 def _coerce_number(key: str, value: object, source: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise click.ClickException(
             f"Invalid {key}={value!r} from {source}: expected a number >= 0."
         )
     result = float(value)
-    if result < 0:
+    if result < 0 and key not in _NEGATIVE_ALLOWED:
         raise click.ClickException(
             f"Invalid {key}={value!r} from {source}: expected a number >= 0."
         )
