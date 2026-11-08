@@ -53,6 +53,18 @@ def test_config_roundtrip_overlay_defaults(store):
     assert cfg["thumbnail_overlay_offset"] == 10
 
 
+def test_config_roundtrip_default_category(store):
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(reg.router)
+    with TestClient(app) as client:
+        r = client.post("/config", json=_cfg_payload(default_category="28"))
+        assert r.status_code == 200
+        assert store["default_category"] == "28"
+        cfg = client.get("/config").json()
+    assert cfg["default_category"] == "28"
+
+
 def test_resolve_overlay_defaults_falls_back_to_config(store):
     store["thumbnail_overlay_size_pct"] = 130
     store["thumbnail_overlay_offset"] = 15

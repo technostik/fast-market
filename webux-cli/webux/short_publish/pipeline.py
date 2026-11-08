@@ -716,11 +716,14 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             job.end_time = time.time()
             _save_meta(job)
             return
+        category = str(pub_cfg.get("default_category", "") or "").strip()
+        category_flag = ["--category", category] if category else []
         rc, url_out = await _run(
             job, s4, _yt(), "upload", final_video,
             "--title", job.title,
             "--description", job.description,
             "--privacy", job.privacy,
+            *category_flag,
         )
         if _finish_step(job, s4, rc):
             return

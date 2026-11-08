@@ -1,10 +1,73 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from pathlib import Path
 
 import click
 
 from commands.base import CommandManifest
+
+
+# YouTube uses the same numeric category IDs in every region for the standard
+# set. A profile stores a human-readable label (French or English), so accept
+# either a label or a raw ID and resolve it to the numeric ID here.
+DEFAULT_CATEGORY_ID = "22"  # People & Blogs
+
+_CATEGORY_ALIASES: dict[str, list[str]] = {
+    "1": ["film & animation", "film et animation", "films et animations"],
+    "2": ["autos & vehicles", "autos et vehicules", "voitures et vehicules"],
+    "10": ["music", "musique"],
+    "15": ["pets & animals", "animaux", "animaux domestiques"],
+    "17": ["sports", "sport"],
+    "19": ["travel & events", "voyages et evenements"],
+    "20": ["gaming", "jeux video"],
+    "22": ["people & blogs", "personnes et blogs"],
+    "23": ["comedy", "humour"],
+    "24": ["entertainment", "divertissement"],
+    "25": ["news & politics", "actualites et politique"],
+    "26": ["howto & style", "comment faire et style"],
+    "27": ["education"],
+    "28": ["science & technology", "science et technologie"],
+    "29": ["nonprofits & activism", "associations et militantisme"],
+    "43": ["shows", "emissions"],
+}
+
+
+def _normalize_category(value: str) -> str:
+    """Lowercase, strip accents and punctuation so labels match loosely."""
+    text = unicodedata.normalize("NFKD", value)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = text.lower().replace("&", " et ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
+
+
+_CATEGORY_LOOKUP: dict[str, str] = {
+    _normalize_category(alias): cat_id
+    for cat_id, aliases in _CATEGORY_ALIASES.items()
+    for alias in aliases
+}
+
+
+def resolve_category_id(value: str | None) -> str:
+    """Resolve a category name (French/English) or numeric ID to a YouTube ID.
+
+    Empty input falls back to the built-in default (People & Blogs).
+    """
+    text = (value or "").strip()
+    if not text:
+        return DEFAULT_CATEGORY_ID
+    if text.isdigit():
+        return text
+    resolved = _CATEGORY_LOOKUP.get(_normalize_category(text))
+    if resolved is None:
+        known = ", ".join(sorted(_CATEGORY_ALIASES))
+        raise click.ClickException(
+            f"Unknown YouTube category {value!r}. Use a numeric ID or a known "
+            f"name (IDs: {known})."
+        )
+    return resolved
 
 
 def _format_upload_error(status: int, reason: str, body: str) -> str:
@@ -37,6 +100,7 @@ def upload_video(
     privacy: str = "unlisted",
     thumbnail: str | None = None,
     progress_callback=None,
+    category: str = "",
 ) -> str:
     """Upload a video to YouTube. Returns the video URL."""
     from core.engine import build_youtube_client
@@ -49,7 +113,7 @@ def upload_video(
             "title": title,
             "description": description,
             "tags": tags or [],
-            "categoryId": "22",
+            "categoryId": resolve_category_id(category),
         },
         "status": {
             "privacyStatus": privacy,
@@ -113,6 +177,15 @@ def register(plugin_manifests: dict) -> CommandManifest:
         default=None,
         help="Thumbnail image to set on the uploaded video",
     )
+    @click.option(
+        "--category",
+        "-c",
+        default="",
+        help=(
+            "YouTube category: a numeric ID or a name (e.g. 'Science et "
+            "technologie'). Defaults to People & Blogs (22)."
+        ),
+    )
     def upload_cmd(
         video_file: str,
         title: str,
@@ -120,16 +193,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
         tags: str,
         privacy: str,
         thumbnail: str | None,
+        category: str,
     ):
         """Upload a video to YouTube."""
         tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+        category_id = resolve_category_id(category)
 
-        click.echo(f"Uploading {Path(video_file).name}...", err=True)
+        click.echo(
+            f"Uploading {Path(video_file).name} (category {category_id})...", err=True
+        )
 
         def _progress(pct: int) -> None:
             click.echo(f"Upload {pct}%...", err=True)
 
-        url = upload_video(video_file, title, description, tags_list, privacy, thumbnail, _progress)
+        url = upload_video(
+            video_file, title, description, tags_list, privacy, thumbnail,
+            _progress, category,
+        )
         click.echo(url)
 
     return CommandManifest(name="upload", click_command=upload_cmd)

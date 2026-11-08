@@ -188,6 +188,28 @@
       <input type="text" id="cfgExts">
     </div>
     <div class="row">
+      <label>YouTube category (default for uploads)</label>
+      <select id="cfgCategory">
+        <option value="">— default (Personnes et blogs / 22) —</option>
+        <option value="1">Film et animation</option>
+        <option value="2">Autos et véhicules</option>
+        <option value="10">Musique</option>
+        <option value="15">Animaux</option>
+        <option value="17">Sport</option>
+        <option value="19">Voyages et événements</option>
+        <option value="20">Jeux vidéo</option>
+        <option value="22">Personnes et blogs</option>
+        <option value="23">Humour</option>
+        <option value="24">Divertissement</option>
+        <option value="25">Actualités et politique</option>
+        <option value="26">Comment faire et style</option>
+        <option value="27">Éducation</option>
+        <option value="28">Science et technologie</option>
+        <option value="29">Associations et militantisme</option>
+        <option value="43">Émissions</option>
+      </select>
+    </div>
+    <div class="row">
       <label>Default title prompt <span class="prompt-info" id="infoTitle" data-content="">ⓘ</span></label>
       <select id="cfgTitlePrompt"></select>
     </div>
@@ -1198,6 +1220,7 @@ async function showConfig() {
       await populateConfigPrompts();
       document.getElementById('cfgPath').value = c.video_source_path || '';
       document.getElementById('cfgExts').value = c.video_extensions || '';
+      document.getElementById('cfgCategory').value = c.default_category || '';
       document.getElementById('cfgTitlePrompt').value = c.default_title_prompt || 'youtube-title';
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
       document.getElementById('cfgCheckPrompt').value = c.default_check_prompt || '';
@@ -1223,6 +1246,7 @@ async function saveConfig() {
   const body = {
     video_source_path: document.getElementById('cfgPath').value,
     video_extensions: document.getElementById('cfgExts').value,
+    default_category: document.getElementById('cfgCategory').value,
     default_title_prompt: document.getElementById('cfgTitlePrompt').value || 'youtube-title',
     default_description_prompt: document.getElementById('cfgDescPrompt').value || 'youtube-summary',
     default_check_prompt: document.getElementById('cfgCheckPrompt').value,
@@ -1262,6 +1286,7 @@ async function toggleConfig() {
       await populateConfigPrompts();
       document.getElementById('cfgPath').value = c.video_source_path || '';
       document.getElementById('cfgExts').value = c.video_extensions || '';
+      document.getElementById('cfgCategory').value = c.default_category || '';
       document.getElementById('cfgTitlePrompt').value = c.default_title_prompt || 'youtube-title';
       document.getElementById('cfgDescPrompt').value = c.default_description_prompt || 'youtube-summary';
       document.getElementById('cfgCheckPrompt').value = c.default_check_prompt || '';

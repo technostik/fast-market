@@ -711,6 +711,9 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             "--description", job.description,
             "--privacy", job.privacy,
         ]
+        category = str(pub_cfg.get("default_category", "") or "").strip()
+        if category:
+            cmd += ["--category", category]
         thumb = job.files.get("thumbnail", "")
         if thumb and Path(thumb).exists():
             cmd += ["--thumbnail", thumb]

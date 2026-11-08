@@ -174,6 +174,7 @@ async def get_config(profile: str | None = Query(default=None)):
         "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings/usage"),
         "short_pinned_comment_enabled": pub.get("short_pinned_comment_enabled", False),
         "short_pinned_comment_text": pub.get("short_pinned_comment_text", ""),
+        "default_category": pub.get("default_category", ""),
         "language": pub.get("language", "fr"),
         "model": pub.get("model", "medium"),
         "privacy": pub.get("privacy", "unlisted"),
@@ -196,6 +197,7 @@ class ConfigSaveRequest(BaseModel):
     modal_usage_url: str = "https://modal.com/settings/usage"
     short_pinned_comment_enabled: bool = False
     short_pinned_comment_text: str = ""
+    default_category: str = ""
     language: str = ""
     model: str = ""
     archive_path: str = ""
@@ -221,6 +223,7 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["modal_usage_url"] = req.modal_usage_url
         pub["short_pinned_comment_enabled"] = req.short_pinned_comment_enabled
         pub["short_pinned_comment_text"] = req.short_pinned_comment_text
+        pub["default_category"] = req.default_category
         pub["language"] = req.language
         pub["model"] = req.model
         pub["archive_path"] = req.archive_path

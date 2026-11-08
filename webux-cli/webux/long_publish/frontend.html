@@ -106,6 +106,27 @@
       <div class="row"><label>Video extensions</label><input id="cfgExt" type="text" placeholder="mp4,mkv,webm"></div>
     </div>
     <div class="row"><label>Signature (appended to description)</label><textarea id="cfgSignature" rows="2"></textarea></div>
+    <div class="row"><label>YouTube category (default for uploads)</label>
+      <select id="cfgCategory">
+        <option value="">— default (Personnes et blogs / 22) —</option>
+        <option value="1">Film et animation</option>
+        <option value="2">Autos et véhicules</option>
+        <option value="10">Musique</option>
+        <option value="15">Animaux</option>
+        <option value="17">Sport</option>
+        <option value="19">Voyages et événements</option>
+        <option value="20">Jeux vidéo</option>
+        <option value="22">Personnes et blogs</option>
+        <option value="23">Humour</option>
+        <option value="24">Divertissement</option>
+        <option value="25">Actualités et politique</option>
+        <option value="26">Comment faire et style</option>
+        <option value="27">Éducation</option>
+        <option value="28">Science et technologie</option>
+        <option value="29">Associations et militantisme</option>
+        <option value="43">Émissions</option>
+      </select>
+    </div>
     <div class="row"><label>Signature video path</label><input id="cfgSigVideo" type="text" oninput="updateSignatureAvailability()"></div>
     <div class="cols2">
       <div class="row"><label>Title prompt <span class="prompt-info" id="infoTitle" data-content="">ⓘ</span></label><select id="cfgTitlePrompt"></select></div>
@@ -329,6 +350,7 @@ async function loadConfig(){
   el('cfgSourcePath').value = c.video_source_path||'';
   el('cfgExt').value = c.video_extensions||'';
   el('cfgSignature').value = c.signature||'';
+  el('cfgCategory').value = c.default_category||'';
   el('cfgSigVideo').value = c.signature_video_path||'';
   el('cfgTitlePrompt').value = c.default_title_prompt||'';
   el('cfgDescPrompt').value = c.default_description_prompt||'';
@@ -421,6 +443,7 @@ async function saveConfig(){
     video_source_path: el('cfgSourcePath').value,
     video_extensions: el('cfgExt').value,
     signature: el('cfgSignature').value,
+    default_category: el('cfgCategory').value,
     signature_video_path: el('cfgSigVideo').value,
     default_title_prompt: el('cfgTitlePrompt').value,
     default_description_prompt: el('cfgDescPrompt').value,

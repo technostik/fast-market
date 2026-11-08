@@ -192,6 +192,7 @@ async def get_config(profile: str | None = Query(default=None)):
         "transcript_language": pub.get("transcript_language", "fr"),
         "long_pinned_comment_enabled": pub.get("long_pinned_comment_enabled", False),
         "long_pinned_comment_text": pub.get("long_pinned_comment_text", ""),
+        "default_category": pub.get("default_category", ""),
         "rhythm_transcript_tolerance": pub.get("rhythm_transcript_tolerance"),
         "rhythm_paragraph_threshold": pub.get("rhythm_paragraph_threshold"),
         "rhythm_pause_inline": pub.get("rhythm_pause_inline"),
@@ -224,6 +225,7 @@ class ConfigSaveRequest(BaseModel):
     transcript_language: str = "fr"
     long_pinned_comment_enabled: bool = False
     long_pinned_comment_text: str = ""
+    default_category: str = ""
     rhythm_transcript_tolerance: float | None = None
     rhythm_paragraph_threshold: float | None = None
     rhythm_pause_inline: float | None = None
@@ -274,6 +276,7 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["transcript_language"] = req.transcript_language
         pub["long_pinned_comment_enabled"] = req.long_pinned_comment_enabled
         pub["long_pinned_comment_text"] = req.long_pinned_comment_text
+        pub["default_category"] = req.default_category
         rhythm_cfg = _rhythm_config_from_request(req)
         try:
             rhythm_params_from_pub(rhythm_cfg)
