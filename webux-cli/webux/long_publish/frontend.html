@@ -11,6 +11,19 @@
     body { margin:0; padding:0; background:var(--bg); color:var(--text);
            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
     .wrap { max-width:880px; margin:0 auto; }
+    /* The publish component is tinted with the selected profile's dark tone
+       (data set from the profile map injected by the webux hub). */
+    .wrap.profile-surface {
+      background: var(--profile-bg, transparent);
+      color: var(--profile-text, var(--text));
+      border: 1px solid var(--profile-border, transparent);
+      border-radius: 10px;
+      padding: 16px;
+      transition: background-color .25s ease, border-color .25s ease;
+      /* Keep muted labels legible on the dark tone regardless of theme. */
+      --dim: var(--profile-dim, #b6bfd0);
+      --text-dim: var(--profile-dim, #b6bfd0);
+    }
     h2 { margin:0 0 12px; font-size:18px; }
     label { display:block; font-size:12px; color:var(--dim); margin-bottom:3px; }
     input[type=text], select, textarea {
@@ -83,7 +96,7 @@
 </head>
 <body>
 <main class="webux-page">
-<div class="wrap">
+<div class="wrap profile-surface">
   <h2>🎬 Long Publish</h2>
 
   <div class="config-toggle" id="cfgToggle">⚙ Config (click to show)</div>
@@ -291,6 +304,12 @@ function currentProfile(){ return (window.fastmarketProfile && window.fastmarket
 function pageProfile(){
   const sel = el('jobProfile');
   return (sel && sel.value) || currentProfile();
+}
+// Tint the publish component with the page profile's tone on load and on
+// every picker change (scoped to the component; the toolbar keeps its own).
+function applyProfileTone(){
+  const wrap = document.querySelector('.wrap.profile-surface');
+  if (wrap && window.webuxApplyProfileTone) window.webuxApplyProfileTone(wrap, pageProfile());
 }
 async function loadPageProfiles(){
   const sel = el('jobProfile');
@@ -914,6 +933,7 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
 // init
 (async ()=>{
   await loadPageProfiles();
+  applyProfileTone();
   await loadConfig();
   updateOverlayRow();
   updateManualMode();
@@ -925,6 +945,7 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
   // The page picker drives every profile-scoped call on this page.
   // data-profile-lock freezes it while an operation runs.
   if (el('jobProfile')) el('jobProfile').addEventListener('change', async ()=>{
+    applyProfileTone();
     await loadConfig();
     await loadVideos();
     await loadThumbVideos();

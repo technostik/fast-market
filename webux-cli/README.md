@@ -64,6 +64,30 @@ webux setup show-path
 webux setup reset
 ```
 
+#### Per-profile colours (multi-profile management)
+
+Every profile gets its own dark background tone, used by the toolbar, the
+publish components and each short-publish pipeline row. Tones are assigned by
+**evenly spaced hues** over the sorted profile list (two profiles ≈ 180°
+apart), so they stay strongly contrasted. To force a colour:
+
+```bash
+# Preview the auto-assigned tone for every profile
+webux setup profile-color tone
+
+# Force a profile's background (written to the _shared profile, global)
+webux setup profile-color set joriel '#7c3aed'
+webux setup profile-color set technostik '#0d9488'
+
+# List configured colours / remove one (back to auto)
+webux setup profile-color show
+webux setup profile-color clear joriel
+```
+
+The map lives under `profile_colors` in the `_shared` webux tool config; edit
+it by hand or with the commands above. A colour drives its background, a derived
+lighter border and an accent shade.
+
 ## Tabs
 
 The server starts at `http://localhost:8007` and redirects to the first available tab.

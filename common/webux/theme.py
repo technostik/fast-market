@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Unified webux theme definitions.
 
 Single source of truth for CSS custom properties used by the webux hub
@@ -23,6 +21,11 @@ such as monitor/corpus, and during migration):
   --warn/--yellow -> --warning
   --bg-dim   -> --bg3
 """
+
+from __future__ import annotations
+
+import colorsys
+import hashlib
 
 DEFAULT_THEME = "dark"
 
@@ -134,8 +137,172 @@ CANONICAL_VARS: frozenset[str] = frozenset(
     ]
 )
 
+#
+# Per-profile tones
+#
+# Every profile (a persona/YouTube channel namespace) gets a distinct dark
+# background tone, so the toolbar, the publish components and each pipeline
+# row can paint themselves with the active channel's colour. Tones are always
+# dark (lightness 0.13-0.74) with a light foreground, so they stay readable
+# under every webux theme.
+#
+# Assignment:
+#   1. an explicit ``profile_colors`` map from the webux tool config
+#      (``webux setup profile-color set``), then
+#   2. evenly spaced hues over the *sorted* profile list, so two profiles are
+#      ~180 deg apart, three ~120 deg, etc. (maximal contrast — a name hash can
+#      hand two profiles near-identical blue/green hues).
+
+PROFILE_VARS: frozenset[str] = frozenset(
+    [
+        "--profile-bg",
+        "--profile-bg-soft",
+        "--profile-border",
+        "--profile-accent",
+        "--profile-text",
+        "--profile-dim",
+    ]
+)
+
+#: Hue (degrees) of the first profile in the sorted list; the rest follow an
+#: even step around the wheel.
+PROFILE_HUE_OFFSET = 205.0
+
+#: Neutral fallback when a name is empty or unknown.
+DEFAULT_PROFILE_TONE: dict[str, str] = {
+    "bg": "#1a1a2e",
+    "bg_soft": "#22223c",
+    "border": "#3a3a5c",
+    "accent": "#7dd3fc",
+    "text": "#f5f7fa",
+    "dim": "#b6bfd0",
+}
+
+
+def _hsl_hex(hue: float, sat: float, light: float) -> str:
+    """HSL (h in [0,1)) -> '#rrggbb'."""
+    r, g, b = colorsys.hls_to_rgb(hue % 1.0, light, sat)
+    return "#{:02x}{:02x}{:02x}".format(
+        max(0, min(255, round(r * 255))),
+        max(0, min(255, round(g * 255))),
+        max(0, min(255, round(b * 255))),
+    )
+
+
+def _parse_hex(color: str) -> tuple[float, float, float] | None:
+    """Parse '#rgb'/'#rrggbb' to (r,g,b) floats in [0,1], else None."""
+    if not isinstance(color, str):
+        return None
+    h = color.strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return None
+    try:
+        return tuple(int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))  # type: ignore[return-value]
+    except ValueError:
+        return None
+
+
+def _tone_for_hue(hue: float) -> dict[str, str]:
+    """A full dark tone dict from a hue in [0,1)."""
+    return {
+        "bg": _hsl_hex(hue, 0.30, 0.13),
+        "bg_soft": _hsl_hex(hue, 0.28, 0.18),
+        "border": _hsl_hex(hue, 0.26, 0.30),
+        "accent": _hsl_hex(hue, 0.60, 0.52),
+        "text": "#f5f7fa",
+        "dim": _hsl_hex(hue, 0.16, 0.74),
+    }
+
+
+def is_valid_profile_color(color: str) -> bool:
+    """True for '#rgb' / '#rrggbb' (the only accepted profile colour form)."""
+    return _parse_hex(color) is not None
+
+
+def tone_from_color(color: str) -> dict[str, str]:
+    """Derive a full tone from an explicit colour (background wins)."""
+    rgb = _parse_hex(color)
+    if rgb is None:
+        return dict(DEFAULT_PROFILE_TONE)
+    h, light, s = colorsys.rgb_to_hls(*rgb)
+    return {
+        "bg": "#" + "".join(f"{round(c * 255):02x}" for c in rgb),
+        "bg_soft": _hsl_hex(h, min(1.0, s * 0.9 + 0.05), min(0.45, light + 0.06)),
+        "border": _hsl_hex(h, min(1.0, s * 0.9 + 0.05), min(0.65, light + 0.16)),
+        "accent": _hsl_hex(h, min(1.0, max(0.45, s)), 0.58),
+        "text": "#f5f7fa",
+        "dim": _hsl_hex(h, 0.16, 0.76),
+    }
+
+
+def profile_tone(name: str | None) -> dict[str, str]:
+    """Return a deterministic tone for a *single* profile name.
+
+    Fallback for callers that do not know the full profile list. The hub uses
+    :func:`profile_tones` instead, which spaces hues evenly for contrast.
+    Stable across processes (SHA-1, not Python's randomised ``hash``).
+    """
+    if not name:
+        return dict(DEFAULT_PROFILE_TONE)
+    digest = hashlib.sha1(str(name).encode("utf-8")).digest()
+    hue = (int.from_bytes(digest[:4], "big") % 3600) / 3600.0
+    return _tone_for_hue(hue)
+
+
+def profile_tones(
+    names: list[str] | tuple[str, ...],
+    overrides: dict[str, str] | None = None,
+) -> dict[str, dict[str, str]]:
+    """Assign a maximally contrasting tone to every profile in ``names``.
+
+    ``overrides`` maps a profile name to an explicit ``#rrggbb`` colour; those
+    win over the even-hue assignment.
+    """
+    overrides = overrides or {}
+    ordered = sorted({n for n in names if n})
+    total = len(ordered)
+    tones: dict[str, dict[str, str]] = {}
+    for index, name in enumerate(ordered):
+        explicit = overrides.get(name)
+        if isinstance(explicit, str) and _parse_hex(explicit) is not None:
+            tones[name] = tone_from_color(explicit)
+            continue
+        hue = ((PROFILE_HUE_OFFSET + index * (360.0 / total)) % 360.0) / 360.0
+        tones[name] = _tone_for_hue(hue)
+    return tones
+
+
+def render_profile_css(
+    profiles: list[str] | tuple[str, ...] | dict[str, dict[str, str]],
+) -> str:
+    """Render ``[data-profile="<name>"]`` rules for every known profile.
+
+    Accepts either a list of names (tones are computed) or a ready tone map
+    from :func:`profile_tones`.
+    """
+    tones = profiles if isinstance(profiles, dict) else profile_tones(profiles)
+    rules: list[str] = []
+    for name, tone in tones.items():
+        # Only slug-safe names can be embedded in a selector unquoted-escaped.
+        if not name or not all(c.isalnum() or c in "-_" for c in name):
+            continue
+        rules.append(
+            f'[data-profile="{name}"] {{\n'
+            f"  --profile-bg: {tone['bg']};\n"
+            f"  --profile-bg-soft: {tone['bg_soft']};\n"
+            f"  --profile-border: {tone['border']};\n"
+            f"  --profile-accent: {tone['accent']};\n"
+            f"  --profile-text: {tone['text']};\n"
+            f"  --profile-dim: {tone['dim']};\n"
+            "}"
+        )
+    return "\n".join(rules)
+
+
 ALLOWED_VARS: frozenset[str] = frozenset(
-    list(CANONICAL_VARS) + list(ALIASES.keys())
+    list(CANONICAL_VARS) + list(ALIASES.keys()) + list(PROFILE_VARS)
 )
 
 

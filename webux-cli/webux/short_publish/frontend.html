@@ -11,6 +11,18 @@
     body { margin:0; padding:0; background:var(--bg); color:var(--text);
            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
     .wrap { max-width:860px; margin:0 auto; }
+    /* The publish component is tinted with the selected profile's dark tone. */
+    .wrap.profile-surface {
+      background: var(--profile-bg, transparent);
+      color: var(--profile-text, var(--text));
+      border: 1px solid var(--profile-border, transparent);
+      border-radius: 10px;
+      padding: 16px;
+      transition: background-color .25s ease, border-color .25s ease;
+      /* Keep muted labels legible on the dark tone regardless of theme. */
+      --dim: var(--profile-dim, #b6bfd0);
+      --text-dim: var(--profile-dim, #b6bfd0);
+    }
     h2 { margin:0 0 12px; font-size:18px; }
     label { display:block; font-size:12px; color:var(--dim); margin-bottom:3px; }
     input[type=text], select, textarea {
@@ -51,6 +63,19 @@
     .pool-mini { padding:3px 8px; font-size:11px; }
     .pool-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:13px; border-bottom:1px solid var(--border); }
     .pool-row:last-child { border-bottom:none; }
+    /* Each pipeline row carries the tone of the profile it will publish with
+       (inline --profile-* vars set from the hub's profile map). */
+    .pool-row.pool-row-profiled {
+      background: var(--profile-bg, transparent);
+      color: var(--profile-text, var(--text));
+      border-bottom:none;
+      border-left:3px solid var(--profile-accent, var(--border));
+      border-radius:6px;
+      padding:6px 8px;
+      margin-bottom:4px;
+      --dim: var(--profile-dim, #b6bfd0);
+      --text-dim: var(--profile-dim, #b6bfd0);
+    }
     .pool-actions { display:flex; gap:4px; align-items:center; flex-shrink:0; }
     .pool-actions button { padding:2px 6px; font-size:11px; }
     /* overflow menu: keeps the row to primary actions + one ⋯ */
@@ -146,7 +171,7 @@
 </head>
 <body>
 <main class="webux-page">
-<div class="wrap">
+<div class="wrap profile-surface">
   <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
     <h2 style="margin:0;">Publish to YouTube</h2>
     <span id="statusDot" style="width:10px;height:10px;border-radius:50%;background:#666;display:inline-block;"></span>
@@ -576,6 +601,12 @@ function currentProfile(){ return (window.fastmarketProfile && window.fastmarket
 function pageProfile(){
   const sel = document.getElementById('jobProfile');
   return (sel && sel.value) || currentProfile();
+}
+// Tint the publish component with the page profile's tone on load and on
+// every picker change (scoped to the component; the toolbar keeps its own).
+function applyProfileTone(){
+  const wrap = document.querySelector('.wrap.profile-surface');
+  if (wrap && window.webuxApplyProfileTone) window.webuxApplyProfileTone(wrap, pageProfile());
 }
 async function loadPageProfiles(){
   const sel = document.getElementById('jobProfile');
@@ -1323,6 +1354,14 @@ async function refreshPool() {
   data.items.forEach(item => {
     const row = document.createElement('div');
     row.className = 'pool-row';
+    // Publish with the profile the item was queued with (falls back to the
+    // page profile), so each pipeline row is tinted its own channel tone.
+    const rowProfile = item.profile || currentProfile();
+    if (rowProfile && window.webuxApplyProfileTone) {
+      row.classList.add('pool-row-profiled');
+      row.dataset.profile = rowProfile;
+      window.webuxApplyProfileTone(row, rowProfile);
+    }
     const name = item.source.split('/').pop();
     const st = item.status;
     const isDone = st === 'finished' || st === 'error' || st === 'stopped';
@@ -2029,6 +2068,7 @@ function applyPinnedDefaults(c) {
 async function init() {
   restoreUiState();
   await loadPageProfiles();
+  applyProfileTone();
   loadVideos();
   loadPrompts();
   fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : '')).then(r => r.ok ? r.json() : {}).then(applyPinnedDefaults).catch(() => {});
@@ -2041,6 +2081,7 @@ async function init() {
   // toolbar locks it while an operation runs (data-profile-lock).
   const profSel = document.getElementById('jobProfile');
   if (profSel) profSel.addEventListener('change', async () => {
+    applyProfileTone();
     await loadPrompts();
     const prof = pageProfile();
     const c = await fetch('/api/short_publish/config' + (prof ? '?profile=' + encodeURIComponent(prof) : ''))

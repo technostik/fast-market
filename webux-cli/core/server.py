@@ -13,7 +13,9 @@ from common.webux.theme import (
     DEFAULT_THEME,
     THEME_NAMES,
     codemirror_theme,
+    profile_tones,
     render_all_themes_css,
+    render_profile_css,
     render_root_css,
     resolve_theme,
 )
@@ -34,8 +36,9 @@ _NAV_LAYOUT = (
   display: flex;
   gap: 8px;
   padding: 10px 14px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
+  background: var(--profile-bg, var(--bg-secondary));
+  color: var(--profile-text, var(--text));
+  border-bottom: 1px solid var(--profile-border, var(--border));
   position: sticky;
   top: 0;
   z-index: 999;
@@ -44,6 +47,7 @@ _NAV_LAYOUT = (
   font-size: 14px;
   font-weight: 400;
   line-height: 1.4;
+  transition: background-color .25s ease, border-color .25s ease;
 }
 /* Isolate the nav from plugin resets (e.g. `* { box-sizing }`) and generic
    element rules (e.g. `button { font-weight: 600 }`, `select { width: 100% }`). */
@@ -52,7 +56,7 @@ _NAV_LAYOUT = (
   margin: 0;
 }
 .webux-nav a {
-  color: var(--text-dim);
+  color: var(--profile-text, var(--text-dim));
   text-decoration: none;
   padding: 8px 12px;
   border-radius: 6px;
@@ -62,14 +66,28 @@ _NAV_LAYOUT = (
   flex-shrink: 0;
   border: none;
 }
-.webux-nav a:hover { color: var(--text); background: var(--surface); }
+.webux-nav a:hover { color: var(--profile-text, var(--text)); background: var(--surface); }
 .webux-nav a.active { color: var(--text); background: var(--accent); }
+.webux-nav .webux-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--profile-accent, var(--accent));
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: .02em;
+}
 /* Grouped dropdowns: the tab bar stays short no matter how many plugins
    are installed. One button per group, tabs inside the menu. */
 .webux-nav { flex-wrap: wrap; }
 .webux-dropdown { position: relative; flex-shrink: 0; }
 .webux-dropbtn {
-  color: var(--text-dim);
+  color: var(--profile-text, var(--text-dim));
   padding: 8px 12px;
   border-radius: 6px;
   background: transparent;
@@ -79,7 +97,7 @@ _NAV_LAYOUT = (
   white-space: nowrap;
   width: auto;
 }
-.webux-dropbtn:hover { color: var(--text); background: var(--surface); }
+.webux-dropbtn:hover { color: var(--profile-text, var(--text)); background: var(--surface); }
 .webux-dropbtn.active { color: var(--text); background: var(--accent); }
 .webux-menu {
   display: none;
@@ -96,6 +114,11 @@ _NAV_LAYOUT = (
 }
 .webux-dropdown.open .webux-menu { display: block; }
 .webux-menu a { display: block; }
+/* The menu drops onto a theme-coloured panel, so it keeps the theme text
+   colours (the profile tone only paints the bar itself). */
+.webux-menu a,
+.webux-menu a:hover { color: var(--text); }
+.webux-menu a.active { color: var(--text); background: var(--accent); }
 .webux-nav .theme-select {
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -368,6 +391,23 @@ _WEBUX_PROFILE_SCRIPT = """
   var busyLabel = '';
   function getProfile(){ return localStorage.getItem('fastmarket_profile') || ''; }
   function setProfile(p){ if (p) localStorage.setItem('fastmarket_profile', p); }
+  function profileTone(name){
+    var map = window.WEBUX_PROFILE_TONES || {};
+    return (name && map[name]) || null;
+  }
+  // Paint the whole page with a profile's tone: sets data-profile on <html>
+  // so every `[data-profile="."]` CSS rule (toolbar, publish components)
+  // updates at once, then keeps the nav badge in sync.
+  function applyProfile(name){
+    if (name) document.documentElement.setAttribute('data-profile', name);
+    var badge = document.querySelector('.webux-profile-badge');
+    if (badge) badge.textContent = '👤 ' + (name || '');
+    try {
+      window.dispatchEvent(new CustomEvent('webux-profile-change', {
+        detail: { profile: name, tone: profileTone(name) }
+      }));
+    } catch (_) {}
+  }
   function busyMessage(){
     return 'Profile locked: ' + (busyLabel || 'an operation is running') +
       ' is running. Wait for it to finish before switching profile.';
@@ -423,13 +463,17 @@ _WEBUX_PROFILE_SCRIPT = """
       }
     }
     var accepted = sel.value;
+    applyProfile(accepted);
     sel.addEventListener('change', function(){
       // A poll may be up to 3s stale: re-verify before reloading, and revert
       // the select when an operation is actually running.
       if (busy){ sel.value = accepted; alert(busyMessage()); return; }
       var wanted = sel.value;
+      // Repaint the toolbar immediately; the reload below re-renders the
+      // server-rendered page with the new active profile as source of truth.
+      applyProfile(wanted);
       checkBusy().then(function(isBusy){
-        if (isBusy){ sel.value = accepted; alert(busyMessage()); return; }
+        if (isBusy){ sel.value = accepted; applyProfile(accepted); alert(busyMessage()); return; }
         accepted = wanted;
         localStorage.setItem('fastmarket_profile_user_set', '1');
         setProfile(wanted);
@@ -439,6 +483,23 @@ _WEBUX_PROFILE_SCRIPT = """
     checkBusy();
     setInterval(checkBusy, 3000);
   });
+  window.webuxApplyProfile = applyProfile;
+  window.webuxProfileTone = profileTone;
+  // Paint a single element (e.g. a publish component or a pipeline row) with
+  // a profile's tone, without touching the toolbar's data-profile.
+  window.webuxApplyProfileTone = function(el, name){
+    if (!el) return;
+    var t = profileTone(name);
+    var keys = ['bg', 'bg_soft', 'border', 'accent', 'text', 'dim'];
+    var css = {
+      bg: '--profile-bg', bg_soft: '--profile-bg-soft', border: '--profile-border',
+      accent: '--profile-accent', text: '--profile-text', dim: '--profile-dim'
+    };
+    keys.forEach(function(k){
+      if (t) el.style.setProperty(css[k], t[k]);
+      else el.style.removeProperty(css[k]);
+    });
+  };
 })();
 window.fastmarketProfile = function(){ return localStorage.getItem('fastmarket_profile') || (document.getElementById('webux-profile')?document.getElementById('webux-profile').value:''); };
 </script>
@@ -616,6 +677,36 @@ def _plugin_group(plugin: WebuxPluginManifest) -> str:
     return _WEBUX_GROUP_FALLBACK.get(plugin.name, "More")
 
 
+def _profile_names() -> list[str]:
+    """Return the sorted profile names under the profiles config base."""
+    try:
+        base = get_profiles_config_base()
+        if not base.exists():
+            return []
+        return sorted(p.name for p in base.iterdir() if p.is_dir())
+    except Exception:
+        return []
+
+
+def _profile_color_overrides() -> dict[str, str]:
+    """Explicit profile colours from the webux tool config (``profile_colors``)."""
+    try:
+        from common.core.config import load_tool_config
+
+        cfg = load_tool_config("webux") or {}
+    except Exception:
+        return {}
+    raw = cfg.get("profile_colors")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
+
+
+def _profile_tones() -> dict[str, dict[str, str]]:
+    """Effective tone for every known profile (config overrides + even hues)."""
+    return profile_tones(_profile_names(), _profile_color_overrides())
+
+
 def _build_nav(
     plugins: dict[str, WebuxPluginManifest],
     active: str | None = None,
@@ -651,17 +742,17 @@ def _build_nav(
             "</div>"
         )
     # Profile selector (global), just before LLM selector
-    try:
-        base = get_profiles_config_base()
-        prof_names = [p.name for p in sorted(base.iterdir()) if p.is_dir()] if base.exists() else []
-    except Exception:
-        prof_names = []
+    prof_names = _profile_names()
     active_prof = resolve_profile()
     prof_options = "".join(
         f'<option value="{_html.escape(name)}"'
         f'{" selected" if name == active_prof else ""}>'
         f'👤 {_html.escape(name)}</option>'
         for name in prof_names
+    )
+    links.append(
+        f'<span class="webux-profile-badge" title="Active profile">'
+        f"👤 {_html.escape(active_prof)}</span>"
     )
     links.append(
         f'<select id="webux-profile" class="profile-select" title="Profile (global)">'
@@ -699,7 +790,21 @@ def _build_nav(
         f"{options}</select>"
     )
     links.append('<button class="exit-btn" onclick="webuxExit()">⏻ Exit</button>')
-    return f"<nav class=\"webux-nav\">{''.join(links)}</nav>"
+    return f"<nav class=\"webux-nav\" data-profile=\"{_html.escape(active_prof)}\">{''.join(links)}</nav>"
+
+
+def _profile_boot_script(
+    tones: dict[str, dict[str, str]], active_profile: str
+) -> str:
+    """Expose the active profile and every profile tone to page scripts."""
+    import json as _json
+
+    return (
+        "<script>"
+        f"window.WEBUX_PROFILE_ACTIVE={_json.dumps(active_profile)};"
+        f"window.WEBUX_PROFILE_TONES={_json.dumps(tones)};"
+        "</script>"
+    )
 
 
 def _inject_nav(
@@ -707,12 +812,17 @@ def _inject_nav(
 ) -> str:
     if default_theme not in THEME_NAMES:
         default_theme = DEFAULT_THEME
+    profile_names = _profile_names()
+    active_profile = resolve_profile()
+    tones = profile_tones(profile_names, _profile_color_overrides())
     theme_css = render_all_themes_css()
-    style_tag = f"<style>{theme_css}{_NAV_LAYOUT}{_PROMPT_INFO_CSS}</style>"
+    profile_css = render_profile_css(tones)
+    style_tag = f"<style>{theme_css}{profile_css}{_NAV_LAYOUT}{_PROMPT_INFO_CSS}</style>"
     # Boot script must run ASAP (in <head>) to avoid a flash of the wrong theme.
     head_tags = _WEBUX_THEME_BOOT_SCRIPT + style_tag
     script_tag = (
-        _WEBUX_EXIT_SCRIPT + _WEBUX_THEME_SCRIPT + _PROMPT_INFO_SCRIPT + _WEBUX_LLM_SCRIPT
+        _profile_boot_script(tones, active_profile)
+        + _WEBUX_EXIT_SCRIPT + _WEBUX_THEME_SCRIPT + _PROMPT_INFO_SCRIPT + _WEBUX_LLM_SCRIPT
         + _WEBUX_NAV_SCRIPT + _WEBUX_PROFILE_SCRIPT
     )
     if "</head>" in plugin_html:
@@ -731,12 +841,15 @@ def _inject_nav(
         end = plugin_html.find(">", idx)
         if end != -1:
             tag = plugin_html[idx : end + 1]
+            extra = ""
             if "data-theme" not in tag:
-                plugin_html = (
-                    plugin_html[:end]
-                    + f' data-theme="{default_theme}"'
-                    + plugin_html[end:]
-                )
+                extra += f' data-theme="{default_theme}"'
+            if "data-profile" not in tag:
+                import html as _html
+
+                extra += f' data-profile="{_html.escape(active_profile)}"'
+            if extra:
+                plugin_html = plugin_html[:end] + extra + plugin_html[end:]
 
     if "<body" in plugin_html:
         body_start = plugin_html.find(">", plugin_html.find("<body"))
