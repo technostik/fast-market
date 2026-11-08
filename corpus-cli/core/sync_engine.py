@@ -55,6 +55,50 @@ class SyncEngine:
             )
         return chunks
 
+    def add_document(self, document: Document) -> dict:
+        """Index a document whose content is already known (no plugin fetch).
+
+        Used by ``corpus add``: the caller supplies title, transcript and
+        metadata (e.g. a freshly published video), so no API call or quota is
+        spent. Reuses the exact indexing path of ``sync_pool_items``: handle,
+        content hash, document upsert, chunk embeddings, pool row and failure
+        clearing.
+        """
+        document.handle = make_handle(
+            document.source_plugin, document.source_id, document.title
+        )
+        content_hash = self.embedder.hash_text(document.raw_text)
+        changed = self.store.upsert_document(document, content_hash)
+
+        chunks: list[Chunk] = []
+        if changed:
+            chunks = self._build_chunks(document)
+            self.store.replace_chunks(
+                document.source_plugin, document.source_id, chunks
+            )
+
+        self.store.upsert_pool_item(
+            document.source_plugin,
+            document.source_id,
+            "synced",
+            metadata=document.metadata,
+            synced_at=datetime.utcnow().isoformat(),
+        )
+        self.store.clear_failure(document.source_plugin, document.source_id)
+        _log_item(
+            document.source_plugin,
+            document,
+            "indexed" if changed else "skipped",
+            chunks=len(chunks),
+        )
+        return {
+            "source": document.source_plugin,
+            "source_id": document.source_id,
+            "handle": document.handle,
+            "indexed": changed,
+            "chunks": len(chunks),
+        }
+
     def sync(
         self,
         plugin: SourcePlugin,

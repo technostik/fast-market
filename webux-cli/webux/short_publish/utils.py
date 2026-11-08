@@ -116,6 +116,10 @@ def _save_meta(job) -> None:
     if pinned_url:
         meta["pinned_comment_url"] = pinned_url
 
+    meta["do_add_to_corpus"] = bool(getattr(job, "do_add_to_corpus", True))
+    _set("corpus_video_id", getattr(job, "corpus_video_id", ""))
+    _set("corpus_handle", getattr(job, "corpus_handle", ""))
+
     if job.check_result is not None:
         meta["check_result"] = job.check_result
     elif existing.get("check_result") is not None:

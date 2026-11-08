@@ -108,7 +108,7 @@ def _validate_manual_title(title_override: str, rhythm_silence: bool) -> str:
     return title
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", thumbnail_overlay_subtitle: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, title_override: str = "", description_override: str = "", profile: str | None = None) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", thumbnail_overlay_subtitle: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, title_override: str = "", description_override: str = "", profile: str | None = None, do_add_to_corpus: bool = True) -> Job:
     """Create (but do not start) a publish Job. Respects publish config for
     default prompts etc."""
     if not profile:
@@ -139,6 +139,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_generate_thumbnail=do_generate_thumbnail,
         do_pinned_comment=do_pinned_comment if do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=pinned_comment_text if pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
+        do_add_to_corpus=do_add_to_corpus,
         thumbnail_overlay_title=thumbnail_overlay_title,
         thumbnail_overlay_subtitle=thumbnail_overlay_subtitle,
         steps=[Step(name=n) for n in step_names],
@@ -495,6 +496,7 @@ class StartRequest(BaseModel):
     do_generate_thumbnail: bool = True
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_add_to_corpus: bool = True
     thumbnail_overlay_title: str = ""
     thumbnail_overlay_subtitle: str = ""
     thumbnail_engine: str = ""
@@ -516,6 +518,8 @@ class ResumeRequest(BaseModel):
     do_generate_thumbnail: bool = True
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    # None = follow the meta log (retry of a run that already chose).
+    do_add_to_corpus: bool | None = None
     do_remove_silence: bool = False
     rhythm_silence: bool = False
     cut_time: str = ""
@@ -578,6 +582,7 @@ async def start(req: StartRequest):
         do_generate_thumbnail=req.do_generate_thumbnail,
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
+        do_add_to_corpus=req.do_add_to_corpus,
         thumbnail_overlay_title=req.thumbnail_overlay_title,
         thumbnail_overlay_subtitle=req.thumbnail_overlay_subtitle,
         thumbnail_engine=req.thumbnail_engine.strip(),
@@ -699,6 +704,11 @@ async def resume(req: ResumeRequest):
         do_generate_thumbnail=req.do_generate_thumbnail if not req.do_generate_thumbnail else meta.get("do_generate_thumbnail", True),
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
+        do_add_to_corpus=(
+            req.do_add_to_corpus
+            if req.do_add_to_corpus is not None
+            else bool(meta.get("do_add_to_corpus", True))
+        ),
         thumbnail_overlay_title=req.thumbnail_overlay_title or meta.get("thumbnail_overlay_title", ""),
         thumbnail_overlay_subtitle=req.thumbnail_overlay_subtitle or meta.get("thumbnail_overlay_subtitle", ""),
         thumbnail_engine=req.thumbnail_engine.strip(),
@@ -710,6 +720,8 @@ async def resume(req: ResumeRequest):
     )
     job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
     job.pinned_comment_url = str(meta.get("pinned_comment_url", "") or "")
+    job.corpus_video_id = str(meta.get("corpus_video_id", "") or "")
+    job.corpus_handle = str(meta.get("corpus_handle", "") or "")
     for i in completed_before:
         if i < from_step:
             job.steps[i].status = "done"

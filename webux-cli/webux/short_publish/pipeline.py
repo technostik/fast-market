@@ -27,6 +27,7 @@ from .utils import (
     _job_env,
 )
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
+from ..video_corpus import maybe_add_to_corpus
 from .pool import clear_pool_cut_time, set_item_upload_duration, set_item_upload_result
 
 
@@ -126,6 +127,24 @@ def _pinned_comment_cfg(job: Job, pub_cfg: dict) -> tuple[bool, str]:
     if not text:
         text = str(pub_cfg.get("short_pinned_comment_text", "") or "").strip()
     return enabled, text
+
+
+async def _maybe_add_to_corpus(job: Job, video_id: str, step) -> None:
+    """Index the uploaded video in the corpus (warn-only, never fails the job)."""
+    if (
+        not getattr(job, "do_add_to_corpus", True)
+        or getattr(job, "skip_upload", False)
+        or not video_id
+    ):
+        return
+    await maybe_add_to_corpus(
+        job,
+        video_id,
+        step,
+        env=_job_env(job),
+        duration=getattr(job, "upload_duration_seconds", None),
+        save_meta=lambda: _save_meta(job),
+    )
 
 
 async def _maybe_post_pinned_comment(job: Job, video_id: str, step) -> None:
@@ -716,6 +735,7 @@ async def _run_llm_and_upload(job: Job, transcript_path: str, final_video: str, 
             job.video_url = watch_url
             job.studio_url = ""
         _save_meta(job)
+        await _maybe_add_to_corpus(job, video_id, s4)
         await _maybe_post_pinned_comment(job, video_id, s4)
         # Keep an existing pool row in sync when the upload was launched outside
         # the pool worker (re-upload to another channel).

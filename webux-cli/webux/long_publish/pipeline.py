@@ -22,7 +22,10 @@ from .utils import (
     _run_capture,
     _extract_video_id,
     _parse_timestamp,
+    _get_video_duration,
+    _job_env,
 )
+from ..video_corpus import maybe_add_to_corpus
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
 
 
@@ -118,6 +121,25 @@ def _pinned_comment_cfg(job: Job, pub_cfg: dict) -> tuple[bool, str]:
     if not text:
         text = str(pub_cfg.get("long_pinned_comment_text", "") or "").strip()
     return enabled, text
+
+
+async def _maybe_add_to_corpus(job: Job, video_id: str, step, final_video: str) -> None:
+    """Index the uploaded video in the corpus (warn-only, never fails the job)."""
+    if (
+        not getattr(job, "do_add_to_corpus", True)
+        or getattr(job, "skip_upload", False)
+        or not video_id
+    ):
+        return
+    duration = await _get_video_duration(final_video) if final_video else 0.0
+    await maybe_add_to_corpus(
+        job,
+        video_id,
+        step,
+        env=_job_env(job),
+        duration=duration,
+        save_meta=lambda: _save_meta(job),
+    )
 
 
 async def _maybe_post_pinned_comment(job: Job, video_id: str, step) -> None:
@@ -707,6 +729,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             job.studio_url = ""
         s5.output = f"Uploaded: {job.video_url}"
         _save_meta(job)
+        await _maybe_add_to_corpus(job, video_id, s5, current_video)
         await _maybe_post_pinned_comment(job, video_id, s5)
 
     job.status = "done"

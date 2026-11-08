@@ -23,6 +23,7 @@ corpus-agent/
 | Command | Description |
 |---------|-------------|
 | `corpus sync` | Fetch and index pending items from the pool. `--handles pool:<source>:<id>` syncs only the selected not-synced items |
+| `corpus add` | Index one document directly from known content (URL, title, description, transcript) — no fetch, no API quota |
 | `corpus search` | Search indexed documents |
 | `corpus list` | List indexed documents |
 | `corpus get-from-id` | Get document by handle |

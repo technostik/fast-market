@@ -87,7 +87,7 @@ def _is_busy() -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
     """
@@ -126,6 +126,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_ignore_post_publish=do_ignore_post_publish,
         do_pinned_comment=do_pinned_comment if do_pinned_comment is not None else bool(pub.get("short_pinned_comment_enabled", False)),
         pinned_comment_text=pinned_comment_text if pinned_comment_text is not None else str(pub.get("short_pinned_comment_text", "") or ""),
+        do_add_to_corpus=do_add_to_corpus,
         cut_time=cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
         upload_duration_seconds=meta.get("upload_duration_seconds"),
@@ -138,6 +139,8 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
     )
     job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
     job.pinned_comment_url = str(meta.get("pinned_comment_url", "") or "")
+    job.corpus_video_id = str(meta.get("corpus_video_id", "") or "")
+    job.corpus_handle = str(meta.get("corpus_handle", "") or "")
     _jobs[job_id] = job
     return job
 
@@ -426,6 +429,7 @@ class StartRequest(BaseModel):
     ignore_post_publish: bool = False
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_add_to_corpus: bool = True
     cut_time: str = ""
     profile: str = ""
 
@@ -447,6 +451,8 @@ class ResumeRequest(BaseModel):
     ignore_post_publish: bool = False
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    # None = follow the meta log (retry of a run that already chose).
+    do_add_to_corpus: bool | None = None
     language: str = ""
     model: str = ""
     privacy: str = "unlisted"
@@ -490,6 +496,7 @@ async def start(req: StartRequest):
         do_ignore_post_publish=req.ignore_post_publish,
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("short_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("short_pinned_comment_text", "") or ""),
+        do_add_to_corpus=req.do_add_to_corpus,
         cut_time=req.cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
     )
@@ -571,6 +578,11 @@ async def resume(req: ResumeRequest):
         do_ignore_post_publish=req.ignore_post_publish,
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub_cfg.get("short_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub_cfg.get("short_pinned_comment_text", "") or ""),
+        do_add_to_corpus=(
+            req.do_add_to_corpus
+            if req.do_add_to_corpus is not None
+            else bool(meta.get("do_add_to_corpus", True))
+        ),
         steps=[Step(name=n) for n in STEP_NAMES],
         files=files,
         title=meta.get("title", ""),
@@ -580,6 +592,8 @@ async def resume(req: ResumeRequest):
     )
     job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
     job.pinned_comment_url = str(meta.get("pinned_comment_url", "") or "")
+    job.corpus_video_id = str(meta.get("corpus_video_id", "") or "")
+    job.corpus_handle = str(meta.get("corpus_handle", "") or "")
     for i in completed_before:
         if i < from_step:
             job.steps[i].status = "done"
@@ -839,6 +853,9 @@ async def reupload(req: ReuploadRequest):
             if req.pinned_comment_text is not None
             else str(pub.get("short_pinned_comment_text", "") or "")
         ),
+        # No checkbox in the re-upload dialog: follow the choice recorded by the
+        # original publish for this source.
+        do_add_to_corpus=bool(meta.get("do_add_to_corpus", True)),
         cut_time="",
         steps=[Step(name=n) for n in STEP_NAMES],
         files=files,
@@ -983,13 +1000,14 @@ class PoolAddRequest(BaseModel):
     ignore_post_publish: bool = False
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_add_to_corpus: bool = True
     cut_time: str = ""
     profile: str = ""
 
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None, do_add_to_corpus=req.do_add_to_corpus)
     return {"ok": ok}
 
 

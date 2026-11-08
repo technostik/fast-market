@@ -78,6 +78,12 @@ class Job:
     # from the run form (an unticked box must really disable the comment).
     do_pinned_comment: bool | None = None
     pinned_comment_text: str = ""
+    # Index the uploaded video in the corpus (URL, title, description,
+    # transcript) right after a successful upload. The run form checks it by
+    # default; failures are warnings only.
+    do_add_to_corpus: bool = True
+    corpus_video_id: str = ""
+    corpus_handle: str = ""
     cut_time: str = ""
     source_urls: list[str] = field(default_factory=list)
     stop_requested: bool = False
@@ -118,6 +124,8 @@ class Job:
             "description": self.description,
             "transcript_text": self.transcript_text,
             "check_result": self.check_result,
+            "do_add_to_corpus": self.do_add_to_corpus,
+            "corpus_handle": self.corpus_handle,
             "files": self.files,
             "start_time": self.start_time,
             "elapsed_seconds": round(job_elapsed, 1),

@@ -348,6 +348,12 @@
             <label for="ignorePostPublish" style="display:inline; margin:0;">Ignore post publishing scripts</label>
           </div>
         </div>
+        <div class="opt">
+          <div class="checkrow">
+            <input type="checkbox" id="addToCorpus" checked>
+            <label for="addToCorpus" style="display:inline; margin:0;" title="After a successful upload, index the video (URL, title, description, transcript) in the corpus. Failures never block the publish.">Add to corpus</label>
+          </div>
+        </div>
       </div>
 
       <div class="cols2">
@@ -823,6 +829,7 @@ async function startJob() {
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
     do_pinned_comment: document.getElementById('doPinnedComment').checked,
     pinned_comment_text: document.getElementById('pinnedCommentText').value,
+    do_add_to_corpus: document.getElementById('addToCorpus').checked,
     cut_time: document.getElementById('cutTime').value,
     profile: pageProfile()
   };
@@ -1024,6 +1031,7 @@ function showResult(job) {
   if (job.video_url) links.innerHTML += `<a href="${job.video_url}" target="_blank">Watch on YouTube</a>`;
   if (job.studio_url) links.innerHTML += `<a href="${job.studio_url}" target="_blank">Studio edit</a>`;
   if (job.pinned_comment_url) links.innerHTML += `<a href="${job.pinned_comment_url}" target="_blank">💬 Pin this comment</a>`;
+  if (job.corpus_handle) links.innerHTML += `<a href="/corpus_browser" target="_blank">📚 In corpus (${job.corpus_handle})</a>`;
   if (job.elapsed_seconds != null) {
     links.innerHTML += `<span style="margin-left:12px;color:var(--dim);">⏱ ${job.elapsed_seconds}s total</span>`;
   }
@@ -1111,6 +1119,7 @@ async function doResume() {
     // which may now show another channel.
     do_pinned_comment: null,
     pinned_comment_text: '',
+    do_add_to_corpus: document.getElementById('addToCorpus').checked,
     profile: area.dataset.profile || pageProfile()
   };
   const r = await fetch('/api/short_publish/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -1899,6 +1908,7 @@ async function addToPool() {
       ignore_post_publish: document.getElementById('ignorePostPublish').checked,
       do_pinned_comment: document.getElementById('doPinnedComment').checked,
       pinned_comment_text: document.getElementById('pinnedCommentText').value,
+      do_add_to_corpus: document.getElementById('addToCorpus').checked,
       cut_time: document.getElementById('cutTime').value,
       profile: pageProfile()
     })

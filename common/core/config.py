@@ -279,9 +279,12 @@ def load_tool_config(tool_name: str, path: str | None = None) -> dict:
     """Load effective config for a tool.
 
     Resolution order (later wins):
-    1. Common config (~/.config/fast-market/common/config.yaml) - workdir
-    2. Discovered common sub-configs (~/.config/fast-market/common/*/config.yaml)
-    3. Tool config (~/.config/fast-market/{tool}/config.yaml)
+    1. Common config (~/.config/fast-market/profiles/_shared/common/config.yaml
+       under the active profile's common/config.yaml) - workdir
+    2. Discovered common sub-configs (~/.config/fast-market/profiles/<profile>/common/*/config.yaml,
+       with the _shared copy merged underneath)
+    3. Tool config (profiles/_shared/{tool}/config.yaml under
+       profiles/<profile>/{tool}/config.yaml)
 
     Before loading, the tool must declare its common config requirements via
     requires_common_config(). If a required subconfig is missing, ConfigError is raised.
@@ -304,6 +307,7 @@ def load_tool_config(tool_name: str, path: str | None = None) -> dict:
     for subconfig_name, subconfig_data in discovered_subconfigs.items():
         discovered_cfg[subconfig_name] = subconfig_data
 
+    use_profile_path = False
     if path is not None:
         tool_path = Path(path).expanduser()
     else:
@@ -322,6 +326,7 @@ def load_tool_config(tool_name: str, path: str | None = None) -> dict:
                 tool_path = deprecated_path
             else:
                 tool_path = get_tool_config_path(tool_name)
+                use_profile_path = True
 
     if not tool_path.exists():
         tool_data = {}
@@ -337,6 +342,18 @@ def load_tool_config(tool_name: str, path: str | None = None) -> dict:
             raise ConfigError(
                 f"{tool_path} must be a YAML mapping, got {type(tool_data).__name__}"
             )
+
+    if use_profile_path:
+        # Layer the _shared copy of this tool config under the active profile's
+        # copy (profile wins). The shared base is the `_shared` sibling of the
+        # active profile, e.g. profiles/_shared/{tool}/config.yaml.
+        shared_path = (
+            tool_path.parent.parent.parent
+            / SHARED
+            / tool_path.parent.name
+            / "config.yaml"
+        )
+        tool_data = _deep_merge(_load_yaml(shared_path), tool_data)
 
     base = {**common_cfg, **discovered_cfg}
     return _deep_merge(base, tool_data)

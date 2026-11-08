@@ -173,6 +173,7 @@
         <div class="opt checkrow"><input type="checkbox" id="useModal" checked><label style="margin:0">Use Modal</label></div>
         <div class="opt checkrow"><input type="checkbox" id="skipUpload"><label style="margin:0">Skip upload</label></div>
         <div class="opt checkrow"><input type="checkbox" id="doThumb" checked><label style="margin:0">Generate thumbnail</label></div>
+        <div class="opt checkrow"><input type="checkbox" id="doAddCorpus" checked><label style="margin:0" title="After a successful upload, index the video (URL, title, description, transcript) in the corpus. Failures never block the publish.">Add to corpus</label></div>
       </div>
       <div class="cols2">
         <div class="row">
@@ -622,6 +623,7 @@ function startBody(){
     description_override: el('forcedDesc').value,
     do_pinned_comment: el('doPinnedComment').checked,
     pinned_comment_text: el('pinnedCommentText').value,
+    do_add_to_corpus: el('doAddCorpus').checked,
     thumbnail_overlay_title: el('thumbOverlayTitle').value,
     thumbnail_overlay_subtitle: el('thumbOverlaySubtitle').value,
     thumbnail_engine: el('thumbEngine').value,
@@ -891,6 +893,7 @@ async function poll(){
     if (data.video_url) links += `<a href="${data.video_url}" target="_blank">▶ Watch</a>`;
     if (data.studio_url) links += `<a href="${data.studio_url}" target="_blank">🛠 Studio</a>`;
     if (data.pinned_comment_url) links += `<a href="${data.pinned_comment_url}" target="_blank">💬 Pin this comment</a>`;
+    if (data.corpus_handle) links += `<a href="/corpus_browser" target="_blank">📚 In corpus (${data.corpus_handle})</a>`;
     const thumb = (data.files||{}).thumbnail;
     const thumbBase = (data.files||{}).thumbnail_base;
     let thumbHtml = '';

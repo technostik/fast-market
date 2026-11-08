@@ -222,6 +222,44 @@ corpus -v search "landing page" --format json | jq '.[0].handle'
 
 ---
 
+### add
+
+```bash
+corpus add [OPTIONS]
+```
+
+Index one document whose content is already known: no plugin fetch, no
+YouTube API call, no quota. The transcript becomes the indexed text and the
+description is stored in metadata (exactly like a YouTube sync). The item is
+marked `synced` in the pool, so later scans skip it.
+
+```bash
+corpus add \
+  --source youtube \
+  --id dQw4w9WgXcQ \
+  --url https://www.youtube.com/watch?v=dQw4w9WgXcQ \
+  --title "My video" \
+  --transcript-file ./clip_transcript.txt \
+  --description-file ./description.txt \
+  --privacy unlisted --duration 542 -F json
+# → {"source":"youtube","source_id":"dQw4w9WgXcQ","handle":"yt-my-video-a3f2","indexed":true,"chunks":3}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--source` | first plugin (`youtube`) | Source plugin |
+| `--id` | required | Source ID (YouTube video ID) |
+| `--url` | required | Public URL |
+| `--title` | required | Document title |
+| `--transcript` / `--transcript-file` | required | Transcript content (inline or file) |
+| `--description` / `--description-file` | empty | Description (inline or file) |
+| `--privacy` | `unknown` | Privacy status |
+| `--duration` | `0` | Duration in seconds |
+| `--published-at` | now | ISO 8601 publish date |
+| `--format json\|text`, `-F` | `text` | Output format |
+
+---
+
 ### sync
 
 ```bash

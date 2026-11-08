@@ -195,6 +195,11 @@ def _save_meta(job) -> None:
         meta["pinned_comment_id"] = job.pinned_comment_id
     if getattr(job, "pinned_comment_url", ""):
         meta["pinned_comment_url"] = job.pinned_comment_url
+    meta["do_add_to_corpus"] = bool(getattr(job, "do_add_to_corpus", True))
+    if getattr(job, "corpus_video_id", ""):
+        meta["corpus_video_id"] = job.corpus_video_id
+    if getattr(job, "corpus_handle", ""):
+        meta["corpus_handle"] = job.corpus_handle
     try:
         with open(_long_meta_path(job.source), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
