@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 import threading
 import uuid
@@ -96,47 +98,133 @@ def _map_error(exc: Exception) -> dict[str, Any]:
 _BACKEND_CACHE: dict[str, dict[str, Any]] = {}
 
 
-def _backend_factory() -> dict[str, Any]:
-    """Build (and cache per db file) the corpus backend for one process.
+def _validated_profile(profile: str | None) -> str | None:
+    """Return the profile name, or 400 for a malformed one (never a bad path)."""
+    if not profile:
+        return None
+    from common.core.profile import ProfileError, validate_profile_name
+
+    try:
+        return validate_profile_name(profile)
+    except ProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@contextlib.contextmanager
+def _profile_context(profile: str | None):
+    """Temporarily pin ``FASTMARKET_PROFILE`` so config/paths resolve per profile.
+
+    The webux toolbar keeps the selected profile client-side (localStorage); the
+    server process has its own active profile. Every profile-scoped request must
+    re-pin the environment while it loads config and opens a corpus DB. Same
+    pattern as the publish plugins' ``_profile_context``.
+    """
+    profile = _validated_profile(profile)
+    old = os.environ.get("FASTMARKET_PROFILE")
+    try:
+        if profile:
+            os.environ["FASTMARKET_PROFILE"] = profile
+        else:
+            os.environ.pop("FASTMARKET_PROFILE", None)
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("FASTMARKET_PROFILE", None)
+        else:
+            os.environ["FASTMARKET_PROFILE"] = old
+
+
+def _backend_factory(profile: str | None = None) -> dict[str, Any]:
+    """Build (and cache per profile) the corpus backend for one process.
+
+    ``profile`` is the persona selected in the webux toolbar (the "local"
+    profile), not necessarily the server process's active profile. It selects
+    both the corpus DB to read/write and the plugin config (e.g. YouTube
+    credentials), so switching profile in the UI actually switches the corpus.
 
     Heavy imports live here so handlers stay lazy. Tests replace this
     function wholesale with fakes.
     """
-    from common.core.config import load_config
-    from common.core.registry import build_plugins
-    from core.embedder import Embedder
-    from core.sync_engine import SyncEngine
-    from storage.sqlalchemy_store import SQLAlchemyStore
+    from common.core.profile import resolve_profile
 
-    config = load_config()
-    cache_key = f"file:{config.get('db_path')}" if config.get("db_path") else "default"
+    resolved = _validated_profile(profile) or resolve_profile()
+    cache_key = f"profile:{resolved}"
     cached = _BACKEND_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
-    store = SQLAlchemyStore(config.get("db_path"))
-    plugins = build_plugins(config, tool_root=_TOOL_ROOT)
-    engine = SyncEngine(
-        store, Embedder(batch_size=int(config.get("embed_batch_size", 32)))
-    )
+    from common.core.config import load_config
+    from core.embedder import Embedder
+    from core.sync_engine import SyncEngine
+    from storage.sqlalchemy_store import SQLAlchemyStore
+
+    with _profile_context(resolved):
+        config = load_config()
+        store = SQLAlchemyStore(config.get("db_path"), profile=resolved)
+        plugins = _build_plugins_lenient(config, resolved)
+        engine = SyncEngine(
+            store, Embedder(batch_size=int(config.get("embed_batch_size", 32)))
+        )
     backend = {
         "config": config,
         "store": store,
         "engine": engine,
         "plugins": plugins,
+        "profile": resolved,
     }
     _BACKEND_CACHE[cache_key] = backend
     return backend
 
 
-def _discover_operations() -> dict[str, Any]:
+def _build_plugins_lenient(
+    config: dict, profile: str | None = None
+) -> dict[str, Any]:
+    """Build source plugins for one profile, skipping the ones misconfigured there.
+
+    A profile may legitimately lack a plugin's config (e.g. technostik has no
+    Obsidian vault). Browsing that profile's corpus must still work, so a failed
+    plugin is logged and skipped instead of failing the whole page.
+    """
+    from common.core.registry import discover_plugins
+
+    try:
+        manifests = discover_plugins(config, tool_root=_TOOL_ROOT)
+    except Exception:
+        logger.warning(
+            "corpus_browser_plugin_discovery_failed", profile=profile, exc_info=True
+        )
+        return {}
+    built: dict[str, Any] = {}
+    for name, manifest in manifests.items():
+        plugin_cls = (
+            getattr(manifest, "source_plugin_class", None)
+            or getattr(manifest, "provider_class", None)
+            or getattr(manifest, "engine_class", None)
+        )
+        if plugin_cls is None:
+            continue
+        try:
+            built[name] = plugin_cls(config)
+        except Exception as exc:
+            logger.warning(
+                "corpus_browser_plugin_build_failed",
+                profile=profile,
+                plugin=name,
+                error=str(exc),
+            )
+    return built
+
+
+def _discover_operations(profile: str | None = None) -> dict[str, Any]:
     from common.core.registry import discover_operations
 
-    return discover_operations(_backend_factory()["config"], tool_root=_TOOL_ROOT)
+    return discover_operations(
+        _backend_factory(profile)["config"], tool_root=_TOOL_ROOT
+    )
 
 
-def _operation_list() -> list[dict[str, Any]]:
-    ops = _discover_operations()
+def _operation_list(profile: str | None = None) -> list[dict[str, Any]]:
+    ops = _discover_operations(profile)
     return [
         {"name": m.name, "field": m.field, "applies_to": m.applies_to}
         for m in sorted(ops.values(), key=lambda m: m.name)
@@ -171,9 +259,10 @@ def _enrich_docs_worker(store: Any, source: str, **kwargs):
 @router.get("/fields")
 def fields(
     source: Optional[str] = Query(None, description="Filter fields by source plugin"),
+    profile: Optional[str] = Query(None, description="Profile/persona to read"),
 ):
     """Field definitions applicable to a source (or the common ones for "all")."""
-    all_fields = _backend_factory()["store"].list_field_definitions()
+    all_fields = _backend_factory(profile)["store"].list_field_definitions()
     if source:
         applicable = [f for f in all_fields if f.get("applies_to") in ("all", source)]
     else:
@@ -182,14 +271,18 @@ def fields(
 
 
 @router.get("/operations")
-def operations():
+def operations(
+    profile: Optional[str] = Query(None, description="Profile/persona to read"),
+):
     """Registered field-producing operations for bulk actions (derived fields)."""
-    return {"operations": _operation_list()}
+    return {"operations": _operation_list(profile)}
 
 
 @router.get("/sources")
-def get_sources():
-    backend = _backend_factory()
+def get_sources(
+    profile: Optional[str] = Query(None, description="Profile/persona to read"),
+):
+    backend = _backend_factory(profile)
     known = set(backend["store"].list_sources())
     try:
         known |= set(backend["plugins"].keys())
@@ -197,16 +290,6 @@ def get_sources():
         # Plugin misconfiguration must not break the read-only sources listing.
         logger.warning("plugin_discovery_failed_for_sources", exc_info=True)
     return {"sources": sorted(known)}
-
-
-@router.get("/profiles")
-def get_profiles():
-    """Distinct profiles present in the corpus (documents + pool items).
-
-    Powers the browser's profile filter. A missing/empty list means the corpus
-    predates the profile column (or has no rows yet).
-    """
-    return {"profiles": _backend_factory()["store"].list_profiles()}
 
 
 # ─── browse / search / document / stats ───────────────────────────────────────
@@ -244,6 +327,7 @@ def _source_extra_meta_keys(store: Any, source: str) -> set[str]:
 @router.get("/columns")
 def columns(
     source: Optional[str] = Query(None, description="Columns for one source, or common ones"),
+    profile: Optional[str] = Query(None, description="Profile/persona to read"),
 ):
     """Extra table columns.
 
@@ -251,11 +335,11 @@ def columns(
     With a source: all declared fields applicable to that source plus every
     metadata key this source's plugin stores (documents + scanned pool).
     """
-    all_fields = _backend_factory()["store"].list_field_definitions()
+    all_fields = _backend_factory(profile)["store"].list_field_definitions()
     if source:
         applicable = [f for f in all_fields if f.get("applies_to") in ("all", source)]
         declared = [{"name": f["name"], "kind": "field"} for f in applicable]
-        meta_keys = sorted(_source_extra_meta_keys(_backend_factory()["store"], source))
+        meta_keys = sorted(_source_extra_meta_keys(_backend_factory(profile)["store"], source))
         return {
             "source": source,
             "columns": [{"name": k, "kind": "meta"} for k in meta_keys] + declared,
@@ -273,16 +357,16 @@ def columns(
 _COLUMN_PREFS_KEY = "browser_columns"
 
 
-def _column_prefs_path() -> Path:
+def _column_prefs_path(profile: str | None = None) -> Path:
     from common.core.config import get_tool_config_path
 
-    return get_tool_config_path("corpus")
+    return get_tool_config_path("corpus", _validated_profile(profile))
 
 
-def _read_raw_tool_config() -> dict[str, Any]:
+def _read_raw_tool_config(profile: str | None = None) -> dict[str, Any]:
     import yaml
 
-    path = _column_prefs_path()
+    path = _column_prefs_path(profile)
     if not path.exists():
         return {}
     try:
@@ -293,8 +377,8 @@ def _read_raw_tool_config() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _read_column_prefs() -> dict[str, list[str]]:
-    prefs = _read_raw_tool_config().get(_COLUMN_PREFS_KEY) or {}
+def _read_column_prefs(profile: str | None = None) -> dict[str, list[str]]:
+    prefs = _read_raw_tool_config(profile).get(_COLUMN_PREFS_KEY) or {}
     if not isinstance(prefs, dict):
         prefs = {}
     return {
@@ -303,12 +387,16 @@ def _read_column_prefs() -> dict[str, list[str]]:
     }
 
 
-def _write_column_prefs(fixed_off: list[str], fields_off: list[str]) -> None:
+def _write_column_prefs(
+    fixed_off: list[str], fields_off: list[str], profile: str | None = None
+) -> None:
     from common.core.yaml_utils import dump_yaml
 
-    data = _read_raw_tool_config()
+    data = _read_raw_tool_config(profile)
     data[_COLUMN_PREFS_KEY] = {"fixedOff": list(fixed_off), "fieldsOff": list(fields_off)}
-    _column_prefs_path().write_text(dump_yaml(data, sort_keys=False), encoding="utf-8")
+    _column_prefs_path(profile).write_text(
+        dump_yaml(data, sort_keys=False), encoding="utf-8"
+    )
 
 
 class _ColumnPrefsBody(BaseModel):
@@ -317,15 +405,20 @@ class _ColumnPrefsBody(BaseModel):
 
 
 @router.get("/columns/prefs")
-def get_column_prefs() -> dict[str, list[str]]:
-    """Hidden columns, persisted in the corpus tool config."""
-    return _read_column_prefs()
+def get_column_prefs(
+    profile: Optional[str] = Query(None, description="Profile/persona"),
+) -> dict[str, list[str]]:
+    """Hidden columns, persisted in the profile's corpus tool config."""
+    return _read_column_prefs(profile)
 
 
 @router.post("/columns/prefs")
-def save_column_prefs(body: _ColumnPrefsBody) -> dict[str, bool]:
-    """Persist hidden columns in the corpus tool config."""
-    _write_column_prefs(body.fixedOff, body.fieldsOff)
+def save_column_prefs(
+    body: _ColumnPrefsBody,
+    profile: Optional[str] = Query(None, description="Profile/persona"),
+) -> dict[str, bool]:
+    """Persist hidden columns in the profile's corpus tool config."""
+    _write_column_prefs(body.fixedOff, body.fieldsOff, profile)
     return {"ok": True}
 
 
@@ -359,7 +452,7 @@ def browse(
     min_duration: Optional[int] = Query(None, ge=0),
     max_duration: Optional[int] = Query(None, ge=0),
     video_type: Optional[str] = Query(None, pattern="^(short|long)$"),
-    profile: Optional[str] = Query(None, description="Filter by profile/persona"),
+    profile: Optional[str] = Query(None, description="Profile/persona to read"),
     order_by: str = Query("date"),
     order_desc: bool = Query(True),
     missing_field: Optional[str] = Query(None),
@@ -380,7 +473,7 @@ def browse(
                 status_code=400, detail=f"Invalid field name in order_by: {field_name}"
             )
 
-    backend = _backend_factory()
+    backend = _backend_factory(profile)
     store = backend["store"]
     filters = SearchFilters(
         source=source,
@@ -431,12 +524,12 @@ def search(
     min_duration: Optional[int] = Query(None, ge=0),
     max_duration: Optional[int] = Query(None, ge=0),
     video_type: Optional[str] = Query(None, pattern="^(short|long)$"),
-    profile: Optional[str] = Query(None, description="Filter by profile/persona"),
+    profile: Optional[str] = Query(None, description="Profile/persona to read"),
 ):
     from core.embedder import Embedder
     from storage.sqlalchemy_store import SearchFilters
 
-    store = _backend_factory()["store"]
+    store = _backend_factory(profile)["store"]
     filters = SearchFilters(
         source=source,
         since=since,
@@ -477,8 +570,11 @@ def search(
 
 
 @router.get("/document/{handle}")
-def show_document(handle: str):
-    store = _backend_factory()["store"]
+def show_document(
+    handle: str,
+    profile: Optional[str] = Query(None, description="Profile/persona to read"),
+):
+    store = _backend_factory(profile)["store"]
     doc = store.get_document_by_handle(handle)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -486,8 +582,10 @@ def show_document(handle: str):
 
 
 @router.get("/stats")
-def stats():
-    return {"stats": _backend_factory()["store"].status()}
+def stats(
+    profile: Optional[str] = Query(None, description="Profile/persona to read"),
+):
+    return {"stats": _backend_factory(profile)["store"].status()}
 
 
 # ─── POST /scan + GET /scan/status ────────────────────────────────────────────
@@ -495,17 +593,23 @@ def stats():
 
 class _ScanRequest(BaseModel):
     source: str = "all"
+    profile: Optional[str] = None
 
 
 @router.post("/scan")
-def start_scan(req: _ScanRequest, background_tasks: BackgroundTasks):
-    plugins = _backend_factory()["plugins"]
+def start_scan(
+    req: _ScanRequest,
+    background_tasks: BackgroundTasks,
+    profile: Optional[str] = Query(None, description="Profile/persona to act on"),
+):
+    resolved = profile or req.profile
+    plugins = _backend_factory(resolved)["plugins"]
     if req.source != "all" and req.source not in plugins:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown source plugin: {req.source}. Available: {sorted(plugins)}",
         )
-    job_id = _new_job("scan", {"source": req.source})
+    job_id = _new_job("scan", {"source": req.source, "profile": resolved})
     background_tasks.add_task(_run_scan_job, job_id)
     return {"job_id": job_id, "status": "running", "source": req.source}
 
@@ -524,6 +628,7 @@ def scan_status(job_id: str):
 def _run_scan_job(job_id: str) -> None:
     payload = _get_job(job_id).get("payload", {})
     source_req = payload.get("source", "all")
+    profile = payload.get("profile")
     result: dict[str, Any] = {
         "source": source_req,
         "per_source": [],
@@ -533,19 +638,20 @@ def _run_scan_job(job_id: str) -> None:
         "requeued": 0,
     }
     try:
-        backend = _backend_factory()
-        plugins = backend["plugins"]
-        sources = sorted(plugins) if source_req == "all" else [source_req]
-        for name in sources:
-            summary = _scan_source_worker(backend["store"], plugins[name])
-            data = summary.to_dict()
-            result["per_source"].append(data)
-            result["processed"] += int(data.get("processed", 0))
-            result["added"] += int(data.get("added", 0))
-            result["refreshed"] += int(data.get("refreshed", 0))
-            result["requeued"] += int(data.get("requeued", 0))
-            # Partial progress is persisted so a later failure keeps the counts.
-            _update_job(job_id, result=result)
+        with _profile_context(profile):
+            backend = _backend_factory(profile)
+            plugins = backend["plugins"]
+            sources = sorted(plugins) if source_req == "all" else [source_req]
+            for name in sources:
+                summary = _scan_source_worker(backend["store"], plugins[name])
+                data = summary.to_dict()
+                result["per_source"].append(data)
+                result["processed"] += int(data.get("processed", 0))
+                result["added"] += int(data.get("added", 0))
+                result["refreshed"] += int(data.get("refreshed", 0))
+                result["requeued"] += int(data.get("requeued", 0))
+                # Partial progress is persisted so a later failure keeps the counts.
+                _update_job(job_id, result=result)
         _update_job(job_id, status="done", result=result, finished_at=_now_iso())
     except Exception as exc:
         logger.exception("corpus_browser_scan_job_failed", job_id=job_id, source=source_req)
@@ -560,10 +666,15 @@ class _EnrichRequest(BaseModel):
     handles: Optional[list[str]] = None
     limit: Optional[int] = None
     concurrency: int = 4
+    profile: Optional[str] = None
 
 
 @router.post("/enrich")
-def start_enrich(req: _EnrichRequest, background_tasks: BackgroundTasks):
+def start_enrich(
+    req: _EnrichRequest,
+    background_tasks: BackgroundTasks,
+    profile: Optional[str] = Query(None, description="Profile/persona to act on"),
+):
     """Bulk-fill metadata (duration, views, tags, ...) via yt-dlp — no YouTube
     API quota involved. Mirrors `corpus enrich`.
 
@@ -571,7 +682,8 @@ def start_enrich(req: _EnrichRequest, background_tasks: BackgroundTasks):
     With ``handles`` it enriches the selected items regardless of sync state:
     ``pool:<source>:<id>`` handles address pool (not-synced) items, any other
     handle (a document handle) addresses an already-indexed document."""
-    backend = _backend_factory()
+    resolved = profile or req.profile
+    backend = _backend_factory(resolved)
     plugins = backend["plugins"]
     source = req.source
     if source is None:
@@ -589,6 +701,7 @@ def start_enrich(req: _EnrichRequest, background_tasks: BackgroundTasks):
         "handles": req.handles,
         "limit": req.limit,
         "concurrency": req.concurrency or 4,
+        "profile": resolved,
     }
     job_id = _new_job("enrich", payload)
     background_tasks.add_task(_run_enrich_job, job_id)
@@ -634,9 +747,10 @@ def _merge_enrich_results(source: str, *results: EnrichResult) -> EnrichResult:
 
 def _run_enrich_job(job_id: str) -> None:
     payload = _get_job(job_id).get("payload", {})
+    profile = payload.get("profile")
     result: dict[str, Any] | None = None
     try:
-        backend = _backend_factory()
+        backend = _backend_factory(profile)
         store = backend["store"]
         source = payload.get("source")
         if not source:
@@ -646,22 +760,23 @@ def _run_enrich_job(job_id: str) -> None:
             )
         concurrency = int(payload.get("concurrency") or 4)
         handles = payload.get("handles")
-        if handles:
-            pool_ids, doc_ids = _partition_enrich_handles(store, source, handles)
-            if not pool_ids and not doc_ids:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No pool or synced handles matched the requested source.",
+        with _profile_context(profile):
+            if handles:
+                pool_ids, doc_ids = _partition_enrich_handles(store, source, handles)
+                if not pool_ids and not doc_ids:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No pool or synced handles matched the requested source.",
+                    )
+                pool_result = _enrich_worker(store, source, source_ids=pool_ids, concurrency=concurrency)
+                doc_result = _enrich_docs_worker(store, source, source_ids=doc_ids, concurrency=concurrency)
+            else:
+                # Bulk "Enrich all": non-synced pool items only (unchanged behaviour).
+                pool_result = _enrich_worker(
+                    store, source, source_ids=None, limit=payload.get("limit"),
+                    concurrency=concurrency,
                 )
-            pool_result = _enrich_worker(store, source, source_ids=pool_ids, concurrency=concurrency)
-            doc_result = _enrich_docs_worker(store, source, source_ids=doc_ids, concurrency=concurrency)
-        else:
-            # Bulk "Enrich all": non-synced pool items only (unchanged behaviour).
-            pool_result = _enrich_worker(
-                store, source, source_ids=None, limit=payload.get("limit"),
-                concurrency=concurrency,
-            )
-            doc_result = EnrichResult(source=source)
+                doc_result = EnrichResult(source=source)
         summary = _merge_enrich_results(source, pool_result, doc_result)
         result = summary.to_dict()
         _update_job(job_id, status="done", result=result, finished_at=_now_iso())
@@ -676,14 +791,20 @@ def _run_enrich_job(job_id: str) -> None:
 class _SyncPoolRequest(BaseModel):
     source: str
     handles: list[str]
+    profile: Optional[str] = None
 
 
 @router.post("/sync-pool")
-def start_sync_pool(req: _SyncPoolRequest, background_tasks: BackgroundTasks):
+def start_sync_pool(
+    req: _SyncPoolRequest,
+    background_tasks: BackgroundTasks,
+    profile: Optional[str] = Query(None, description="Profile/persona to act on"),
+):
     """Fetch and index the given not-synced pool items into the corpus.
     ``handles`` are pool handles (pool:<source>:<id>). Syncing a pool item is
     an operation like any other: select videos in the browser, then Sync."""
-    backend = _backend_factory()
+    resolved = profile or req.profile
+    backend = _backend_factory(resolved)
     if req.source not in backend["plugins"]:
         raise HTTPException(
             status_code=400,
@@ -692,7 +813,7 @@ def start_sync_pool(req: _SyncPoolRequest, background_tasks: BackgroundTasks):
         )
     if not req.handles:
         raise HTTPException(status_code=400, detail="No pool handles provided.")
-    payload = {"source": req.source, "handles": req.handles}
+    payload = {"source": req.source, "handles": req.handles, "profile": resolved}
     job_id = _new_job("sync-pool", payload)
     background_tasks.add_task(_run_sync_pool_job, job_id)
     return {"job_id": job_id, "status": "running", "source": req.source}
@@ -710,9 +831,10 @@ def _sync_pool_worker(store: Any, engine: Any, plugin, pool_items, vault_path=No
 
 def _run_sync_pool_job(job_id: str) -> None:
     payload = _get_job(job_id).get("payload", {})
+    profile = payload.get("profile")
     result: dict[str, Any] | None = None
     try:
-        backend = _backend_factory()
+        backend = _backend_factory(profile)
         store = backend["store"]
         source = payload["source"]
         wanted = set(payload.get("handles") or [])
@@ -725,13 +847,14 @@ def _run_sync_pool_job(job_id: str) -> None:
                 status_code=400,
                 detail="None of the given handles matched pool items.",
             )
-        sync_result = _sync_pool_worker(
-            backend["store"],
-            backend["engine"],
-            backend["plugins"][source],
-            pool_items,
-            vault_path=None,
-        )
+        with _profile_context(profile):
+            sync_result = _sync_pool_worker(
+                backend["store"],
+                backend["engine"],
+                backend["plugins"][source],
+                pool_items,
+                vault_path=None,
+            )
         result = {
             "source": sync_result.source,
             "processed": sync_result.processed,
@@ -759,16 +882,22 @@ def _run_sync_pool_job(job_id: str) -> None:
 class _ResyncRequest(BaseModel):
     source: str
     handles: list[str]
+    profile: Optional[str] = None
 
 
 @router.post("/resync")
-def start_resync(req: _ResyncRequest, background_tasks: BackgroundTasks):
+def start_resync(
+    req: _ResyncRequest,
+    background_tasks: BackgroundTasks,
+    profile: Optional[str] = Query(None, description="Profile/persona to act on"),
+):
     """Re-fetch the content (transcript) of already-indexed documents.
 
     ``handles`` are document handles (not pool handles). Documents whose content
     changed are re-chunked and re-embedded; unchanged ones are skipped. Stored
     metadata is preserved."""
-    backend = _backend_factory()
+    resolved = profile or req.profile
+    backend = _backend_factory(resolved)
     if req.source not in backend["plugins"]:
         raise HTTPException(
             status_code=400,
@@ -777,7 +906,10 @@ def start_resync(req: _ResyncRequest, background_tasks: BackgroundTasks):
         )
     if not req.handles:
         raise HTTPException(status_code=400, detail="No document handles provided.")
-    job_id = _new_job("resync", {"source": req.source, "handles": req.handles})
+    job_id = _new_job(
+        "resync",
+        {"source": req.source, "handles": req.handles, "profile": resolved},
+    )
     background_tasks.add_task(_run_resync_job, job_id)
     return {"job_id": job_id, "status": "running", "source": req.source}
 
@@ -789,13 +921,15 @@ def resync_status(job_id: str):
 
 def _run_resync_job(job_id: str) -> None:
     payload = _get_job(job_id).get("payload", {})
+    profile = payload.get("profile")
     result: dict[str, Any] | None = None
     try:
-        backend = _backend_factory()
+        backend = _backend_factory(profile)
         source = payload["source"]
-        sync_result = backend["engine"].sync_documents(
-            backend["plugins"][source], payload.get("handles") or []
-        )
+        with _profile_context(profile):
+            sync_result = backend["engine"].sync_documents(
+                backend["plugins"][source], payload.get("handles") or []
+            )
         result = {
             "source": sync_result.source,
             "processed": sync_result.processed,
@@ -833,8 +967,13 @@ class _SyncRequest(BaseModel):
 
 
 @router.post("/sync")
-def start_sync(req: _SyncRequest, background_tasks: BackgroundTasks):
-    backend = _backend_factory()
+def start_sync(
+    req: _SyncRequest,
+    background_tasks: BackgroundTasks,
+    profile: Optional[str] = Query(None, description="Profile/persona to act on"),
+):
+    resolved = profile or req.profile
+    backend = _backend_factory(resolved)
     store = backend["store"]
     if not store.get_field_definition(req.field):
         raise HTTPException(
@@ -844,7 +983,7 @@ def start_sync(req: _SyncRequest, background_tasks: BackgroundTasks):
                 "`corpus field create` first."
             ),
         )
-    if not any(op["field"] == req.field for op in _operation_list()):
+    if not any(op["field"] == req.field for op in _operation_list(resolved)):
         raise HTTPException(
             status_code=400,
             detail=f"No registered operation produces field '{req.field}'.",
@@ -866,7 +1005,7 @@ def start_sync(req: _SyncRequest, background_tasks: BackgroundTasks):
         "until": req.until,
         "min_duration": req.min_duration,
         "max_duration": req.max_duration,
-        "profile": req.profile,
+        "profile": resolved,
     }
     job_id = _new_job("sync", payload)
     background_tasks.add_task(_run_sync_job, job_id)
@@ -882,11 +1021,12 @@ def _run_sync_job(job_id: str) -> None:
     from storage.sqlalchemy_store import SearchFilters
 
     payload = _get_job(job_id).get("payload", {})
+    profile = payload.get("profile")
     result: dict[str, Any] | None = None
     try:
-        backend = _backend_factory()
+        backend = _backend_factory(profile)
         manifest = next(
-            (m for m in _discover_operations().values()
+            (m for m in _discover_operations(profile).values()
              if m.field == payload.get("field")),
             None,
         )
@@ -901,17 +1041,18 @@ def _run_sync_job(job_id: str) -> None:
             until=payload.get("until"),
             min_duration=payload.get("min_duration"),
             max_duration=payload.get("max_duration"),
-            profile=payload.get("profile"),
+            profile=profile,
         )
         source = None if payload.get("source") in (None, "all") else payload["source"]
-        sync_result = backend["engine"].sync_field(
-            payload["field"],
-            operation,
-            source=source,
-            limit=payload.get("limit") or 1000,
-            handles=payload.get("handles"),
-            filters=filters,
-        )
+        with _profile_context(profile):
+            sync_result = backend["engine"].sync_field(
+                payload["field"],
+                operation,
+                source=source,
+                limit=payload.get("limit") or 1000,
+                handles=payload.get("handles"),
+                filters=filters,
+            )
         result = {
             "field": payload["field"],
             "source": source,

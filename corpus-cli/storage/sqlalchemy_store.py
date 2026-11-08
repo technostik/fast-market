@@ -110,9 +110,14 @@ class _CompatConnection:
 
 
 class SQLAlchemyStore:
-    def __init__(self, path: str | None = None) -> None:
+    def __init__(self, path: str | None = None, profile: str | None = None) -> None:
+        # `profile` is the persona this store was opened for. It is the default
+        # written into every document/pool row, so a browser job running against
+        # another profile's DB tags rows correctly even outside a profile env
+        # context. None falls back to the process's active profile.
+        self._profile = profile
         if path is None:
-            path = str(get_tool_data_dir("corpus") / "corpus.db")
+            path = str(get_tool_data_dir("corpus", profile) / "corpus.db")
 
         self._path = path
         if path == ":memory:":
@@ -167,7 +172,7 @@ class SQLAlchemyStore:
     def upsert_document(self, document: Document, content_hash: str) -> bool:
         from common.core.profile import resolve_profile
 
-        profile = document.profile or resolve_profile()
+        profile = document.profile or self._profile or resolve_profile()
         with self._session() as session:
             existing = session.execute(
                 select(DocumentModel).where(
@@ -626,25 +631,6 @@ class SQLAlchemyStore:
             ).all()
         return [row[0] for row in rows]
 
-    def list_profiles(self) -> list[str]:
-        """Distinct profiles present in the documents *and* pool tables.
-
-        Used by the corpus browser profile filter. Documents and pool items are
-        unioned so a profile that only has scanned (not-yet-synced) items is
-        still selectable. NULL/empty rows (pre-migration edge cases) are ignored.
-        """
-        with self._session() as session:
-            rows = session.execute(
-                text(
-                    "SELECT profile FROM ( "
-                    "SELECT profile FROM documents WHERE profile IS NOT NULL AND profile != '' "
-                    "UNION "
-                    "SELECT profile FROM pool_items WHERE profile IS NOT NULL AND profile != '' "
-                    ") ORDER BY profile"
-                )
-            ).all()
-        return [row[0] for row in rows]
-
     def delete_all(self) -> None:
         with self._session() as session:
             session.execute(text("DELETE FROM documents"))
@@ -977,7 +963,7 @@ class SQLAlchemyStore:
         """Insert or update a pool item. Returns True if newly inserted."""
         from common.core.profile import resolve_profile
 
-        profile = profile or resolve_profile()
+        profile = profile or self._profile or resolve_profile()
         now = datetime.utcnow().isoformat()
         with self._session() as session:
             existing = session.execute(
@@ -1013,7 +999,7 @@ class SQLAlchemyStore:
         Returns count of newly added items."""
         from common.core.profile import resolve_profile
 
-        profile = profile or resolve_profile()
+        profile = profile or self._profile or resolve_profile()
         now = datetime.utcnow().isoformat()
         existing_ids = set(self.get_pool_ids(plugin_name).keys())
         added = 0

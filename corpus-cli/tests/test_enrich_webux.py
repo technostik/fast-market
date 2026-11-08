@@ -49,7 +49,7 @@ def client(monkeypatch):
         "engine": None,
         "plugins": {"youtube": object(), "obsidian": object()},
     }
-    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+    monkeypatch.setattr(mod, "_backend_factory", lambda profile=None: backend)
     monkeypatch.setattr(
         mod,
         "_enrich_worker",
@@ -114,7 +114,7 @@ def test_enrich_selection_with_synced_doc_handle(client, monkeypatch):
     ])
     backend = {"config": {}, "store": store, "engine": None,
                "plugins": {"youtube": object(), "obsidian": object()}}
-    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+    monkeypatch.setattr(mod, "_backend_factory", lambda profile=None: backend)
 
     resp = client.post("/api/corpus_browser/enrich",
                        json={"source": "youtube", "handles": ["yt-one"]})
@@ -141,7 +141,7 @@ def test_enrich_selection_mixed_pool_and_synced(client, monkeypatch):
     )
     backend = {"config": {}, "store": store, "engine": None,
                "plugins": {"youtube": object(), "obsidian": object()}}
-    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+    monkeypatch.setattr(mod, "_backend_factory", lambda profile=None: backend)
 
     resp = client.post("/api/corpus_browser/enrich",
                        json={"source": "youtube",
@@ -181,7 +181,7 @@ def test_sync_pool_indexes_selected_handles(client, monkeypatch):
     ])
     backend = {"config": {}, "store": store, "engine": None,
                "plugins": {"youtube": object(), "obsidian": object()}}
-    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+    monkeypatch.setattr(mod, "_backend_factory", lambda profile=None: backend)
 
     resp = client.post("/api/corpus_browser/sync-pool",
                        json={"source": "youtube", "handles": ["pool:youtube:v1"]})
@@ -224,7 +224,7 @@ def test_resync_refetches_selected_docs(client, monkeypatch):
     ))
     backend = {"config": {}, "store": _FakeStore(), "engine": engine,
                "plugins": {"youtube": object(), "obsidian": object()}}
-    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+    monkeypatch.setattr(mod, "_backend_factory", lambda profile=None: backend)
 
     resp = client.post("/api/corpus_browser/resync",
                        json={"source": "youtube", "handles": ["yt-one", "yt-two"]})
@@ -269,7 +269,7 @@ def test_browse_view_all_includes_pool_rows(client, monkeypatch):
     )
     backend = {"config": {}, "store": store, "engine": None,
                "plugins": {"youtube": object(), "obsidian": object()}}
-    monkeypatch.setattr(mod, "_backend_factory", lambda: backend)
+    monkeypatch.setattr(mod, "_backend_factory", lambda profile=None: backend)
 
     resp = client.get("/api/corpus_browser/browse?state=all")
     assert resp.status_code == 200, resp.text

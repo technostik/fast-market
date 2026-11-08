@@ -94,12 +94,16 @@ corpus setup edit    # Open config.yaml in your default editor
   - ID-based for YouTube (newest-first playlist walking)
   - Date-based for file plugins (mtime tracking)
 - Privacy status tracking for YouTube content
-- **Multi-profile**: every document and pool item carries a `profile` column
-  (the persona it was indexed under). It is written by every ingest path
-  (`add`, `sync`, `scan`, `enrich`) from the active profile — `corpus --profile`
-  or `FASTMARKET_PROFILE` — and by the publish pipelines' automatic corpus add
-  (`webux.video_corpus`). The corpus browser exposes it as a column and a filter.
+- **Multi-profile**: the corpus DB stays isolated per profile (ADR 011). Every
+  document and pool item also carries a `profile` column (the persona it was
+  indexed under), written by every ingest path (`add`, `sync`, `scan`, `enrich`)
+  and by the publish pipelines' automatic corpus add (`webux.video_corpus`).
   Migration `0006` backfills pre-existing rows to `joriel`.
+- **Profile-scoped browser**: the corpus browser reads the profile selected in
+  the webux toolbar (client-side), not the server process's active profile.
+  The frontend sends `?profile=<name>` on every request; the backend re-pins
+  `FASTMARKET_PROFILE` while loading config and opens that profile's DB. This is
+  why switching profile in the UI also switches the corpus shown.
 
 ### User Interfaces
 - **CLI**: Click-based with dynamic plugin option injection

@@ -1,9 +1,9 @@
-"""Multi-profile support: the `profile` column, filtering, and the browser API.
+"""Multi-profile support: the `profile` column and profile-scoped browsing.
 
-The column is written on every document / pool insert (explicit value, else the
-active profile) and read back for the corpus browser profile filter. The Alembic
-migration (0006) backfills pre-existing rows to "joriel"; that path is exercised
-by opening a real file DB, not by these unit tests.
+Each profile owns its corpus DB, so the browser must open the profile selected
+in the webux toolbar (passed as `?profile=`), not the server process's active
+profile. The Alembic migration (0006) backfills pre-existing rows to "joriel";
+that path is exercised on real files, not by these unit tests.
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ def test_upsert_document_stores_profile():
     store = SQLAlchemyStore(":memory:")
     store.upsert_document(_doc("v1", "joriel"), "h1")
     assert store.get_document("youtube", "v1")["profile"] == "joriel"
-    assert store.list_profiles() == ["joriel"]
 
 
 def test_upsert_document_defaults_to_active_profile(monkeypatch):
@@ -45,11 +44,21 @@ def test_upsert_document_defaults_to_active_profile(monkeypatch):
     assert store.get_document("youtube", "v1")["profile"] == "technostik"
 
 
-def test_list_profiles_unions_documents_and_pool():
+def test_store_constructor_profile_tags_writes(monkeypatch):
+    # A store opened for a profile tags rows with it even if the process env is
+    # a different profile (the browser's background jobs rely on this).
+    monkeypatch.setenv("FASTMARKET_PROFILE", "joriel")
+    store = SQLAlchemyStore(":memory:", profile="technostik")
+    store.upsert_document(_doc("v1", ""), "h1")
+    assert store.get_document("youtube", "v1")["profile"] == "technostik"
+
+
+def test_pool_item_profile_roundtrip():
     store = SQLAlchemyStore(":memory:")
-    store.upsert_document(_doc("v1", "joriel"), "h1")
-    store.upsert_pool_item("youtube", "p1", "pending", {}, profile="technostik")
-    assert store.list_profiles() == ["joriel", "technostik"]
+    store.upsert_pool_item("youtube", "p1", "pending", {}, profile="joriel")
+    items = store.get_pool_items("youtube", status=None)
+    assert items[0]["profile"] == "joriel"
+    assert pool_row(items[0])["profile"] == "joriel"
 
 
 def test_document_profile_filter():
@@ -64,58 +73,46 @@ def test_document_profile_filter():
     assert [d["source_id"] for d in technostik] == ["v2"]
 
 
-def test_pool_item_profile_roundtrip():
-    store = SQLAlchemyStore(":memory:")
-    store.upsert_pool_item("youtube", "p1", "pending", {}, profile="joriel")
-    items = store.get_pool_items("youtube", status=None)
-    assert items[0]["profile"] == "joriel"
-    assert pool_row(items[0])["profile"] == "joriel"
-
-
 class _FakeStore:
     def __init__(self, docs=None):
         self.docs = docs or []
 
-    def list_profiles(self):
-        return sorted({d["profile"] for d in self.docs if d.get("profile")})
-
     def list_documents_extended(self, source=None, filters=None, order_by="date",
                                 reverse=False, limit=1000):
-        rows = list(self.docs)
-        if filters and filters.profile:
-            rows = [d for d in rows if d.get("profile") == filters.profile]
-        return rows
+        return list(self.docs)
 
     def get_pool_items(self, source=None, status=None):
         return []
 
 
-def _client(monkeypatch, store):
+def test_browse_uses_requested_profile(monkeypatch):
     pytest.importorskip("httpx")
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
     import webux.corpus_browser.register as mod
 
-    monkeypatch.setattr(
-        mod, "_backend_factory",
-        lambda: {"config": {}, "store": store, "engine": None, "plugins": {}},
-    )
+    seen: list[str | None] = []
+
+    def _factory(profile=None):
+        seen.append(profile)
+        return {
+            "config": {}, "store": _FakeStore(), "engine": None,
+            "plugins": {}, "profile": profile,
+        }
+
+    monkeypatch.setattr(mod, "_backend_factory", _factory)
     app = FastAPI()
     app.include_router(mod.router, prefix="/api/corpus_browser")
-    return TestClient(app)
+    client = TestClient(app)
 
+    assert client.get("/api/corpus_browser/browse?profile=technostik").status_code == 200
+    assert seen == ["technostik"]
 
-def test_browse_profiles_endpoint(monkeypatch):
-    store = _FakeStore([
-        {"handle": "youtube:v1", "source_plugin": "youtube", "source_id": "v1",
-         "title": "One", "profile": "joriel", "metadata": {}, "raw_text": "x"},
-        {"handle": "youtube:v2", "source_plugin": "youtube", "source_id": "v2",
-         "title": "Two", "profile": "technostik", "metadata": {}, "raw_text": "y"},
-    ])
-    client = _client(monkeypatch, store)
-    assert client.get("/api/corpus_browser/profiles").json() == {
-        "profiles": ["joriel", "technostik"]
-    }
-    data = client.get("/api/corpus_browser/browse?profile=joriel").json()
-    assert [i["source_id"] for i in data["items"]] == ["v1"]
+    # POST endpoints inherit the profile from the query string too (the frontend
+    # fetch wrapper appends it to every request, body or not).
+    seen.clear()
+    assert client.post(
+        "/api/corpus_browser/scan?profile=technostik", json={"source": "all"}
+    ).status_code == 200
+    assert "technostik" in seen

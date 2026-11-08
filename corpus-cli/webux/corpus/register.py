@@ -7,11 +7,23 @@ from common.webux.base import WebuxPluginManifest
 router = APIRouter()
 
 
-@router.get("/status")
-def status() -> dict[str, list[dict]]:
+def _store(profile: str | None = None):
+    """Open the corpus DB of the profile selected in the webux toolbar.
+
+    ``SQLAlchemyStore`` defaults to the profile's own DB (the corpus is isolated
+    per profile, ADR 011); ``profile`` comes from the frontend's `?profile=` so
+    switching persona in the UI switches the corpus shown.
+    """
     from storage.sqlalchemy_store import SQLAlchemyStore
 
-    store = SQLAlchemyStore()
+    return SQLAlchemyStore(None, profile=profile)
+
+
+@router.get("/status")
+def status(
+    profile: str | None = Query(None, description="Profile/persona to read"),
+) -> dict[str, list[dict]]:
+    store = _store(profile)
     return {"status": store.status()}
 
 
@@ -21,11 +33,12 @@ def search(
     mode: str = Query("keyword", pattern="^(keyword|semantic)$"),
     limit: int = Query(20, ge=1, le=200),
     source: str | None = Query(None),
+    profile: str | None = Query(None, description="Profile/persona to read"),
 ) -> dict:
     from core.embedder import Embedder
-    from storage.sqlalchemy_store import SQLAlchemyStore, SearchFilters
+    from storage.sqlalchemy_store import SearchFilters
 
-    store = SQLAlchemyStore()
+    store = _store(profile)
     filters = SearchFilters(source=source)
 
     if not q.strip():
@@ -62,10 +75,11 @@ def list_docs(
     offset: int = Query(0, ge=0),
     source: str | None = Query(None),
     order_by: str = Query("date", pattern="^(date|size|duration|title)$"),
+    profile: str | None = Query(None, description="Profile/persona to read"),
 ) -> dict[str, list[dict]]:
-    from storage.sqlalchemy_store import SQLAlchemyStore, SearchFilters
+    from storage.sqlalchemy_store import SearchFilters
 
-    store = SQLAlchemyStore()
+    store = _store(profile)
     filters = SearchFilters(source=source)
     docs = store.list_documents_extended(
         source=source,
@@ -102,19 +116,34 @@ _HTML = """<!doctype html>
 <script>
 const out = document.querySelector('#out pre');
 const show = (v) => out.textContent = JSON.stringify(v, null, 2);
+// Each profile owns its corpus DB; carry the toolbar-selected profile on every
+// request so the backend opens that profile's corpus.
+function currentProfile() {
+  try {
+    if (typeof window.fastmarketProfile === 'function') {
+      const p = window.fastmarketProfile();
+      if (p) return p;
+    }
+  } catch (e) { /* hub script absent */ }
+  return localStorage.getItem('fastmarket_profile') || window.WEBUX_PROFILE_ACTIVE || '';
+}
+function withProfile(url) {
+  const p = currentProfile();
+  return p ? url + (url.includes('?') ? '&' : '?') + 'profile=' + encodeURIComponent(p) : url;
+}
 
 document.getElementById('searchBtn').onclick = async () => {
   const q = document.getElementById('q').value;
   const mode = document.getElementById('mode').value;
-  const r = await fetch(`/api/corpus/search?q=${encodeURIComponent(q)}&mode=${mode}`);
+  const r = await fetch(withProfile(`/api/corpus/search?q=${encodeURIComponent(q)}&mode=${mode}`));
   show(await r.json());
 };
 document.getElementById('listBtn').onclick = async () => {
-  const r = await fetch('/api/corpus/list?limit=25&offset=0&order_by=date');
+  const r = await fetch(withProfile('/api/corpus/list?limit=25&offset=0&order_by=date'));
   show(await r.json());
 };
 document.getElementById('statusBtn').onclick = async () => {
-  const r = await fetch('/api/corpus/status');
+  const r = await fetch(withProfile('/api/corpus/status'));
   show(await r.json());
 };
 </script>
