@@ -206,7 +206,10 @@ def test_success_runs_add_and_records_handle(tmp_path: Path, monkeypatch):
     assert saved == [True]
 
     argv = (tmp_path / "argv.txt").read_text(encoding="utf-8").splitlines()
-    assert argv[:2] == ["add", "--source"]
+    # The profile is passed before the subcommand (corpus group option), so the
+    # shared corpus tags the entry with the publish profile.
+    assert argv[:2] == ["--profile", "default"]
+    assert argv[2:4] == ["add", "--source"]
     assert argv[argv.index("--id") + 1] == "abcdefghijk"
     assert argv[argv.index("--url") + 1] == "https://www.youtube.com/watch?v=abcdefghijk"
     assert argv[argv.index("--title") + 1] == "My video"

@@ -199,6 +199,16 @@ def get_sources():
     return {"sources": sorted(known)}
 
 
+@router.get("/profiles")
+def get_profiles():
+    """Distinct profiles present in the corpus (documents + pool items).
+
+    Powers the browser's profile filter. A missing/empty list means the corpus
+    predates the profile column (or has no rows yet).
+    """
+    return {"profiles": _backend_factory()["store"].list_profiles()}
+
+
 # ─── browse / search / document / stats ───────────────────────────────────────
 
 # Pool rows (scanned but not yet indexed) reuse the doc row shape; the row
@@ -324,6 +334,7 @@ def _count_shorts_hidden(
     source: str | None,
     state: str | None,
     video_type: str | None,
+    profile: str | None = None,
 ) -> int:
     """Count pool candidates the short/long filter hides (known durations only)."""
     from core.pool_rows import select_pool_rows
@@ -331,7 +342,7 @@ def _count_shorts_hidden(
 
     if video_type not in ("short", "long") or state == "synced":
         return 0
-    no_short_filter = SearchFilters(source=source, video_type=None)
+    no_short_filter = SearchFilters(source=source, video_type=None, profile=profile)
     rows = select_pool_rows(store, source, state or "all", no_short_filter)
     if video_type == "long":
         return sum(1 for r in rows if (r["duration_seconds"] or 0) <= YOUTUBE_SHORT_MAX_SECONDS)
@@ -348,6 +359,7 @@ def browse(
     min_duration: Optional[int] = Query(None, ge=0),
     max_duration: Optional[int] = Query(None, ge=0),
     video_type: Optional[str] = Query(None, pattern="^(short|long)$"),
+    profile: Optional[str] = Query(None, description="Filter by profile/persona"),
     order_by: str = Query("date"),
     order_desc: bool = Query(True),
     missing_field: Optional[str] = Query(None),
@@ -378,6 +390,7 @@ def browse(
         max_duration=max_duration,
         video_type=video_type,
         missing_field=missing_field,
+        profile=profile,
     )
     try:
         # Docs are only merged in for the "all"/"synced" views. The pending /
@@ -397,7 +410,7 @@ def browse(
         pool_rows = select_pool_rows(store, source, state or "all", filters)
         # How many pool candidates the short/long filter hid (explains an empty
         # queue: "everything pending is a Short").
-        shorts_hidden = _count_shorts_hidden(store, source, state, video_type)
+        shorts_hidden = _count_shorts_hidden(store, source, state, video_type, profile)
         total = len(docs) + len(pool_rows)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -418,6 +431,7 @@ def search(
     min_duration: Optional[int] = Query(None, ge=0),
     max_duration: Optional[int] = Query(None, ge=0),
     video_type: Optional[str] = Query(None, pattern="^(short|long)$"),
+    profile: Optional[str] = Query(None, description="Filter by profile/persona"),
 ):
     from core.embedder import Embedder
     from storage.sqlalchemy_store import SearchFilters
@@ -430,6 +444,7 @@ def search(
         min_duration=min_duration,
         max_duration=max_duration,
         video_type=video_type,
+        profile=profile,
     )
 
     if not q.strip():
@@ -453,6 +468,7 @@ def search(
                 "title": r.title,
                 "excerpt": r.excerpt,
                 "score": r.score,
+                "profile": r.profile,
                 "duration": r.duration_seconds,
             }
             for r in results
@@ -813,6 +829,7 @@ class _SyncRequest(BaseModel):
     until: Optional[str] = None
     min_duration: Optional[int] = None
     max_duration: Optional[int] = None
+    profile: Optional[str] = None
 
 
 @router.post("/sync")
@@ -849,6 +866,7 @@ def start_sync(req: _SyncRequest, background_tasks: BackgroundTasks):
         "until": req.until,
         "min_duration": req.min_duration,
         "max_duration": req.max_duration,
+        "profile": req.profile,
     }
     job_id = _new_job("sync", payload)
     background_tasks.add_task(_run_sync_job, job_id)
@@ -883,6 +901,7 @@ def _run_sync_job(job_id: str) -> None:
             until=payload.get("until"),
             min_duration=payload.get("min_duration"),
             max_duration=payload.get("max_duration"),
+            profile=payload.get("profile"),
         )
         source = None if payload.get("source") in (None, "all") else payload["source"]
         sync_result = backend["engine"].sync_field(

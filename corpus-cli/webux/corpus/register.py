@@ -49,6 +49,7 @@ def search(
                 "title": r.title,
                 "excerpt": r.excerpt,
                 "score": r.score,
+                "profile": r.profile,
             }
             for r in results
         ],

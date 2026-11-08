@@ -105,6 +105,7 @@ def scan_source(plugin, store, debug: bool = False) -> ScanSummary:
                     plugin.name, sid, pool_status,
                     new_meta,
                     added_at=existing["added_at"],
+                    profile=existing.get("profile"),
                 )
                 refreshed += 1
                 # Re-queue failed items whose state changed to the requeue-on

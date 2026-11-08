@@ -94,6 +94,12 @@ corpus setup edit    # Open config.yaml in your default editor
   - ID-based for YouTube (newest-first playlist walking)
   - Date-based for file plugins (mtime tracking)
 - Privacy status tracking for YouTube content
+- **Multi-profile**: every document and pool item carries a `profile` column
+  (the persona it was indexed under). It is written by every ingest path
+  (`add`, `sync`, `scan`, `enrich`) from the active profile — `corpus --profile`
+  or `FASTMARKET_PROFILE` — and by the publish pipelines' automatic corpus add
+  (`webux.video_corpus`). The corpus browser exposes it as a column and a filter.
+  Migration `0006` backfills pre-existing rows to `joriel`.
 
 ### User Interfaces
 - **CLI**: Click-based with dynamic plugin option injection

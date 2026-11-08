@@ -32,7 +32,7 @@ class _FakeStore:
         ]
 
     def upsert_pool_item(self, plugin_name, source_id, status, metadata,
-                         added_at=None, synced_at=None):
+                         added_at=None, synced_at=None, profile=None):
         self.items = [
             it
             for it in self.items
@@ -43,6 +43,7 @@ class _FakeStore:
                 "source_plugin": plugin_name,
                 "source_id": source_id,
                 "status": status,
+                "profile": profile,
                 "metadata": metadata,
                 "added_at": added_at,
                 "synced_at": synced_at,

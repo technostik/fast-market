@@ -83,8 +83,16 @@ async def _run_corpus_add(
         description_file = Path(tmp) / "description.txt"
         transcript_file.write_text(transcript, encoding="utf-8")
         description_file.write_text(description, encoding="utf-8")
-        cmd = [
-            _corpus(), "add",
+        # Tag the corpus entry with the publish profile explicitly (not only
+        # via FASTMARKET_PROFILE, so a job's profile survives even if the
+        # server process env differs). The flag goes before the subcommand:
+        # --profile is a corpus group option.
+        profile = str(getattr(job, "profile", "") or "").strip()
+        cmd = [_corpus()]
+        if profile:
+            cmd += ["--profile", profile]
+        cmd += [
+            "add",
             "--source", "youtube",
             "--id", video_id,
             "--url", url,

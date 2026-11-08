@@ -16,11 +16,14 @@ class DocumentModel(Base):
         Index("ix_documents_source_plugin", "source_plugin"),
         Index("ix_documents_updated_at", "updated_at"),
         Index("ix_documents_privacy_status", "privacy_status"),
+        Index("ix_documents_profile", "profile"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     handle: Mapped[str] = mapped_column(String, nullable=False)
     source_plugin: Mapped[str] = mapped_column(String, nullable=False)
+    # Persona/profile the document was indexed under (e.g. "joriel").
+    profile: Mapped[str | None] = mapped_column(String, nullable=True)
     source_id: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -76,11 +79,14 @@ class PoolItemModel(Base):
         UniqueConstraint("source_plugin", "source_id", name="uq_pool_items_source"),
         Index("ix_pool_items_source_plugin", "source_plugin"),
         Index("ix_pool_items_status", "status"),
+        Index("ix_pool_items_profile", "profile"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source_plugin: Mapped[str] = mapped_column(String, nullable=False)
     source_id: Mapped[str] = mapped_column(String, nullable=False)
+    # Persona/profile the item was discovered under (e.g. "joriel").
+    profile: Mapped[str | None] = mapped_column(String, nullable=True)
     # pending | synced | excluded | failed
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")

@@ -11,6 +11,7 @@ class Document:
     title: str
     raw_text: str
     handle: str = ""  # stable slug handle, e.g. yt-my-video-a3f2
+    profile: str = ""  # persona/profile the document belongs to (e.g. "joriel")
     url: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -65,6 +66,7 @@ class SearchResult:
     title: str
     excerpt: str
     score: float
+    profile: str | None = None
     duration_seconds: int | None = None
     privacy_status: str | None = (
         None  # YouTube: "public" | "private" | "unlisted"; Obsidian: None

@@ -51,8 +51,10 @@ class SearchFilters:
         max_size: int | None = None,
         privacy_status: str | None = None,
         missing_field: str | None = None,
+        profile: str | None = None,
     ) -> None:
         self.source = source
+        self.profile = profile
         self.min_duration = min_duration
         self.max_duration = max_duration
         self.video_type = video_type
@@ -163,6 +165,9 @@ class SQLAlchemyStore:
         return result
 
     def upsert_document(self, document: Document, content_hash: str) -> bool:
+        from common.core.profile import resolve_profile
+
+        profile = document.profile or resolve_profile()
         with self._session() as session:
             existing = session.execute(
                 select(DocumentModel).where(
@@ -179,6 +184,7 @@ class SQLAlchemyStore:
                 "source_id": document.source_id,
                 "title": document.title,
                 "raw_text": document.raw_text,
+                "profile": profile,
                 "url": document.url,
                 "updated_at": document.updated_at.isoformat()
                 if document.updated_at
@@ -250,7 +256,7 @@ class SQLAlchemyStore:
                 session.execute(
                     text(
                         "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, "
-                        "duration_seconds, privacy_status, metadata_json "
+                        "duration_seconds, privacy_status, profile, metadata_json "
                         "FROM documents WHERE source_plugin=:source_plugin AND source_id=:source_id"
                     ),
                     {"source_plugin": source_plugin, "source_id": source_id},
@@ -266,7 +272,7 @@ class SQLAlchemyStore:
                 session.execute(
                     text(
                         "SELECT handle, source_plugin, source_id, title, raw_text, url, updated_at, "
-                        "duration_seconds, privacy_status, metadata_json "
+                        "duration_seconds, privacy_status, profile, metadata_json "
                         "FROM documents WHERE handle=:handle OR source_id=:handle"
                     ),
                     {"handle": handle},
@@ -370,7 +376,7 @@ class SQLAlchemyStore:
                     text(
                         """
                     SELECT d.handle, d.source_plugin, d.source_id, d.title, d.duration_seconds,
-                           d.privacy_status, c.content
+                           d.privacy_status, d.profile, c.content
                     FROM chunks_fts c
                     JOIN documents d ON d.source_plugin=c.source_plugin AND d.source_id=c.source_id
                     WHERE chunks_fts MATCH :query
@@ -390,6 +396,7 @@ class SQLAlchemyStore:
                 title=row["title"],
                 excerpt=row["content"][:220],
                 score=1.0,
+                profile=row["profile"],
                 duration_seconds=row["duration_seconds"],
                 privacy_status=row["privacy_status"],
             )
@@ -409,7 +416,7 @@ class SQLAlchemyStore:
                     text(
                         """
                     SELECT c.source_plugin, c.source_id, c.content, c.embedding_json,
-                           d.handle, d.title, d.duration_seconds, d.privacy_status
+                           d.handle, d.title, d.duration_seconds, d.privacy_status, d.profile
                     FROM chunks c
                     JOIN documents d ON d.source_plugin=c.source_plugin AND d.source_id=c.source_id
                     """
@@ -433,6 +440,7 @@ class SQLAlchemyStore:
                 title=row["title"],
                 excerpt=row["content"][:220],
                 score=score,
+                profile=row["profile"],
                 duration_seconds=row["duration_seconds"],
                 privacy_status=row["privacy_status"],
             )
@@ -452,7 +460,7 @@ class SQLAlchemyStore:
                     session.execute(
                         text(
                             "SELECT handle, source_plugin, source_id, title, url, updated_at, "
-                            "duration_seconds, privacy_status, metadata_json "
+                            "duration_seconds, privacy_status, profile, metadata_json "
                             "FROM documents WHERE source_plugin=:source ORDER BY updated_at DESC LIMIT :limit"
                         ),
                         {"source": source, "limit": limit * 5},
@@ -465,7 +473,7 @@ class SQLAlchemyStore:
                     session.execute(
                         text(
                             "SELECT handle, source_plugin, source_id, title, url, updated_at, "
-                            "duration_seconds, privacy_status, metadata_json "
+                            "duration_seconds, privacy_status, profile, metadata_json "
                             "FROM documents ORDER BY updated_at DESC LIMIT :limit"
                         ),
                         {"limit": limit * 5},
@@ -488,7 +496,7 @@ class SQLAlchemyStore:
     ) -> list[dict]:
         query = (
             "SELECT handle, source_plugin, source_id, title, raw_text, url, "
-            "updated_at, duration_seconds, privacy_status, metadata_json "
+            "updated_at, duration_seconds, privacy_status, profile, metadata_json "
             "FROM documents WHERE 1=1"
         )
         params: dict[str, object] = {"limit": limit}
@@ -524,6 +532,10 @@ class SQLAlchemyStore:
                     f" AND json_extract(metadata_json, '$.{filters.missing_field}') "
                     "IS NULL"
                 )
+
+        if filters and filters.profile:
+            query += " AND profile=:profile"
+            params["profile"] = filters.profile
 
         order_field_map = {
             "date": "updated_at",
@@ -599,6 +611,10 @@ class SQLAlchemyStore:
                     "IS NULL"
                 )
 
+        if filters and filters.profile:
+            query += " AND profile=:profile"
+            params["profile"] = filters.profile
+
         with self._session() as session:
             return int(session.execute(text(query), params).scalar() or 0)
 
@@ -607,6 +623,25 @@ class SQLAlchemyStore:
         with self._session() as session:
             rows = session.execute(
                 text("SELECT DISTINCT source_plugin FROM documents ORDER BY source_plugin")
+            ).all()
+        return [row[0] for row in rows]
+
+    def list_profiles(self) -> list[str]:
+        """Distinct profiles present in the documents *and* pool tables.
+
+        Used by the corpus browser profile filter. Documents and pool items are
+        unioned so a profile that only has scanned (not-yet-synced) items is
+        still selectable. NULL/empty rows (pre-migration edge cases) are ignored.
+        """
+        with self._session() as session:
+            rows = session.execute(
+                text(
+                    "SELECT profile FROM ( "
+                    "SELECT profile FROM documents WHERE profile IS NOT NULL AND profile != '' "
+                    "UNION "
+                    "SELECT profile FROM pool_items WHERE profile IS NOT NULL AND profile != '' "
+                    ") ORDER BY profile"
+                )
             ).all()
         return [row[0] for row in rows]
 
@@ -937,8 +972,12 @@ class SQLAlchemyStore:
         metadata: dict,
         added_at: str | None = None,
         synced_at: str | None = None,
+        profile: str | None = None,
     ) -> bool:
         """Insert or update a pool item. Returns True if newly inserted."""
+        from common.core.profile import resolve_profile
+
+        profile = profile or resolve_profile()
         now = datetime.utcnow().isoformat()
         with self._session() as session:
             existing = session.execute(
@@ -950,6 +989,7 @@ class SQLAlchemyStore:
             if existing:
                 existing.status = status
                 existing.metadata_json = json.dumps(metadata)
+                existing.profile = profile
                 if synced_at:
                     existing.synced_at = synced_at
                 return False
@@ -958,6 +998,7 @@ class SQLAlchemyStore:
                     source_plugin=plugin_name,
                     source_id=source_id,
                     status=status,
+                    profile=profile,
                     metadata_json=json.dumps(metadata),
                     added_at=added_at or now,
                     synced_at=synced_at,
@@ -965,9 +1006,14 @@ class SQLAlchemyStore:
             )
             return True
 
-    def add_to_pool(self, items: list, plugin_name: str) -> int:
+    def add_to_pool(
+        self, items: list, plugin_name: str, profile: str | None = None
+    ) -> int:
         """Batch-add ItemMeta items to pool as 'pending'. Skips already-pooled IDs.
         Returns count of newly added items."""
+        from common.core.profile import resolve_profile
+
+        profile = profile or resolve_profile()
         now = datetime.utcnow().isoformat()
         existing_ids = set(self.get_pool_ids(plugin_name).keys())
         added = 0
@@ -980,6 +1026,7 @@ class SQLAlchemyStore:
                         source_plugin=plugin_name,
                         source_id=item.source_id,
                         status="pending",
+                        profile=profile,
                         metadata_json=json.dumps(item.metadata or {}),
                         added_at=now,
                         synced_at=None,
@@ -1007,7 +1054,7 @@ class SQLAlchemyStore:
     ) -> list[dict]:
         """Return pool items as dicts, ordered by added_at ascending."""
         query = (
-            "SELECT source_plugin, source_id, status, metadata_json, added_at, synced_at "
+            "SELECT source_plugin, source_id, status, profile, metadata_json, added_at, synced_at "
             "FROM pool_items WHERE 1=1"
         )
         params: dict = {}
@@ -1028,6 +1075,7 @@ class SQLAlchemyStore:
                 "source_plugin": r["source_plugin"],
                 "source_id": r["source_id"],
                 "status": r["status"],
+                "profile": r["profile"],
                 "metadata": json.loads(r["metadata_json"] or "{}"),
                 "added_at": r["added_at"],
                 "synced_at": r["synced_at"],
@@ -1211,6 +1259,8 @@ class SQLAlchemyStore:
                 query = query.where(
                     DocumentModel.duration_seconds <= filters.max_duration
                 )
+            if filters.profile:
+                query = query.where(DocumentModel.profile == filters.profile)
         query = query.limit(limit)
         with self._session() as session:
             rows = session.scalars(query).all()
@@ -1268,6 +1318,7 @@ class SQLAlchemyStore:
             "raw_text": row.raw_text,
             "url": row.url,
             "updated_at": row.updated_at,
+            "profile": row.profile,
             "duration_seconds": row.duration_seconds,
             "privacy_status": row.privacy_status,
             "metadata": json.loads(row.metadata_json or "{}"),
@@ -1282,6 +1333,8 @@ def _apply_filters(
     out = []
     for item in results:
         if filters.source and item.source_plugin != filters.source:
+            continue
+        if filters.profile and (item.profile or "") != filters.profile:
             continue
         duration = item.duration_seconds or 0
         if filters.min_duration is not None and duration < filters.min_duration:
@@ -1306,6 +1359,8 @@ def _apply_filters_dicts(
     out = []
     for item in items:
         if filters.source and item.get("source_plugin") != filters.source:
+            continue
+        if filters.profile and (item.get("profile") or "") != filters.profile:
             continue
         duration = item.get("duration_seconds") or 0
         if filters.min_duration is not None and duration < filters.min_duration:

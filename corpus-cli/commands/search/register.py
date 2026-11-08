@@ -42,6 +42,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
                         "source_id": r.source_id,
                         "title": r.title,
                         "score": round(r.score, 4),
+                        "profile": r.profile,
                         "duration_seconds": r.duration_seconds,
                         "privacy_status": r.privacy_status,
                         "excerpt": r.excerpt,
@@ -61,7 +62,8 @@ def register(plugin_manifests: dict) -> CommandManifest:
                     else ""
                 )
                 priv = f"  privacy={r.privacy_status}" if r.privacy_status else ""
-                click.echo(f"[{r.handle}] {r.title}{dur}{priv}")
+                prof = f"  profile={r.profile}" if r.profile else ""
+                click.echo(f"[{r.handle}] {r.title}{dur}{priv}{prof}")
                 click.echo(f"  score={round(r.score, 4)}  source={r.source_plugin}")
                 click.echo(f"  {r.excerpt[:120]}")
 

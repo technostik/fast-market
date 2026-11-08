@@ -136,6 +136,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         updated_at = _parse_published_at(published_at) or datetime.now()
         duration_seconds = max(0, duration)
+        from common.core.profile import resolve_profile
+
+        # Profile at insert time: explicit --profile on the corpus group exports
+        # FASTMARKET_PROFILE; the publish pipelines pass it on the subprocess env.
+        profile = resolve_profile()
         metadata = {
             "id": source_id,
             "title": title,
@@ -144,6 +149,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             "url": url,
             "duration_seconds": duration_seconds,
             "privacy_status": privacy or "unknown",
+            "profile": profile,
         }
 
         document = Document(
@@ -151,6 +157,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
             source_id=source_id,
             title=title,
             raw_text=transcript_text,
+            profile=profile,
             url=url,
             updated_at=updated_at,
             duration_seconds=duration_seconds or None,
@@ -162,6 +169,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
         engine, _plugins, _store = build_engine(verbose)
         result = engine.add_document(document)
         result["url"] = url
+        result["profile"] = profile
         out(result, fmt)
 
     return CommandManifest(name="add", click_command=add_cmd)

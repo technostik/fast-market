@@ -31,6 +31,7 @@ def pool_row(item: dict[str, Any]) -> dict[str, Any]:
         "handle": f"{POOL_HANDLE_PREFIX}{item['source_plugin']}:{item['source_id']}",
         "source_plugin": item["source_plugin"],
         "source_id": item["source_id"],
+        "profile": item.get("profile"),
         "title": meta.get("title") or item["source_id"],
         "raw_text": None,
         "url": meta.get("url"),
@@ -63,6 +64,9 @@ def pool_matches(row: dict[str, Any], filters) -> bool:
     if filters.since and date < f"{filters.since}T00:00:00":
         return False
     if filters.until and date > f"{filters.until}T23:59:59":
+        return False
+    profile = getattr(filters, "profile", None)
+    if profile and (row.get("profile") or "") != profile:
         return False
     # missing_field: a pool row has no derived fields yet, so it always matches.
     return True

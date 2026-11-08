@@ -50,6 +50,8 @@ def test_add_indexes_document(runner, mock_env, tmp_path):
     assert data["indexed"] is True
     assert data["chunks"] >= 1
     assert data["url"] == "https://www.youtube.com/watch?v=addvid00001"
+    # The active profile is tagged on the document and echoed in the result.
+    assert data["profile"]
 
     doc = runner.invoke(
         main,
@@ -63,6 +65,7 @@ def test_add_indexes_document(runner, mock_env, tmp_path):
     assert stored["duration_seconds"] == 542
     assert stored["metadata"]["description"] == "The video description."
     assert stored["metadata"]["url"] == "https://www.youtube.com/watch?v=addvid00001"
+    assert stored["profile"] == data["profile"]
 
 
 def test_add_marks_pool_item_synced(runner, mock_env, tmp_path):

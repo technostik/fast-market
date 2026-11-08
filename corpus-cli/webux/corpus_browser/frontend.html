@@ -108,6 +108,7 @@
 
   <div class="filters">
     <select id="sourceFilter"><option value="">All sources</option></select>
+    <select id="profileFilter" title="Filter by profile/persona"><option value="">All profiles</option></select>
     <input type="date" id="since" title="Since date"/>
     <input type="date" id="until" title="Until date"/>
     <input type="number" id="minDuration" placeholder="Min s" min="0" style="width:84px"/>
@@ -195,7 +196,7 @@ const QUOTA_KEY = 'corpus_browser_quota_until';
 const PREFS_KEY = 'corpus_browser_prefs';
 
 const state = {
-  sources: [], fields: [], ops: [], columns: [],
+  sources: [], profiles: [], fields: [], ops: [], columns: [],
   items: [], results: [], mode: 'browse', total: 0, offset: 0,
   missingField: '', missingOnly: false,
   order: 'published', orderDesc: true,
@@ -221,6 +222,7 @@ function cellText(v) {
 function savePrefs() {
   localStorage.setItem(PREFS_KEY, JSON.stringify({
     source: $('sourceFilter').value,
+    profile: $('profileFilter').value,
     excludeShorts: $('excludeShorts').checked,
   }));
 }
@@ -228,6 +230,7 @@ function restorePrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
     if (p.source && p.source !== $('sourceFilter').value) $('sourceFilter').value = p.source;
+    if (p.profile && p.profile !== $('profileFilter').value) $('profileFilter').value = p.profile;
     $('excludeShorts').checked = !!p.excludeShorts;
   } catch (e) { /* corrupt prefs — ignore */ }
 }
@@ -306,6 +309,19 @@ async function loadSources() {
   }
 }
 
+async function loadProfiles() {
+  // Distinct profiles stored in the corpus. The saved pref only sticks if the
+  // profile still exists; otherwise fall back to "All profiles".
+  try {
+    const data = await (await fetch(API + '/profiles')).json();
+    state.profiles = data.profiles || [];
+  } catch (e) { state.profiles = []; }
+  const current = $('profileFilter').value;
+  $('profileFilter').innerHTML = '<option value="">All profiles</option>' +
+    state.profiles.map(p => '<option value="' + esc(p) + '">' + esc(p) + '</option>').join('');
+  if (current && state.profiles.includes(current)) $('profileFilter').value = current;
+}
+
 async function loadFields() {
   const src = $('sourceFilter').value;
   const data = await (await fetch(API + '/fields?source=' + encodeURIComponent(src))).json();
@@ -359,6 +375,8 @@ function fixedColumnDefs() {
     {key: 'thumb', label: 'Thumb', order: null, render: d => thumbImg(d)},
     {key: 'published', label: 'Published', order: 'published',
      render: d => cellText(meta(d).published_at || d.updated_at).slice(0, 10)},
+    {key: 'profile', label: 'Profile', order: null,
+     render: d => esc(d.profile || '')},
     {key: 'size', label: 'Size', order: 'size',
      render: d => d.raw_text ? String(d.raw_text).length : ''},
     {key: 'duration', label: 'Duration', order: 'duration',
@@ -560,6 +578,7 @@ function currentParams() {
   const p = new URLSearchParams();
   const src = currentSource();
   if (src) p.set('source', src);
+  const prof = $('profileFilter').value; if (prof) p.set('profile', prof);
   const since = $('since').value; if (since) p.set('since', since);
   const until = $('until').value; if (until) p.set('until', until);
   const min = $('minDuration').value; if (min) p.set('min_duration', min);
@@ -1062,6 +1081,7 @@ function syncBodyFor(field) {
     body.until = $('until').value || null;
     body.min_duration = $('minDuration').value || null;
     body.max_duration = $('maxDuration').value || null;
+    body.profile = $('profileFilter').value || null;
     body.limit = Math.max(1, state.total);
   } else {
     body.handles = [...state.selected];
@@ -1122,6 +1142,7 @@ $('searchBtn').onclick = search;
 $('browseBtn').onclick = () => browse(0);
 $('applyBtn').onclick = () => { savePrefs(); loadFields(); loadColumns(); browse(0); };
 $('sourceFilter').onchange = () => { savePrefs(); loadFields(); loadColumns(); browse(0); };
+$('profileFilter').onchange = () => { savePrefs(); browse(0); };
 $('excludeShorts').onchange = () => { savePrefs(); browse(0); };
 $('orderBy').onchange = () => { state.order = $('orderBy').value; browse(0); };
 $('orderDesc').onchange = () => { state.orderDesc = $('orderDesc').checked; browse(0); };
@@ -1140,6 +1161,7 @@ $('clearSel').onclick = clearSelection;
 
 (async function init() {
   await loadSources();
+  await loadProfiles();
   restorePrefs();
   await Promise.all([loadFields(), loadColumns(), loadOps(), loadColumnPrefs()]);
   browse(0);

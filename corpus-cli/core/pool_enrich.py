@@ -374,6 +374,7 @@ def _write_pool_item(store: Any, source: str, existing: dict, merged: dict) -> b
         merged,
         added_at=existing["added_at"],
         synced_at=existing.get("synced_at"),
+        profile=existing.get("profile"),
     )
     return True
 

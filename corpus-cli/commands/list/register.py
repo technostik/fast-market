@@ -164,6 +164,8 @@ def _print_text(docs: list[dict]) -> None:
         meta_parts = []
         if date:
             meta_parts.append(f"date={date}")
+        if doc.get("profile"):
+            meta_parts.append(f"profile={doc['profile']}")
         if doc.get("pool_status"):
             meta_parts.append(f"status={doc['pool_status']}")
             if doc.get("scan_at"):
