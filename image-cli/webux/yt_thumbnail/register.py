@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -143,8 +144,44 @@ def _meta_path(source: Path) -> Path:
     return source.parent / f"{source.stem}-long-meta.json"
 
 
+def _find_meta_path(source: Path) -> Path:
+    """Locate the meta sidecar that describes ``source``.
+
+    The publish pipeline writes the meta next to the *input* video (named
+    after the run timestamp) and then renames the processed output to its
+    final title. A published video therefore has no meta named after it;
+    find the sidecar whose ``files`` entry points at it (``final_video``).
+    """
+    direct = _meta_path(source)
+    if direct.exists():
+        return direct
+    try:
+        wanted = source.expanduser().resolve()
+    except OSError:
+        return direct
+    for candidate in sorted(source.parent.glob("*-long-meta.json")):
+        if candidate == direct:
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        files = data.get("files") if isinstance(data, dict) else None
+        if not isinstance(files, dict):
+            continue
+        for value in files.values():
+            if not isinstance(value, str) or not value:
+                continue
+            try:
+                if Path(value).expanduser().resolve() == wanted:
+                    return candidate
+            except OSError:
+                continue
+    return direct
+
+
 def _load_meta(source: Path) -> dict:
-    p = _meta_path(source)
+    p = _find_meta_path(source)
     if p.exists():
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -155,7 +192,7 @@ def _load_meta(source: Path) -> dict:
 
 
 def _save_meta(source: Path, meta: dict) -> None:
-    _meta_path(source).write_text(
+    _find_meta_path(source).write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
@@ -852,8 +889,15 @@ async def push_thumbnail(req: PushRequest):
         )
     thumb = str(Path(thumb).expanduser().resolve())
     cmd = [_yt(), "thumbnail-set", video_id, "--file", thumb]
+    # Use the publish profile recorded in the meta so the API call targets
+    # the same channel/credentials the video was uploaded with.
+    env = os.environ.copy()
+    profile = str(meta.get("profile") or "").strip()
+    if profile:
+        env["FASTMARKET_PROFILE"] = profile
     proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
     stdout, stderr = await proc.communicate()
     if proc.returncode:
