@@ -92,6 +92,7 @@ pip install -e './corpus-cli[ml,youtube]' \
 | `openai` | prompt-cli | OpenAI provider support |
 | `kokoro` | sound-cli | Kokoro TTS engine |
 | `qwen3` | sound-cli | Qwen3-TTS voice design engine |
+| `acestep` | sound-cli | ACE-Step 1.5 music generation |
 | `musicgen` | sound-cli | MusicGen music generation |
 | `dev` | All | Development testing tools |
 
@@ -325,8 +326,10 @@ sound speak "Bonjour" -e qwen3 --voice "A soft French voice" -L French   # Qwen3
 sound speak "Hi" --voice "am_michael" --speed 1.5              # Kokoro voice override
 
 # Music Generation
-sound music "lofi piano beat"
+sound music "lofi piano beat"                                  # ACE-Step (default)
 sound music "upbeat electronic" -d 10                           # Custom duration
+sound music "pop anthem" --lyrics-file lyrics.txt -d 60         # Full song with vocals
+sound music "ambient" -e musicgen -d 10                         # MusicGen instead
 
 # Setup
 sound setup -c                                                  # Show current config
@@ -340,6 +343,7 @@ sound setup reset                                               # Reset to defau
 **Available engines:**
 - `kokoro` — Lightweight TTS with weighted voice mixing (`am_michael*0.7,am_fenrir*0.3`)
 - `qwen3` — Voice design via natural language descriptions (GPU recommended)
+- `acestep` — ACE-Step 1.5 full songs with lyrics, in-process via diffusers (GPU recommended; default music engine)
 - `musicgen` — Text-to-music generation (GPU recommended)
 
 **Config location:** `~/.config/fast-market/sound/config.yaml`

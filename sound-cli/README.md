@@ -1,6 +1,6 @@
 # sound-agent
 
-AI sound generation CLI tool with TTS (Kokoro, Qwen3-TTS) and music generation (MusicGen) support. Generate speech and music from text prompts using multiple engine plugins.
+AI sound generation CLI tool with TTS (Kokoro, Qwen3-TTS) and music generation (ACE-Step 1.5, MusicGen) support. Generate speech and music from text prompts using multiple engine plugins.
 
 ## Installation
 
@@ -10,17 +10,18 @@ cd sound-agent
 pip install -e .
 
 # Install with all engines
-pip install -e ".[kokoro,qwen3,musicgen,transcribe,dev]"
+pip install -e ".[kokoro,qwen3,acestep,musicgen,transcribe,dev]"
 
 # Install with only specific engines
 pip install -e ".[kokoro]"       # just kokoro TTS
-pip install -e ".[musicgen]"     # just music generation
+pip install -e ".[acestep]"      # just ACE-Step 1.5 music generation
+pip install -e ".[musicgen]"     # just MusicGen music generation
 ```
 
 ### Prerequisites
 
 - Python 3.11 or higher
-- CUDA-compatible GPU recommended for Qwen3-TTS and MusicGen
+- CUDA-compatible GPU recommended for Qwen3-TTS, ACE-Step and MusicGen
 - Kokoro works well on CPU
 
 ## Configuration
@@ -37,6 +38,7 @@ Configuration is stored in XDG-compliant paths under the `fast-market` namespace
 # ~/.config/fast-market/sound/config.yaml
 
 default_engine: kokoro
+default_music_engine: acestep
 
 kokoro:
   voice: am_michael*0.7,am_fenrir*0.3   # weighted voice mix
@@ -50,6 +52,21 @@ qwen3:
   base_model:          Qwen/Qwen3-TTS-12Hz-1.7B-Base          # stable TTS
   clone: null            # path to reference audio for voice cloning
   ref_text: null         # transcript of clone audio (ICL mode)
+
+acestep:
+  model: ACE-Step/acestep-v15-xl-turbo-diffusers
+  duration: 30.0           # seconds (10-600)
+  lyrics: "[Instrumental]" # default when no --lyrics is given
+  vocal_language: en       # must match the lyrics language
+  num_inference_steps: 8   # turbo default
+  guidance_scale: 1.0      # ignored by turbo (guidance-distilled)
+  shift: 3.0
+  dtype: bfloat16
+  device: cuda
+  quantization: auto       # auto|nf4|int8|none — nf4 keeps the DiT in ~4-bit VRAM
+  cpu_offload: auto        # auto|false|model|sequential — swaps modules to CPU
+  vae_tiling: true         # bounded decode memory for long tracks
+  attention_backend: null  # e.g. "flash" when flash-attn is installed
 
 musicgen:
   model: facebook/musicgen-medium
@@ -145,8 +162,10 @@ sound speak "こんにちは" -L ja
 | `sound speak "text"` | Synthesize speech from text |
 | `sound speak "text" -e qwen3 -v "description"` | TTS with voice design |
 | `sound speak "text" -e kokoro -v "am_michael" --speed 1.5` | Kokoro with options |
-| `sound music "lofi piano track"` | Generate music from prompt |
+| `sound music "lofi piano track"` | Generate music from prompt (default engine: ACE-Step) |
 | `sound music "upbeat electronic" -d 10` | Music with custom duration |
+| `sound music "pop anthem" --lyrics "[Verse]\n..."` | Vocal track with lyrics |
+| `sound music "ambient" -e musicgen -d 10` | MusicGen instead of the default engine |
 | `sound prosody speech.wav` | Analyze prosody, print a global 0-100 score |
 | `sound prosody clip.mp4 --format json` | Prosody analysis of a video's audio track |
 | `sound charisma speech.wav` | Estimate vocal charisma, print a global 0-100 score |
@@ -193,14 +212,28 @@ fortune | sound speak -e qwen3 -L French
 
 ### `sound music <PROMPT>`
 
-Generate music from a text prompt.
+Generate music from a text prompt. PROMPT describes the music (style, instruments, mood, tempo); lyrics are supplied separately.
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--engine` | `-e` | Music engine: `musicgen` |
-| `--duration` | `-d` | Duration in seconds, default 5.0 |
+| `--engine` | `-e` | Music engine: `acestep` (default) or `musicgen` |
+| `--duration` | `-d` | Duration in seconds, default per engine (`acestep`: 30, `musicgen`: 5) |
+| `--lyrics` | `-l` | Lyrics to sing, with section tags like `[Verse]` / `[Chorus]` |
+| `--lyrics-file` | — | Read lyrics from a file |
+| `--instrumental` | `-i` | Force `[Instrumental]` (default when no lyrics are given) |
+| `--seed` | `-S` | Random seed for reproducible generation |
 | `--output` | `-o` | Output path (default: workdir/music\_\<timestamp\>.wav) |
 | `--format` | `-F` | Output format: `json` or `text` |
+
+Engine choice order: `--engine` → `default_music_engine` → `default_engine` (only when it is a music engine) → `acestep`.
+
+**Examples:**
+```bash
+sound music "warm lofi piano, dusty vinyl, 80 bpm"
+sound music "dark synthwave, analog bass" -d 45 -S 42
+sound music "acoustic pop" --lyrics-file lyrics.txt -d 60
+sound music "cinematic strings" -i -o intro.wav
+```
 
 ### `sound prosody <FILE>`
 
@@ -315,6 +348,17 @@ sound transcribe speech.wav --modal --format json
 - **Hardware**: GPU recommended (2 × 1.7B param models)
 - **Install**: `pip install sound-agent[qwen3]`
 
+### ACE-Step 1.5 (default music engine)
+- **Package**: `diffusers` with `AceStepPipeline` (plus `transformers`, `accelerate` for offloading, `bitsandbytes` for low-VRAM quantization)
+- **Model**: `ACE-Step/acestep-v15-xl-turbo-diffusers` (auto-downloaded on first use, ~11 GB)
+- **Generation**: full songs with vocals and lyrics, 48 kHz stereo, 10 s to 10 min
+- **Lyrics**: 50+ languages via `--lyrics` / `--lyrics-file`; `[Instrumental]` by default
+- **Prompt**: describes style, instruments, mood, tempo — it does not replace the lyrics
+- **Runs in-process**: no server and no separate binary; the pipeline wraps the DiT half of ACE-Step 1.5 (text encoder + condition encoder + DiT + VAE)
+- **Hardware**: `quantization: auto` loads the 5B DiT in nf4 (~3 GB) when `bitsandbytes` is installed, which is what fits 8 GB cards; without it, `cpu_offload: auto` falls back to sequential layer offload on GPUs below 16 GB and whole-model offload above. Quantized loading and offload are mutually exclusive.
+- **Install**: `pip install sound-agent[acestep]` (+ `pip install bitsandbytes` for quantization)
+- **Checkpoint variants**: point `acestep.model` at another Diffusers checkpoint (e.g. `ACE-Step/acestep-v15-base-diffusers`), adjusting `num_inference_steps`/`guidance_scale`
+
 ### MusicGen
 - **Package**: `transformers` (included in base deps)
 - **Model**: `facebook/musicgen-medium` (auto-downloaded on first use)
@@ -377,6 +421,7 @@ sound-cli/
 │   ├── base.py            # TTSPlugin + MusicGenPlugin ABCs
 │   ├── kokoro/            # Kokoro TTS engine
 │   ├── qwen3/             # Qwen3-TTS voice design engine
+│   ├── acestep/           # ACE-Step 1.5 music engine (diffusers)
 │   └── musicgen/          # MusicGen music engine
 ├── commands/              # CLI commands
 │   ├── base.py            # CommandManifest
@@ -404,7 +449,8 @@ sound-cli/
 ### Optional Engines
 - `kokoro>=0.9` - Kokoro TTS (lightweight)
 - `qwen-tts>=0.1` - Qwen3-TTS VoiceDesign
-- `transformers` - MusicGen (included in core deps)
+- `diffusers` + `transformers` + `accelerate` - ACE-Step 1.5 music generation (`acestep` extra)
+- `transformers` - MusicGen
 - `transcribe` extra (`faster-whisper`, `requests`, `python-dotenv`) - local faster-whisper + Groq (`whisper-large-v3-turbo`, needs `GROQ_API_KEY`) + Cloudflare (`@cf/openai/whisper-large-v3-turbo`, needs `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`)
 
 ## Development

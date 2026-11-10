@@ -29,8 +29,13 @@ class MusicGenPlugin(ABC):
     def generate(self, prompt: str, duration: float, **kwargs) -> tuple[Any, int]:
         """Generate music from a text prompt.
 
+        Engines may accept extra keyword arguments (``lyrics``, ``seed``,
+        ``verbose``, …) and must ignore the ones they do not support.
+
         Returns:
-            Tuple of (audio_tensor, sample_rate).
+            Tuple of (audio, sample_rate). ``audio`` is either a 1-D mono
+            tensor of shape (frames,) or a 2-D tensor of shape
+            (frames, channels) — the layout ``soundfile.write`` expects.
         """
         raise NotImplementedError
 

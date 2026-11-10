@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sound-agent"
 version = "0.1.0"
-description = "Sound generation CLI with TTS (Kokoro, Qwen3-TTS) and music generation (MusicGen)"
+description = "Sound generation CLI with TTS (Kokoro, Qwen3-TTS) and music generation (ACE-Step 1.5, MusicGen)"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 kokoro = ["kokoro>=0.9,<1.0"]
 qwen3 = ["qwen-tts>=0.1"]
+acestep = ["diffusers", "transformers", "accelerate"]
 musicgen = ["transformers"]
 transcribe = ["faster-whisper>=1.0", "requests>=2.28", "python-dotenv"]
 youtube = ["yt-dlp>=2024.1"]
@@ -33,6 +34,7 @@ where = ["."]
 include = [
     "common*", "cli*", "core*",
     "plugins*", "plugins.kokoro*", "plugins.qwen3*", "plugins.musicgen*",
+    "plugins.acestep*",
     "commands*", "commands.speak*", "commands.music*", "commands.setup*", "commands.prosody*", "commands.charisma*",
     "commands.normalize_volume*", "commands.segment*", "commands.transcribe*",
     "modal_client*",

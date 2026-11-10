@@ -21,14 +21,18 @@ class MusicGenModelPlugin(MusicGenPlugin):
         if self._model is None:
             from transformers import MusicgenForConditionalGeneration, AutoProcessor
 
-            model_id = self.config.get("model", "facebook/musicgen-medium")
+            section = self.config.get("musicgen", {}) or {}
+            model_id = section.get("model", "facebook/musicgen-medium")
             self._model = MusicgenForConditionalGeneration.from_pretrained(model_id)
             self._processor = AutoProcessor.from_pretrained(model_id)
         return self._model, self._processor
 
     def generate(
-        self, prompt: str, duration: float, **kwargs
+        self, prompt: str, duration: float | None, **kwargs
     ) -> tuple[torch.Tensor, int]:
+        section = self.config.get("musicgen", {}) or {}
+        duration = duration or section.get("duration", 5.0)
+
         model, processor = self._load_model()
 
         inputs = processor(text=[prompt], padding=True, return_tensors="pt")

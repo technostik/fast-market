@@ -11,7 +11,7 @@ requires_common_config("sound", [])
 
 main = create_cli_group(
     "sound",
-    description="Generate speech and music using AI (Kokoro, Qwen3-TTS, MusicGen).",
+    description="Generate speech and music using AI (Kokoro, Qwen3-TTS, ACE-Step, MusicGen).",
 )
 _TOOL_ROOT = Path(__file__).resolve().parents[1]
 

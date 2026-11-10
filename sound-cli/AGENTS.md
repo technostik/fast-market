@@ -1,7 +1,7 @@
 # sound-agent
 
 ## Purpose
-AI sound generation CLI tool with TTS (Kokoro, Qwen3-TTS) and music generation (MusicGen). Provides a modular plugin system for multiple sound generation engines with CLI commands.
+AI sound generation CLI tool with TTS (Kokoro, Qwen3-TTS) and music generation (ACE-Step 1.5, MusicGen). Provides a modular plugin system for multiple sound generation engines with CLI commands.
 
 ## Architecture Overview
 
@@ -10,7 +10,7 @@ sound-cli/
 ├── sound_entry/           # CLI entry point (NOT cli/!)
 │   └── __init__.py        # Imports main from cli.main
 ├── core/                  # Core logic (models, config)
-├── plugins/               # Engine plugins (kokoro, qwen3, musicgen)
+├── plugins/               # Engine plugins (kokoro, qwen3, acestep, musicgen)
 ├── commands/              # CLI commands (speak, music, prosody, charisma, normalize-volume, segment, transcribe)
 └── common/                # Symlink to shared utilities
 ```
@@ -33,6 +33,8 @@ sound-cli/
 | `kokoro/register.py` | Declares kokoro plugin to the system |
 | `qwen3/plugin.py` | `Qwen3TTSPlugin` - dual-model voice design + cloning with stable reference caching |
 | `qwen3/register.py` | Declares qwen3 plugin to the system |
+| `acestep/plugin.py` | `AcestepPlugin` - ACE-Step 1.5 full songs via diffusers `AceStepPipeline` (in-process) |
+| `acestep/register.py` | Declares acestep plugin to the system |
 | `musicgen/plugin.py` | `MusicGenModelPlugin` - text-to-music generation |
 | `musicgen/register.py` | Declares musicgen plugin to the system |
 
@@ -65,8 +67,12 @@ sound-cli/
 
 ### Music Generation
 - Accept text prompts with duration control
-- Generate music using MusicGen models
-- Save WAV output to workdir
+- Default engine: `acestep` (ACE-Step 1.5 XL turbo via diffusers, in-process — no server/binary)
+- `acestep` sings a full song when given `--lyrics` / `--lyrics-file`, otherwise `[Instrumental]`; `musicgen` is prompt-only
+- `--seed` is supported by every engine that accepts it (`acestep`); engines absorb unknown kwargs
+- Quantization and offload are resolved from `acestep.quantization` / `acestep.cpu_offload` by `resolve_quantization()` / `resolve_offload()`; `auto` = nf4 when `bitsandbytes` is importable (otherwise sequential offload below 16 GB VRAM), and the two cannot be combined
+- Engine resolution: `--engine` → `default_music_engine` → `default_engine` (only if it is a music engine) → `acestep` → first music engine (`commands/helpers.py:resolve_music_engine`)
+- Save WAV output to workdir; plugins return 1-D mono or 2-D `(frames, channels)` tensors (the `soundfile.write` layout)
 
 ### Prosody Analysis
 - Accept an audio or video file (video audio is extracted via `ffmpeg` subprocess)
@@ -116,6 +122,7 @@ sound-cli/
 # ~/.config/fast-market/sound/config.yaml
 
 default_engine: kokoro
+default_music_engine: acestep
 
 kokoro:
   voice: am_michael*0.7,am_fenrir*0.3
@@ -129,6 +136,22 @@ qwen3:
   base_model:          Qwen/Qwen3-TTS-12Hz-1.7B-Base
   clone: null            # path to reference .wav for voice cloning
   ref_text: null         # transcript of clone audio (ICL mode)
+
+acestep:
+  model: ACE-Step/acestep-v15-xl-turbo-diffusers
+  duration: 30.0            # seconds (10-600)
+  lyrics: "[Instrumental]"  # fallback when no --lyrics is given
+  vocal_language: en
+  num_inference_steps: 8
+  guidance_scale: 1.0       # ignored by turbo checkpoints
+  shift: 3.0
+  dtype: bfloat16
+  device: cuda
+  quantization: auto        # auto|nf4|int8|none (auto = nf4 when bitsandbytes is installed)
+  cpu_offload: auto         # auto|false|model|sequential (quantization + offload can't combine)
+  vae_tiling: true
+  attention_backend: null   # "flash" needs flash-attn
+  extra: {}                 # forwarded verbatim to AceStepPipeline.__call__
 
 musicgen:
   model: facebook/musicgen-medium
@@ -214,8 +237,10 @@ base_model.generate_voice_clone(text=user_text, ref_audio=ref_path, ref_text=REF
 | `echo "hi" \| sound speak` | Pipe text via stdin |
 | `sound speak "hello" -e qwen3 -L French` | TTS with language |
 | `sound speak "hi" --voice "am_michael" --speed 1.5` | Kokoro with options |
-| `sound music "lofi beat"` | Generate music from prompt |
+| `sound music "lofi beat"` | Generate music from prompt (default engine: acestep) |
 | `sound music "jazz" -d 10` | Music with custom duration |
+| `sound music "pop" --lyrics "[Verse]\n..." -S 42` | ACE-Step vocal track with lyrics and seed |
+| `sound music "ambient" -e musicgen -d 10` | Force MusicGen |
 | `sound prosody speech.wav` | Prosody analysis with global 0-100 score |
 | `sound prosody talk.mp4 --format json` | Prosody analysis of a video's audio track |
 | `sound charisma speech.wav` | Charisma analysis with global 0-100 score |
@@ -250,7 +275,8 @@ class MusicGenPlugin(ABC):
     name: str
     @abstractmethod
     def generate(self, prompt: str, duration: float, **kwargs) -> tuple[torch.Tensor, int]:
-        """Returns (audio_tensor, sample_rate)."""
+        """Returns (audio, sample_rate). Audio is (frames,) mono or (frames, channels) stereo.
+        May receive lyrics=, seed=, verbose=. Ignore what you do not support."""
 ```
 
 ## Voice Mixing (Kokoro)
@@ -280,7 +306,10 @@ If weights are omitted, they are normalized equally. If only some have weights, 
 - `python-dotenv` - repo-root `.env` loading for API keys (`transcribe` extra)
 - `kokoro` - Kokoro TTS engine (optional)
 - `qwen-tts` - Qwen3-TTS engine (optional)
-- `transformers` - MusicGen model (core dep)
+- `transformers` - MusicGen model and ACE-Step text encoder (core dep)
+- `diffusers` - ACE-Step 1.5 `AceStepPipeline` (optional, `acestep` extra)
+- `accelerate` - model CPU offloading so ACE-Step fits consumer GPUs (optional, `acestep` extra)
+- `bitsandbytes` - nf4/int8 quantization of the ACE-Step DiT for 8 GB cards (optional, install separately)
 - `yt-dlp` - downloads a partial (first N seconds) YouTube clip for `normalize-volume set-reference <url>` (optional, `youtube` extra)
 
 ### Integrations
@@ -320,6 +349,7 @@ If weights are omitted, they are normalized equally. If only some have weights, 
 2. Create `plugins/your_engine/register.py` returning `PluginManifest`
 3. Add engine config defaults to `core/config.py`
 4. Engine auto-appears in `music` command choices
+5. Read the config for your engine as `config["your_engine"]` — plugins receive the whole config dict, not their section
 
 ### Add New CLI Command
 
