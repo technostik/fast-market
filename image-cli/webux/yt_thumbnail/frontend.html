@@ -89,6 +89,11 @@ input[type=range] { flex:1; padding:0; }
         <img id="curImg" class="preview-main" alt="current thumbnail">
         <div class="row" style="margin-top:8px"><label>Base (no overlay)</label></div>
         <img id="baseImg" class="preview-base" alt="base image">
+        <div class="row" style="margin-top:8px">
+          <input id="thumbFile" type="file" accept="image/*">
+          <button id="useThumbBtn" title="Copy an existing image next to the video and make it the current thumbnail">📥 Use as thumbnail</button>
+        </div>
+        <div class="hint">Already have a thumbnail (composed before a Long Publish run, or made elsewhere)? Load it here — it is copied next to the video as <code>&lt;video&gt;_thumb_N</code>, becomes “Current”, and can be pushed.</div>
         <div class="hist" id="histStrip"></div>
       </div>
       <div class="card">
@@ -380,6 +385,35 @@ el('useBaseBtn').onclick = async () => {
   } else {
     status(`Imported ${d.name} — set the overlay title, then Apply overlay.`, 'ok');
   }
+};
+
+// Adopt an existing image as the current thumbnail (e.g. one composed before
+// a Long Publish run, or from another tool). Copies it next to the video and
+// records it in the meta so “Push thumbnail” works.
+el('useThumbBtn').onclick = async () => {
+  const source = el('videoSel').value;
+  if (!source) { status('Select a working video first', 'err'); return; }
+  const f = el('thumbFile').files[0];
+  if (!f) { status('Choose a thumbnail image first', 'err'); return; }
+  const fd = new FormData();
+  fd.append('source', source);
+  fd.append('file', f);
+  status('Loading thumbnail…');
+  const r = await fetch(API + '/upload-thumbnail', { method: 'POST', body: fd });
+  const d = await r.json();
+  if (!r.ok) { status(d.detail || 'Load failed', 'err'); return; }
+  el('thumbFile').value = '';
+  // The backend already wrote the meta; use the returned path immediately
+  // so the push button enables even if refreshCurrent races or fails.
+  window._currentThumb = d.path;
+  el('curImg').src = imgUrl(d.path);
+  el('baseImg').src = imgUrl(d.path);
+  el('baseSrc').textContent = `${d.name} · ${d.width}×${d.height}`;
+  window._pickedBase = '';
+  await refreshCurrent(source);
+  const sizeNote = (d.width === 1280 && d.height === 720) ? ''
+    : ` (${d.width}×${d.height} — YouTube thumbnails should be 1280×720)`;
+  status(`Loaded ${d.name} as v${d.version}${sizeNote} — ready to push.`, 'ok');
 };
 
 el('composeBtn').onclick = async () => {

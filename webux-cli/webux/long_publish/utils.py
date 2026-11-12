@@ -156,6 +156,17 @@ def _long_meta_path(source: str) -> Path:
 
 
 def _save_meta(job) -> None:
+    """Persist the job sidecar, merging with what is already on disk.
+
+    The sidecar is shared with the YT Thumbnail tab (``files.thumbnail``,
+    ``files.thumbnail_base``, ``thumbnail_version``, the saved suggestions)
+    and with earlier runs on the same video. A run started *after* the user
+    already composed a thumbnail — typically with "Generate thumbnail"
+    unchecked — has nothing to write for those keys, so rewriting the file
+    wholesale used to erase the thumbnail and make it impossible to push.
+    Merge instead: keys this job knows win, everything else is kept.
+    """
+    existing = _load_meta(job.source)
     meta: dict = {
         "source": job.source,
         "completed_steps": [i for i, s in enumerate(job.steps) if s.status == "done"],
@@ -201,9 +212,12 @@ def _save_meta(job) -> None:
         meta["corpus_video_id"] = job.corpus_video_id
     if getattr(job, "corpus_handle", ""):
         meta["corpus_handle"] = job.corpus_handle
+    merged = dict(existing)
+    merged.update(meta)
+    merged["files"] = {**(existing.get("files") or {}), **job.files}
     try:
         with open(_long_meta_path(job.source), "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+            json.dump(merged, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
@@ -245,6 +259,30 @@ def _stem(p: str) -> str:
 
 def _dir(p: str) -> Path:
     return Path(p).resolve().parent
+
+
+#: Image extensions adopted as an existing thumbnail when generation is off.
+_THUMB_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _latest_thumbnail(source: str) -> str:
+    """Newest ``<stem>_thumb_*`` next to ``source`` (empty string if none).
+
+    The YT Thumbnail tab writes its versions there. Used when a run has
+    thumbnail generation disabled: the user may already have composed one
+    (before this run, possibly before the meta existed), and it should stay
+    the current thumbnail instead of being reported as missing.
+    """
+    p = Path(source).expanduser()
+    candidates = [
+        f
+        for f in p.parent.glob(f"{p.stem}_thumb_*.*")
+        if f.is_file() and f.suffix.lower() in _THUMB_IMAGE_EXTENSIONS
+    ]
+    if not candidates:
+        return ""
+    newest = max(candidates, key=lambda f: f.stat().st_mtime)
+    return str(newest.resolve())
 
 
 def _extract_video_id(url: str) -> str:

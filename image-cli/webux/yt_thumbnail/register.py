@@ -221,6 +221,28 @@ def _find_meta_path(source: Path) -> Path:
     return direct
 
 
+def _thumb_anchor(source: Path) -> tuple[Path, str]:
+    """Directory + stem holding a video's ``<stem>_thumb_*`` files.
+
+    Long Publish renames the processed video to its title at step 2 and keeps
+    the sidecar (and the thumbnails) under the *original input* stem. A
+    published video therefore has no thumbnails named after it; resolve the
+    series through the meta ``source`` instead.
+    """
+    meta_path = _find_meta_path(source)
+    if meta_path != _meta_path(source):
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        src = data.get("source") if isinstance(data, dict) else None
+        if isinstance(src, str) and src.strip():
+            anchor = Path(src).expanduser()
+            if anchor.parent.is_dir():
+                return anchor.parent, anchor.stem
+    return source.parent, source.stem
+
+
 def _load_meta(source: Path) -> dict:
     p = _find_meta_path(source)
     if p.exists():
@@ -465,9 +487,9 @@ async def list_videos(
 async def history(source: str = Query(default="")):
     root = _source_dir()
     src = _work_source(source, root)
-    stem = src.stem
+    out_dir, stem = _thumb_anchor(src)
     thumbs = sorted(
-        (f for f in src.parent.glob(f"{stem}_thumb_*.*") if f.is_file()),
+        (f for f in out_dir.glob(f"{stem}_thumb_*.*") if f.is_file()),
         key=lambda f: f.stat().st_mtime,
     )
     meta = _load_meta(src)
@@ -784,8 +806,7 @@ async def _compose_worker(
 ) -> None:
     try:
         prompt = (req.prompt or "").strip()
-        out_dir = source.parent
-        stem = source.stem
+        out_dir, stem = _thumb_anchor(source)
         version = _next_version(out_dir, stem)
         ov = _fill_overlay(req.overlay)
         cmd = [
@@ -878,8 +899,7 @@ async def _edit_worker(
         prompt = (req.prompt or "").strip()
         engine = req.engine.strip()
         meta = _load_meta(source)
-        out_dir = source.parent
-        stem = source.stem
+        out_dir, stem = _thumb_anchor(source)
         version = _next_version(out_dir, stem)
         ov = _fill_overlay(req.overlay)
         overlay_title = req.title.strip() or meta.get("thumbnail_overlay_title", "").strip()
@@ -970,8 +990,7 @@ async def _overlay_worker(
 ) -> None:
     try:
         meta = _load_meta(source)
-        out_dir = source.parent
-        stem = source.stem
+        out_dir, stem = _thumb_anchor(source)
         version = int(meta.get("thumbnail_version", 0) or 0)
         # Re-applying on the current versioned base updates that version in
         # place; a base imported from disk (or an older version) gets a new
@@ -1084,6 +1103,62 @@ async def upload_base(
     return {
         "path": str(target.resolve()),
         "name": target.name,
+        "width": width,
+        "height": height,
+    }
+
+
+@router.post("/upload-thumbnail")
+async def upload_thumbnail(
+    source: str = Form(""),
+    file: UploadFile = File(...),
+):
+    """Adopt an existing image as the working video's current thumbnail.
+
+    Convenience fallback when the thumbnail is not in the meta — e.g. it was
+    composed before a Long Publish run and the sidecar lost it, or it comes
+    from another tool. The file is copied next to the video as
+    ``<stem>_thumb_<N>`` (``<stem>`` follows the meta source, so a renamed /
+    published video reuses its original series) and recorded in
+    ``files.thumbnail`` + ``thumbnail_version`` so push works immediately.
+    """
+    root = _source_dir()
+    src = _resolve_video(source, root)
+    out_dir, stem = _thumb_anchor(src)
+
+    ext = Path(file.filename or "").suffix.lower() or ".png"
+    if ext not in SOURCE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported image format: {file.filename}"
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    from PIL import Image
+
+    version = _next_version(out_dir, stem)
+    target = out_dir / f"{stem}_thumb_{version}{ext}"
+    target.write_bytes(data)
+    try:
+        with Image.open(target) as img:
+            width, height = img.size
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400, detail=f"Not a readable image: {file.filename}"
+        )
+
+    _update_meta_after(src, str(target.resolve()), str(target.resolve()), version)
+    logger.info(
+        "yt_thumbnail_thumbnail_upload",
+        source=str(src), path=str(target), version=version,
+        width=width, height=height,
+    )
+    return {
+        "path": str(target.resolve()),
+        "name": target.name,
+        "version": version,
         "width": width,
         "height": height,
     }

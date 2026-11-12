@@ -17,6 +17,7 @@ from .utils import (
     _sound,
     _image,
     _stem,
+    _latest_thumbnail,
     _ass_to_plain_text,
     _sanitize_filename,
     _run,
@@ -632,7 +633,22 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         _save_meta(job)
     elif not job.do_generate_thumbnail:
         job.steps[3].status = "skipped"
-        job.steps[3].output = "Thumbnail generation disabled"
+        # Keep a thumbnail the user already composed in the YT Thumbnail tab.
+        # The meta merge already preserves ``files.thumbnail``; when it is
+        # missing (older runs, deleted sidecar) adopt the newest
+        # ``<stem>_thumb_*`` sitting next to the video so it stays current
+        # and pushable from that tab.
+        if not job.files.get("thumbnail"):
+            kept = str((_load_meta(job.source).get("files") or {}).get("thumbnail") or "")
+            if not kept or not Path(kept).expanduser().exists():
+                kept = _latest_thumbnail(job.source)
+            if kept:
+                job.files["thumbnail"] = kept
+                job.files.setdefault("thumbnail_base", kept)
+        note = ""
+        if job.files.get("thumbnail"):
+            note = f" — reusing {Path(job.files['thumbnail']).name}"
+        job.steps[3].output = "Thumbnail generation disabled" + note
         _save_meta(job)
     elif from_step <= 3:
         s3 = job.steps[3]
