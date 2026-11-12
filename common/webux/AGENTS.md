@@ -8,6 +8,11 @@ by declaring a `fast_market.webux_plugins` entry point.
 ## Files
 - `base.py` — WebuxPluginManifest dataclass (the contract)
 - `registry.py` — discover_webux_plugins() via importlib.metadata entry points
+- `transcripts.py` — `find_transcript()` / `ass_to_plain_text()` / `is_placeholder()`:
+  the single transcript-discovery rule set shared by the publish pipelines and
+  the YT Thumbnail tab (meta `transcript_txt` → meta ASS → `<stem>_transcript.txt`
+  and `<stem>.transcript.txt` sidecars → meta `transcript_text`; placeholders
+  such as `(transcript unavailable)` are ignored).
 
 ## Entry Point Convention
 Each contributing package declares in its pyproject.toml:

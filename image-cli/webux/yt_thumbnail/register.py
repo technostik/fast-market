@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 from common import structlog
 from common.core.config import load_tool_config
 from common.webux.base import WebuxPluginManifest
+from common.webux.transcripts import find_transcript
 
 logger = structlog.get_logger(__name__)
 
@@ -53,10 +55,49 @@ def _yt() -> str:
     return shutil.which("youtube") or "youtube"
 
 
-def _publish_cfg() -> dict:
+def _prompt() -> str:
+    return shutil.which("prompt") or "prompt"
+
+
+def _video() -> str:
+    return shutil.which("video") or "video"
+
+
+def _job_env(profile: str | None = None) -> dict:
+    """Environment for subprocesses: the meta's publish profile wins.
+
+    The prompt store and the YouTube credentials are per profile, so scene /
+    title suggestions must run under the profile the video was published with,
+    not whatever profile the webux process happens to serve.
+    """
+    env = os.environ.copy()
+    if profile:
+        env["FASTMARKET_PROFILE"] = profile
+    return env
+
+
+@contextlib.contextmanager
+def _profile_context(profile: str | None):
+    """Temporarily point ``load_tool_config`` at another profile."""
+    if not profile:
+        yield
+        return
+    old = os.environ.get("FASTMARKET_PROFILE")
+    os.environ["FASTMARKET_PROFILE"] = profile
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("FASTMARKET_PROFILE", None)
+        else:
+            os.environ["FASTMARKET_PROFILE"] = old
+
+
+def _publish_cfg(profile: str | None = None) -> dict:
     """Read ``youtube.publish`` (video source dir shared with long_publish)."""
     try:
-        cfg = load_tool_config("youtube")
+        with _profile_context(profile):
+            cfg = load_tool_config("youtube")
         pub = cfg.get("youtube", {}).get("publish", {})
         return pub if isinstance(pub, dict) else {}
     except Exception:
@@ -430,12 +471,21 @@ async def history(source: str = Query(default="")):
         key=lambda f: f.stat().st_mtime,
     )
     meta = _load_meta(src)
+    files = meta.get("files", {}) or {}
+    found = find_transcript(src, files, meta.get("transcript_text", "")) if src.exists() else None
+    video_url = meta.get("video_url", "") or ""
     return {
         "source": str(src),
-        "current": (meta.get("files", {}) or {}).get("thumbnail", ""),
-        "base": (meta.get("files", {}) or {}).get("thumbnail_base", ""),
+        "current": files.get("thumbnail", ""),
+        "base": files.get("thumbnail_base", ""),
         "overlay_title": meta.get("thumbnail_overlay_title", ""),
         "overlay_subtitle": meta.get("thumbnail_overlay_subtitle", ""),
+        # Suggestion produced by long_publish step 3 (or by this tab).
+        "scene_suggestion": meta.get("thumbnail_prompt", ""),
+        "has_transcript": found is not None,
+        "transcript_path": str(found.path) if found else "",
+        "published": bool(video_url),
+        "video_url": video_url,
         "versions": [
             {"path": str(f.resolve()), "name": f.name, "mtime": f.stat().st_mtime}
             for f in thumbs
@@ -515,7 +565,7 @@ def _finish_job(job_id: str, result: dict | None = None, error: str = "") -> Non
     job["done"].set()
 
 
-async def _run_and_log(job_id: str, cmd: list[str]) -> str:
+async def _run_and_log(job_id: str, cmd: list[str], env: dict | None = None) -> str:
     """Spawn ``cmd``, stream its stderr into the job log, return stdout.
 
     Raises RuntimeError (recorded in the log) when the process fails.
@@ -526,7 +576,8 @@ async def _run_and_log(job_id: str, cmd: list[str]) -> str:
     _job_log(job_id, "$ " + " ".join(shown))
     started = asyncio.get_running_loop().time()
     proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
 
     async def _drain() -> None:
@@ -560,6 +611,118 @@ async def job_status(job_id: str):
         "result": job["result"],
         "error": job["error"],
     }
+
+
+# ── Scene / overlay suggestions (same prompts as long_publish step 3) ─────
+#
+# Suggestions can need a Whisper pass (10+ minutes on a long video), so they
+# follow the same job pattern as compose/edit/overlay.
+
+
+class SuggestRequest(BaseModel):
+    source: str = ""
+
+
+def _suggestion_prompt_names(profile: str | None) -> tuple[str, str]:
+    pub = _publish_cfg(profile)
+    scene = str(pub.get("default_thumbnail_prompt") or "").strip() or "youtube-thumbnail"
+    title = (
+        str(pub.get("default_thumbnail_overlay_prompt") or "").strip()
+        or "youtube-thumbnail-title"
+    )
+    return scene, title
+
+
+def _record_transcript(source: Path, meta: dict, path: Path) -> None:
+    """Remember where the reused transcript lives (never overwrite an entry)."""
+    files = dict(meta.get("files") or {})
+    if files.get("transcript_txt"):
+        return
+    files["transcript_txt"] = str(path)
+    meta["files"] = files
+    _save_meta(source, meta)
+
+
+async def _ensure_transcript(
+    job_id: str, source: Path, meta: dict, profile: str | None
+) -> Path:
+    """Reuse a transcript already on disk, or transcribe ``source`` now."""
+    files = dict(meta.get("files") or {})
+    found = find_transcript(source, files, meta.get("transcript_text", ""))
+    if found is not None:
+        _job_log(job_id, f"♻ Reusing transcript ({found.origin}): {found.path}")
+        _record_transcript(source, meta, found.path)
+        return found.path
+
+    pub = _publish_cfg(profile)
+    mode = str(pub.get("transcript_mode", "normal") or "normal")
+    if mode == "none":
+        raise RuntimeError(
+            "Transcript mode is disabled in the publish config; enable it or add "
+            f"{source.stem}_transcript.txt next to the video"
+        )
+    txt = source.parent / f"{source.stem}_transcript.txt"
+    cmd = [
+        _video(), "extract-transcript", str(source),
+        "-o", str(txt), "--format", "txt",
+        "-l", str(pub.get("transcript_language", "fr") or "fr"),
+        "-m", str(pub.get("transcript_model", "medium") or "medium"),
+    ]
+    if mode == "groq":
+        cmd.append("--use-groq")
+    _job_log(job_id, "No transcript found — transcribing now (this can take a while)…")
+    await _run_and_log(job_id, cmd, env=_job_env(profile))
+    if not txt.exists():
+        raise RuntimeError("Transcription finished but no transcript file was written")
+    _record_transcript(source, meta, txt)
+    return txt
+
+
+async def _suggest_worker(job_id: str, source: Path, kind: str) -> None:
+    try:
+        meta = _load_meta(source)
+        profile = str(meta.get("profile") or "").strip() or None
+        scene_name, title_name = _suggestion_prompt_names(profile)
+        name = scene_name if kind == "scene" else title_name
+        transcript = await _ensure_transcript(job_id, source, meta, profile)
+        _job_log(job_id, f"prompt apply {name}")
+        stdout = await _run_and_log(
+            job_id,
+            [_prompt(), "apply", name, f"transcript=@{transcript}"],
+            env=_job_env(profile),
+        )
+        text = stdout.strip()
+        if not text:
+            raise RuntimeError(f"Prompt {name!r} returned no text")
+        meta = _load_meta(source)
+        key = "thumbnail_prompt" if kind == "scene" else "thumbnail_overlay_title"
+        meta[key] = text
+        _save_meta(source, meta)
+        _finish_job(job_id, {kind: text, "transcript": str(transcript)})
+        logger.info("yt_thumbnail_suggest_done", job_id=job_id, kind=kind, source=str(source))
+    except Exception as exc:
+        _finish_job(job_id, error=str(exc))
+
+
+def _start_suggestion(req: SuggestRequest, kind: str) -> dict:
+    root = _source_dir()
+    source = _resolve_video(req.source, root)
+    job_id = _new_job(f"suggest-{kind}", str(source))
+    asyncio.create_task(_suggest_worker(job_id, source, kind))
+    logger.info("yt_thumbnail_suggest_start", job_id=job_id, kind=kind, source=str(source))
+    return {"job_id": job_id}
+
+
+@router.post("/suggest-scene")
+async def suggest_scene(req: SuggestRequest):
+    """Suggest an image prompt for the selected video (reuses its transcript)."""
+    return _start_suggestion(req, "scene")
+
+
+@router.post("/suggest-overlay-title")
+async def suggest_overlay_title(req: SuggestRequest):
+    """Suggest the short overlay text for the selected video."""
+    return _start_suggestion(req, "title")
 
 
 def _update_meta_after(
@@ -810,6 +973,11 @@ async def _overlay_worker(
         out_dir = source.parent
         stem = source.stem
         version = int(meta.get("thumbnail_version", 0) or 0)
+        # Re-applying on the current versioned base updates that version in
+        # place; a base imported from disk (or an older version) gets a new
+        # slot so nothing already in the history is overwritten.
+        if not version or not Path(base).name.startswith(f"{stem}_thumb_{version}"):
+            version = _next_version(out_dir, stem)
         ov = _fill_overlay(req.overlay)
         subtitle = req.subtitle.strip()
         cmd = [_image(), "overlay", base, "--title", title, "-F", "json"]
@@ -825,8 +993,8 @@ async def _overlay_worker(
         if not new_path or not Path(new_path).expanduser().exists():
             raise RuntimeError("output path not found in command output")
         # Overlay reuses the current version slot (same base, new text).
-        new_path, renamed_base = _place_thumb(out_dir, stem, new_path, base, version or 1)
-        _update_meta_after(source, new_path, renamed_base or base, version or 1,
+        new_path, renamed_base = _place_thumb(out_dir, stem, new_path, base, version)
+        _update_meta_after(source, new_path, renamed_base or base, version,
                            overlay_title=title, overlay_subtitle=subtitle)
         _finish_job(job_id, {"thumbnail": new_path, "base": renamed_base or base})
     except Exception as exc:
@@ -864,6 +1032,61 @@ async def upload_sources(
     if not saved:
         raise HTTPException(status_code=400, detail="No files uploaded")
     return {"sources": saved}
+
+
+@router.post("/upload-base")
+async def upload_base(
+    source: str = Form(""),
+    file: UploadFile = File(...),
+):
+    """Import an external image to use as the overlay base.
+
+    The goal is to apply an overlay title on a hand-made / external image and
+    push the result. The file is copied into the video source dir as
+    ``<stem>_ext_<id>.<ext>`` so ``/overlay`` and ``/push-thumbnail`` can
+    resolve it with the usual containment rules.
+    """
+    root = _source_dir()
+    src = _resolve_video(source, root) if source.strip() else None
+    stem = src.stem if src is not None else DRAFT_STEM
+    out_dir = src.parent if src is not None else root
+
+    ext = Path(file.filename or "").suffix.lower() or ".png"
+    if ext not in SOURCE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported image format: {file.filename}"
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    target = out_dir / f"{stem}_ext_{uuid.uuid4().hex[:8]}{ext}"
+    target.write_bytes(data)
+
+    from PIL import Image
+
+    try:
+        with Image.open(target) as img:
+            width, height = img.size
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400, detail=f"Not a readable image: {file.filename}"
+        )
+
+    logger.info(
+        "yt_thumbnail_base_upload",
+        source=str(src) if src is not None else "",
+        path=str(target),
+        width=width,
+        height=height,
+    )
+    return {
+        "path": str(target.resolve()),
+        "name": target.name,
+        "width": width,
+        "height": height,
+    }
 
 
 @router.post("/push-thumbnail")

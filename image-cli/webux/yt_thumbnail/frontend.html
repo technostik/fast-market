@@ -7,13 +7,22 @@ button { cursor:pointer; }
 button:hover { background:var(--accent); }
 button:disabled { opacity:.45; cursor:default; }
 .btn-primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
-.grid { display:grid; grid-template-columns: 300px 1fr 300px; gap:12px; }
+.grid { display:grid; grid-template-columns: 280px minmax(0, 1fr) 400px; gap:12px; }
+@media (max-width: 1400px) { .grid { grid-template-columns: 260px minmax(0, 1fr) 360px; } }
 @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
 .card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:12px; }
 .card h3 { margin:0 0 8px 0; font-size:14px; }
 .row { display:flex; gap:8px; margin-bottom:8px; align-items:center; flex-wrap:wrap; }
 .row label { font-size:12px; color:var(--text-dim); min-width:110px; }
 .row input[type=text], .row input[type=number], .row select, .row textarea { flex:1; min-width:0; }
+/* Stacked field: label above a full-width input (overlay title/subtitle). */
+.field { display:flex; flex-direction:column; gap:4px; margin-bottom:8px; }
+.field > label { font-size:12px; color:var(--text-dim); }
+.field > input, .field > .row { width:100%; }
+.field > .row { margin-bottom:0; }
+.field > .row input[type=text] { flex:1 1 auto; min-width:120px; }
+.field-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.field-head button { padding:2px 8px; font-size:11px; }
 .hint { font-size:11px; color:var(--text-dim); }
 .src-slot { display:flex; gap:6px; margin-bottom:6px; align-items:center; }
 .src-slot input { flex:1; min-width:0; font-size:12px; }
@@ -31,7 +40,18 @@ input[type=range] { flex:1; padding:0; }
 <body>
 <main class="webux-page">
   <h2>🖼️ YT Thumbnail composer</h2>
-  <div class="hint" style="margin-bottom:10px">Compose a 1280×720 thumbnail from up to 4 source images (multi-image compose via <code>-R</code> refs), re-apply overlay text in the long_publish style, then iterate with small edits. A video is required only to push the result to YouTube. Until then, files are saved in the video folder as <code>thumbnail_draft_thumb[_overlay]_&lt;N&gt;</code>.</div>
+  <div class="hint" style="margin-bottom:10px">Compose a 1280×720 thumbnail from up to 4 source images (multi-image compose via <code>-R</code> refs), re-apply overlay text in the long_publish style, then iterate with small edits. Pick a working video to reuse the scene / overlay title suggested by Long Publish, write the result next to that video, and push it to YouTube.</div>
+
+  <div class="card">
+    <h3>🎞️ Working video</h3>
+    <div class="row">
+      <label>Video source dir</label><input id="srcDir" type="text"><button id="refreshBtn">↻ Refresh</button>
+    </div>
+    <div class="row">
+      <label>Video</label><select id="videoSel"><option value="">— none (draft workspace) —</option></select>
+    </div>
+    <div class="hint">Selecting a video loads its thumbnails and prefills the scene prompt + overlay title saved by Long Publish (or suggested here). Compose, edit and overlay then write <code>&lt;video&gt;_thumb_*</code>; with no video selected they keep writing <code>thumbnail_draft_*</code>.</div>
+  </div>
 
   <div class="grid">
     <div>
@@ -59,8 +79,10 @@ input[type=range] { flex:1; padding:0; }
         <div class="row"><textarea id="promptInp" rows="3" style="width:100%" placeholder="Describe the thumbnail scene, e.g. “put image 0 on a neon stage, dramatic light”"></textarea></div>
         <div class="row">
           <button class="btn-primary" id="composeBtn">✨ Compose thumbnail</button>
+          <button id="suggestSceneBtn" disabled title="Suggest the scene prompt from the transcript (transcribes it on the fly if needed)">🎬 Suggest scene</button>
           <span id="composeOut" class="hint"></span>
         </div>
+        <div class="hint">“Suggest scene” needs a working video; it reuses an existing transcript or transcribes the video first.</div>
       </div>
       <div class="card">
         <h3>🔎 Current</h3>
@@ -81,8 +103,28 @@ input[type=range] { flex:1; padding:0; }
     <div>
       <div class="card">
         <h3>🏷️ Overlay text (long_publish style)</h3>
-        <div class="row"><label>Title</label><input id="ovTitle" type="text"></div>
-        <div class="row"><label>Subtitle</label><input id="ovSubtitle" type="text" placeholder="optional — same font, ⅓ smaller, top, centered, no band"></div>
+        <div class="field">
+          <div class="field-head">
+            <label for="ovTitle">Title</label>
+            <button id="suggestTitleBtn" disabled title="Suggest the overlay title from the transcript">💡 Suggest</button>
+          </div>
+          <input id="ovTitle" type="text" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="ovSubtitle">Subtitle</label>
+          <input id="ovSubtitle" type="text" placeholder="optional — same font, ⅓ smaller, top, centered, no band">
+        </div>
+        <div class="field">
+          <div class="field-head">
+            <label for="baseFile">Base image (external)</label>
+            <span class="hint" id="baseSrc"></span>
+          </div>
+          <div class="row">
+            <input id="baseFile" type="file" accept="image/*">
+            <button id="useBaseBtn">📂 Use this image</button>
+          </div>
+          <div class="hint">Pick an image from disk to apply the overlay title on it, then push the result. Without one, the overlay is applied on the current base.</div>
+        </div>
         <div class="row"><label>Text color (fg)</label><input id="ovFg" type="text" placeholder="e.g. white / #ff0000"></div>
         <div class="row"><label>Background (bg)</label><input id="ovBg" type="text" placeholder="e.g. black / none"></div>
         <div class="row"><label>Effect</label><select id="ovEffect"><option value="">— default —</option><option>none</option><option>box</option><option>shadow</option><option>band</option></select></div>
@@ -95,15 +137,9 @@ input[type=range] { flex:1; padding:0; }
       </div>
       <div class="card">
         <h3>🚀 Publish</h3>
-        <div class="row">
-          <label>Video source dir</label><input id="srcDir" type="text"><button id="refreshBtn">↻ Refresh</button>
-        </div>
-        <div class="row">
-          <label>Video</label><select id="videoSel"><option value="">— select to push —</option></select>
-        </div>
-        <div class="hint">Required only for “Push thumbnail to YouTube”. Compose, edit and overlay work with no video selected.</div>
-        <div class="row"><button id="pushBtn">⬆ Push thumbnail to YouTube</button></div>
+        <div class="row"><button id="pushBtn" disabled>⬆ Push thumbnail to YouTube</button></div>
         <div class="row"><span id="pushOut" class="hint"></span></div>
+        <div class="hint" id="pushHint">Select a published video with a thumbnail on screen to enable push.</div>
       </div>
     </div>
   </div>
@@ -233,46 +269,87 @@ async function loadVideos() {
   const r = await fetch(API + '/list-videos?path=' + encodeURIComponent(dir));
   const d = await r.json();
   if (d.error) { status(d.error, 'err'); return; }
-  const sel = el('videoSel'); sel.innerHTML = '<option value="">— select —</option>';
+  const sel = el('videoSel');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— none (draft workspace) —</option>';
   (d.videos || []).forEach(v => {
     const o = document.createElement('option'); o.value = v.path;
-    o.textContent = v.name + (v.has_thumbnail ? ' 🖼' : '');
+    o.textContent = v.name + (v.has_thumbnail ? ' 🖼' : '') + (v.video_url ? ' ▶' : '');
     sel.appendChild(o);
   });
+  if (cur && (d.videos || []).some(v => v.path === cur)) sel.value = cur;
   status(`Loaded ${(d.videos || []).length} videos from ${dir}`, 'ok');
+  await refreshCurrent(sel.value);
 }
 function rememberThumb(path, base) {
   if (path) { el('curImg').src = imgUrl(path); window._currentThumb = path; }
   else { el('curImg').removeAttribute('src'); window._currentThumb = ''; }
   if (base) el('baseImg').src = imgUrl(base); else el('baseImg').removeAttribute('src');
+  el('baseSrc').textContent = base ? String(base).split('/').pop() : '';
 }
-async function refreshCurrent() {
-  const r = await fetch(API + '/history');
+// Prefill a field with a suggestion unless the user typed in it. The
+// autofilled value is remembered so switching videos can refresh it.
+function autofill(input, value) {
+  if (!value) return;
+  const auto = input.dataset.auto || '';
+  if (!input.dataset.touched || input.value.trim() === auto) {
+    input.value = value;
+    input.dataset.auto = value;
+    delete input.dataset.touched;
+  }
+}
+function updateActionState() {
+  const hasVideo = !!el('videoSel').value;
+  const hasThumb = !!window._currentThumb;
+  el('suggestSceneBtn').disabled = !hasVideo;
+  el('suggestTitleBtn').disabled = !hasVideo;
+  el('pushBtn').disabled = !(hasVideo && window._published && hasThumb);
+  const hint = el('pushHint');
+  if (!hasVideo) hint.textContent = 'Select a working video to push a thumbnail.';
+  else if (!window._published) hint.textContent = 'This video has no YouTube upload yet.';
+  else if (!hasThumb) hint.textContent = 'Compose or pick a thumbnail first.';
+  else hint.textContent = 'Pushes the thumbnail shown in “Current”.';
+}
+async function refreshCurrent(source) {
+  const q = source ? '?source=' + encodeURIComponent(source) : '';
+  const r = await fetch(API + '/history' + q);
   const d = await r.json();
   rememberThumb(d.current, d.base);
-  if (d.overlay_title && !el('ovTitle').value) el('ovTitle').value = d.overlay_title;
+  // Long-publish (or a previous suggestion here) is the starting point.
+  autofill(el('promptInp'), d.scene_suggestion || '');
+  autofill(el('ovTitle'), d.overlay_title || '');
   if (d.overlay_subtitle && !el('ovSubtitle').value) el('ovSubtitle').value = d.overlay_subtitle;
+  window._published = !!d.published;
+  updateActionState();
   const strip = el('histStrip'); strip.innerHTML = '';
   (d.versions || []).slice().reverse().forEach(v => {
     const im = document.createElement('img'); im.src = imgUrl(v.path); im.title = v.name;
     if (v.path === d.current) im.className = 'current';
     im.onclick = async () => {
       // Click a version to make it the base for the next overlay/edit.
-      const paths = sourcePaths();
       status(`Selected ${v.name} — use “Small change” (as base) or set overlay then Apply.`);
       window._pickedBase = v.path;
+      el('baseImg').src = imgUrl(v.path);
+      el('baseSrc').textContent = v.name;
     };
     strip.appendChild(im);
   });
 }
 
 el('refreshBtn').onclick = loadVideos;
+el('videoSel').addEventListener('change', async () => {
+  window._pickedBase = '';
+  await refreshCurrent(el('videoSel').value);
+});
+el('promptInp').addEventListener('input', () => { el('promptInp').dataset.touched = '1'; });
+el('ovTitle').addEventListener('input', () => { el('ovTitle').dataset.touched = '1'; });
 el('strengthInp').oninput = () => { el('strengthVal').textContent = Number(el('strengthInp').value).toFixed(2); };
 
 el('uploadBtn').onclick = async () => {
   const files = el('uploadFiles').files;
   if (!files.length) { status('Pick files first', 'err'); return; }
   const fd = new FormData();
+  fd.append('source', el('videoSel').value);
   [...files].slice(0, 4).forEach(f => fd.append('files', f));
   status('Uploading…');
   const r = await fetch(API + '/upload-sources', { method: 'POST', body: fd });
@@ -282,10 +359,33 @@ el('uploadBtn').onclick = async () => {
   status(`Uploaded ${d.sources.length} source image(s)`, 'ok');
 };
 
+// Import a finished / external image and use it as the overlay base. This is
+// the "burn the title onto my own image, then push it" path.
+el('useBaseBtn').onclick = async () => {
+  const f = el('baseFile').files[0];
+  if (!f) { status('Choose an image file first', 'err'); return; }
+  const fd = new FormData();
+  fd.append('source', el('videoSel').value);
+  fd.append('file', f);
+  status('Importing image…');
+  const r = await fetch(API + '/upload-base', { method: 'POST', body: fd });
+  const d = await r.json();
+  if (!r.ok) { status(d.detail || 'Import failed', 'err'); return; }
+  window._pickedBase = d.path;
+  el('baseImg').src = imgUrl(d.path);
+  el('baseSrc').textContent = `${d.name} · ${d.width}×${d.height}`;
+  el('baseFile').value = '';
+  if (d.width !== 1280 || d.height !== 720) {
+    status(`Imported ${d.name} (${d.width}×${d.height}) — YouTube thumbnails should be 1280×720.`, 'err');
+  } else {
+    status(`Imported ${d.name} — set the overlay title, then Apply overlay.`, 'ok');
+  }
+};
+
 el('composeBtn').onclick = async () => {
   const refs = sourcePaths();
   if (!el('promptInp').value.trim()) { status('Enter a prompt', 'err'); return; }
-  const body = { prompt: el('promptInp').value.trim(), engine: el('engineSel').value,
+  const body = { source: el('videoSel').value, prompt: el('promptInp').value.trim(), engine: el('engineSel').value,
     sources: refs, title: el('ovTitle').value.trim(), subtitle: el('ovSubtitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
   status('Composing… (live log in the Console below)');
   const d = await runJob(API + '/compose', body, el('composeOut'), 'Composing…');
@@ -293,13 +393,13 @@ el('composeBtn').onclick = async () => {
   if (!d) return;
   el('composeOut').textContent = `Done v${d.version} (${String(d.thumbnail).split('/').pop()})`;
   window._currentThumb = d.thumbnail || '';
-  await refreshCurrent();
+  await refreshCurrent(el('videoSel').value);
   status(`Composed ${d.thumbnail}`, 'ok');
 };
 
 el('editBtn').onclick = async () => {
   if (!el('editPrompt').value.trim()) { status('Describe the small change', 'err'); return; }
-  const body = { prompt: el('editPrompt').value.trim(), base: window._pickedBase || '',
+  const body = { source: el('videoSel').value, prompt: el('editPrompt').value.trim(), base: window._pickedBase || '',
     engine: el('engineSel').value, strength: Number(el('strengthInp').value),
     title: el('ovTitle').value.trim(), subtitle: el('ovSubtitle').value.trim(), overlay: overlayOpts(), ...genOpts() };
   status('Editing… (live log in the Console below)');
@@ -308,22 +408,45 @@ el('editBtn').onclick = async () => {
   if (!d) return;
   window._pickedBase = '';
   el('editOut').textContent = `Done v${d.version} via ${d.mode}`;
-  await refreshCurrent();
+  await refreshCurrent(el('videoSel').value);
   status(`Edited (${d.mode}): ${d.thumbnail}`, 'ok');
 };
 
 el('overlayBtn').onclick = async () => {
   if (!el('ovTitle').value.trim()) { status('Enter an overlay title', 'err'); return; }
-  const body = { base: window._pickedBase || '', title: el('ovTitle').value.trim(), subtitle: el('ovSubtitle').value.trim(), overlay: overlayOpts() };
+  const body = { source: el('videoSel').value, base: window._pickedBase || '', title: el('ovTitle').value.trim(), subtitle: el('ovSubtitle').value.trim(), overlay: overlayOpts() };
   status('Applying overlay… (live log in the Console below)');
   const d = await runJob(API + '/overlay', body, el('overlayOut'), 'Applying…');
   clearBusy();
   if (!d) return;
   window._pickedBase = '';
   el('overlayOut').textContent = 'Done';
-  await refreshCurrent();
+  await refreshCurrent(el('videoSel').value);
   status(`Overlay applied: ${d.thumbnail}`, 'ok');
 };
+
+// ── Suggestions (scene prompt / overlay title) ─────────────────────────────
+async function runSuggestion(url, outEl, apply) {
+  const src = el('videoSel').value;
+  if (!src) { status('Select a working video first', 'err'); return; }
+  status('Suggesting… (reuses the transcript, transcribes it if needed)');
+  const d = await runJob(API + url, { source: src }, outEl, 'Suggesting…');
+  outEl.textContent = '';
+  if (!d) return;
+  apply(d);
+}
+el('suggestSceneBtn').onclick = () => runSuggestion('/suggest-scene', el('composeOut'), d => {
+  el('promptInp').value = d.scene;
+  el('promptInp').dataset.auto = d.scene;
+  delete el('promptInp').dataset.touched;
+  status('Scene suggested — review it, then Compose.', 'ok');
+});
+el('suggestTitleBtn').onclick = () => runSuggestion('/suggest-overlay-title', el('overlayOut'), d => {
+  el('ovTitle').value = d.title;
+  el('ovTitle').dataset.auto = d.title;
+  delete el('ovTitle').dataset.touched;
+  status('Overlay title suggested — review it, then Apply overlay.', 'ok');
+});
 
 el('pushBtn').onclick = async () => {
   const src = el('videoSel').value;
@@ -337,6 +460,6 @@ el('pushBtn').onclick = async () => {
 };
 
 buildSlots([]);
-(async () => { await loadConfig(); await loadEngines(); await loadVideos(); await refreshCurrent(); })();
+(async () => { await loadConfig(); await loadEngines(); await loadVideos(); updateActionState(); })();
 </script>
 </body></html>

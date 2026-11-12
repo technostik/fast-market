@@ -65,50 +65,6 @@ def test_config_roundtrip_default_category(store):
     assert cfg["default_category"] == "28"
 
 
-def test_resolve_overlay_defaults_falls_back_to_config(store):
-    store["thumbnail_overlay_size_pct"] = 130
-    store["thumbnail_overlay_offset"] = 15
-    store["thumbnail_overlay_fg"] = "red"
-    store["thumbnail_overlay_bg"] = "black"
-    store["thumbnail_overlay_effect"] = "band"
-    store["thumbnail_overlay_band_size"] = 33
-    fg, bg, effect, size_pct, offset, band = reg._resolve_overlay_defaults({}, store)
-    assert (fg, bg, effect, band) == ("red", "black", "band", 33)
-    assert size_pct == 130
-    assert offset == 15
-
-
-def _make_source(tmp_path: Path, overlay_title: str = "") -> str:
-    src = tmp_path / "vid.mp4"
-    src.write_text("x")
-    meta = {"files": {}, "thumbnail_overlay_title": overlay_title}
-    (tmp_path / "vid-long-meta.json").write_text(json.dumps(meta))
-    return str(src)
-
-
-def test_replace_base_image(tmp_path, store, monkeypatch):
-    monkeypatch.setattr(reg, "_image", lambda: "image")
-    monkeypatch.setattr(reg, "_resolve_overlay_defaults",
-                        lambda meta, cfg: ("", "", "", 0, 0, 0))
-    monkeypatch.setattr(reg, "_append_overlay_opts", lambda *a, **k: [])
-
-    from PIL import Image
-    img = tmp_path / "in.png"
-    Image.new("RGB", (10, 10), (255, 0, 0)).save(img)
-
-    src = _make_source(tmp_path, overlay_title="")
-    from fastapi import FastAPI
-    app = FastAPI(); app.include_router(reg.router)
-    with TestClient(app) as client:
-        r = client.post("/replace-base-image",
-                        data={"source": src, "base_image": str(img)})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert Path(body["base"]).exists()
-    # base renamed to <stem>_thumb_<N><ext>
-    assert body["base"].endswith("_thumb_1.png")
-
-
 @pytest.mark.parametrize(
     "raw, expected",
     [

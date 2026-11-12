@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from common import structlog
 from common.core.config import ConfigError, load_tool_config, save_tool_config
+from common.webux.transcripts import ass_to_plain_text
 from .models import DEFAULT_VIDEO_EXTENSIONS, LEGACY_VIDEO_EXTENSIONS
 
 logger = structlog.get_logger(__name__)
@@ -264,20 +265,9 @@ def _job_env(job) -> dict:
     return env
 
 
-def _ass_to_plain_text(ass_path: str) -> str:
-    lines = []
-    with open(ass_path, encoding="utf-8") as f:
-        for line in f:
-            if not line.startswith("Dialogue:"):
-                continue
-            parts = line.split(",", 9)
-            if len(parts) < 10:
-                continue
-            text = parts[9].strip()
-            text = re.sub(r"\{[^}]*\}", "", text)
-            if text:
-                lines.append(text)
-    return "\n".join(lines)
+#: Kept as a module attribute so existing `from .utils import _ass_to_plain_text`
+#: imports keep working; the implementation is shared with yt_thumbnail.
+_ass_to_plain_text = ass_to_plain_text
 
 
 async def _get_video_duration(path: str) -> float:

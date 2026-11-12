@@ -152,8 +152,8 @@
     </div>
     <div class="row"><label>Crossfade at cuts</label><input id="cfgRhyXfade" type="number" min="0" step="0.001" placeholder="0.008"></div>
     <div class="cols2">
-      <div class="row"><label>Thumbnail image prompt <span class="prompt-info" id="infoThumb" data-content="">ⓘ</span></label><select id="cfgThumbPrompt"><option value="">— none (disabled) —</option></select></div>
-      <div class="row"><label>Thumbnail overlay prompt <span class="prompt-info" id="infoOverlay" data-content="">ⓘ</span></label><select id="cfgThumbOverlay"><option value="">— none (disabled) —</option></select></div>
+      <div class="row"><label>Thumbnail image prompt <span class="prompt-info" id="infoThumb" data-content="">ⓘ</span></label><select id="cfgThumbPrompt"><option value="">— default (youtube-thumbnail) —</option></select></div>
+      <div class="row"><label>Thumbnail overlay prompt <span class="prompt-info" id="infoOverlay" data-content="">ⓘ</span></label><select id="cfgThumbOverlay"><option value="">— default (youtube-thumbnail-title) —</option></select></div>
     </div>
     <div class="row"><label>Thumbnail engine (image model)</label><input id="cfgThumbEngine" type="text" placeholder="leave empty for default"></div>
     <div class="cols2">
@@ -245,47 +245,9 @@
       </div>
 
       <hr>
-      <div class="row">
-        <label>🖼 Regenerate thumbnail (already published video)</label>
-      </div>
-      <div class="row" id="thumbCurWrap" style="display:none;">
-        <label>Current thumbnail</label>
-        <img class="thumb-preview" id="thumbCur" src="">
-      </div>
-      <div class="row"><label>New image prompt <span class="hint">(used by "Regenerate image")</span></label><textarea id="regenImagePrompt" rows="2" placeholder="generate a brand new base image from this prompt"></textarea></div>
-      <div class="cols2">
-        <div class="row"><label>Image engine</label><select id="regenEngine"><option value="">— config default —</option></select></div>
-        <div class="row"><label>New overlay title <span class="hint">(used by "Regenerate overlay")</span></label><input id="regenOverlayTitle" type="text"></div>
-      </div>
-      <div class="row"><label>Subtitle <span class="hint">(optional — top, centered, no band; empty keeps the stored one)</span></label><input id="regenOverlaySubtitle" type="text"></div>
-      <div class="cols2">
-        <div class="row"><label>Text color (fg)</label><input id="regenFg" type="text" placeholder="from config if empty"></div>
-        <div class="row"><label>Background (bg)</label><input id="regenBg" type="text" placeholder="from config if empty"></div>
-      </div>
-      <div class="cols2">
-        <div class="row"><label>Font size (× % of default) <span class="hint">e.g. 120 = +20%</span></label><input id="regenSizePct" type="number" min="10" max="400" step="5" placeholder="100 = default"></div>
-        <div class="row"><label>Drop offset (% down) <span class="hint">e.g. 10 = band + text +10%</span></label><input id="regenOffset" type="number" min="-50" max="80" step="1" placeholder="0 = default"></div>
-      </div>
-      <div class="cols2">
-        <div class="row" style="align-self:flex-end; gap:8px;">
-          <button class="btn-sec" id="regenImgBtn">🖼 Regenerate image</button>
-          <button class="btn-sec" id="regenOverlayBtn">🏷 Regenerate overlay</button>
-        </div>
-      </div>
-      <div class="upload-box" style="margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:8px;">
-        <div class="row"><label>Video — required only to push this thumbnail to YouTube</label>
-          <select id="thumbVidSel"><option value="">— select to push —</option></select>
-        </div>
-        <div class="row"><button class="btn-go" id="pushYtBtn" disabled>🛠 Update YouTube</button></div>
-      </div>
-      <div class="row">
-        <label>Replace base image (no overlay) from disk</label>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input id="baseFile" type="file" accept="image/*">
-          <button class="btn-sec" id="replaceBaseBtn">📂 Use this image</button>
-        </div>
-      </div>
-      <pre class="log-box" id="regenOut" style="display:none;"></pre>
+      <div class="hint">🖼 Thumbnails for published videos are edited in the
+        <a href="/yt_thumbnail" target="_blank">YT Thumbnail</a> tab — it reuses
+        the scene and overlay title suggested by this run.</div>
 
       <div class="steps" id="steps"></div>
       <pre class="log-box" id="logBox"></pre>
@@ -486,7 +448,6 @@ async function saveConfig(){
     });
   }
   await loadVideos();
-  await loadThumbVideos();
 }
 
 async function loadVideos(selectLatest){
@@ -732,141 +693,22 @@ el('cfgToggle').addEventListener('click', ()=>{
 el('cfgSave').addEventListener('click', saveConfig);
 
 
-// ── Thumbnail regeneration ──────────────────────────────────────────────────
+// ── Thumbnail engine (this run) ─────────────────────────────────────────────
 async function loadEngines(){
   const r = await fetch(API+'/list-engines').catch(()=>null);
   const data = r ? await r.json() : {engines:[], default:''};
   const engines = data.engines || [];
   const blank = '— config default ('+(data.default||'image default')+') —';
-  for (const sel of [el('regenEngine'), el('thumbEngine')]){
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">'+blank+'</option>';
-    for (const e of engines){
-      const o = document.createElement('option');
-      o.value = e; o.textContent = e === data.default ? e+' (default)' : e;
-      sel.appendChild(o);
-    }
-    if (cur && engines.includes(cur)) sel.value = cur;
-  }
-}
-async function loadThumbVideos(){
-  const path = el('cfgSourcePath').value || '';
-  const ext = el('cfgExt').value || '';
-  const r = await fetch(API+'/list-thumbnails?path='+encodeURIComponent(path)+'&extensions='+encodeURIComponent(ext)).catch(()=>null);
-  const data = r ? await r.json() : {videos:[], draft:null};
-  // The select resolves the YouTube video to update, so list every published
-  // video plus any video that already has a thumbnail (not just the latter:
-  // a just-uploaded video may have no thumbnail yet).
-  const videos = (data.videos||[]).filter(v=>v.has_thumbnail || v.video_url);
-  const sel = el('thumbVidSel');
+  const sel = el('thumbEngine');
   const cur = sel.value;
-  const label = v=>v.name+(v.video_url?' ▶ published':'')+(v.has_thumbnail?'':' (no thumb)');
-  sel.innerHTML = '<option value="">— select video (optional) —</option>' + videos.map(v=>`<option value="${v.path}">${label(v)}</option>`).join('');
-  if (cur) sel.value = cur;
-  applyDraftThumb(data.draft);
-}
-function pushReady(thumb){
-  el('pushYtBtn').dataset.thumbnail = thumb || '';
-  el('pushYtBtn').disabled = !(thumb && el('thumbVidSel').value);
-}
-function applyDraftThumb(draft){
-  if (el('thumbVidSel').value) return;
-  if (draft && draft.thumbnail){
-    el('thumbCur').src = API+'/download?file='+encodeURIComponent(draft.thumbnail)+'&t='+Date.now();
-    el('thumbCurWrap').style.display='block';
-    pushReady(draft.thumbnail);
-  } else {
-    el('thumbCurWrap').style.display='none';
-    pushReady('');
+  sel.innerHTML = '<option value="">'+blank+'</option>';
+  for (const e of engines){
+    const o = document.createElement('option');
+    o.value = e; o.textContent = e === data.default ? e+' (default)' : e;
+    sel.appendChild(o);
   }
+  if (cur && engines.includes(cur)) sel.value = cur;
 }
-el('thumbVidSel').addEventListener('change', ()=>{
-  const path = el('thumbVidSel').value;
-  el('pushYtBtn').disabled = true;
-  fetch(API+'/list-thumbnails?path='+encodeURIComponent(el('cfgSourcePath').value||'')+'&extensions='+encodeURIComponent(el('cfgExt').value||''))
-    .then(x=>x.json()).catch(()=>({videos:[], draft:null})).then(data=>{
-      const v = (data.videos||[]).find(x=>x.path===path);
-      if (v && v.thumbnail){
-        el('thumbCurWrap').style.display='block';
-        el('thumbCur').src = API+'/download?file='+encodeURIComponent(v.thumbnail)+'&t='+Date.now();
-        pushReady(v.thumbnail);
-      } else if (data.draft && data.draft.thumbnail){
-        el('thumbCurWrap').style.display='block';
-        el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.draft.thumbnail)+'&t='+Date.now();
-        pushReady(data.draft.thumbnail);
-      } else {
-        el('thumbCurWrap').style.display='none';
-        pushReady('');
-      }
-    });
-});
-function regenThumbnail(mode){
-  return async ()=>{
-    const source = el('thumbVidSel').value;
-    const title = el('regenOverlayTitle').value;
-    const imagePrompt = el('regenImagePrompt').value;
-    if (mode === 'image' && !imagePrompt.trim()){ alert('Enter an image prompt for "Regenerate image"'); return; }
-    if (mode === 'overlay' && !title.trim()){ alert('Enter an overlay title for "Regenerate overlay"'); return; }
-    el('regenOut').style.display='block';
-    el('regenOut').textContent = (mode === 'image' ? 'Generating image…' : 'Regenerating overlay…');
-    el('pushYtBtn').disabled = true;
-    // UX values override config defaults; fall back to config when blank.
-    const sizePct = Number(el('regenSizePct').value) || Number(el('cfgThumbSizePct').value) || 0;
-    const offset = Number(el('regenOffset').value) || Number(el('cfgThumbOffset').value) || 0;
-    const body = {
-      source,
-      mode,
-      image_prompt: imagePrompt,
-      engine: el('regenEngine').value,
-      overlay_title: title,
-      overlay_subtitle: el('regenOverlaySubtitle').value,
-      overlay_fg: el('regenFg').value || el('cfgThumbFg').value,
-      overlay_bg: el('regenBg').value || el('cfgThumbBg').value,
-      overlay_effect: el('cfgThumbEffect').value,
-      overlay_band_size: Number(el('cfgThumbBand').value) || 0,
-      overlay_size_pct: sizePct,
-      overlay_offset: offset,
-    };
-    const r = await fetch(API+'/regenerate-thumbnail', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    const data = await r.json();
-    if (!r.ok){ el('regenOut').textContent = 'Error: '+(data.detail||''); return; }
-    el('regenOut').textContent = 'Done. New thumbnail: '+data.thumbnail;
-    el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.thumbnail)+'&t='+Date.now();
-    el('thumbCurWrap').style.display='block';
-    pushReady(data.thumbnail);
-  };
-}
-el('regenImgBtn').addEventListener('click', regenThumbnail('image'));
-el('regenOverlayBtn').addEventListener('click', regenThumbnail('overlay'));
-el('replaceBaseBtn').addEventListener('click', async ()=>{
-  const source = el('thumbVidSel').value;
-  const f = el('baseFile').files[0];
-  if (!f){ alert('Choose an image file first'); return; }
-  el('regenOut').style.display='block';
-  el('regenOut').textContent = 'Replacing base image…';
-  el('pushYtBtn').disabled = true;
-  const fd = new FormData();
-  fd.append('source', source);
-  fd.append('upload', f);
-  const r = await fetch(API+'/replace-base-image', { method:'POST', body: fd });
-  const data = await r.json();
-  if (!r.ok){ el('regenOut').textContent = 'Error: '+(data.detail||''); return; }
-  el('regenOut').textContent = 'Done. New base: '+data.base;
-  el('thumbCur').src = API+'/download?file='+encodeURIComponent(data.thumbnail)+'&t='+Date.now();
-  el('thumbCurWrap').style.display='block';
-  pushReady(data.thumbnail);
-});
-el('pushYtBtn').addEventListener('click', async ()=>{
-  const source = el('thumbVidSel').value;
-  if (!source){ alert('Select a video to push the thumbnail to'); return; }
-  el('pushYtBtn').disabled = true;
-  const body = { source, thumbnail: el('pushYtBtn').dataset.thumbnail||'' };
-  el('regenOut').textContent = 'Updating YouTube…';
-  const r = await fetch(API+'/push-thumbnail', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  const data = await r.json();
-  if (!r.ok){ el('regenOut').textContent = 'Error: '+(data.detail||''); el('pushYtBtn').disabled=false; return; }
-  el('regenOut').textContent = 'Thumbnail pushed to YouTube (video '+data.video_id+')';
-});
 
 function updateOverlayRow(){
   const show = el('doThumb').checked;
@@ -947,7 +789,6 @@ async function poll(){
   if (data.status === 'done' || data.status === 'error' || data.status === 'stopped'){
     stopPoll();
     refreshQuickPrompt();
-    loadThumbVideos();
   }
 }
 function startPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer = setInterval(poll, 1500); poll(); }
@@ -963,7 +804,6 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
   await loadVideos();
   await loadPrompts();
   await loadEngines();
-  await loadThumbVideos();
   await refreshQuickPrompt();
   // The page picker drives every profile-scoped call on this page.
   // data-profile-lock freezes it while an operation runs.
@@ -971,7 +811,6 @@ function stopPoll(){ if (pollTimer) clearInterval(pollTimer); pollTimer=null; }
     applyProfileTone();
     await loadConfig();
     await loadVideos();
-    await loadThumbVideos();
     await loadPrompts();
     await refreshQuickPrompt();
   });

@@ -9,6 +9,7 @@ from pathlib import Path
 from .models import Job, DEFAULT_VIDEO_SOURCE_PATH, RHYTHM_PARAM_FLAGS
 from .utils import (
     _load_publish_cfg,
+    _load_meta,
     _save_meta,
     _yt,
     _pr,
@@ -26,6 +27,7 @@ from .utils import (
     _job_env,
 )
 from ..video_corpus import maybe_add_to_corpus
+from common.webux.transcripts import find_transcript
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
 
 
@@ -230,7 +232,7 @@ async def _generate_image_prompt(job: Job, transcript_path: str, pub_cfg: dict) 
     configured thumbnail prompt applied to the transcript; falls back to the
     same image-prompt template storyboard uses; finally falls back to the
     video title."""
-    name = pub_cfg.get("default_thumbnail_prompt", "").strip()
+    name = pub_cfg.get("default_thumbnail_prompt", "").strip() or "youtube-thumbnail"
     if name and transcript_path and Path(transcript_path).exists():
         rc, out = await _run(job, None, _pr(), "apply", name, f"transcript=@{transcript_path}")
         if rc == 0 and out.strip():
@@ -276,8 +278,9 @@ async def _generate_from_storyboard_prompt(transcript_path: str) -> str:
 
 async def _generate_overlay_title(job: Job, transcript_path: str, pub_cfg: dict) -> str:
     """Build the overlay text for the thumbnail. Uses the configured overlay
-    prompt applied to the transcript; empty when none configured."""
-    name = pub_cfg.get("default_thumbnail_overlay_prompt", "").strip()
+    prompt applied to the transcript, defaulting to ``youtube-thumbnail-title``
+    (same seed as the long-publish Config picker)."""
+    name = pub_cfg.get("default_thumbnail_overlay_prompt", "").strip() or "youtube-thumbnail-title"
     if name and transcript_path and Path(transcript_path).exists():
         rc, out = await _run(job, None, _pr(), "apply", name, f"transcript=@{transcript_path}")
         if rc == 0 and out.strip():
@@ -289,6 +292,19 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
     stem = _stem(job.source)
     pub_cfg = _load_publish_cfg(getattr(job, "profile", None))
     d = Path(pub_cfg.get("video_source_path", DEFAULT_VIDEO_SOURCE_PATH)).expanduser().resolve()
+
+    # A previous run may have left a transcript behind (meta log + ASS, or a
+    # sidecar). Seed the job so find_transcript() can reuse it, without
+    # overwriting anything this job already produced.
+    if not job.files.get("transcript_txt") and not job.transcript_text:
+        previous = _load_meta(job.source)
+        prev_files = previous.get("files") or {}
+        for key in ("transcript_txt", "transcript"):
+            value = str(prev_files.get(key) or "").strip()
+            if value and Path(value).exists():
+                job.files.setdefault(key, value)
+        if previous.get("transcript_text"):
+            job.transcript_text = str(previous["transcript_text"])
 
     for i in range(from_step):
         if job.steps[i].status == "pending":
@@ -433,30 +449,55 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
                 job.files["audio"] = audio_out
                 rhythm_note += "\n🔊 Normalized"
 
-        cmd = [
-            _video(), "extract-transcript", current_video,
-            "-o", ass_path, "-l", job.language, "-m", job.model, "--format", "ass",
-        ]
-        if job.use_modal:
-            cmd.append("--modal")
-        if job.transcript_mode == "groq":
-            cmd.append("--use-groq")
-        if await _run_tracked(job, s1, *cmd):
-            return
-        s1.end_time = time.time()
-        elapsed_s = round(s1.end_time - s1.start_time, 1)
-        mode_label = "modal" if job.use_modal else "local"
-        plain = _ass_to_plain_text(ass_path)
-        s1.output = f"Done in {elapsed_s}s [{mode_label} mode]\n\nTranscript:\n{plain}"
-        if rhythm_note:
-            s1.output = f"{rhythm_note}\n{s1.output}"
-        s1.status = "done"; s1.progress = 100
-        with open(txt_path, "w", encoding="utf-8") as _f:
-            _f.write(plain)
-        job.files["transcript"] = ass_path
-        job.files["transcript_txt"] = txt_path
-        job.transcript_text = plain
-        _save_meta(job)
+        reused = find_transcript(job.source, job.files, job.transcript_text)
+        if reused is not None:
+            # A transcript already exists for this video (earlier run, a
+            # sidecar written by another pipeline, or the meta log). Reuse it
+            # instead of paying for another Whisper pass.
+            txt_path = str(reused.path)
+            plain = reused.text
+            s1.end_time = time.time()
+            elapsed_s = round(s1.end_time - s1.start_time, 1)
+            s1.output = (
+                f"♻ Reused existing transcript ({reused.origin}, {elapsed_s}s)\n\n"
+                f"Transcript:\n{plain}"
+            )
+            if rhythm_note:
+                s1.output = f"{rhythm_note}\n{s1.output}"
+            s1.status = "done"
+            s1.progress = 100
+            job.files["transcript_txt"] = txt_path
+            ass_existing = job.files.get("transcript", "")
+            if ass_existing and Path(ass_existing).exists():
+                job.files["transcript"] = ass_existing
+            job.transcript_text = plain
+            _save_meta(job)
+        else:
+            cmd = [
+                _video(), "extract-transcript", current_video,
+                "-o", ass_path, "-l", job.language, "-m", job.model, "--format", "ass",
+            ]
+            if job.use_modal:
+                cmd.append("--modal")
+            if job.transcript_mode == "groq":
+                cmd.append("--use-groq")
+            if await _run_tracked(job, s1, *cmd):
+                return
+            s1.end_time = time.time()
+            elapsed_s = round(s1.end_time - s1.start_time, 1)
+            mode_label = "modal" if job.use_modal else "local"
+            plain = _ass_to_plain_text(ass_path)
+            s1.output = f"Done in {elapsed_s}s [{mode_label} mode]\n\nTranscript:\n{plain}"
+            if rhythm_note:
+                s1.output = f"{rhythm_note}\n{s1.output}"
+            s1.status = "done"
+            s1.progress = 100
+            with open(txt_path, "w", encoding="utf-8") as _f:
+                _f.write(plain)
+            job.files["transcript"] = ass_path
+            job.files["transcript_txt"] = txt_path
+            job.transcript_text = plain
+            _save_meta(job)
     else:
         if (skip_transcript or manual_mode) and from_step <= 1:
             s1 = job.steps[1]
@@ -606,6 +647,14 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         image_prompt = await _generate_image_prompt(job, txt_path, pub_cfg)
         job.thumbnail_prompt = image_prompt
         overlay_title = job.thumbnail_overlay_title.strip() or await _generate_overlay_title(job, txt_path, pub_cfg)
+        job.thumbnail_overlay_title = overlay_title
+        # Persist both suggestions before the image call so the YT Thumbnail
+        # tab can pick them up as a starting point even if generation fails.
+        _save_meta(job)
+        s3.output = (
+            f"🎬 Suggested scene:\n{image_prompt}\n\n"
+            f"🔤 Suggested overlay title: {overlay_title or '(none)'}"
+        )
 
         thumb_engine = (job.thumbnail_engine or pub_cfg.get("thumbnail_engine", "")).strip()
         cmd = [_image(), "generate", image_prompt, "--size", "youtube", "-F", "json", "--output-dir", str(d)]

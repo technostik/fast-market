@@ -495,6 +495,17 @@ When `image-cli` is installed, `webux serve` gains a **🖼️ YT Thumbnail** ta
 `image` CLI through subprocess — no `core.*` imports, so no namespace
 collision with the hub):
 
+- **🎞️ Working video**: one selector at the top drives the whole tab. It
+  loads that video's thumbnails and prefills the scene prompt + overlay title
+  saved in the shared `*-long-meta.json` by Long Publish (or by a previous
+  suggestion here). Empty = draft workspace (`thumbnail_draft_*`).
+- **🎬 Suggest scene** / **💡 Suggest title**: ask the same prompts as Long
+  Publish (`youtube-thumbnail` / `youtube-thumbnail-title`, overridable in the
+  publish config) for a scene prompt and a short uppercase overlay title.
+  They reuse an existing transcript — `*_transcript.txt`, the ASS from a
+  previous run, or the meta log — and only transcribe the video when none is
+  found. Both run as background jobs and persist the suggestion into the meta
+  so Long Publish sees it too.
 - **Compose**: prompt + up to 4 source images (`-R` refs, "image 0..3") at
   YouTube size (1280×720), with the same overlay options as
   `image generate --title`.
@@ -503,10 +514,16 @@ collision with the hub):
   cloud engines).
 - **Overlay**: re-apply title text in the long_publish style (fg/bg/effect/
   style/position/size %/offset).
+- **Your own image**: “Base image (external)” picks any image from disk
+  (`POST /upload-base`, copied next to the video as `<stem>_ext_<id>`), then
+  “Apply overlay” burns the title onto it as a new version — no generation
+  needed. The result is pushed like any other thumbnail; a warning is shown
+  when the imported image is not 1280×720.
 - Files are versioned `<stem>_thumb[_overlay]_<N>` next to the video (the
   video source dir shared with long_publish) and recorded in the shared
   `*-long-meta.json` keys, so Long Publish sees them too — including
-  **push to YouTube** (`youtube thumbnail-set`).
+  **push to YouTube** (`youtube thumbnail-set`). Re-applying an overlay on the
+  current base updates that version; an imported or older base gets a new one.
 - Compose/edit/overlay run as **background jobs**: the tab returns a job id
   immediately and streams the `image` console (weight download, pipeline
   load, denoising steps) into a live Console panel via `GET /job/{id}` —

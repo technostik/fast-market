@@ -21,9 +21,17 @@ def video_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         yt_thumb, "_publish_cfg",
-        lambda: {"video_source_path": str(tmp_path), "video_extensions": "mp4,mkv,webm"},
+        lambda profile=None: {"video_source_path": str(tmp_path), "video_extensions": "mp4,mkv,webm"},
     )
     return tmp_path
+
+
+async def _await_job(job_id: str, timeout: float = 10.0):
+    """Wait for a background job worker to finish (test helper)."""
+    import asyncio
+
+    await asyncio.wait_for(yt_thumb._jobs[job_id]["done"].wait(), timeout=timeout)
+    return await yt_thumb.job_status(job_id)
 
 
 class TestManifest:
@@ -388,3 +396,232 @@ class TestJobs:
             yt_thumb._run_and_log = orig
         assert status["status"] == "error"
         assert "synthetic failure" in status["error"]
+
+
+class TestSuggestions:
+    def test_history_exposes_suggestions_and_flags(self, video_dir: Path):
+        import asyncio
+
+        src = video_dir / "video.mp4"
+        (video_dir / "video_transcript.txt").write_text("bonjour", encoding="utf-8")
+        yt_thumb._save_meta(src, {
+            "thumbnail_prompt": "scene idea",
+            "thumbnail_overlay_title": "TITRE",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "files": {},
+        })
+        body = asyncio.run(yt_thumb.history(source=str(src)))
+        assert body["scene_suggestion"] == "scene idea"
+        assert body["overlay_title"] == "TITRE"
+        assert body["has_transcript"] is True
+        assert body["transcript_path"].endswith("video_transcript.txt")
+        assert body["published"] is True
+        assert body["video_url"].endswith("dQw4w9WgXcQ")
+
+    def test_history_draft_has_no_transcript(self, video_dir: Path):
+        import asyncio
+
+        body = asyncio.run(yt_thumb.history(source=""))
+        assert body["has_transcript"] is False
+        assert body["published"] is False
+        assert body["scene_suggestion"] == ""
+
+    def test_suggest_scene_reuses_transcript(
+        self, video_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A transcript on disk means no Whisper pass — only ``prompt apply``."""
+        import asyncio
+
+        calls: list[list[str]] = []
+
+        async def fake_run(job_id: str, cmd: list[str], env=None):
+            calls.append(list(cmd))
+            return "A DRAMATIC SCENE"
+
+        monkeypatch.setattr(yt_thumb, "_run_and_log", fake_run)
+        monkeypatch.setattr(yt_thumb, "_publish_cfg", lambda profile=None: {
+            "video_source_path": str(video_dir),
+            "default_thumbnail_prompt": "youtube-thumbnail",
+        })
+        (video_dir / "video_transcript.txt").write_text("bonjour", encoding="utf-8")
+        src = str((video_dir / "video.mp4").resolve())
+
+        async def _go():
+            body = await yt_thumb.suggest_scene(yt_thumb.SuggestRequest(source=src))
+            return await _await_job(body["job_id"])
+
+        status = asyncio.run(_go())
+        assert status["status"] == "done", status
+        assert status["result"]["scene"] == "A DRAMATIC SCENE"
+        assert len(calls) == 1
+        assert calls[0][1:3] == ["apply", "youtube-thumbnail"]
+        assert not any("extract-transcript" in c for c in calls)
+        meta = json.loads((video_dir / "video-long-meta.json").read_text())
+        assert meta["thumbnail_prompt"] == "A DRAMATIC SCENE"
+        assert meta["files"]["transcript_txt"].endswith("video_transcript.txt")
+
+    def test_suggest_title_transcribes_when_missing(
+        self, video_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        import asyncio
+
+        calls: list[list[str]] = []
+
+        async def fake_run(job_id: str, cmd: list[str], env=None):
+            calls.append(list(cmd))
+            if "extract-transcript" in cmd:
+                out = Path(cmd[cmd.index("-o") + 1])
+                out.write_text("bonjour le monde", encoding="utf-8")
+            return "MON TITRE"
+
+        monkeypatch.setattr(yt_thumb, "_run_and_log", fake_run)
+        monkeypatch.setattr(yt_thumb, "_publish_cfg", lambda profile=None: {
+            "video_source_path": str(video_dir),
+            "default_thumbnail_overlay_prompt": "",
+            "transcript_mode": "normal",
+            "transcript_language": "fr",
+            "transcript_model": "medium",
+        })
+        src = str((video_dir / "video.mp4").resolve())
+
+        async def _go():
+            body = await yt_thumb.suggest_overlay_title(
+                yt_thumb.SuggestRequest(source=src)
+            )
+            return await _await_job(body["job_id"])
+
+        status = asyncio.run(_go())
+        assert status["status"] == "done", status
+        assert status["result"]["title"] == "MON TITRE"
+        assert calls[0][1] == "extract-transcript"
+        assert calls[0][-1] != "--use-groq"
+        assert calls[1][1:3] == ["apply", "youtube-thumbnail-title"]
+        meta = json.loads((video_dir / "video-long-meta.json").read_text())
+        assert meta["thumbnail_overlay_title"] == "MON TITRE"
+        assert meta["files"]["transcript_txt"].endswith("video_transcript.txt")
+
+    def test_suggest_refuses_when_transcript_mode_none(
+        self, video_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        import asyncio
+
+        async def fake_run(job_id: str, cmd: list[str], env=None):  # pragma: no cover
+            raise AssertionError("no subprocess expected")
+
+        monkeypatch.setattr(yt_thumb, "_run_and_log", fake_run)
+        monkeypatch.setattr(yt_thumb, "_publish_cfg", lambda profile=None: {
+            "video_source_path": str(video_dir),
+            "transcript_mode": "none",
+        })
+        src = str((video_dir / "video.mp4").resolve())
+
+        async def _go():
+            body = await yt_thumb.suggest_scene(yt_thumb.SuggestRequest(source=src))
+            return await _await_job(body["job_id"])
+
+        status = asyncio.run(_go())
+        assert status["status"] == "error"
+        assert "Transcript mode is disabled" in status["error"]
+
+    def test_suggest_requires_video(self, video_dir: Path):
+        import asyncio
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(yt_thumb.suggest_scene(yt_thumb.SuggestRequest(source="")))
+        assert exc.value.status_code == 400
+
+
+def _png_bytes(width: int = 1280, height: int = 720) -> bytes:
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), "red").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _upload(data: bytes, filename: str):
+    import io
+
+    from starlette.datastructures import UploadFile
+
+    return UploadFile(file=io.BytesIO(data), filename=filename)
+
+
+class TestExternalBase:
+    def test_upload_base_copies_image_next_to_video(self, video_dir: Path):
+        import asyncio
+
+        src = (video_dir / "video.mp4").resolve()
+        body = asyncio.run(
+            yt_thumb.upload_base(source=str(src), file=_upload(_png_bytes(), "art.png"))
+        )
+        path = Path(body["path"])
+        assert path.parent == video_dir.resolve()
+        assert path.name.startswith("video_ext_") and path.suffix == ".png"
+        assert path.read_bytes() == _png_bytes()
+        assert (body["width"], body["height"]) == (1280, 720)
+
+    def test_upload_base_rejects_non_image(self, video_dir: Path):
+        import asyncio
+
+        from fastapi import HTTPException
+
+        src = (video_dir / "video.mp4").resolve()
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                yt_thumb.upload_base(
+                    source=str(src), file=_upload(b"not an image", "art.png")
+                )
+            )
+        assert exc.value.status_code == 400
+
+    def test_upload_base_rejects_unsupported_extension(self, video_dir: Path):
+        import asyncio
+
+        from fastapi import HTTPException
+
+        src = (video_dir / "video.mp4").resolve()
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                yt_thumb.upload_base(source=str(src), file=_upload(b"x", "art.gif"))
+            )
+        assert exc.value.status_code == 400
+
+    def test_overlay_on_external_image_creates_new_version(
+        self, video_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """An imported base must not overwrite the current versioned thumbnail."""
+        import asyncio
+
+        src = (video_dir / "video.mp4").resolve()
+        ext = video_dir / "video_ext_abcd.png"
+        ext.write_bytes(_png_bytes())
+        current_base = video_dir / "video_thumb_1.png"
+        current_base.write_bytes(_png_bytes())
+        yt_thumb._save_meta(src, {
+            "thumbnail_version": 1,
+            "files": {"thumbnail": str(current_base)},
+        })
+
+        async def fake_run(job_id: str, cmd: list[str], env=None):
+            base = Path(cmd[2])
+            out = base.with_name(base.stem + "_overlay" + base.suffix)
+            out.write_bytes(_png_bytes())
+            return f'{{"path": "{out}"}}'
+
+        monkeypatch.setattr(yt_thumb, "_run_and_log", fake_run)
+        job_id = yt_thumb._new_job("overlay", str(src))
+        req = yt_thumb.OverlayRequest(source=str(src), base=str(ext), title="TITRE")
+        asyncio.run(yt_thumb._overlay_worker(job_id, req, src, str(ext), "TITRE"))
+
+        job = yt_thumb._jobs[job_id]
+        assert job["status"] == "done", job["error"]
+        assert Path(job["result"]["thumbnail"]).name == "video_thumb_overlay_2.png"
+        assert Path(job["result"]["base"]).name == "video_thumb_2.png"
+        # Version 1 is untouched.
+        assert current_base.exists()
+        meta = json.loads((video_dir / "video-long-meta.json").read_text())
+        assert meta["thumbnail_version"] == 2

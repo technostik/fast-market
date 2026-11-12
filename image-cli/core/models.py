@@ -5,6 +5,10 @@ from typing import Any
 
 from PIL import Image
 
+#: Engines that talk to the Cloudflare Workers AI API. They all share one
+#: account id / api token, so a blank block inherits the configured ones.
+CLOUDFLARE_ENGINES = frozenset({"flux2cloud", "flux29bcloud", "flux3cloud"})
+
 
 @dataclass(slots=True)
 class TextOverlayConfig:
@@ -248,6 +252,19 @@ class ImageGenConfig:
         engines = {}
         for name, engine_data in data.get("engines", {}).items():
             engines[name] = EngineConfig.from_dict(engine_data)
+
+        # Cloudflare engines all use the same account/token. A profile that
+        # only configured one of them (typically flux2cloud) must not require
+        # the credentials again for flux29bcloud / flux3cloud: fill blanks
+        # from the first configured engine. Explicit per-engine values win.
+        cloud = [e for name, e in engines.items() if name in CLOUDFLARE_ENGINES]
+        shared_account = next((e.account_id for e in cloud if e.account_id), "")
+        shared_token = next((e.api_token for e in cloud if e.api_token), "")
+        for engine in cloud:
+            if shared_account and not engine.account_id:
+                engine.account_id = shared_account
+            if shared_token and not engine.api_token:
+                engine.api_token = shared_token
 
         sizes = []
         for size_data in data.get("available_sizes", []):

@@ -93,6 +93,16 @@ def list_engines(config: dict) -> None:
         click.echo(f"    Model path: {model_path}")
 
 
+def _shared_cloud_credentials(config: dict, exclude: str = "") -> tuple[str, str] | None:
+    """Account id / token already configured for another Cloudflare engine."""
+    for name, block in (config.get("engines") or {}).items():
+        if name == exclude or name not in _CLOUD_ENGINES or not isinstance(block, dict):
+            continue
+        if block.get("account_id") and block.get("api_token"):
+            return str(block["account_id"]), str(block["api_token"])
+    return None
+
+
 def add_engine(config_path: Path, config: dict, engine_name: str) -> None:
     """Add a new engine configuration."""
     try:
@@ -113,14 +123,28 @@ def add_engine(config_path: Path, config: dict, engine_name: str) -> None:
     default_settings = get_engine_defaults(normalized)
     click.echo(f"\n=== Adding {normalized} engine ===")
     if normalized in _CLOUD_ENGINES:
-        account_id = click.prompt(
-            "Cloudflare account ID",
-            default=default_settings.get("account_id", ""),
+        # All Cloudflare engines share one account. Reuse the credentials a
+        # sibling engine already has instead of asking for them again.
+        shared = (
+            _shared_cloud_credentials(config, exclude=normalized)
+            if normalized not in config["engines"]
+            else None
         )
-        api_token = click.prompt(
-            "Cloudflare API token",
-            default=default_settings.get("api_token", ""),
-        )
+        if shared:
+            account_id, api_token = shared
+            click.echo(
+                "Using the Cloudflare credentials already configured for "
+                "another engine."
+            )
+        else:
+            account_id = click.prompt(
+                "Cloudflare account ID",
+                default=default_settings.get("account_id", ""),
+            )
+            api_token = click.prompt(
+                "Cloudflare API token",
+                default=default_settings.get("api_token", ""),
+            )
         if normalized == "flux29bcloud":
             cf_model = "@cf/black-forest-labs/flux-2-klein-9b"
             click.echo(f"Model pinned to: {cf_model} (fixed 4 steps).")

@@ -146,11 +146,15 @@ If `monitor-cli` is installed, a **Monitor** tab appears automatically, showing 
 ### 🖼️ YT Thumbnail (from `image-cli`, Publish group)
 
 If `image-cli` is installed, a **YT Thumbnail** tab appears automatically:
-compose a 1280×720 thumbnail from a prompt plus up to 4 source images
-(multi-image `-R` references), re-apply overlay text in the long_publish style,
-iterate with small-change edits, and push to YouTube. Files are versioned
-`<stem>_thumb[_overlay]_<N>` next to the video and share the
-`*-long-meta.json` keys with Long Publish. See `image-cli/README.md` for details.
+pick a working video (or leave it empty for the draft workspace), then compose
+a 1280×720 thumbnail from a prompt plus up to 4 source images (multi-image `-R`
+references), re-apply overlay text in the long_publish style, iterate with
+small-change edits, and push to YouTube. **🎬 Suggest scene** / **💡 Suggest
+title** reuse the video's transcript (transcribing it only when none exists)
+and write their suggestions into the shared `*-long-meta.json` — the same keys
+Long Publish fills during its thumbnail step, so the two tabs hand work back and
+forth. Files are versioned `<stem>_thumb[_overlay]_<N>` next to the video. See
+`image-cli/README.md` for details.
 
 API prefix: `/api/yt_thumbnail/`
 

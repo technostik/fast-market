@@ -132,3 +132,42 @@ class TestSetupWizard:
         assert "remove" in result.output
         assert "set-default" in result.output
         assert "set-model-path" in result.output
+
+
+class TestCloudCredentialReuse:
+    def test_shared_credentials_come_from_a_sibling_engine(self, tmp_path: Path):
+        from commands.setup.helpers import _shared_cloud_credentials
+
+        config = {
+            "engines": {
+                "flux2cloud": {"account_id": "acct", "api_token": "tok"},
+                "flux3cloud": {},
+            }
+        }
+        assert _shared_cloud_credentials(config, exclude="flux3cloud") == ("acct", "tok")
+
+    def test_no_shared_credentials_when_none_configured(self):
+        from commands.setup.helpers import _shared_cloud_credentials
+
+        assert _shared_cloud_credentials({"engines": {"flux3cloud": {}}}) is None
+
+    def test_add_cloud_engine_reuses_existing_credentials(self, tmp_path: Path, monkeypatch):
+        """Adding flux3cloud must not ask for the token flux2cloud already has."""
+        import yaml
+
+        from commands.setup import helpers
+
+        config_path = tmp_path / "config.yaml"
+        config = {
+            "engines": {"flux2cloud": {"account_id": "acct", "api_token": "tok",
+                                       "cf_model": "@cf/black-forest-labs/flux-2-klein-4b"}},
+        }
+        prompts: list[str] = []
+        monkeypatch.setattr(helpers.click, "prompt", lambda text, **kw: prompts.append(text) or "")
+        helpers.add_engine(config_path, config, "flux3cloud")
+
+        assert prompts == []
+        saved = yaml.safe_load(config_path.read_text())
+        assert saved["engines"]["flux3cloud"]["account_id"] == "acct"
+        assert saved["engines"]["flux3cloud"]["api_token"] == "tok"
+        assert saved["engines"]["flux3cloud"]["cf_model"] == "@cf/black-forest-labs/flux-3-image-klein"

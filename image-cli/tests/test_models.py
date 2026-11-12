@@ -157,6 +157,38 @@ class TestImageGenConfig:
         size = config.get_size("nonexistent")
         assert size is None
 
+    def test_cloudflare_engines_share_credentials(self):
+        """A blank flux3cloud block must inherit flux2cloud's credentials."""
+        config = ImageGenConfig.from_dict({
+            "engines": {
+                "flux2cloud": {"account_id": "acct", "api_token": "tok"},
+                "flux3cloud": {},
+            }
+        })
+        flux3 = config.get_engine_config("flux3cloud")
+        assert flux3.account_id == "acct"
+        assert flux3.api_token == "tok"
+
+    def test_engine_credentials_win_over_shared(self):
+        config = ImageGenConfig.from_dict({
+            "engines": {
+                "flux2cloud": {"account_id": "acct", "api_token": "tok"},
+                "flux3cloud": {"account_id": "other", "api_token": "othertok"},
+            }
+        })
+        flux3 = config.get_engine_config("flux3cloud")
+        assert flux3.account_id == "other"
+        assert flux3.api_token == "othertok"
+
+    def test_shared_credentials_do_not_leak_to_local_engines(self):
+        config = ImageGenConfig.from_dict({
+            "engines": {
+                "flux2cloud": {"account_id": "acct", "api_token": "tok"},
+                "flux2": {"model_path": "./m"},
+            }
+        })
+        assert config.get_engine_config("flux2").account_id == ""
+
     def test_get_engine_config(self, mock_config):
         config = ImageGenConfig.from_dict(mock_config)
         engine_config = config.get_engine_config("flux2")

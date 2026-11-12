@@ -615,3 +615,20 @@ prompts:
   max_tokens: 2048
   model_provider: ''
   model_name: ''
+- name: youtube-thumbnail-title
+  description: Génère un titre de miniature YouTube court, en majuscules, à partir d'une transcription
+  content: 'Suggère un titre de miniature YouTube à fort impact basé sur la transcription
+    suivante :
+
+
+    {transcript}
+
+
+    Le titre doit être en français, en MAJUSCULES, très court (2 à 5 mots), optimisé
+    pour les clics, sans ponctuation finale, sans guillemets, sans emoji et sans
+    texte supplémentaire. Il doit capter la tension centrale du sujet plutôt que le
+    résumer. Réponds uniquement avec le titre.'
+  temperature: 0.7
+  max_tokens: 200
+  model_provider: ''
+  model_name: ''
