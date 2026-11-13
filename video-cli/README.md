@@ -71,7 +71,7 @@ The shared Click group also accepts these global options:
 |---------|-------------|
 | `video remove-silence INPUT` | Remove silent portions from a video |
 | `video extract-transcript INPUT` | Create ASS, SRT, TXT, or word-level JSON subtitles |
-| `video burn-subtitles VIDEO ASS` | Burn ASS subtitles into a video |
+| `video burn-subtitles VIDEO ASS` | Burn ASS subtitles into a video, optionally at top, middle, or bottom |
 | `video cut INPUT` | Trim a video at a timestamp using stream copy |
 | `video short-extractor INPUT` | Extract one clip or a JSON segment list and convert to 9:16 (portrait) |
 | `video concat INPUT... -o OUTPUT` | Concatenate two or more videos |
@@ -162,12 +162,16 @@ Burn an ASS subtitle file into a video with ffmpeg.
 | `ASS_FILE` | — | Existing ASS subtitle file | required |
 | `--output` | `-o` | Output path | `<stem>_subtitled<suffix>` next to the video |
 | `--font-size` | — | Subtitle font size | `96` |
+| `--position` | — | Subtitle placement: `top-left`, `top`, `middle`, or `bottom` | `top-left` |
 | `--modal` / `--local` | — | Run on Modal or locally | `--local` |
+
+The default `top-left` reproduces the previous hardcoded placement. `top`, `middle`, and `bottom` are horizontally centered. The position overrides the alignment written in the ASS file.
 
 ```bash
 video burn-subtitles talk.mp4 talk.ass
 video burn-subtitles talk.mp4 talk.ass -o talk_subtitled.mp4 --font-size 72
-video burn-subtitles talk.mp4 talk.ass --modal
+video burn-subtitles talk.mp4 talk.ass --position bottom
+video burn-subtitles talk.mp4 talk.ass --position middle --modal
 ```
 
 ### `video cut INPUT_FILE`

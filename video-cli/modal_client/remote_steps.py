@@ -24,6 +24,7 @@ def _run_media_pipeline_impl(
     model_size: str = "medium",
     subtitle_size: int = 96,
     use_groq: bool = False,
+    subtitle_position: str = "top-left",
 ) -> dict:
     """
     Run up to three media processing steps inside one Modal container:
@@ -79,7 +80,7 @@ def _run_media_pipeline_impl(
         # ── Step 2: Burn subtitles ────────────────────────────────────────────
         if do_burn_subtitles and os.path.exists(ass_path):
             out_path = os.path.join(tmpdir, f"{stem}_subtitled.mp4")
-            _burn_subtitles(current_path, ass_path, out_path, subtitle_size)
+            _burn_subtitles(current_path, ass_path, out_path, subtitle_size, subtitle_position)
             current_path = out_path
 
         # ── Collect outputs ───────────────────────────────────────────────────
@@ -197,6 +198,7 @@ def remote_burn_subtitles(
     video_name: str,
     ass_bytes: bytes,
     subtitle_size: int = 96,
+    subtitle_position: str = "top-left",
 ) -> dict:
     return _run_media_pipeline_impl(
         video_bytes,
@@ -206,6 +208,7 @@ def remote_burn_subtitles(
         ass_bytes=ass_bytes,
         do_burn_subtitles=True,
         subtitle_size=subtitle_size,
+        subtitle_position=subtitle_position,
     )
 
 
@@ -819,13 +822,49 @@ def _burn_subtitles(
     ass_path: str,
     output_path: str,
     subtitle_size: int = 96,
+    position: str = "top-left",
 ) -> None:
     import os
     import subprocess
 
-    abs_ass = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
+    # Mirror of commands/burn_subtitles/register.py. Alignment is applied to the
+    # style line of a rewritten copy rather than force_style: this ffmpeg/libass
+    # build mirrors the Alignment field of force_style. The value 10 matches the
+    # previous force_style default and renders top-left either way.
+    positions = {"top-left": 10, "top": 8, "middle": 5, "bottom": 2}
+    try:
+        alignment = positions[position]
+    except KeyError:
+        raise ValueError(
+            f"Unknown subtitle position {position!r}; expected one of {tuple(positions)}"
+        ) from None
+
+    with open(ass_path, encoding="utf-8") as handle:
+        ass_content = handle.read()
+
+    alignment_index = None
+    rewritten = []
+    for line in ass_content.splitlines():
+        if line.startswith("Format:") and "Alignment" in line and alignment_index is None:
+            alignment_index = [part.strip() for part in line.split(",")][1:].index("Alignment")
+        if line.startswith("Style:") and alignment_index is not None:
+            fields = line.split(",")
+            fields[alignment_index + 1] = str(alignment)
+            line = ",".join(fields)
+        rewritten.append(line)
+    if alignment_index is None:
+        raise ValueError(
+            "ASS file has no style Format line with an Alignment column; "
+            "cannot apply a subtitle position"
+        )
+
+    positioned = ass_path + ".positioned.ass"
+    with open(positioned, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(rewritten))
+
+    abs_ass = os.path.abspath(positioned).replace("\\", "/").replace(":", "\\:")
     force_style = (
-        f"Alignment=10,Fontsize={subtitle_size},"
+        f"Fontsize={subtitle_size},"
         "MarginL=0,MarginR=0,MarginV=0,"
         "Outline=8,Shadow=14,BackColour=&H80000000&"
     )

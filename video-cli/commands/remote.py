@@ -50,7 +50,13 @@ def run_remote_extract_transcript(
     return result
 
 
-def run_remote_burn_subtitles(video_path: Path, ass_path: Path, output_path: Path, font_size: int) -> dict:
+def run_remote_burn_subtitles(
+    video_path: Path,
+    ass_path: Path,
+    output_path: Path,
+    font_size: int,
+    position: str = "top-left",
+) -> dict:
     try:
         from modal_client.app import app, spawn_and_get
         from modal_client.remote_steps import remote_burn_subtitles
@@ -60,7 +66,8 @@ def run_remote_burn_subtitles(video_path: Path, ass_path: Path, output_path: Pat
     with app.run():
         result = spawn_and_get(
             remote_burn_subtitles,
-            video_path.read_bytes(), video_path.name, ass_path.read_bytes(), font_size,
+            video_path.read_bytes(), video_path.name, ass_path.read_bytes(),
+            font_size, position,
         )
     output_path.write_bytes(result["video_bytes"])
     return result
