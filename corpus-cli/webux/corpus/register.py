@@ -162,4 +162,5 @@ def register(config: dict) -> WebuxPluginManifest:
         frontend_html=_HTML,
         order=10,
         lazy=True,
+        group="Observe",
     )

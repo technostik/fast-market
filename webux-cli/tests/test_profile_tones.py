@@ -186,10 +186,10 @@ class TestProfileServerContract:
         assert "var(--profile-bg" in html
         assert "var(--profile-border" in html
 
-    def test_nav_badge_shows_active_profile(self, monkeypatch):
+    def test_nav_profile_select_shows_active_profile(self, monkeypatch):
         html = self._render(monkeypatch)
-        assert "webux-profile-badge" in html
-        assert "👤 alpha" in html
+        assert 'id="webux-profile"' in html
+        assert '<option value="alpha" selected>👤 alpha</option>' in html
 
     def test_profile_script_defines_public_helpers(self):
         for helper in (

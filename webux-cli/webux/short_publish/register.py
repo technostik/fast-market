@@ -1033,8 +1033,9 @@ async def pool_redo_item(body: dict):
 @router.post("/pool/retry-item")
 async def pool_retry_item(body: dict):
     src = body.get("source", "")
-    ok = retry_item(src)
-    return {"ok": ok}
+    # retry_item already returns {ok, error?, from_step?}; pass it through so
+    # the UI can explain why a row did not restart.
+    return retry_item(src)
 
 
 @router.post("/pool/start")

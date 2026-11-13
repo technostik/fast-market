@@ -1541,12 +1541,39 @@ async function poolRedoItem(source) {
 }
 
 async function poolRetryItem(source) {
-  await fetch('/api/short_publish/pool/retry-item', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source })
-  });
-  refreshPool();
+  // The endpoint answers {ok, error?, from_step?}: a row can refuse to retry
+  // (item no longer in the pool, source file deleted, item not failed), and
+  // silently refreshing would look like the button did nothing.
+  let data = {};
+  try {
+    const r = await fetch('/api/short_publish/pool/retry-item', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source })
+    });
+    data = await r.json().catch(() => ({}));
+    if (!r.ok) data = { ok: false, error: data.detail || ('HTTP ' + r.status) };
+  } catch (err) {
+    data = { ok: false, error: String(err) };
+  }
+
+  if (!data.ok) {
+    alert('Retry failed: ' + (data.error || 'unknown error'));
+    refreshPool();
+    return;
+  }
+
+  await refreshPool();
+  // refreshPool() paints Running/Stopped over the header, so write the
+  // confirmation last. The next poll can replace it.
+  const statusEl = document.getElementById('poolStatus');
+  if (statusEl) {
+    const from = (typeof data.from_step === 'number')
+      ? ' from step ' + (data.from_step + 1)
+      : '';
+    statusEl.textContent = '🔁 Queued — retrying' + from + '…';
+    statusEl.style.color = 'var(--ok)';
+  }
 }
 
 async function poolRerunCheck(source) {

@@ -98,6 +98,61 @@ def _fetch_groq_segments(input_path: str, language: str) -> list[dict]:
     return result_segments
 
 
+def _transcribe_word_segments(
+    input_path: str,
+    language: str = "fr",
+    model_size: str = "medium",
+    progress_cb=None,
+    use_groq: bool = False,
+) -> list[dict]:
+    """Word-level transcription shared by the JSON/ASS writers and multi-format runs."""
+    if use_groq:
+        result_segments = _fetch_groq_segments(input_path, language)
+        if progress_cb:
+            try:
+                progress_cb(100, 100)
+            except Exception:
+                pass
+        return result_segments
+
+    import subprocess
+
+    from faster_whisper import WhisperModel
+
+    # best-effort total duration for percentage
+    total_dur = None
+    try:
+        dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
+        dur_out = subprocess.check_output(dur_cmd, text=True)
+        total_dur = float(json.loads(dur_out)["format"]["duration"])
+    except Exception:
+        pass
+
+    lang = language if language != "auto" else None
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    segments_iter, _ = model.transcribe(input_path, word_timestamps=True, language=lang)
+
+    result_segments = []
+    for seg in segments_iter:
+        word_list = [
+            {"word": w.word.strip(), "start": w.start, "end": w.end}
+            for w in (seg.words or [])
+        ]
+        result_segments.append({
+            "start": seg.start,
+            "end": seg.end,
+            "text": seg.text.strip(),
+            "words": word_list,
+        })
+        if progress_cb and total_dur:
+            try:
+                pct = min(100.0, (seg.end / total_dur) * 100)
+                progress_cb(round(pct, 1), 100)
+            except Exception:
+                pass
+    return result_segments
+
+
 def generate_karaoke_ass(
     input_path: str,
     output_ass_path: str,
@@ -113,49 +168,19 @@ def generate_karaoke_ass(
     Green = primary (being read), White = secondary (pre-read), middle-centered.
     If progress_cb is given it receives (current_pct, 100).
     """
-    if use_groq:
-        result_segments = _fetch_groq_segments(input_path, language)
-        if progress_cb:
-            try:
-                progress_cb(100, 100)
-            except Exception:
-                pass
-    else:
-        from faster_whisper import WhisperModel
-        import subprocess, json
+    result_segments = _transcribe_word_segments(
+        input_path, language, model_size, progress_cb=progress_cb, use_groq=use_groq
+    )
+    _write_ass_segments(output_ass_path, result_segments, subtitle_size, max_line_chars)
 
-        # best-effort total duration for percentage
-        total_dur = None
-        try:
-            dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
-            dur_out = subprocess.check_output(dur_cmd, text=True)
-            total_dur = float(json.loads(dur_out)["format"]["duration"])
-        except Exception:
-            pass
 
-        lang = language if language != "auto" else None
-        model = WhisperModel(model_size, device="cpu", compute_type="int8")
-        segments_iter, _ = model.transcribe(input_path, word_timestamps=True, language=lang)
-
-        result_segments = []
-        for seg in segments_iter:
-            word_list = [
-                {"word": w.word.strip(), "start": w.start, "end": w.end}
-                for w in (seg.words or [])
-            ]
-            result_segments.append({
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text.strip(),
-                "words": word_list,
-            })
-            if progress_cb and total_dur:
-                try:
-                    pct = min(100.0, (seg.end / total_dur) * 100)
-                    progress_cb(round(pct, 1), 100)
-                except Exception:
-                    pass
-
+def _write_ass_segments(
+    output_ass_path: str,
+    result_segments: list[dict],
+    subtitle_size: int = 96,
+    max_line_chars: int = 35,
+) -> None:
+    """Write ASS karaoke lines from word-level segments."""
     primary_color = "&H0000FF00"   # green — word being read
     secondary_color = "&H00FFFFFF" # white — words not yet read
     outline_color = "&H00000000"
@@ -268,7 +293,10 @@ def transcribe_to_srt(
     """Segment-level SRT transcription via faster_whisper (fallback: openai-whisper on CPU)."""
     if use_groq:
         result_segments = _fetch_groq_segments(input_path, language)
-        segments = [(s["start"], s["end"], s["text"]) for s in result_segments]
+        segments = [
+            {"start": s["start"], "end": s["end"], "text": s["text"]}
+            for s in result_segments
+        ]
         if progress_cb:
             try:
                 progress_cb(100, 100)
@@ -290,7 +318,7 @@ def transcribe_to_srt(
             segments_gen, _ = model.transcribe(input_path, language=lang)
             segments = []
             for seg in segments_gen:
-                segments.append((seg.start, seg.end, seg.text.strip()))
+                segments.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
                 if progress_cb and total_dur:
                     try:
                         pct = min(100.0, (seg.end / total_dur) * 100)
@@ -303,15 +331,20 @@ def transcribe_to_srt(
             model = whisper.load_model(model_size, device="cpu")
             result = model.transcribe(input_path, language=lang)
             segments = [
-                (seg["start"], seg["end"], seg["text"].strip())
+                {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip()}
                 for seg in result["segments"]
             ]
 
+    _write_srt_segments(output_path, segments)
+
+
+def _write_srt_segments(output_path: str, segments: list[dict]) -> None:
+    """Write an SRT file from ``{start, end, text}`` segments."""
     with open(output_path, "w", encoding="utf-8") as f:
-        for i, (start, end, text) in enumerate(segments, 1):
+        for i, seg in enumerate(segments, 1):
             f.write(f"{i}\n")
-            f.write(f"{_fmt_srt_time(start)} --> {_fmt_srt_time(end)}\n")
-            f.write(f"{text}\n\n")
+            f.write(f"{_fmt_srt_time(seg['start'])} --> {_fmt_srt_time(seg['end'])}\n")
+            f.write(f"{seg['text'].strip()}\n\n")
 
 
 # ── TXT helpers ───────────────────────────────────────────────────────────────
@@ -368,6 +401,13 @@ def transcribe_to_txt(
         f.write("\n".join(lines))
 
 
+def _write_txt_segments(output_path: str, segments: list[dict]) -> None:
+    """Write plain text (one segment per line, no timestamps)."""
+    lines = [s["text"].strip() for s in segments if s["text"].strip()]
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
 # ── JSON helpers ─────────────────────────────────────────────────────────────
 
 def transcribe_to_json(
@@ -384,50 +424,14 @@ def transcribe_to_json(
     ``words`` is a flat list of {word, start, end}; ``segments`` holds
     {start, end, text}. Local-only (no Modal branch).
     """
-    if use_groq:
-        result_segments = _fetch_groq_segments(input_path, language)
-        if progress_cb:
-            try:
-                progress_cb(100, 100)
-            except Exception:
-                pass
-    else:
-        import subprocess
+    result_segments = _transcribe_word_segments(
+        input_path, language, model_size, progress_cb=progress_cb, use_groq=use_groq
+    )
+    _write_json(output_path, result_segments, language)
 
-        from faster_whisper import WhisperModel
 
-        # best-effort total duration for percentage
-        total_dur = None
-        try:
-            dur_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", input_path]
-            dur_out = subprocess.check_output(dur_cmd, text=True)
-            total_dur = float(json.loads(dur_out)["format"]["duration"])
-        except Exception:
-            pass
-
-        lang = language if language != "auto" else None
-        model = WhisperModel(model_size, device="cpu", compute_type="int8")
-        segments_iter, _ = model.transcribe(input_path, word_timestamps=True, language=lang)
-
-        result_segments = []
-        for seg in segments_iter:
-            word_list = [
-                {"word": w.word.strip(), "start": w.start, "end": w.end}
-                for w in (seg.words or [])
-            ]
-            result_segments.append({
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text.strip(),
-                "words": word_list,
-            })
-            if progress_cb and total_dur:
-                try:
-                    pct = min(100.0, (seg.end / total_dur) * 100)
-                    progress_cb(round(pct, 1), 100)
-                except Exception:
-                    pass
-
+def _write_json(output_path: str, result_segments: list[dict], language: str) -> None:
+    """Write the word-level JSON transcript payload."""
     flat_words = []
     for seg in result_segments:
         flat_words.extend(seg.get("words", []))
@@ -448,17 +452,70 @@ def transcribe_to_json(
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 _EXT_TO_FORMAT = {".ass": "ass", ".srt": "srt", ".txt": "txt", ".json": "json"}
+_FORMATS = ("ass", "srt", "txt", "json")
+
+
+def _parse_formats(raw: tuple[str, ...], output: str | None) -> list[str]:
+    """Parse --format values (comma-separated or repeated), else infer from -o."""
+    values = [
+        part.strip().lower()
+        for value in raw
+        for part in value.split(",")
+        if part.strip()
+    ]
+    if not values and output:
+        inferred = _EXT_TO_FORMAT.get(Path(output).suffix.lower())
+        if inferred:
+            values = [inferred]
+    if not values:
+        values = ["srt"]
+
+    unknown = [value for value in values if value not in _FORMATS]
+    if unknown:
+        raise click.BadParameter(
+            f"unknown format(s): {', '.join(unknown)}; choose from {', '.join(_FORMATS)}",
+            param_hint="'--format'",
+        )
+
+    # Preserve order, drop duplicates.
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
+
+
+def _output_paths(
+    input_path: Path, output: str | None, formats: list[str]
+) -> dict[str, Path]:
+    """Resolve one output path per requested format.
+
+    A single format keeps ``-o`` verbatim (backward compatible). Several
+    formats treat ``-o`` as a base: its suffix is replaced by each format.
+    """
+    if output:
+        path = Path(output).resolve()
+        if len(formats) == 1:
+            return {formats[0]: path}
+        base = path.with_suffix("")
+        return {fmt: base.with_suffix(f".{fmt}") for fmt in formats}
+    return {
+        fmt: input_path.parent / f"{input_path.stem}.{fmt}"
+        for fmt in formats
+    }
 
 
 def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("extract-transcript")
     @click.argument("input_file", type=click.Path(exists=True))
-    @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
+    @click.option("--output", "-o", type=click.Path(), default=None, help="Output file path (base path when several formats are requested)")
     @click.option(
-        "--format", "-f", "fmt",
-        type=click.Choice(["ass", "srt", "txt", "json"]),
-        default=None,
-        help="Output format (default: inferred from extension, else srt)",
+        "--format", "-f", "formats",
+        multiple=True,
+        type=str,
+        help="Output format(s): ass, srt, txt or json. Repeat or comma-separate "
+             "to write several files from one transcription (e.g. -f json,txt). "
+             "Default: inferred from -o, else srt.",
     )
     @click.option("--language", "-l", default="fr", show_default=True, help="Language code or 'auto'")
     @click.option("--model", "-m", default="medium", show_default=True, help="Whisper model size")
@@ -468,7 +525,7 @@ def register(plugin_manifests: dict) -> CommandManifest:
     def extract_transcript_cmd(
         input_file: str,
         output: str | None,
-        fmt: str | None,
+        formats: tuple[str, ...],
         language: str,
         model: str,
         font_size: int,
@@ -478,24 +535,45 @@ def register(plugin_manifests: dict) -> CommandManifest:
         """Transcribe a video to ASS karaoke, SRT, plain TXT, or word-level JSON subtitles.
 
         Format is inferred from the output file extension (.ass / .srt / .txt / .json).
-        Use --format to override. Defaults to srt when not specified.
-        The json format is local-only and is the recommended input for
-        `video remove-silence --use-transcript`.
+        Use --format to override, and repeat it (or comma-separate it) to write
+        several files from one transcription: ``-f json,txt``.
+        Defaults to srt when not specified. The json format is local-only and
+        is the recommended input for `video remove-silence --use-transcript`.
         """
         input_path = Path(input_file).resolve()
+        selected = _parse_formats(formats, output)
+        outputs = _output_paths(input_path, output, selected)
 
-        # Determine format: explicit flag > output extension > default srt
-        if fmt is None and output is not None:
-            fmt = _EXT_TO_FORMAT.get(Path(output).suffix.lower())
-        if fmt is None:
-            fmt = "srt"
+        click.echo(
+            f"Transcribing {input_path.name} ({model}, {language}, {', '.join(selected)})...",
+            err=True,
+        )
 
-        if output:
-            output_path = Path(output).resolve()
-        else:
-            output_path = input_path.parent / f"{input_path.stem}.{fmt}"
+        if len(selected) > 1:
+            # Several formats share one word-level pass so Whisper runs once.
+            if modal:
+                raise click.ClickException(
+                    "Multiple --format values are local-only; drop --modal "
+                    "or request one format per remote run."
+                )
+            segments = _transcribe_word_segments(
+                str(input_path), language, model, progress_cb=None, use_groq=use_groq
+            )
+            for fmt in selected:
+                output_path = outputs[fmt]
+                if fmt == "ass":
+                    _write_ass_segments(str(output_path), segments, font_size)
+                elif fmt == "srt":
+                    _write_srt_segments(str(output_path), segments)
+                elif fmt == "txt":
+                    _write_txt_segments(str(output_path), segments)
+                else:
+                    _write_json(str(output_path), segments, language)
+                click.echo(str(output_path))
+            return
 
-        click.echo(f"Transcribing {input_path.name} ({model}, {language}, {fmt})...", err=True)
+        fmt = selected[0]
+        output_path = outputs[fmt]
 
         if modal:
             if fmt == "json":

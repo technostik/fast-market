@@ -38,7 +38,7 @@ commands/<command>/register.py
 | `cli/main.py` | Creates the `video-agent` Click group, loads `.env`, and registers discovered commands |
 | `commands/base.py` | Defines `CommandManifest`, the contract returned by every command registration |
 | `commands/remove_silence/` | RMS silence detection and MoviePy re-encoding; `transcript.py` holds the local-only transcript-aware pause logic (pure, unit-tested); `config.py` resolves rhythm params as CLI > video config file > code defaults |
-| `commands/extract_transcript/` | Local or Groq transcription to ASS, SRT, TXT, or word-level JSON (`json` is local-only) |
+| `commands/extract_transcript/` | Local or Groq transcription to ASS, SRT, TXT, or word-level JSON (`json` and multi-format runs are local-only) |
 | `commands/burn_subtitles/` | ffmpeg ASS subtitle burn-in |
 | `commands/cut/` | Timestamp parsing and stream-copy trimming |
 | `commands/concat/` | MoviePy concatenation with H.264/AAC output |
@@ -68,7 +68,7 @@ commands/<command>/register.py
 | Command | Local implementation | Remote implementation |
 |---------|----------------------|-----------------------|
 | `remove-silence` | `commands/remove_silence/register.py` | `remote_remove_silence` (default path only; `--use-transcript`/`--dry-run` are local-only) |
-| `extract-transcript` | `commands/extract_transcript/register.py` | `remote_extract_transcript` (ass/srt/txt only; `-f json` is local-only) |
+| `extract-transcript` | `commands/extract_transcript/register.py` | `remote_extract_transcript` (ass/srt/txt only; `-f json` and multi-format runs are local-only) |
 | `burn-subtitles` | `commands/burn_subtitles/register.py` | `remote_burn_subtitles` |
 | `concat` | `commands/concat/register.py` | `remote_concat_videos` |
 | `pipeline` | `commands/pipeline/register.py` | `run_media_pipeline` |
@@ -142,7 +142,7 @@ commands/<command>/register.py
 - **lipsync venv-local basicsr patch:** basicsr 1.4.2 imports `torchvision.transforms.functional_tensor` (removed in tv>=0.15); `setup()` auto-patches the venv copy with a try/except fallback. Re-apply is idempotent.
 - **Missing output parents:** Most commands write directly to the resolved output path and do not create its parent directory.
 - **Silence failure modes:** A file with no usable audio raises `SilentVideoError`. The local implementation removes and rejects a result that is not shorter than the source; the current Modal worker returns the resulting video without that additional check.
-- **Transcript-aware silence removal is local-only by design:** `--use-transcript`/`--dry-run` (and `extract-transcript -f json`) never reach Modal; combining them with `--modal` fails with a clear error. Keep new pause logic in `commands/remove_silence/transcript.py` (no media imports) so it stays unit-testable.
+- **Transcript-aware silence removal is local-only by design:** `--use-transcript`/`--dry-run` (and `extract-transcript -f json` or any multi-format `-f a,b`) never reach Modal; combining them with `--modal` fails with a clear error. Keep new pause logic in `commands/remove_silence/transcript.py` (no media imports) so it stays unit-testable.
 - **Chrome WebM has no container duration:** MediaRecorder writes `Duration: N/A`. MoviePy's `ffmpeg -i` parser raises `OSError` on that header. `commands/media_open.py` (and the Modal copy `_open_video_clip`) takes the duration from packet timestamps. Do not open those files with a bare `VideoFileClip`.
 - **Stream-copy cuts:** `cut` avoids re-encoding, so keyframes and timestamps can make an arbitrary cut point imprecise.
 - **VFR slow-motion trap:** a stream-copy cut of a VFR file (e.g. OBS/Chrome VP9, static talking head) gets a computed average fps far below the container rate. MoviePy would adopt that average, misindex frames (`int(fps*t)`), and re-encode in slow motion with normal-speed audio. `commands/media_open.open_video_clip` (and the Modal `_open_video_clip` mirror) forces the container rate when average and container differ by >5% — the same rate files with undetermined average already get. CFR files are untouched.

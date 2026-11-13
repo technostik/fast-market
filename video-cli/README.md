@@ -132,15 +132,15 @@ Transcribe a video into karaoke-style ASS subtitles, SRT subtitles, plain text, 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
 | `INPUT_FILE` | — | Existing input video | required |
-| `--output` | `-o` | Output path | `<stem>.<format>` next to the input |
-| `--format` | `-f` | Output format: `ass`, `srt`, `txt`, or `json` | Inferred from the output extension, otherwise `srt` |
+| `--output` | `-o` | Output path (base path when several formats are requested) | `<stem>.<format>` next to the input |
+| `--format` | `-f` | Output format(s): `ass`, `srt`, `txt`, or `json`; repeat or comma-separate to write several files | Inferred from the output extension, otherwise `srt` |
 | `--language` | `-l` | Language code or `auto` | `fr` |
 | `--model` | `-m` | Whisper model size | `medium` |
 | `--font-size` | — | ASS font size | `96` |
 | `--modal` / `--local` | — | Run on Modal or locally | `--local` |
 | `--use-groq` | — | Use Groq `whisper-large-v3` instead of local `faster-whisper`; Modal SRT/TXT still use faster-whisper | off |
 
-Format selection follows this order: explicit `--format`, output-file extension, then `srt`. ASS output uses word-level green/white highlighting; SRT and TXT contain segment-level or plain text. The `json` format is local-only and writes word-level timestamps (`{language, text, words:[{word,start,end}], segments:[{start,end,text}]}`); it is the recommended input for `video remove-silence --use-transcript`. Local `--use-groq` supports all four formats, but the current Modal implementation uses Groq only for ASS; Modal SRT and TXT requests are transcribed with worker-side `faster-whisper`.
+Format selection follows this order: explicit `--format`, output-file extension, then `srt`. Repeat `--format` (or comma-separate it) to write several files from a single transcription, e.g. `video extract-transcript interview.mp4 -f json,txt`. With several formats, `-o` is a base path whose suffix is replaced by each format (`-o interview.json -f json,txt` → `interview.json` + `interview.txt`), and each final path is printed on stdout, one per line. Multi-format runs are local-only (drop `--modal`). ASS output uses word-level green/white highlighting; SRT and TXT contain segment-level or plain text. The `json` format is local-only and writes word-level timestamps (`{language, text, words:[{word,start,end}], segments:[{start,end,text}]}`); it is the recommended input for `video remove-silence --use-transcript`. Local `--use-groq` supports all four formats, but the current Modal implementation uses Groq only for ASS; Modal SRT and TXT requests are transcribed with worker-side `faster-whisper`.
 
 ```bash
 video extract-transcript talk.mp4

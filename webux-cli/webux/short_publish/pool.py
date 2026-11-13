@@ -100,6 +100,7 @@ def _load_pool_from_disk():
                 charisma_score=item.get("charisma_score", ""),
                 charisma_notes=item.get("charisma_notes", ""),
                 retry_count=item.get("retry_count", 0),
+                retry_from_step=item.get("retry_from_step"),
                 duration_seconds=item.get("duration_seconds"),
                 upload_duration_seconds=item.get("upload_duration_seconds"),
             )
@@ -141,6 +142,7 @@ def _save_pool_to_disk():
                 "charisma_score": it.charisma_score,
                 "charisma_notes": it.charisma_notes,
                 "retry_count": it.retry_count,
+                "retry_from_step": it.retry_from_step,
                 "duration_seconds": it.duration_seconds,
                 "upload_duration_seconds": it.upload_duration_seconds,
             }
@@ -216,38 +218,89 @@ def redo_item(source: str) -> bool:
     return False
 
 
-def retry_item(source: str) -> bool:
-    """Requeue an error/stopped pool item, resuming from the first failed step.
-    Each subsequent retry goes back one more step (progressive rollback)."""
+def _find_pool_item(source: str):
+    """Find a pool item by resolved path, raw path, then basename.
+
+    Old pool files (or entries added from another cwd/symlink) can store a
+    path that does not compare equal to ``Path(source).resolve()``. Mirror
+    ``remove_from_pool``'s fallbacks so a failed row always retries.
+    """
     src = str(Path(source).expanduser().resolve())
-    for it in _pool:
-        if it.source == src and it.status in ("error", "stopped"):
-            meta = _load_meta(src)
-            completed = set(meta.get("completed_steps", []))
-            skipped = set(meta.get("skipped_steps", []))
-            passed = completed | skipped
-            # First step not yet completed or skipped is the retry entry point
-            base_from_step = 0
-            for i in range(len(STEP_NAMES)):
-                if i not in passed:
-                    base_from_step = i
-                    break
-            else:
-                # All steps passed — shouldn't happen for error/stopped, but fallback to 0
-                base_from_step = 0
-            it.retry_count += 1
-            from_step = max(0, base_from_step - it.retry_count)
-            it.status = "queued"
-            it.finished_at = None
-            it.elapsed_seconds = None
-            it.error_message = ""
-            it.job_id = None
-            it.retry_from_step = from_step
-            _update_meta_status(src, "queued")
-            _save_pool_to_disk()
-            start_pool()
-            return True
-    return False
+    src_raw = str(Path(source).expanduser())
+    exact = next(
+        (it for it in _pool if it.source in (src, src_raw)),
+        None,
+    )
+    if exact is not None:
+        return exact
+    base = Path(src).name
+    return next((it for it in _pool if Path(it.source).name == base), None)
+
+
+def retry_item(source: str) -> dict:
+    """Requeue an error/stopped pool item, resuming from the first failed step.
+
+    Each subsequent retry goes back one more step (progressive rollback).
+    Returns ``{"ok": bool, ...}`` so the UI can explain a no-op instead of
+    silently ignoring it.
+    """
+    it = _find_pool_item(source)
+    if it is None:
+        return {"ok": False, "error": f"Pool item not found: {source}"}
+    if it.status not in ("error", "stopped"):
+        return {
+            "ok": False,
+            "error": f"Pool item is not failed (status: {it.status})",
+        }
+
+    src = it.source
+    if not Path(src).expanduser().exists():
+        # Legacy pool files can hold a path relative to another cwd. The
+        # caller's path matched this item by basename, so prefer it when it
+        # exists, and heal the pool entry so the worker sees the real file.
+        candidate = str(Path(source).expanduser().resolve())
+        if Path(candidate).exists():
+            src = candidate
+            it.source = candidate
+
+    # The worker's source-missing guard would fail the retry immediately, so
+    # report it here where the UI can act on it.
+    if not Path(src).expanduser().exists():
+        return {
+            "ok": False,
+            "error": f"Source file not found: {src} — remove the pool item "
+                     "and re-add an existing file.",
+        }
+
+    meta = _load_meta(src)
+    completed = set(meta.get("completed_steps", []))
+    skipped = set(meta.get("skipped_steps", []))
+    passed = completed | skipped
+    # First step not yet completed or skipped is the retry entry point
+    base_from_step = 0
+    for i in range(len(STEP_NAMES)):
+        if i not in passed:
+            base_from_step = i
+            break
+    else:
+        # All steps passed — shouldn't happen for error/stopped, but fallback to 0
+        base_from_step = 0
+    it.retry_count += 1
+    from_step = max(0, base_from_step - it.retry_count)
+    it.status = "queued"
+    it.finished_at = None
+    it.elapsed_seconds = None
+    it.error_message = ""
+    it.job_id = None
+    it.retry_from_step = from_step
+    _update_meta_status(src, "queued")
+    _save_pool_to_disk()
+    start_pool()
+    return {
+        "ok": True,
+        "from_step": from_step,
+        "retry_count": it.retry_count,
+    }
 
 
 def remove_from_pool(source: str) -> bool:
@@ -540,10 +593,17 @@ async def _pool_worker():
 
 def start_pool():
     global _worker_task, _pool_state, _pool_auto_start
-    if _pool_state["running"]:
+    _pool_auto_start = True
+    # ``running`` alone is not proof the worker is alive: the task can finish
+    # (crash or cancel) while the flag stays True, and then a retry would be
+    # queued with nothing draining the queue. Recreate the task in that case.
+    if (
+        _pool_state["running"]
+        and _worker_task is not None
+        and not _worker_task.done()
+    ):
         return
     _pool_state["running"] = True
-    _pool_auto_start = True
     if _worker_task is None or _worker_task.done():
         _worker_task = asyncio.create_task(_pool_worker())
 

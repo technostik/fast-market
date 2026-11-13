@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -411,6 +412,12 @@ class OverlayRequest(BaseModel):
 class PushRequest(BaseModel):
     source: str = ""
     thumbnail: str = ""
+
+
+class AdoptRequest(BaseModel):
+    source: str = ""
+    # Existing image inside the source dir (a history version, usually).
+    path: str = ""
 
 
 # ── Config / engines / videos ─────────────────────────────────────────────
@@ -1164,6 +1171,59 @@ async def upload_thumbnail(
     }
 
 
+@router.post("/adopt-thumbnail")
+async def adopt_thumbnail(req: AdoptRequest):
+    """Make an image already on disk the working video's current thumbnail.
+
+    Clicking a version in the history strip should be enough: without this,
+    the user had to re-pick the same file in the "Use as thumbnail" input
+    before pushing. Nothing is copied — the history file is already
+    ``<stem>_thumb_<N>`` — the meta is repointed at it so the Current preview
+    and "Push thumbnail" use it.
+    """
+    root = _source_dir()
+    src = _resolve_video(req.source, root)
+    if not req.path.strip():
+        raise HTTPException(status_code=400, detail="No image chosen")
+    image = _resolve_image_param(req.path.strip(), root)
+    if not image.is_file():
+        raise HTTPException(status_code=400, detail=f"Not a file: {image}")
+    if image.suffix.lower() not in SOURCE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported image format: {image.name}"
+        )
+
+    from PIL import Image
+
+    try:
+        with Image.open(image) as img:
+            width, height = img.size
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail=f"Not a readable image: {image.name}"
+        )
+
+    # Keep the version the file name advertises; a foreign image (imported or
+    # from another tool) keeps the current version so history stays ordered.
+    meta = _load_meta(src)
+    match = re.search(r"_thumb(?:_overlay)?_(\d+)$", image.stem)
+    version = int(match.group(1)) if match else int(meta.get("thumbnail_version") or 0)
+
+    _update_meta_after(src, str(image), str(image), version)
+    logger.info(
+        "yt_thumbnail_thumbnail_adopt",
+        source=str(src), path=str(image), version=version,
+        width=width, height=height,
+    )
+    return {
+        "path": str(image),
+        "name": image.name,
+        "version": version,
+        "width": width,
+        "height": height,
+    }
+
+
 @router.post("/push-thumbnail")
 async def push_thumbnail(req: PushRequest):
     """Push the current (or given) thumbnail to YouTube for this video."""
@@ -1206,8 +1266,6 @@ async def push_thumbnail(req: PushRequest):
 
 def _extract_video_id(url: str) -> str:
     """Extract a YouTube video ID from common URL forms (mirrors long_publish)."""
-    import re as _re
-
     if not url:
         return ""
     patterns = [
@@ -1215,7 +1273,7 @@ def _extract_video_id(url: str) -> str:
         r"youtube\.com.*[?&]v=([A-Za-z0-9_-]{11})",
     ]
     for pattern in patterns:
-        match = _re.search(pattern, url)
+        match = re.search(pattern, url)
         if match:
             return match.group(1)
     return ""

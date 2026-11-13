@@ -45,7 +45,8 @@ class TestManifest:
         paths = {r.path for r in manifest.api_router.routes}
         assert {
             "/compose", "/edit", "/overlay", "/list-videos", "/history",
-            "/upload-sources", "/push-thumbnail", "/download", "/config",
+            "/upload-sources", "/upload-thumbnail", "/adopt-thumbnail",
+            "/push-thumbnail", "/download", "/config",
             "/list-engines", "/job/{job_id}",
         } <= paths
 
@@ -625,3 +626,117 @@ class TestExternalBase:
         assert current_base.exists()
         meta = json.loads((video_dir / "video-long-meta.json").read_text())
         assert meta["thumbnail_version"] == 2
+
+
+class TestAdoptThumbnail:
+    """Clicking a history version must be enough to make it Current."""
+
+    def test_adopt_existing_version_updates_meta_without_copying(
+        self, video_dir: Path
+    ):
+        import asyncio
+
+        src = (video_dir / "video.mp4").resolve()
+        version = video_dir / "video_thumb_2.png"
+        version.write_bytes(_png_bytes())
+        yt_thumb._save_meta(src, {
+            "thumbnail_version": 1,
+            "files": {"thumbnail": str(video_dir / "video_thumb_1.png")},
+        })
+
+        body = asyncio.run(
+            yt_thumb.adopt_thumbnail(
+                yt_thumb.AdoptRequest(source=str(src), path=str(version))
+            )
+        )
+
+        assert body["path"] == str(version.resolve())
+        assert body["name"] == "video_thumb_2.png"
+        assert body["version"] == 2
+        assert (body["width"], body["height"]) == (1280, 720)
+        # In place: no new version file was created.
+        assert sorted(p.name for p in video_dir.glob("video_thumb_*.png")) == [
+            "video_thumb_2.png"
+        ]
+        meta = json.loads((video_dir / "video-long-meta.json").read_text())
+        assert meta["files"]["thumbnail"] == str(version.resolve())
+        assert meta["thumbnail_version"] == 2
+
+    def test_adopt_foreign_image_keeps_current_version(self, video_dir: Path):
+        import asyncio
+
+        src = (video_dir / "video.mp4").resolve()
+        ext = video_dir / "video_ext_abcd.png"
+        ext.write_bytes(_png_bytes())
+        yt_thumb._save_meta(src, {"thumbnail_version": 4, "files": {}})
+
+        body = asyncio.run(
+            yt_thumb.adopt_thumbnail(
+                yt_thumb.AdoptRequest(source=str(src), path=str(ext))
+            )
+        )
+
+        assert body["version"] == 4
+        meta = json.loads((video_dir / "video-long-meta.json").read_text())
+        assert meta["thumbnail_version"] == 4
+
+    def test_adopt_requires_path(self, video_dir: Path):
+        import asyncio
+
+        from fastapi import HTTPException
+
+        src = (video_dir / "video.mp4").resolve()
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                yt_thumb.adopt_thumbnail(
+                    yt_thumb.AdoptRequest(source=str(src), path="  ")
+                )
+            )
+        assert exc.value.status_code == 400
+
+    def test_adopt_requires_video(self, video_dir: Path):
+        import asyncio
+
+        from fastapi import HTTPException
+
+        img = video_dir / "video_thumb_1.png"
+        img.write_bytes(_png_bytes())
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                yt_thumb.adopt_thumbnail(
+                    yt_thumb.AdoptRequest(source="", path=str(img))
+                )
+            )
+        assert exc.value.status_code == 400
+
+    def test_adopt_rejects_path_outside_source_dir(self, video_dir: Path, tmp_path: Path):
+        import asyncio
+
+        from fastapi import HTTPException
+
+        src = (video_dir / "video.mp4").resolve()
+        outside = tmp_path.parent / "outside.png"
+        outside.write_bytes(_png_bytes())
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                yt_thumb.adopt_thumbnail(
+                    yt_thumb.AdoptRequest(source=str(src), path=str(outside))
+                )
+            )
+        assert exc.value.status_code == 403
+
+    def test_adopt_rejects_unsupported_extension(self, video_dir: Path):
+        import asyncio
+
+        from fastapi import HTTPException
+
+        src = (video_dir / "video.mp4").resolve()
+        bad = video_dir / "video_thumb_1.gif"
+        bad.write_bytes(b"GIF89a")
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                yt_thumb.adopt_thumbnail(
+                    yt_thumb.AdoptRequest(source=str(src), path=str(bad))
+                )
+            )
+        assert exc.value.status_code == 400

@@ -68,20 +68,6 @@ _NAV_LAYOUT = (
 }
 .webux-nav a:hover { color: var(--profile-text, var(--text)); background: var(--surface); }
 .webux-nav a.active { color: var(--text); background: var(--accent); }
-.webux-nav .webux-profile-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--profile-accent, var(--accent));
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  flex-shrink: 0;
-  letter-spacing: .02em;
-}
 /* Grouped dropdowns: the tab bar stays short no matter how many plugins
    are installed. One button per group, tabs inside the menu. */
 .webux-nav { flex-wrap: wrap; }
@@ -397,11 +383,9 @@ _WEBUX_PROFILE_SCRIPT = """
   }
   // Paint the whole page with a profile's tone: sets data-profile on <html>
   // so every `[data-profile="."]` CSS rule (toolbar, publish components)
-  // updates at once, then keeps the nav badge in sync.
+  // updates at once.
   function applyProfile(name){
     if (name) document.documentElement.setAttribute('data-profile', name);
-    var badge = document.querySelector('.webux-profile-badge');
-    if (badge) badge.textContent = '👤 ' + (name || '');
     try {
       window.dispatchEvent(new CustomEvent('webux-profile-change', {
         detail: { profile: name, tone: profileTone(name) }
@@ -749,10 +733,6 @@ def _build_nav(
         f'{" selected" if name == active_prof else ""}>'
         f'👤 {_html.escape(name)}</option>'
         for name in prof_names
-    )
-    links.append(
-        f'<span class="webux-profile-badge" title="Active profile">'
-        f"👤 {_html.escape(active_prof)}</span>"
     )
     links.append(
         f'<select id="webux-profile" class="profile-select" title="Profile (global)">'
