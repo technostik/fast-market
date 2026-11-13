@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -255,6 +257,7 @@ def extract_short(
             remove_temp=True,
             audio_bitrate="192k",
             preset="medium",
+            logger=None,
         )
     finally:
         if clip is not None:
@@ -264,6 +267,109 @@ def extract_short(
         source.close()
 
     return str(output_file)
+
+
+def load_segments(segments_file: str) -> list[dict]:
+    """Parse a segments JSON file (a list of ``{title?, start, end}``).
+
+    Times accept the same formats as the CLI. Invalid entries fail loudly with
+    the offending index.
+    """
+    path = Path(segments_file)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path} is not valid JSON: {exc}") from exc
+    if not isinstance(data, list) or not data:
+        raise ValueError(f"{path} must contain a non-empty JSON list of segments")
+
+    segments = []
+    for index, item in enumerate(data, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"{path} segment {index} is not a JSON object")
+        start, end = item.get("start"), item.get("end")
+        if start is None or end is None:
+            raise ValueError(f"{path} segment {index} is missing 'start' or 'end'")
+        start_seconds = parse_timestamp(str(start))
+        end_seconds = parse_timestamp(str(end))
+        if start_seconds is None or end_seconds is None:
+            raise ValueError(
+                f"{path} segment {index} has unparseable times: {start!r} -> {end!r}"
+            )
+        title = item.get("title")
+        segments.append(
+            {
+                "title": title if isinstance(title, str) else None,
+                "start": start_seconds,
+                "end": end_seconds,
+            }
+        )
+    return segments
+
+
+def _sanitize_title(title: str) -> str:
+    """Turn a segment title into a filesystem-safe file stem."""
+    return re.sub(r'[\\/:*?"<>|]', "-", title).strip().strip(".")
+
+
+def _unique_path(directory: Path, stem: str) -> Path:
+    """``directory/stem.mp4``, suffixed with ``(n)`` when it already exists."""
+    candidate = directory / f"{stem}.mp4"
+    counter = 2
+    while candidate.exists():
+        candidate = directory / f"{stem} ({counter}).mp4"
+        counter += 1
+    return candidate
+
+
+def extract_segments(
+    input_file: str,
+    segments_file: str,
+    output_dir: str | None = None,
+    layout: str = "stack",
+    zoom: float = 1.0,
+    center_x: float = 0.0,
+    center_y: float = 0.0,
+    foreground_zoom: float = DEFAULT_FG_ZOOM,
+    background_blur: float = DEFAULT_BG_BLUR,
+    background_brightness: float = DEFAULT_BG_BRIGHTNESS,
+) -> list[str]:
+    """Extract every segment in ``segments_file`` from ``input_file``.
+
+    Each output is named after its title, or ``<input stem>_short_<n>`` when
+    the segment has no title (``n`` counts the untitled segments in file
+    order). Outputs go to ``output_dir`` (the input directory by default).
+    """
+    segments = load_segments(segments_file)
+    input_path = Path(input_file).resolve()
+    directory = Path(output_dir).expanduser().resolve() if output_dir else input_path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+
+    outputs: list[str] = []
+    untitled = 0
+    for index, segment in enumerate(segments, start=1):
+        stem = _sanitize_title(segment["title"] or "")
+        if not stem:
+            untitled += 1
+            stem = f"{input_path.stem}_short_{untitled}"
+        output_path = _unique_path(directory, stem)
+        print(f"[{index}/{len(segments)}] {output_path.name}", file=sys.stderr)
+        outputs.append(
+            extract_short(
+                str(input_path),
+                str(output_path),
+                segment["start"],
+                segment["end"],
+                layout=layout,
+                zoom=zoom,
+                center_x=center_x,
+                center_y=center_y,
+                foreground_zoom=foreground_zoom,
+                background_blur=background_blur,
+                background_brightness=background_brightness,
+            )
+        )
+    return outputs
 
 
 def _parse_time(value: str, option: str) -> float:
@@ -280,8 +386,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.command("short-extractor")
     @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
     @click.option(
-        "--start", "-s", required=True, metavar="TIME",
-        help="Clip start (SS, MM:SS, HH:MM:SS, or HH:MM:SS,mmm)",
+        "--segments", type=click.Path(exists=True, dir_okay=False), default=None,
+        help="JSON list of {title?, start, end} segments to extract as separate shorts",
+    )
+    @click.option(
+        "--start", "-s", default=None, metavar="TIME",
+        help="Clip start (SS, MM:SS, HH:MM:SS, or HH:MM:SS,mmm); required without --segments",
     )
     @click.option(
         "--end", "-e", default=None, metavar="TIME",
@@ -316,10 +426,13 @@ def register(plugin_manifests: dict) -> CommandManifest:
                   show_default=True,
                   help="Background brightness multiplier for --layout fit-blur (1.0 = unchanged)")
     @click.option("--output", "-o", type=click.Path(), default=None,
-                  help="Output file path")
+                  help="Output file path (single segment only)")
+    @click.option("--output-dir", type=click.Path(), default=None,
+                  help="Directory for --segments outputs (default: input directory)")
     def short_extractor_cmd(
         input_file: str,
-        start: str,
+        segments: str | None,
+        start: str | None,
         end: str | None,
         duration: float | None,
         layout: str,
@@ -330,20 +443,23 @@ def register(plugin_manifests: dict) -> CommandManifest:
         bg_blur: float,
         bg_brightness: float,
         output: str | None,
+        output_dir: str | None,
     ):
         """Extract a clip from a video and convert it to 9:16 (portrait)."""
-        if (end is None) == (duration is None):
-            raise click.UsageError("pass exactly one of --end or --duration")
-
-        start_seconds = _parse_time(start, "--start")
-        if end is not None:
-            end_seconds = _parse_time(end, "--end")
-        else:
-            if duration is None or duration <= 0:
-                raise click.BadParameter(
-                    f"duration must be > 0, got {duration}", param_hint="--duration"
+        if segments is not None:
+            if start is not None or end is not None or duration is not None:
+                raise click.UsageError(
+                    "--segments cannot be combined with --start/--end/--duration"
                 )
-            end_seconds = start_seconds + duration
+            if output is not None:
+                raise click.UsageError("--output is not valid with --segments; use --output-dir")
+        else:
+            if output_dir is not None:
+                raise click.UsageError("--output-dir requires --segments")
+            if start is None:
+                raise click.UsageError("--start is required without --segments")
+            if (end is None) == (duration is None):
+                raise click.UsageError("pass exactly one of --end or --duration")
 
         if zoom < 1.0:
             raise click.BadParameter(f"zoom must be >= 1.0, got {zoom}", param_hint="--zoom")
@@ -388,6 +504,38 @@ def register(plugin_manifests: dict) -> CommandManifest:
             )
 
         input_path = Path(input_file).resolve()
+
+        if segments is not None:
+            click.echo(
+                f"Extracting segments from {input_path.name} as 9:16 ({layout})...",
+                err=True,
+            )
+            outputs = extract_segments(
+                str(input_path),
+                segments,
+                output_dir=output_dir,
+                layout=layout,
+                zoom=zoom,
+                center_x=center_x,
+                center_y=center_y,
+                foreground_zoom=fg_zoom,
+                background_blur=bg_blur,
+                background_brightness=bg_brightness,
+            )
+            for path in outputs:
+                click.echo(path)
+            return
+
+        start_seconds = _parse_time(start, "--start")
+        if end is not None:
+            end_seconds = _parse_time(end, "--end")
+        else:
+            if duration is None or duration <= 0:
+                raise click.BadParameter(
+                    f"duration must be > 0, got {duration}", param_hint="--duration"
+                )
+            end_seconds = start_seconds + duration
+
         output_path = (
             Path(output).resolve() if output
             else input_path.parent / f"{input_path.stem}_short.mp4"

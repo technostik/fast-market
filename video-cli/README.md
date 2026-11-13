@@ -73,7 +73,7 @@ The shared Click group also accepts these global options:
 | `video extract-transcript INPUT` | Create ASS, SRT, TXT, or word-level JSON subtitles |
 | `video burn-subtitles VIDEO ASS` | Burn ASS subtitles into a video |
 | `video cut INPUT` | Trim a video at a timestamp using stream copy |
-| `video short-extractor INPUT` | Extract a clip and convert it to 9:16 (portrait) |
+| `video short-extractor INPUT` | Extract one clip or a JSON segment list and convert to 9:16 (portrait) |
 | `video concat INPUT... -o OUTPUT` | Concatenate two or more videos |
 | `video duration INPUT` | Print a video duration in seconds |
 | `video assemble IMAGE AUDIO` | Create a Ken Burns clip from an image and audio |
@@ -189,12 +189,13 @@ video cut interview.mp4 -t 00:01:30 --keep tail -o interview_tail.mp4
 
 ### `video short-extractor INPUT_FILE`
 
-Extract `[start, end]` from a 16:9 video and re-encode it as a 9:16 portrait clip with H.264/AAC. This command does not add subtitles; use `video burn-subtitles` on the result. Timestamps accept the SRT form (`HH:MM:SS,mmm`) produced by `video extract-transcript`.
+Extract `[start, end]` from a 16:9 video and re-encode it as a 9:16 portrait clip with H.264/AAC, either as a single range or one clip per entry in a JSON segments file. This command does not add subtitles; use `video burn-subtitles` on the result. Timestamps accept the SRT form (`HH:MM:SS,mmm`) produced by `video extract-transcript`.
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
 | `INPUT_FILE` | — | Existing input video | required |
-| `--start` | `-s` | Clip start as seconds, `MM:SS`, `HH:MM:SS`, or `HH:MM:SS,mmm` | required |
+| `--segments` | — | JSON file with a list of `{title?, start, end}` objects; extracts one short per entry | — |
+| `--start` | `-s` | Clip start as seconds, `MM:SS`, `HH:MM:SS`, or `HH:MM:SS,mmm` | required without `--segments` |
 | `--end` | `-e` | Clip end, same formats as `--start` | one of `--end`/`--duration` |
 | `--duration` | `-d` | Clip length in seconds, alternative to `--end` | one of `--end`/`--duration` |
 | `--layout` | — | `stack` keeps the whole frame as two stacked 16:9 halves; `crop` zooms around the anchor and center-crops; `fit-blur` centers the full frame over a blurred background | `stack` |
@@ -204,9 +205,22 @@ Extract `[start, end]` from a 16:9 video and re-encode it as a 9:16 portrait cli
 | `--fg-zoom` | — | Foreground scale for `--layout fit-blur` (`1.0` = canvas width) | `1.3` |
 | `--bg-blur` | — | Gaussian blur sigma in pixels for `--layout fit-blur` | `30` |
 | `--bg-brightness` | — | Background brightness multiplier for `--layout fit-blur` (`1.0` = unchanged) | `0.75` |
-| `--output` | `-o` | Output path | `<stem>_short.mp4` next to the input |
+| `--output` | `-o` | Output path (single segment only) | `<stem>_short.mp4` next to the input |
+| `--output-dir` | — | Directory for `--segments` outputs (created if missing) | input directory |
 
 All layouts output 9:16. `--zoom`, `--center-x`, and `--center-y` are rejected with `stack` and `fit-blur`; `--fg-zoom`, `--bg-blur`, and `--bg-brightness` are rejected with `stack` and `crop`. An `--end` past the last frame is clamped to the source duration with a warning on stderr; a start past the end is an error.
+
+`--segments` extracts one short per entry in a JSON list, which lets a transcript pass define the ranges:
+
+```json
+[
+  {"title": "La métaphore du pistolet chargé : technologie vs maturité", "start": "00:00:00,000", "end": "00:01:04,480"},
+  {"title": "Le wokisme comme refus de la maturation", "start": "00:09:10,040", "end": "00:09:37,320"},
+  {"start": "00:15:29,400", "end": "00:15:56,000"}
+]
+```
+
+Each output is named after its `title` (filesystem-unsafe characters replaced by `-`); segments without one use `<input stem>_short_<n>`, where `n` counts the untitled segments in file order. An existing file is never overwritten: a ` (2)`, ` (3)`, … suffix is added. `--segments` cannot be combined with `--start`, `--end`, or `--duration`.
 
 `stack` and `crop` build the portrait clip from the source dimensions with MoviePy. `fit-blur` renders a fixed 1080×1920 composition with ffmpeg: a duplicated, cover-scaled, Gaussian-blurred and dimmed background fills the canvas, and the full frame is scaled to `--fg-zoom` × the canvas width and centered on top (the default `1.3` overflows about 15% on each side). Both layers share the source frames, so they stay in sync and keep the source frame rate.
 
@@ -216,6 +230,7 @@ video short-extractor talk.mp4 -s 1:12,5 -d 40 -o short.mp4
 video short-extractor talk.mp4 -s 0:30 -e 1:10 --layout crop --zoom 1.2 --center-y 0.4
 video short-extractor talk.mp4 -s 0:30 -e 1:10 --layout fit-blur
 video short-extractor talk.mp4 -s 0:30 -e 1:10 --layout fit-blur --fg-zoom 1.2 --bg-blur 40 --bg-brightness 0.6
+video short-extractor talk.mp4 --segments segments.json --layout fit-blur --output-dir shorts/
 ```
 
 ### `video concat INPUT_FILES... -o OUTPUT`

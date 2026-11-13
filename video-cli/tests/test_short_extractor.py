@@ -16,7 +16,9 @@ from commands.cut.register import parse_timestamp
 from commands.short_extractor.register import (
     _build_fit_blur_filter,
     _crop_offset,
+    extract_segments,
     extract_short,
+    load_segments,
     register,
 )
 
@@ -238,6 +240,137 @@ def test_cli_writes_default_output(landscape_video: Path):
     expected = landscape_video.parent / "source_short.mp4"
     assert str(expected) in result.stdout
     assert expected.exists()
+
+
+def _write_segments(path: Path, segments: list[dict]) -> Path:
+    path.write_text(json.dumps(segments), encoding="utf-8")
+    return path
+
+
+def test_load_segments_parses_titles_and_times(tmp_path: Path):
+    segments_file = _write_segments(
+        tmp_path / "segments.json",
+        [
+            {"title": "First", "start": "00:00:00,000", "end": "00:00:01,500"},
+            {"start": "2.0", "end": "3.0"},
+        ],
+    )
+
+    segments = load_segments(str(segments_file))
+    assert segments == [
+        {"title": "First", "start": 0.0, "end": 1.5},
+        {"title": None, "start": 2.0, "end": 3.0},
+    ]
+
+
+def test_load_segments_rejects_missing_time_field(tmp_path: Path):
+    segments_file = _write_segments(tmp_path / "segments.json", [{"start": "0"}])
+
+    with pytest.raises(ValueError, match="missing 'start' or 'end'"):
+        load_segments(str(segments_file))
+
+
+def test_load_segments_rejects_bad_json_and_empty_list(tmp_path: Path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ValueError, match="not valid JSON"):
+        load_segments(str(bad))
+
+    empty = tmp_path / "empty.json"
+    empty.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-empty"):
+        load_segments(str(empty))
+
+
+def test_extract_segments_names_by_title_then_sequence(
+    landscape_video: Path, tmp_path: Path
+):
+    out_dir = tmp_path / "out"
+    segments_file = _write_segments(
+        tmp_path / "segments.json",
+        [
+            {"title": "Le wokisme / refus ?", "start": "0.0", "end": "0.4"},
+            {"start": "0.5", "end": "0.9"},
+            {"title": "Troisième", "start": "1.0", "end": "1.4"},
+        ],
+    )
+
+    outputs = extract_segments(
+        str(landscape_video), str(segments_file), output_dir=str(out_dir)
+    )
+
+    assert [Path(p).name for p in outputs] == [
+        "Le wokisme - refus -.mp4",
+        "source_short_1.mp4",
+        "Troisième.mp4",
+    ]
+    for path in outputs:
+        assert Path(path).exists()
+        width, height, _ = _probe(Path(path))
+        assert width < height
+
+
+def test_extract_segments_avoids_overwriting_existing_title(
+    landscape_video: Path, tmp_path: Path
+):
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "Already Here.mp4").write_bytes(b"x")
+    segments_file = _write_segments(
+        tmp_path / "segments.json",
+        [{"title": "Already Here", "start": "0.0", "end": "0.4"}],
+    )
+
+    outputs = extract_segments(
+        str(landscape_video), str(segments_file), output_dir=str(out_dir)
+    )
+
+    assert Path(outputs[0]).name == "Already Here (2).mp4"
+    assert (out_dir / "Already Here.mp4").read_bytes() == b"x"
+
+
+def test_cli_extracts_segments_to_stdout(landscape_video: Path, tmp_path: Path):
+    runner = CliRunner()
+    cmd = register({}).click_command
+    out_dir = tmp_path / "out"
+    segments_file = _write_segments(
+        tmp_path / "segments.json",
+        [
+            {"title": "One", "start": "0.0", "end": "0.3"},
+            {"start": "0.5", "end": "0.8"},
+        ],
+    )
+
+    result = runner.invoke(
+        cmd, [str(landscape_video), "--segments", str(segments_file),
+              "--output-dir", str(out_dir)]
+    )
+
+    assert result.exit_code == 0, result.output
+    stdout_paths = [line for line in result.stdout.splitlines() if line.strip()]
+    assert [Path(p).name for p in stdout_paths] == ["One.mp4", "source_short_1.mp4"]
+    assert (out_dir / "One.mp4").exists()
+
+
+def test_cli_rejects_segments_with_start(landscape_video: Path, tmp_path: Path):
+    runner = CliRunner()
+    cmd = register({}).click_command
+    segments_file = _write_segments(tmp_path / "segments.json", [{"start": "0", "end": "1"}])
+
+    result = runner.invoke(
+        cmd, [str(landscape_video), "--segments", str(segments_file), "-s", "0"]
+    )
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
+
+
+def test_cli_requires_start_without_segments(landscape_video: Path):
+    runner = CliRunner()
+    cmd = register({}).click_command
+
+    result = runner.invoke(cmd, [str(landscape_video), "-e", "1"])
+    assert result.exit_code == 2
+    assert "--start is required without --segments" in result.output
 
 
 if __name__ == "__main__":
