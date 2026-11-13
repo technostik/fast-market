@@ -41,6 +41,7 @@ commands/<command>/register.py
 | `commands/extract_transcript/` | Local or Groq transcription to ASS, SRT, TXT, or word-level JSON (`json` and multi-format runs are local-only) |
 | `commands/burn_subtitles/` | ffmpeg ASS subtitle burn-in |
 | `commands/cut/` | Timestamp parsing and stream-copy trimming |
+| `commands/short_extractor/` | 16:9 to 9:16 clip extraction (`stack`, `crop`, or `fit-blur` layout) with H.264/AAC output |
 | `commands/concat/` | MoviePy concatenation with H.264/AAC output |
 | `commands/duration/` | `ffprobe` duration reporting |
 | `commands/assemble/` | Still-image and audio Ken Burns rendering |
@@ -73,6 +74,7 @@ commands/<command>/register.py
 | `concat` | `commands/concat/register.py` | `remote_concat_videos` |
 | `pipeline` | `commands/pipeline/register.py` | `run_media_pipeline` |
 | `cut` | `commands/cut/register.py` | none |
+| `short-extractor` | `commands/short_extractor/register.py` | none |
 | `duration` | `commands/duration/register.py` | none |
 | `assemble` | `commands/assemble/assembler.py` | none |
 | `generate` | `commands/generate/fal.py` (fal.ai queue REST: submit → poll → download) | none (fal.ai is already cloud) |
@@ -145,6 +147,9 @@ commands/<command>/register.py
 - **Transcript-aware silence removal is local-only by design:** `--use-transcript`/`--dry-run` (and `extract-transcript -f json` or any multi-format `-f a,b`) never reach Modal; combining them with `--modal` fails with a clear error. Keep new pause logic in `commands/remove_silence/transcript.py` (no media imports) so it stays unit-testable.
 - **Chrome WebM has no container duration:** MediaRecorder writes `Duration: N/A`. MoviePy's `ffmpeg -i` parser raises `OSError` on that header. `commands/media_open.py` (and the Modal copy `_open_video_clip`) takes the duration from packet timestamps. Do not open those files with a bare `VideoFileClip`.
 - **Stream-copy cuts:** `cut` avoids re-encoding, so keyframes and timestamps can make an arbitrary cut point imprecise.
+- **`short-extractor` always outputs 9:16:** `--layout stack` crops the left/right edges and stacks them vertically, keeping the full frame; `--layout crop` zooms and center-crops, so it discards everything outside the 9:16 window; `--layout fit-blur` keeps the full frame centered over a blurred copy of itself on a fixed 1080x1920 canvas. `--zoom`/`--center-x`/`--center-y` are rejected outside `crop`, and `--fg-zoom`/`--bg-blur`/`--bg-brightness` outside `fit-blur`.
+- **`fit-blur` is the only ffmpeg-backed layout:** MoviePy 2 has no Gaussian-blur effect, so the background blur, dimming, and compositing run through an ffmpeg `filter_complex` graph. Keep its option ranges (`--bg-blur` 0–1024, `--bg-brightness` in `(0, 2]`) in sync with what the `gblur` and `colorchannelmixer` filters accept. `--bg-brightness` is multiplicative (1.0 = unchanged), and the foreground is centered, so it is cut equally at both edges.
+- **`short-extractor` crop anchors are edge-based:** `--center-x 0`/`--center-y 0` anchor the zoom window at the left/top edge (the source plugin's behavior), and `1` moves it only halfway across the available slack. Output dimensions are rounded down to even numbers so the H.264 encode does not fall back to a 4:4:4 pixel format. `--layout crop` fails on sources narrower than 9:16, and `--layout stack` warns when the source is already portrait because it doubles the height.
 - **VFR slow-motion trap:** a stream-copy cut of a VFR file (e.g. OBS/Chrome VP9, static talking head) gets a computed average fps far below the container rate. MoviePy would adopt that average, misindex frames (`int(fps*t)`), and re-encode in slow motion with normal-speed audio. `commands/media_open.open_video_clip` (and the Modal `_open_video_clip` mirror) forces the container rate when average and container differ by >5% — the same rate files with undetermined average already get. CFR files are untouched.
 - **Assembly zoom options:** Supported named and dynamic motion profiles currently ignore the CLI zoom fallback values.
 - **Model availability:** The Modal image preloads the `medium` Whisper model. Other requested model sizes may need runtime download or may fail in a restricted worker environment.
@@ -169,6 +174,7 @@ pytest tests/
 The suite covers:
 
 - Timestamp parsing, `head`/`tail` selection, and stream-copy failure handling in `tests/test_cut.py`.
+- 9:16 stack/crop/fit-blur geometry, range validation, end clamping, and CLI option validation in `tests/test_short_extractor.py` (requires `ffmpeg` and `ffprobe`).
 - `ffprobe` duration success and failure handling in `tests/test_duration.py`.
 - fal.ai generate resolution, quota fallback, payload building, and output handling in `tests/test_generate_fal.py` (network-free via monkeypatched client).
 - SadTalker command construction, output discovery, and setup helpers in `tests/test_lipsync.py` (no GPU/network; subprocess mocked).

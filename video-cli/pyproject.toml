@@ -28,6 +28,7 @@ packages = [
     "commands",
     "commands.remove_silence",
     "commands.cut",
+    "commands.short_extractor",
     "commands.extract_transcript",
     "commands.burn_subtitles",
     "commands.concat",

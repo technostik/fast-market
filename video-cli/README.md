@@ -73,6 +73,7 @@ The shared Click group also accepts these global options:
 | `video extract-transcript INPUT` | Create ASS, SRT, TXT, or word-level JSON subtitles |
 | `video burn-subtitles VIDEO ASS` | Burn ASS subtitles into a video |
 | `video cut INPUT` | Trim a video at a timestamp using stream copy |
+| `video short-extractor INPUT` | Extract a clip and convert it to 9:16 (portrait) |
 | `video concat INPUT... -o OUTPUT` | Concatenate two or more videos |
 | `video duration INPUT` | Print a video duration in seconds |
 | `video assemble IMAGE AUDIO` | Create a Ken Burns clip from an image and audio |
@@ -177,13 +178,44 @@ Trim at a timestamp with ffmpeg stream copy. This is fast, but the cut is not fr
 |--------|-------|-------------|---------|
 | `INPUT_FILE` | — | Existing input video | required |
 | `--output` | `-o` | Output path | `<stem>_cut<suffix>` next to the input |
-| `--time` | `-t` | Cut point as seconds, `MM:SS`, or `HH:MM:SS` | required |
+| `--time` | `-t` | Cut point as seconds, `MM:SS`, `HH:MM:SS`, or `HH:MM:SS,mmm` | required |
 | `--keep` | — | Keep `head` (`[0,time]`) or `tail` (`[time,end]`) | `head` |
 
 ```bash
 video cut interview.mp4 -t 90
 video cut interview.mp4 -t 1:30 --keep head
 video cut interview.mp4 -t 00:01:30 --keep tail -o interview_tail.mp4
+```
+
+### `video short-extractor INPUT_FILE`
+
+Extract `[start, end]` from a 16:9 video and re-encode it as a 9:16 portrait clip with H.264/AAC. This command does not add subtitles; use `video burn-subtitles` on the result. Timestamps accept the SRT form (`HH:MM:SS,mmm`) produced by `video extract-transcript`.
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `INPUT_FILE` | — | Existing input video | required |
+| `--start` | `-s` | Clip start as seconds, `MM:SS`, `HH:MM:SS`, or `HH:MM:SS,mmm` | required |
+| `--end` | `-e` | Clip end, same formats as `--start` | one of `--end`/`--duration` |
+| `--duration` | `-d` | Clip length in seconds, alternative to `--end` | one of `--end`/`--duration` |
+| `--layout` | — | `stack` keeps the whole frame as two stacked 16:9 halves; `crop` zooms around the anchor and center-crops; `fit-blur` centers the full frame over a blurred background | `stack` |
+| `--zoom` | — | Zoom factor for `--layout crop`, `>= 1.0` | `1.0` |
+| `--center-x` | — | Horizontal zoom anchor in `[-1, 1]` for `--layout crop` (`0` = left edge) | `0.0` |
+| `--center-y` | — | Vertical zoom anchor in `[-1, 1]` for `--layout crop` (`0` = top edge) | `0.0` |
+| `--fg-zoom` | — | Foreground scale for `--layout fit-blur` (`1.0` = canvas width) | `1.3` |
+| `--bg-blur` | — | Gaussian blur sigma in pixels for `--layout fit-blur` | `30` |
+| `--bg-brightness` | — | Background brightness multiplier for `--layout fit-blur` (`1.0` = unchanged) | `0.75` |
+| `--output` | `-o` | Output path | `<stem>_short.mp4` next to the input |
+
+All layouts output 9:16. `--zoom`, `--center-x`, and `--center-y` are rejected with `stack` and `fit-blur`; `--fg-zoom`, `--bg-blur`, and `--bg-brightness` are rejected with `stack` and `crop`. An `--end` past the last frame is clamped to the source duration with a warning on stderr; a start past the end is an error.
+
+`stack` and `crop` build the portrait clip from the source dimensions with MoviePy. `fit-blur` renders a fixed 1080×1920 composition with ffmpeg: a duplicated, cover-scaled, Gaussian-blurred and dimmed background fills the canvas, and the full frame is scaled to `--fg-zoom` × the canvas width and centered on top (the default `1.3` overflows about 15% on each side). Both layers share the source frames, so they stay in sync and keep the source frame rate.
+
+```bash
+video short-extractor talk.mp4 -s 00:01:12,500 -e 00:01:52,000
+video short-extractor talk.mp4 -s 1:12,5 -d 40 -o short.mp4
+video short-extractor talk.mp4 -s 0:30 -e 1:10 --layout crop --zoom 1.2 --center-y 0.4
+video short-extractor talk.mp4 -s 0:30 -e 1:10 --layout fit-blur
+video short-extractor talk.mp4 -s 0:30 -e 1:10 --layout fit-blur --fg-zoom 1.2 --bg-blur 40 --bg-brightness 0.6
 ```
 
 ### `video concat INPUT_FILES... -o OUTPUT`

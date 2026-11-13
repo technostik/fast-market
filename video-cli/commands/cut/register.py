@@ -8,12 +8,13 @@ from commands.base import CommandManifest
 
 
 def parse_timestamp(ts: str) -> float | None:
-    """Parse a cut point into seconds.
+    """Parse a timestamp into seconds.
 
-    Accepts ``MM:SS``, ``HH:MM:SS``, or a bare number of seconds.
+    Accepts ``MM:SS``, ``HH:MM:SS``, an SRT timecode with fractional seconds
+    (``HH:MM:SS,mmm`` or ``HH:MM:SS.mmm``), or a bare number of seconds.
     Returns ``None`` for an unparseable value.
     """
-    ts = (ts or "").strip()
+    ts = (ts or "").strip().replace(",", ".")
     if not ts:
         return None
     if ":" in ts:
