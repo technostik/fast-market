@@ -107,6 +107,10 @@ class Job:
     # Duration (seconds) of the final video that will be uploaded to YouTube,
     # measured right before the upload step runs.
     upload_duration_seconds: float | None = None
+    # True only for jobs created by the run form / pool item, i.e. the jobs that
+    # own the do_remove_silence / do_burn_subtitles / use_modal choices. Resume,
+    # redo post-publish and re-upload keep the values recorded by the first run.
+    record_processing_options: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         now = time.time()

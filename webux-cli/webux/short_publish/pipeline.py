@@ -330,6 +330,8 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             s0.output += f"\n⏱ Duration: {duration:.0f}s (limit {effective_limit:.0f}s incl. signature)"
             current_video = out_path
             job.files["no_silence"] = out_path
+        else:
+            s0.output += "🔇 Remove silence disabled — original timing kept"
 
         # ── Volume normalization (optional, modal-aware) ──
         if job.do_normalize_volume:
@@ -484,6 +486,8 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         else:
             if skip_transcript:
                 s2.output = "Skipped (no transcript selected)"
+            else:
+                s2.output = "Skipped (subtitles disabled)"
             s2.status = "skipped"
         _save_meta(job)
     else:

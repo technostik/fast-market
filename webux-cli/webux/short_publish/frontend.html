@@ -1343,7 +1343,15 @@ async function uploadFile(file) {
   await fetch('/api/short_publish/pool/add', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ source: data.path, profile: pageProfile() })
+    body: JSON.stringify({
+      source: data.path,
+      profile: pageProfile(),
+      // The queued item must inherit the run form's processing options;
+      // otherwise an upload silently re-enables silence removal / subtitles / Modal.
+      do_remove_silence: document.getElementById('removeSilence').checked,
+      do_burn_subtitles: document.getElementById('burnSubtitles').checked,
+      use_modal: document.getElementById('useModal').checked,
+    })
   });
   refreshPool();
 }
@@ -1398,7 +1406,20 @@ async function refreshPool() {
     const mainDur = uploadDur != null
       ? ' ' + fmtDurationChip(uploadDur)
       : '';
-    let html = `<span>${name} <small style="color:var(--dim)">(${st})</small>${mainDur}</span>`;
+    // Processing options the item was queued with — only the non-defaults are
+    // shown, so a run that keeps silence / skips subtitles / runs locally is
+    // visible on the row instead of being guessed from the step list.
+    let optBadges = '';
+    if (item.do_remove_silence === false) {
+      optBadges += ' <span title="Remove silence disabled — original silence kept" style="cursor:help;font-size:11px;">🔇✖</span>';
+    }
+    if (item.do_burn_subtitles === false) {
+      optBadges += ' <span title="Burn subtitles disabled" style="cursor:help;font-size:11px;">💬✖</span>';
+    }
+    if (item.use_modal === false) {
+      optBadges += ' <span title="Processed locally (Modal disabled)" style="cursor:help;font-size:11px;">💻</span>';
+    }
+    let html = `<span>${name} <small style="color:var(--dim)">(${st})</small>${mainDur}${optBadges}</span>`;
     if (item.check_result !== null && item.check_result !== undefined) {
       const isOk = _isCheckOk(item.check_result);
       const detail = isOk ? 'Content check: OK' : `Content check: ${item.check_result}`;
@@ -1993,6 +2014,9 @@ async function addToPool() {
       source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
       skip_upload: document.getElementById('skipUpload').checked,
       transcript_mode: document.getElementById('cfgTranscriptMode').value,
+      do_remove_silence: document.getElementById('removeSilence').checked,
+      do_burn_subtitles: document.getElementById('burnSubtitles').checked,
+      use_modal: document.getElementById('useModal').checked,
       do_normalize_volume: document.getElementById('normalizeVolume').checked,
       do_charisma: document.getElementById('doCharisma').checked,
       do_add_signature: (!document.getElementById('addSignature').disabled && document.getElementById('addSignature').checked),

@@ -23,6 +23,12 @@ class PoolItem:
     source_urls: list[str] = field(default_factory=list)
     skip_upload: bool = False
     transcript_mode: str = "normal"
+    # Processing options chosen when the item was queued. They must be stored on
+    # the item (and in .publish-pool.json): the worker creates the Job later and
+    # used to hardcode remove-silence/burn-subtitles/modal to True.
+    do_remove_silence: bool = True
+    do_burn_subtitles: bool = True
+    use_modal: bool = True
     do_normalize_volume: bool = False
     do_charisma: bool = True
     do_add_signature: bool = True
@@ -81,6 +87,9 @@ def _load_pool_from_disk():
                 source_urls=item.get("source_urls", []),
                 skip_upload=item.get("skip_upload", False),
                 transcript_mode=item.get("transcript_mode") or ("groq" if item.get("use_groq") else "normal"),
+                do_remove_silence=item.get("do_remove_silence", True),
+                do_burn_subtitles=item.get("do_burn_subtitles", True),
+                use_modal=item.get("use_modal", True),
                 do_normalize_volume=item.get("do_normalize_volume", False),
                 do_charisma=item.get("do_charisma", True),
                 do_add_signature=item.get("do_add_signature", True),
@@ -124,6 +133,9 @@ def _save_pool_to_disk():
                 "source_urls": it.source_urls,
                 "skip_upload": it.skip_upload,
                 "transcript_mode": it.transcript_mode,
+                "do_remove_silence": it.do_remove_silence,
+                "do_burn_subtitles": it.do_burn_subtitles,
+                "use_modal": it.use_modal,
                 "do_normalize_volume": it.do_normalize_volume,
                 "do_charisma": it.do_charisma,
                 "do_add_signature": it.do_add_signature,
@@ -184,7 +196,7 @@ def _update_meta_status(source: str, status: str):
         pass
 
 
-def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True) -> bool:
+def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True, do_remove_silence: bool = True, do_burn_subtitles: bool = True, use_modal: bool = True) -> bool:
     src = str(Path(source).expanduser().resolve())
     if is_no_signature_source(Path(src)):
         return False
@@ -193,7 +205,7 @@ def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str
     source_urls = source_urls or []
     if not profile:
         profile = resolve_profile()
-    item = PoolItem(source=src, profile=profile, title_override=title_override, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish, do_pinned_comment=do_pinned_comment, pinned_comment_text=pinned_comment_text, do_add_to_corpus=do_add_to_corpus, cut_time=cut_time, duration_seconds=_get_video_duration_cli_sync(src))
+    item = PoolItem(source=src, profile=profile, title_override=title_override, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_remove_silence=do_remove_silence, do_burn_subtitles=do_burn_subtitles, use_modal=use_modal, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish, do_pinned_comment=do_pinned_comment, pinned_comment_text=pinned_comment_text, do_add_to_corpus=do_add_to_corpus, cut_time=cut_time, duration_seconds=_get_video_duration_cli_sync(src))
     _pool.append(item)
     _create_meta(src, description_prefix, source_urls)
     _save_pool_to_disk()
@@ -446,6 +458,11 @@ def get_pool_state() -> dict:
             "source_urls": it.source_urls,
             "skip_upload": it.skip_upload,
             "do_add_to_corpus": it.do_add_to_corpus,
+            # Processing options the item was queued with (shown on the row so a
+            # "no silence removal" / "local processing" run is visible).
+            "do_remove_silence": it.do_remove_silence,
+            "do_burn_subtitles": it.do_burn_subtitles,
+            "use_modal": it.use_modal,
             "status": it.status,
             "added_at": it.added_at,
             "finished_at": it.finished_at,
@@ -518,6 +535,9 @@ async def _pool_worker():
                 source_urls=next_item.source_urls,
                 skip_upload=next_item.skip_upload,
                 transcript_mode=next_item.transcript_mode,
+                do_remove_silence=next_item.do_remove_silence,
+                do_burn_subtitles=next_item.do_burn_subtitles,
+                use_modal=next_item.use_modal,
                 do_normalize_volume=next_item.do_normalize_volume,
                 do_charisma=next_item.do_charisma,
                 do_add_signature=next_item.do_add_signature,

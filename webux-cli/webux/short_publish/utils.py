@@ -117,6 +117,17 @@ def _save_meta(job) -> None:
         meta["pinned_comment_url"] = pinned_url
 
     meta["do_add_to_corpus"] = bool(getattr(job, "do_add_to_corpus", True))
+    # Processing options actually chosen for this run (run form / pool item).
+    # Jobs that do not own those decisions (resume, redo post-publish, re-upload)
+    # must keep whatever the original run recorded.
+    if getattr(job, "record_processing_options", False):
+        meta["do_remove_silence"] = bool(job.do_remove_silence)
+        meta["do_burn_subtitles"] = bool(job.do_burn_subtitles)
+        meta["use_modal"] = bool(job.use_modal)
+    else:
+        for _k in ("do_remove_silence", "do_burn_subtitles", "use_modal"):
+            if _k in existing:
+                meta[_k] = existing[_k]
     _set("corpus_video_id", getattr(job, "corpus_video_id", ""))
     _set("corpus_handle", getattr(job, "corpus_handle", ""))
 

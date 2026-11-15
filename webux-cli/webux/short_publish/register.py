@@ -87,9 +87,13 @@ def _is_busy() -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True, do_remove_silence: bool = True, do_burn_subtitles: bool = True, use_modal: bool = True) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
+
+    The processing options (``do_remove_silence``, ``do_burn_subtitles``,
+    ``use_modal``) are the ones stored on the pool item: hardcoding them here
+    made every queued video run all three steps whatever the run form said.
     """
     if not profile:
         profile = resolve_profile()
@@ -111,8 +115,8 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         prompt_title=pub.get("default_title_prompt", "youtube-title"),
         prompt_summary=pub.get("default_description_prompt", "youtube-summary"),
         prompt_check=pub.get("default_check_prompt", ""),
-        do_remove_silence=True,
-        do_burn_subtitles=True,
+        do_remove_silence=do_remove_silence,
+        do_burn_subtitles=do_burn_subtitles,
         transcript_mode=transcript_mode,
         language=pub.get("language", "fr"),
         model=pub.get("model", "medium"),
@@ -120,6 +124,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         description_prefix=description_prefix,
         source_urls=source_urls or [],
         skip_upload=skip_upload,
+        use_modal=use_modal,
         do_normalize_volume=do_normalize_volume,
         do_charisma=do_charisma,
         do_add_signature=do_add_signature,
@@ -136,6 +141,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         description_raw=meta.get("description_raw", ""),
         transcript_text=meta.get("transcript_text", ""),
         check_result=meta.get("check_result"),
+        record_processing_options=True,
     )
     job.pinned_comment_id = str(meta.get("pinned_comment_id", "") or "")
     job.pinned_comment_url = str(meta.get("pinned_comment_url", "") or "")
@@ -502,6 +508,7 @@ async def start(req: StartRequest):
         do_add_to_corpus=req.do_add_to_corpus,
         cut_time=req.cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
+        record_processing_options=True,
     )
     _jobs[job_id] = job
     asyncio.create_task(_run_job_safely(_run_pipeline_from(job, 0), job))
@@ -997,6 +1004,9 @@ class PoolAddRequest(BaseModel):
     source_urls: list[str] = []
     skip_upload: bool = False
     transcript_mode: str = "normal"
+    do_remove_silence: bool = True
+    do_burn_subtitles: bool = True
+    use_modal: bool = True
     do_normalize_volume: bool = False
     do_charisma: bool = True
     do_add_signature: bool = True
@@ -1010,7 +1020,7 @@ class PoolAddRequest(BaseModel):
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None, do_add_to_corpus=req.do_add_to_corpus)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None, do_add_to_corpus=req.do_add_to_corpus, do_remove_silence=req.do_remove_silence, do_burn_subtitles=req.do_burn_subtitles, use_modal=req.use_modal)
     return {"ok": ok}
 
 
