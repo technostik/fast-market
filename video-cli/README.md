@@ -162,16 +162,16 @@ Burn an ASS subtitle file into a video with ffmpeg.
 | `ASS_FILE` | — | Existing ASS subtitle file | required |
 | `--output` | `-o` | Output path | `<stem>_subtitled<suffix>` next to the video |
 | `--font-size` | — | Subtitle font size | `96` |
-| `--position` | — | Subtitle placement: `top-left`, `top`, `middle`, or `bottom` | `top-left` |
+| `--position` | — | Subtitle placement: `top-left`, `top`, `middle`, or `bottom` | `middle` |
 | `--modal` / `--local` | — | Run on Modal or locally | `--local` |
 
-The default `top-left` reproduces the previous hardcoded placement. `top`, `middle`, and `bottom` are horizontally centered. The position overrides the alignment written in the ASS file.
+The default `middle` reproduces the previous hardcoded middle-centered placement. `top`, `middle`, and `bottom` are horizontally centered; `top-left` is left-aligned. The position overrides the alignment written in the ASS file.
 
 ```bash
 video burn-subtitles talk.mp4 talk.ass
 video burn-subtitles talk.mp4 talk.ass -o talk_subtitled.mp4 --font-size 72
 video burn-subtitles talk.mp4 talk.ass --position bottom
-video burn-subtitles talk.mp4 talk.ass --position middle --modal
+video burn-subtitles talk.mp4 talk.ass --position top --modal
 ```
 
 ### `video cut INPUT_FILE`

@@ -74,9 +74,26 @@ def _bright_text_bbox(video: Path, tmp_path: Path) -> tuple[int, int, int, int]:
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def _legacy_bbox(video: Path, ass: Path, tmp_path: Path) -> tuple[int, int, int, int]:
+    """Bbox produced by the pre-`--position` burn (force_style Alignment=10)."""
+    out = tmp_path / "legacy.mp4"
+    force_style = (
+        "Alignment=10,Fontsize=40,"
+        "MarginL=0,MarginR=0,MarginV=0,"
+        "Outline=8,Shadow=14,BackColour=&H80000000&"
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", str(video),
+         "-vf", f"subtitles='{ass}':force_style='{force_style}'", str(out)],
+        check=True,
+    )
+    return _bright_text_bbox(out, tmp_path)
+
+
 def test_force_style_does_not_set_alignment():
-    # force_style Alignment is mirrored by this ffmpeg/libass build, so
-    # placement must not depend on it.
+    # force_style Alignment does not mean what the ASS style field means (10
+    # renders middle-center there, top-left here), so placement must not depend
+    # on it.
     style = _force_style(96)
     assert "Alignment" not in style
     assert "Fontsize=96" in style
@@ -131,6 +148,24 @@ def test_position_places_text(position: str, expect, tmp_path: Path):
     assert expect(*bbox), f"position {position!r} bbox={bbox}"
 
 
+def test_default_position_matches_legacy_burn(tmp_path: Path):
+    # Regression: the pre-`--position` burn forced force_style Alignment=10 and
+    # rendered middle-centered. Dropping the argument must not move the text.
+    video = tmp_path / "in.mp4"
+    ass = tmp_path / "subs.ass"
+    out = tmp_path / "out.mp4"
+    _make_dark_video(video)
+    _write_ass(ass)
+
+    burn_ass_subtitles(str(video), str(ass), str(out), subtitle_size=40)
+
+    legacy = _legacy_bbox(video, ass, tmp_path)
+    bbox = _bright_text_bbox(out, tmp_path)
+    assert all(abs(a - b) <= 2 for a, b in zip(bbox, legacy)), (
+        f"default bbox={bbox} differs from legacy middle-centered bbox={legacy}"
+    )
+
+
 def test_cli_exposes_position_and_rejects_unknown(tmp_path: Path):
     from click.testing import CliRunner
 
@@ -148,6 +183,7 @@ def test_cli_exposes_position_and_rejects_unknown(tmp_path: Path):
     assert help_result.exit_code == 0
     assert "--position" in help_result.stdout
     assert "top-left" in help_result.stdout
+    assert "[default: middle]" in help_result.stdout
 
     bad = runner.invoke(
         cmd, [str(video), str(ass), "--position", "sideways"]

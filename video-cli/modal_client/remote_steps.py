@@ -24,7 +24,7 @@ def _run_media_pipeline_impl(
     model_size: str = "medium",
     subtitle_size: int = 96,
     use_groq: bool = False,
-    subtitle_position: str = "top-left",
+    subtitle_position: str = "middle",
 ) -> dict:
     """
     Run up to three media processing steps inside one Modal container:
@@ -198,7 +198,7 @@ def remote_burn_subtitles(
     video_name: str,
     ass_bytes: bytes,
     subtitle_size: int = 96,
-    subtitle_position: str = "top-left",
+    subtitle_position: str = "middle",
 ) -> dict:
     return _run_media_pipeline_impl(
         video_bytes,
@@ -822,15 +822,16 @@ def _burn_subtitles(
     ass_path: str,
     output_path: str,
     subtitle_size: int = 96,
-    position: str = "top-left",
+    position: str = "middle",
 ) -> None:
     import os
     import subprocess
 
     # Mirror of commands/burn_subtitles/register.py. Alignment is applied to the
-    # style line of a rewritten copy rather than force_style: this ffmpeg/libass
-    # build mirrors the Alignment field of force_style. The value 10 matches the
-    # previous force_style default and renders top-left either way.
+    # style line of a rewritten copy rather than force_style: the force_style
+    # Alignment field is not interchangeable with the ASS style field on this
+    # ffmpeg/libass build. The style value 10 renders top-left, so "middle" (5)
+    # is the default that reproduces the historical middle-centered output.
     positions = {"top-left": 10, "top": 8, "middle": 5, "bottom": 2}
     try:
         alignment = positions[position]

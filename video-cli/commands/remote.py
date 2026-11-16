@@ -55,7 +55,7 @@ def run_remote_burn_subtitles(
     ass_path: Path,
     output_path: Path,
     font_size: int,
-    position: str = "top-left",
+    position: str = "middle",
 ) -> dict:
     try:
         from modal_client.app import app, spawn_and_get

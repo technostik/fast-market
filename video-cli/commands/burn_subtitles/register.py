@@ -9,20 +9,22 @@ import click
 
 from commands.base import CommandManifest
 
-# ASS alignment values. "top-left" (10) is the historical default and the only
-# value that reproduces the previous burned output (see the alignment note in
-# _apply_position). 2/5/8 are the numpad bottom/middle/top-center anchors.
+# ASS style alignment values. 2/5/8 are the numpad bottom/middle/top-center
+# anchors; 10 is the value the ASS writer puts in the style line and renders
+# top-left here. "middle" (5) reproduces the pre-`--position` output exactly
+# (see the alignment note in _apply_position).
 POSITIONS = {"top-left": 10, "top": 8, "middle": 5, "bottom": 2}
+
+DEFAULT_POSITION = "middle"
 
 
 def _force_style(subtitle_size: int) -> str:
     """Build the ffmpeg ASS ``force_style`` string.
 
-    Alignment is deliberately absent: with this ffmpeg/libass build the
-    ``Alignment`` field of ``force_style`` is mirrored (8 renders at the
-    center, 10 at the center-right), so placement is applied to the style line
-    of a rewritten ASS copy instead. The default position keeps the value 10
-    that the previous ``force_style`` used, which renders top-left either way.
+    Alignment is deliberately absent: the ``Alignment`` field of ``force_style``
+    is not interchangeable with the ASS style field on this ffmpeg/libass build
+    (``force_style`` 10 renders middle-center, 5 renders top-left), so placement
+    is applied to the style line of a rewritten ASS copy instead.
     """
     return (
         f"Fontsize={subtitle_size},"
@@ -36,7 +38,9 @@ def _apply_position(ass_content: str, position: str) -> str:
 
     Rewrites the ``Alignment`` field of every style line. An inline ``{\anN}``
     override is not used: this ffmpeg/libass build mirrors it, while the style
-    field renders correctly.
+    field renders correctly. The style field value 10 (what the ASS writer
+    emits) renders top-left here, so ``middle`` (5) is what matches the old
+    middle-centered output.
     """
     try:
         alignment = POSITIONS[position]
@@ -70,11 +74,12 @@ def burn_ass_subtitles(
     output_path: str,
     subtitle_size: int = 96,
     progress_cb=None,
-    position: str = "top-left",
+    position: str = DEFAULT_POSITION,
 ) -> None:
     """Burn ASS karaoke subtitles into a video using ffmpeg subtitles filter.
     If progress_cb is provided it receives (current_pct, total_pct).
-    ``position`` is one of ``POSITIONS``.
+    ``position`` is one of ``POSITIONS``; the default matches the historical
+    middle-centered placement.
     """
     # Rewritten copy: force_style cannot be trusted for Alignment (see above).
     positioned = tempfile.NamedTemporaryFile(
@@ -143,9 +148,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option(
         "--position",
         type=click.Choice(list(POSITIONS)),
-        default="top-left",
+        default=DEFAULT_POSITION,
         show_default=True,
-        help="Subtitle placement (top-left preserves the historical alignment)",
+        help="Subtitle placement (middle preserves the historical middle-centered rendering)",
     )
     @click.option("--modal/--local", default=False, show_default=True, help="Run this step on Modal instead of locally.")
     def burn_subtitles_cmd(

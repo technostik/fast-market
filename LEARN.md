@@ -58,3 +58,9 @@
 - A description override alone only replaces the summary call; the title prompt still runs, so Whisper stays.
 - The rhythm option is disabled in the UI and rejected with HTTP 400 on the API: rhythm mode cuts with the word-level transcript that manual mode never produces.
 - `title_override` / `description_override` live in `*-long-meta.json`, so Retry keeps the manual title after the field is cleared.
+
+## 2026-11-16 — burn-subtitles default placement
+
+- `ffmpeg`'s `subtitles=...:force_style='Alignment=N'` does not use the same numbering as the ASS style line: on this build (ffmpeg 8.0.1, libass 0.17.4) `force_style` 10 renders middle-center while style value 10 renders top-left. Never translate one into the other by value.
+- The pre-`--position` burn hardcoded `force_style Alignment=10`, so the historical output was middle-centered even though `extract-transcript` writes `Alignment: 10` in the style line. The backward-compatible default is therefore `middle` (style value 5), not `top-left`.
+- Measure placement instead of reasoning about it: render the same ASS through both paths, extract the white-glyph bbox with Pillow, and compare. `tests/test_burn_subtitles_position.py::test_default_position_matches_legacy_burn` pins the old path against the current default.
