@@ -475,7 +475,10 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
             s2.start_time = time.time()
             s2.status = "running"
             out_path = str(d / f"{stem}_subtitled.mp4")
-            cmd = [_video(), "burn-subtitles", current_video, ass_path, "-o", out_path]
+            cmd = [
+                _video(), "burn-subtitles", current_video, ass_path,
+                "-o", out_path, "--position", job.subtitle_position,
+            ]
             if job.use_modal:
                 cmd.append("--modal")
             if await _run_tracked(job, s2, *cmd):

@@ -1,5 +1,5 @@
-"""Processing options (remove silence / burn subtitles / Modal) must survive the
-pool queue.
+"""Processing options (remove silence / burn subtitles / subtitle position /
+Modal) must survive the pool queue.
 
 The run form's three checkboxes used to be dropped by ``POST /pool/add`` and
 hardcoded to ``True`` in ``_create_publish_job``, so every queued video ran all
@@ -66,6 +66,16 @@ def test_add_to_pool_defaults_processing_options_to_true(tmp_path, monkeypatch):
 
     item = sp_pool._pool[0]
     assert (item.do_remove_silence, item.do_burn_subtitles, item.use_modal) == (True, True, True)
+    assert item.subtitle_position == "middle"
+
+
+def test_add_to_pool_stores_subtitle_position(tmp_path, monkeypatch):
+    _isolate_pool(monkeypatch)
+    video = _video(tmp_path)
+
+    assert sp_pool.add_to_pool(str(video), subtitle_position="bottom")
+
+    assert sp_pool._pool[0].subtitle_position == "bottom"
 
 
 # ── .publish-pool.json round trip ─────────────────────────────────────────
@@ -80,6 +90,7 @@ def test_pool_file_round_trip_keeps_processing_options(tmp_path, monkeypatch):
             source=str(pool_file.parent / "a.mp4"),
             do_remove_silence=False,
             do_burn_subtitles=False,
+            subtitle_position="bottom",
             use_modal=False,
         ),
     ])
@@ -88,12 +99,14 @@ def test_pool_file_round_trip_keeps_processing_options(tmp_path, monkeypatch):
     saved = json.loads(pool_file.read_text(encoding="utf-8"))["items"][0]
     assert saved["do_remove_silence"] is False
     assert saved["do_burn_subtitles"] is False
+    assert saved["subtitle_position"] == "bottom"
     assert saved["use_modal"] is False
 
     sp_pool._pool = []
     sp_pool._load_pool_from_disk()
     item = sp_pool._pool[0]
     assert (item.do_remove_silence, item.do_burn_subtitles, item.use_modal) == (False, False, False)
+    assert item.subtitle_position == "bottom"
 
 
 def test_legacy_pool_file_defaults_processing_options_to_true(tmp_path, monkeypatch):
@@ -111,6 +124,7 @@ def test_legacy_pool_file_defaults_processing_options_to_true(tmp_path, monkeypa
 
     item = sp_pool._pool[0]
     assert (item.do_remove_silence, item.do_burn_subtitles, item.use_modal) == (True, True, True)
+    assert item.subtitle_position == "middle"
 
 
 def test_pool_state_exposes_processing_options(tmp_path, monkeypatch):
@@ -122,6 +136,7 @@ def test_pool_state_exposes_processing_options(tmp_path, monkeypatch):
         status="queued",
         do_remove_silence=False,
         do_burn_subtitles=False,
+        subtitle_position="top",
         use_modal=False,
     ))
 
@@ -129,6 +144,7 @@ def test_pool_state_exposes_processing_options(tmp_path, monkeypatch):
 
     assert item["do_remove_silence"] is False
     assert item["do_burn_subtitles"] is False
+    assert item["subtitle_position"] == "top"
     assert item["use_modal"] is False
 
 
@@ -143,11 +159,13 @@ def test_create_publish_job_honours_processing_options(tmp_path, monkeypatch):
         str(video),
         do_remove_silence=False,
         do_burn_subtitles=False,
+        subtitle_position="bottom",
         use_modal=False,
     )
 
     assert job.do_remove_silence is False
     assert job.do_burn_subtitles is False
+    assert job.subtitle_position == "bottom"
     assert job.use_modal is False
     assert job.record_processing_options is True
 
@@ -160,6 +178,7 @@ def test_create_publish_job_defaults_processing_options_to_true(tmp_path, monkey
     job = sp_register._create_publish_job(str(video))
 
     assert (job.do_remove_silence, job.do_burn_subtitles, job.use_modal) == (True, True, True)
+    assert job.subtitle_position == "middle"
 
 
 # ── POST /pool/add forwards the three options ─────────────────────────────
@@ -184,12 +203,14 @@ def test_pool_add_endpoint_forwards_processing_options(monkeypatch):
         "source": "/v/clip.mp4",
         "do_remove_silence": False,
         "do_burn_subtitles": False,
+        "subtitle_position": "bottom",
         "use_modal": False,
     })
 
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["do_remove_silence"] is False
     assert captured["kwargs"]["do_burn_subtitles"] is False
+    assert captured["kwargs"]["subtitle_position"] == "bottom"
     assert captured["kwargs"]["use_modal"] is False
 
 
@@ -213,7 +234,26 @@ def test_pool_add_endpoint_defaults_processing_options_to_true(monkeypatch):
     assert r.status_code == 200, r.text
     assert captured["kwargs"]["do_remove_silence"] is True
     assert captured["kwargs"]["do_burn_subtitles"] is True
+    assert captured["kwargs"]["subtitle_position"] == "middle"
     assert captured["kwargs"]["use_modal"] is True
+
+
+def test_pool_add_endpoint_rejects_unknown_subtitle_position(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    def fake_add_to_pool(*args, **kwargs):  # must never be reached
+        raise AssertionError("add_to_pool called with an invalid position")
+
+    monkeypatch.setattr(sp_register, "add_to_pool", fake_add_to_pool)
+    app = FastAPI()
+    app.include_router(sp_register.router)
+    client = TestClient(app)
+
+    r = client.post("/pool/add", json={"source": "/v/clip.mp4", "subtitle_position": "sideways"})
+
+    assert r.status_code == 400
+    assert "sideways" in r.text
 
 
 # ── pipeline actually skips the steps ─────────────────────────────────────
@@ -226,6 +266,7 @@ def _pipeline_job(tmp_path: Path, **flags) -> Job:
         prompt_summary="s",
         do_remove_silence=flags.get("do_remove_silence", True),
         do_burn_subtitles=flags.get("do_burn_subtitles", True),
+        subtitle_position=flags.get("subtitle_position", "middle"),
         use_modal=flags.get("use_modal", True),
         language="fr",
         model="medium",
@@ -305,6 +346,18 @@ def test_pipeline_forwards_modal_flag(tmp_path, monkeypatch):
     assert "--modal" in by_sub["burn-subtitles"]
 
 
+def test_pipeline_forwards_subtitle_position(tmp_path, monkeypatch):
+    job = _pipeline_job(
+        tmp_path, do_remove_silence=False, do_burn_subtitles=True,
+        subtitle_position="bottom", use_modal=False,
+    )
+
+    cmds, _ = _run_core(job, tmp_path, monkeypatch)
+
+    burn = next(c for c in cmds if len(c) > 1 and c[1] == "burn-subtitles")
+    assert burn[burn.index("--position") + 1] == "bottom"
+
+
 # ── meta log traceability ─────────────────────────────────────────────────
 
 def _meta_job(source: str, *, record: bool, **flags) -> Job:
@@ -315,6 +368,7 @@ def _meta_job(source: str, *, record: bool, **flags) -> Job:
         prompt_summary="s",
         do_remove_silence=flags.get("do_remove_silence", True),
         do_burn_subtitles=flags.get("do_burn_subtitles", True),
+        subtitle_position=flags.get("subtitle_position", "middle"),
         use_modal=flags.get("use_modal", True),
         language="fr",
         model="medium",
@@ -327,13 +381,14 @@ def _meta_job(source: str, *, record: bool, **flags) -> Job:
 def test_meta_records_processing_options(tmp_path):
     video = _video(tmp_path)
     job = _meta_job(str(video), record=True, do_remove_silence=False,
-                    do_burn_subtitles=False, use_modal=False)
+                    do_burn_subtitles=False, subtitle_position="bottom", use_modal=False)
 
     sp_utils._save_meta(job)
 
     meta = json.loads((video.parent / "clip-meta.json").read_text(encoding="utf-8"))
     assert meta["do_remove_silence"] is False
     assert meta["do_burn_subtitles"] is False
+    assert meta["subtitle_position"] == "bottom"
     assert meta["use_modal"] is False
 
 
@@ -346,14 +401,52 @@ def test_meta_keeps_previous_options_for_jobs_that_do_not_own_them(tmp_path):
         "source": str(video),
         "do_remove_silence": False,
         "do_burn_subtitles": True,
+        "subtitle_position": "bottom",
         "use_modal": False,
     }), encoding="utf-8")
 
     job = _meta_job(str(video), record=False, do_remove_silence=False,
-                    do_burn_subtitles=False, use_modal=True)
+                    do_burn_subtitles=False, subtitle_position="top", use_modal=True)
     sp_utils._save_meta(job)
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["do_remove_silence"] is False
     assert meta["do_burn_subtitles"] is True   # not overwritten by the resume's False
+    assert meta["subtitle_position"] == "bottom"  # not overwritten by the resume's "top"
     assert meta["use_modal"] is False          # not overwritten by the resume's True
+
+
+# ── subtitle position: validation + run form contract ─────────────────────
+
+SHORT_HTML = Path(__file__).parent.parent / "webux" / "short_publish" / "frontend.html"
+
+
+def test_normalize_subtitle_position():
+    import pytest
+
+    from webux.short_publish.models import normalize_subtitle_position
+
+    assert normalize_subtitle_position(None) == "middle"
+    assert normalize_subtitle_position("") == "middle"
+    assert normalize_subtitle_position(" Bottom ") == "bottom"
+    assert normalize_subtitle_position("top-left") == "top-left"
+    with pytest.raises(ValueError):
+        normalize_subtitle_position("sideways")
+
+
+def test_run_form_exposes_subtitle_position():
+    """The position select defaults to middle for every newly proposed video."""
+    html = SHORT_HTML.read_text(encoding="utf-8")
+
+    assert 'id="subtitlePosition"' in html
+    for pos in ("middle", "bottom", "top", "top-left"):
+        assert f'<option value="{pos}"' in html
+    assert '<option value="middle" selected>' in html
+    # A new video must always reset to the default placement...
+    assert "resetSubtitlePosition();" in html
+    # ...so the choice is per-video and deliberately NOT in the persisted UI state.
+    assert "'cutTime','removeSilence','burnSubtitles','useModal'\n];" in html
+    # ...and every payload that can start/queue a run forwards it.
+    assert html.count(
+        "subtitle_position: document.getElementById('subtitlePosition').value"
+    ) == 4

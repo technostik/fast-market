@@ -354,8 +354,19 @@
         </div>
         <div class="opt">
           <div class="checkrow">
-            <input type="checkbox" id="burnSubtitles" checked>
+            <input type="checkbox" id="burnSubtitles" checked onchange="updateSubtitleDependency()">
             <label for="burnSubtitles" style="display:inline; margin:0;">Burn subtitles</label>
+          </div>
+        </div>
+        <div class="opt">
+          <div class="checkrow">
+            <label for="subtitlePosition" style="display:inline; margin:0;" title="Where the burned subtitles are placed. Resets to Middle for every new video.">Subtitle position</label>
+            <select id="subtitlePosition" style="width:auto; padding:2px 6px; margin-left:6px;">
+              <option value="middle" selected>Middle (default)</option>
+              <option value="bottom">Bottom</option>
+              <option value="top">Top</option>
+              <option value="top-left">Top-left</option>
+            </select>
           </div>
         </div>
         <div class="opt">
@@ -650,6 +661,9 @@ const UI_STATE_KEY = 'fastmarket_short_publish_ui_v1';
 // global blob would carry one channel's comment onto another channel's video.
 // They are re-seeded from the page profile's config on load and on every
 // profile change (see applyPinnedDefaults).
+// 'subtitlePosition' is deliberately NOT persisted either: every new video must
+// start at the default "Middle" placement, never inherit the previous video's
+// choice (see onFileSelected).
 const UI_STATE_IDS = [
   'manualTitle','descPrefix','sourceUrls','skipUpload','cfgTranscriptMode',
   'normalizeVolume','doCharisma','addSignature','ignorePostPublish','privacy',
@@ -752,11 +766,19 @@ function previewSource() {
   nameEl.innerHTML = sel.options[sel.selectedIndex].textContent.split(' · ')[0] + ' ' + fmtDurationChip(videoDurations[sel.value]);
 }
 
+function resetSubtitlePosition() {
+  // Each newly proposed video starts at the default placement; the choice is
+  // per-video and must not leak from the previous selection or localStorage.
+  const el = document.getElementById('subtitlePosition');
+  if (el) el.value = 'middle';
+}
+
 function onFileSelected() {
   const sel = document.getElementById('fileSelect');
   const wrap = document.getElementById('videoWrap');
   const vid = document.getElementById('videoPreview');
   const nameEl = document.getElementById('videoName');
+  resetSubtitlePosition();
   if (!sel.value) {
     wrap.style.display = 'none';
     vid.pause();
@@ -870,6 +892,7 @@ async function startJob() {
     prompt_summary: defaultDescPrompt(),
     do_remove_silence: document.getElementById('removeSilence').checked,
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
+    subtitle_position: document.getElementById('subtitlePosition').value,
     transcript_mode: document.getElementById('cfgTranscriptMode').value,
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
@@ -1157,6 +1180,7 @@ async function doResume() {
     prompt_summary: defaultDescPrompt(),
     from_step: from,
     do_burn_subtitles: document.getElementById('burnSubtitles').checked,
+    subtitle_position: document.getElementById('subtitlePosition').value,
     transcript_mode: document.getElementById('cfgTranscriptMode').value,
     skip_upload: document.getElementById('skipUpload').checked,
     use_modal: document.getElementById('useModal').checked,
@@ -1350,6 +1374,7 @@ async function uploadFile(file) {
       // otherwise an upload silently re-enables silence removal / subtitles / Modal.
       do_remove_silence: document.getElementById('removeSilence').checked,
       do_burn_subtitles: document.getElementById('burnSubtitles').checked,
+      subtitle_position: document.getElementById('subtitlePosition').value,
       use_modal: document.getElementById('useModal').checked,
     })
   });
@@ -1415,6 +1440,13 @@ async function refreshPool() {
     }
     if (item.do_burn_subtitles === false) {
       optBadges += ' <span title="Burn subtitles disabled" style="cursor:help;font-size:11px;">💬✖</span>';
+    }
+    // Placement is only worth a badge when it is not the default: the row must
+    // show that a queued video will not burn at the middle.
+    if (item.subtitle_position && item.subtitle_position !== 'middle') {
+      const posTitle = { bottom: 'bottom', top: 'top', 'top-left': 'top-left' }[item.subtitle_position] || item.subtitle_position;
+      const posGlyph = { bottom: '💬↓', top: '💬↑', 'top-left': '💬◤' }[item.subtitle_position] || '💬';
+      optBadges += ` <span title="Subtitles positioned: ${posTitle}" style="cursor:help;font-size:11px;">${posGlyph}</span>`;
     }
     if (item.use_modal === false) {
       optBadges += ' <span title="Processed locally (Modal disabled)" style="cursor:help;font-size:11px;">💻</span>';
@@ -2016,6 +2048,7 @@ async function addToPool() {
       transcript_mode: document.getElementById('cfgTranscriptMode').value,
       do_remove_silence: document.getElementById('removeSilence').checked,
       do_burn_subtitles: document.getElementById('burnSubtitles').checked,
+      subtitle_position: document.getElementById('subtitlePosition').value,
       use_modal: document.getElementById('useModal').checked,
       do_normalize_volume: document.getElementById('normalizeVolume').checked,
       do_charisma: document.getElementById('doCharisma').checked,
@@ -2111,9 +2144,16 @@ function initPool() {
 function updateSubtitleDependency() {
   const mode = document.getElementById('cfgTranscriptMode').value;
   const burn = document.getElementById('burnSubtitles');
+  const position = document.getElementById('subtitlePosition');
   const noTranscript = (mode === '' || mode === 'none');
   burn.disabled = noTranscript;
   if (noTranscript) burn.checked = false;
+  if (position) {
+    // Placement is meaningless without a burn: grey it out instead of letting
+    // the form suggest a choice that will be ignored.
+    position.disabled = noTranscript || !burn.checked;
+    position.style.opacity = position.disabled ? '0.4' : '1';
+  }
 }
 
 function signatureAvailable() {

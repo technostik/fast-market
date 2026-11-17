@@ -64,3 +64,10 @@
 - `ffmpeg`'s `subtitles=...:force_style='Alignment=N'` does not use the same numbering as the ASS style line: on this build (ffmpeg 8.0.1, libass 0.17.4) `force_style` 10 renders middle-center while style value 10 renders top-left. Never translate one into the other by value.
 - The pre-`--position` burn hardcoded `force_style Alignment=10`, so the historical output was middle-centered even though `extract-transcript` writes `Alignment: 10` in the style line. The backward-compatible default is therefore `middle` (style value 5), not `top-left`.
 - Measure placement instead of reasoning about it: render the same ASS through both paths, extract the white-glyph bbox with Pillow, and compare. `tests/test_burn_subtitles_position.py::test_default_position_matches_legacy_burn` pins the old path against the current default.
+
+## 2026-11-17 — short_publish subtitle placement
+
+- `subtitle_position` is a fourth per-run processing option, alongside remove-silence / burn-subtitles / Modal: it must ride on the `PoolItem` (`.publish-pool.json`), be forwarded by the pool worker into `_create_publish_job`, and be passed explicitly by the pipeline as `video burn-subtitles --position`. Relying on the CLI default would silently ignore the queued choice.
+- Legacy pool files have no `subtitle_position`; they must load as `middle` so a restart does not move already-queued subtitles.
+- Validate at the API boundary (`models.normalize_subtitle_position` → HTTP 400), not in the pipeline: an invalid value would otherwise reach ffmpeg inside a background task where nobody sees the error.
+- The run-form select is intentionally outside the persisted `localStorage` UI state and is reset in `onFileSelected()`: "middle by default for every new video" is a product rule, not a remembered preference.

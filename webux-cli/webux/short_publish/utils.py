@@ -123,9 +123,10 @@ def _save_meta(job) -> None:
     if getattr(job, "record_processing_options", False):
         meta["do_remove_silence"] = bool(job.do_remove_silence)
         meta["do_burn_subtitles"] = bool(job.do_burn_subtitles)
+        meta["subtitle_position"] = job.subtitle_position
         meta["use_modal"] = bool(job.use_modal)
     else:
-        for _k in ("do_remove_silence", "do_burn_subtitles", "use_modal"):
+        for _k in ("do_remove_silence", "do_burn_subtitles", "subtitle_position", "use_modal"):
             if _k in existing:
                 meta[_k] = existing[_k]
     _set("corpus_video_id", getattr(job, "corpus_video_id", ""))

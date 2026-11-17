@@ -19,6 +19,22 @@ STEP_NAMES = [
 DEFAULT_VIDEO_SOURCE_PATH = "/home/joriel/Vidéos"
 DEFAULT_VIDEO_EXTENSIONS = "mp4,mkv"
 
+# Must match `video burn-subtitles --position` choices. "middle" is the video
+# CLI default and the historical middle-centered placement.
+SUBTITLE_POSITIONS = ("middle", "bottom", "top", "top-left")
+DEFAULT_SUBTITLE_POSITION = "middle"
+
+
+def normalize_subtitle_position(value: str | None) -> str:
+    """Validate a subtitle position against the video CLI choices."""
+    position = (value or DEFAULT_SUBTITLE_POSITION).strip().lower()
+    if position not in SUBTITLE_POSITIONS:
+        raise ValueError(
+            f"Unknown subtitle position {value!r}; expected one of {SUBTITLE_POSITIONS}"
+        )
+    return position
+
+
 _INTERMEDIATE_RE = re.compile(r"_(nosilence|cut|subtitled|no_signature)$", re.IGNORECASE)
 
 # Files produced by the "append signature" step: `no_signature_<title>.mp4`. These
@@ -63,6 +79,7 @@ class Job:
     language: str
     model: str
     privacy: str
+    subtitle_position: str = DEFAULT_SUBTITLE_POSITION
     title_override: str = ""
     profile: str = ""
     transcript_mode: str = "normal"

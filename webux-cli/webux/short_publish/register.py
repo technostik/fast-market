@@ -19,11 +19,13 @@ from .models import (
     Job,
     Step,
     STEP_NAMES,
+    DEFAULT_SUBTITLE_POSITION,
     DEFAULT_VIDEO_SOURCE_PATH,
     DEFAULT_VIDEO_EXTENSIONS,
     _INTERMEDIATE_RE,
     _STEP_FILE_KEYS,
     is_no_signature_source,
+    normalize_subtitle_position,
 )
 from .utils import (
     _load_publish_cfg,
@@ -71,6 +73,18 @@ def _is_intermediate(path: Path) -> bool:
     return bool(_INTERMEDIATE_RE.search(path.stem))
 
 
+def _validated_subtitle_position(value: str | None) -> str:
+    """Validate the subtitle placement chosen in the run form.
+
+    Mirrors `video burn-subtitles --position`; an unknown value fails the request
+    instead of reaching ffmpeg.
+    """
+    try:
+        return normalize_subtitle_position(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _is_busy() -> bool:
     """True while the pool worker or an immediate publish job is active.
 
@@ -87,13 +101,14 @@ def _is_busy() -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True, do_remove_silence: bool = True, do_burn_subtitles: bool = True, use_modal: bool = True) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True, do_remove_silence: bool = True, do_burn_subtitles: bool = True, use_modal: bool = True, subtitle_position: str = DEFAULT_SUBTITLE_POSITION) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
 
     The processing options (``do_remove_silence``, ``do_burn_subtitles``,
-    ``use_modal``) are the ones stored on the pool item: hardcoding them here
-    made every queued video run all three steps whatever the run form said.
+    ``subtitle_position``, ``use_modal``) are the ones stored on the pool item:
+    hardcoding them here made every queued video run all three steps whatever
+    the run form said.
     """
     if not profile:
         profile = resolve_profile()
@@ -117,6 +132,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         prompt_check=pub.get("default_check_prompt", ""),
         do_remove_silence=do_remove_silence,
         do_burn_subtitles=do_burn_subtitles,
+        subtitle_position=subtitle_position,
         transcript_mode=transcript_mode,
         language=pub.get("language", "fr"),
         model=pub.get("model", "medium"),
@@ -423,6 +439,7 @@ class StartRequest(BaseModel):
     prompt_check: str = ""
     do_remove_silence: bool = True
     do_burn_subtitles: bool = True
+    subtitle_position: str = DEFAULT_SUBTITLE_POSITION
     transcript_mode: str = "normal"
     language: str = ""
     model: str = ""
@@ -451,6 +468,8 @@ class ResumeRequest(BaseModel):
     prompt_check: str = ""
     from_step: int = 3
     do_burn_subtitles: bool = True
+    # Empty = keep the position recorded by the original run.
+    subtitle_position: str = ""
     transcript_mode: str = "normal"
     skip_upload: bool = False
     use_modal: bool = True
@@ -491,6 +510,7 @@ async def start(req: StartRequest):
         prompt_check=req.prompt_check or pub.get("default_check_prompt", ""),
         do_remove_silence=req.do_remove_silence,
         do_burn_subtitles=req.do_burn_subtitles,
+        subtitle_position=_validated_subtitle_position(req.subtitle_position),
         transcript_mode=req.transcript_mode,
         language=req.language or pub.get("language", "fr"),
         model=req.model or pub.get("model", "medium"),
@@ -574,6 +594,11 @@ async def resume(req: ResumeRequest):
         prompt_check=req.prompt_check or pub_cfg.get("default_check_prompt", ""),
         do_remove_silence=False,
         do_burn_subtitles=req.do_burn_subtitles,
+        # Resume re-burns from the form's choice when provided, otherwise from
+        # the position the original run recorded in its meta log.
+        subtitle_position=_validated_subtitle_position(
+            req.subtitle_position or meta.get("subtitle_position")
+        ),
         transcript_mode=req.transcript_mode,
         language=req.language or pub_cfg.get("language", "fr"),
         model=req.model or pub_cfg.get("model", "medium"),
@@ -1006,6 +1031,7 @@ class PoolAddRequest(BaseModel):
     transcript_mode: str = "normal"
     do_remove_silence: bool = True
     do_burn_subtitles: bool = True
+    subtitle_position: str = DEFAULT_SUBTITLE_POSITION
     use_modal: bool = True
     do_normalize_volume: bool = False
     do_charisma: bool = True
@@ -1020,7 +1046,7 @@ class PoolAddRequest(BaseModel):
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None, do_add_to_corpus=req.do_add_to_corpus, do_remove_silence=req.do_remove_silence, do_burn_subtitles=req.do_burn_subtitles, use_modal=req.use_modal)
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None, do_add_to_corpus=req.do_add_to_corpus, do_remove_silence=req.do_remove_silence, do_burn_subtitles=req.do_burn_subtitles, use_modal=req.use_modal, subtitle_position=_validated_subtitle_position(req.subtitle_position))
     return {"ok": ok}
 
 
