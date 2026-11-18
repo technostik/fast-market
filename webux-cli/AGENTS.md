@@ -11,7 +11,7 @@ Modular web UI server for fast-market: a single `webux serve` process hosts mult
 - `commands/serve/register.py` — `webux serve` (uvicorn, --host, --port, --open, --restart)
 - `commands/setup/register.py` — `webux setup show | reset | show-path`
 - `webux/fileviewer/` — **Files** tab: browse/edit config, data, workdir files with CodeMirror
-- `webux/soundlab/` — **Sound Lab** tab: quick TTS engine test bench (engine picker, per-engine params, FR/EN preset phrases or free text, audio preview)
+- `webux/soundlab/` — **Sound Lab** tab: quick TTS engine test bench (engine picker, per-engine params, FR/EN preset phrases or free text, audio preview), SadTalker talking-head lipsync (face image upload, `video lipsync` run, video preview) and a debug log console
 - `webux/yt_poster/` — **YT Poster** tab: batch-post YouTube comments/videos, regenerate replies
 - `webux/skill_runner/` — **Plan Editor** tab: load `*.run.yaml` plans, edit skill/prompt files
 
