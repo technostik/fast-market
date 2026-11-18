@@ -1,7 +1,23 @@
+"""Qwen3-TTS engine plugin.
+
+qwen-tts 0.1.1 pins ``transformers==4.57.3``. Under transformers >= 5 the
+speech tokenizer (Mimi refactor) loads with remapped/missing weights and
+model code raises, so the plugin runs generation out-of-process in a
+dedicated venv (default ``~/.venvs/fast-market-qwen3``, built with
+``--system-site-packages`` and ``transformers==4.57.3``). The venv is
+configurable via the ``venv_python`` key of the ``qwen3`` config section.
+
+Under transformers 4.x the plugin runs in-process exactly as before.
+"""
+
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +29,14 @@ from plugins.base import TTSPlugin
 
 REFERENCE_TEXT = "This is a reference voice sample for voice cloning."
 REF_VOICES_SUBDIR = "ref_voices"
+DEFAULT_VENV_PYTHON = "~/.venvs/fast-market-qwen3/bin/python"
+_VENV_SETUP_HINT = (
+    "qwen-tts 0.1.1 needs transformers 4.x. Build the side venv with:\n"
+    "  python -m venv --system-site-packages ~/.venvs/fast-market-qwen3\n"
+    "  ~/.venvs/fast-market-qwen3/bin/pip install 'transformers==4.57.3' qwen-tts\n"
+    "Or point the 'venv_python' key of the qwen3 config section at another"
+    " interpreter that has transformers<5 and qwen-tts."
+)
 
 _QWEN3_LANG_MAP: dict[str, str] = {
     "en": "English",
@@ -59,6 +83,22 @@ def resolve_qwen3_language(language: str | None) -> str:
     return "English"
 
 
+def transformers_major_version() -> int:
+    """Major version of the installed transformers, 0 if unreadable."""
+    try:
+        import transformers
+
+        return int(transformers.__version__.split(".")[0])
+    except Exception:
+        return 0
+
+
+def resolve_venv_python(config: dict) -> Path:
+    """Python interpreter of the transformers-4.x side venv."""
+    raw = config.get("venv_python") or DEFAULT_VENV_PYTHON
+    return Path(raw).expanduser()
+
+
 class Qwen3TTSPlugin(TTSPlugin):
     """TTS engine using Qwen3-TTS with dual-model architecture.
 
@@ -80,7 +120,7 @@ class Qwen3TTSPlugin(TTSPlugin):
         self._base_model = None
 
     # ------------------------------------------------------------------
-    # Model lifecycle
+    # Model lifecycle (in-process, transformers 4.x only)
     # ------------------------------------------------------------------
 
     def _get_voice_design_model(self):
@@ -159,7 +199,70 @@ class Qwen3TTSPlugin(TTSPlugin):
         sf.write(str(path), audio.numpy(), sr)
 
     # ------------------------------------------------------------------
-    # Create a reference voice once and cache it
+    # Out-of-process generation (transformers >= 5)
+    # ------------------------------------------------------------------
+
+    def _runner_path(self) -> Path:
+        return Path(__file__).resolve().parent / "runner.py"
+
+    def _synthesize_subprocess(
+        self,
+        text: str,
+        voice: str,
+        speed: float,
+        language: str,
+        clone: str | None,
+        ref_text: str | None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, int]:
+        venv_python = resolve_venv_python(self.config)
+        if not venv_python.exists():
+            self._log(f"Side venv not found at {venv_python}.")
+            raise RuntimeError(_VENV_SETUP_HINT)
+
+        out_dir = get_tool_cache_dir("sound") / "qwen3"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"out_{self._voice_hash(text + language)}_{os.getpid()}.wav"
+
+        payload = {
+            "text": text,
+            "voice": voice,
+            "speed": speed,
+            "language": language,
+            "clone": clone,
+            "ref_text": ref_text,
+            "exaggeration": kwargs.get("exaggeration"),
+            "output": str(out_path),
+            "config": {
+                "voice_design_model": self.config.get(
+                    "voice_design_model", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+                ),
+                "base_model": self.config.get(
+                    "base_model", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+                ),
+            },
+        }
+
+        proc = subprocess.run(  # noqa: S603 — interpreter from trusted config
+            [str(venv_python), str(self._runner_path())],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        if proc.returncode != 0 or not out_path.exists():
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-5:]
+            raise RuntimeError(
+                "qwen3 side venv generation failed (see log console):\n"
+                + "\n".join(tail)
+            )
+
+        audio, sr = sf.read(str(out_path), always_2d=False)
+        out_path.unlink(missing_ok=True)
+        return torch.from_numpy(audio), int(sr)
+
+    # ------------------------------------------------------------------
+    # Create a reference voice once and cache it (in-process path)
     # ------------------------------------------------------------------
 
     def _ensure_reference(
@@ -205,10 +308,15 @@ class Qwen3TTSPlugin(TTSPlugin):
         self, text: str, voice: str, speed: float, **kwargs
     ) -> tuple[torch.Tensor, int]:
         language = resolve_qwen3_language(
-            kwargs.get("language") or self.config.get("language", "en")
+            kwargs.pop("language", None) or self.config.get("language", "en")
         )
-        clone = kwargs.get("clone") or self.config.get("clone")
-        ref_text = kwargs.get("ref_text") or self.config.get("ref_text")
+        clone = kwargs.pop("clone", None) or self.config.get("clone")
+        ref_text = kwargs.pop("ref_text", None) or self.config.get("ref_text")
+
+        if transformers_major_version() >= 5:
+            return self._synthesize_subprocess(
+                text, voice, speed, language, clone, ref_text, **kwargs
+            )
 
         ref_path = self._ensure_reference(voice, clone, ref_text, language)
 

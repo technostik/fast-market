@@ -67,7 +67,9 @@ class CsmPlugin(TTSPlugin):
     name = "csm"
 
     def __init__(self, config: dict):
-        self.config = config
+        # Plugins receive the whole tool config; read this engine's section
+        # (fall back to the whole dict when constructed with a bare engine dict).
+        self.config = config.get(self.name) if isinstance(config.get(self.name), dict) else config
         self._model: Any = None
         self._processor: Any = None
 
