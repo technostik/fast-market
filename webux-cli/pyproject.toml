@@ -29,6 +29,7 @@ long_publish = "webux.long_publish.register:register"
 storyboard = "webux.storyboard.register:register"
 voiceboard = "webux.voiceboard.register:register"
 charisma = "webux.charisma.register:register"
+soundlab = "webux.soundlab.register:register"
 
 [tool.setuptools]
 packages = [
@@ -44,6 +45,7 @@ packages = [
     "webux.storyboard",
     "webux.voiceboard",
     "webux.charisma",
+    "webux.soundlab",
     "commands",
     "commands.serve",
 ]

@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Webux Sound Lab</title>
+  <style>
+    /* Theme vars (:root) are injected by the webux hub. Use var(--*) only. */
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 20px 16px 60px; }
+    .card { background: var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-top:12px; }
+    label { font-size:12px; color:var(--text-dim); display:flex; flex-direction:column; gap:4px; }
+    input, select, textarea {
+      background:var(--bg); color:var(--text); border:1px solid var(--border);
+      border-radius:4px; padding:8px; font-size:14px; box-sizing:border-box;
+    }
+    input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); }
+    textarea { width:100%; min-height:90px; resize:vertical; font-family:inherit; }
+    button { padding:9px 16px; border:1px solid var(--border); background:var(--bg); color:var(--text); border-radius:4px; cursor:pointer; font-size:14px; }
+    button:hover { border-color:var(--accent); }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+    button.primary:disabled { opacity:.5; cursor:not-allowed; }
+    button.chip { padding:6px 10px; font-size:12px; border-radius:14px; }
+    .hint { font-size:12px; color:var(--text-dim); margin-top:6px; }
+    #status { min-height:20px; font-size:13px; margin-top:8px; white-space:pre-wrap; }
+    #status.err { color:var(--danger,#f66); }
+    #status.ok { color:var(--success,#7c7); }
+    #playerBox { display:none; margin-top:12px; }
+    audio { width:100%; }
+    .hidden { display:none !important; }
+    .lang { color:var(--text-dim); font-size:11px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="row">
+      <label style="flex:1;min-width:220px">Engine
+        <select id="engine"><option value="">loading…</option></select>
+      </label>
+      <button id="reload">Reload engines</button>
+      <span id="engineHS" class="lang"></span>
+    </div>
+    <div class="grid" id="params"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" id="presets"></div>
+    <div style="margin-top:10px">
+      <textarea id="text" placeholder="Type a test phrase, or click a preset above…"></textarea>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="go">Generate</button>
+      <span id="status"></span>
+    </div>
+    <div id="playerBox" class="card" style="margin:12px 0 0">
+      <div class="row" style="justify-content:space-between">
+        <strong id="genTitle"></strong>
+        <span id="genMeta" class="lang"></span>
+      </div>
+      <audio id="player" controls preload="none"></audio>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>Recent tests</strong>
+    <div id="history" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<script>
+/* ── engine → visible parameter fields ─────────────────────────────────── */
+const FIELDS = [
+  { id:'voice',       label:'Voice',            ph:'engine default', engines:['kokoro','qwen3','csm'],
+    hint:{kokoro:'weighted mix: am_michael*0.7,am_fenrir*0.3', qwen3:'natural language description', csm:'numeric speaker id: 0, 1…'} },
+  { id:'language',    label:'Language',          ph:'engine default', engines:['kokoro','qwen3','csm','chatterbox'], list:['en','fr','es','de','it','pt','ja','ko','zh','ru'] },
+  { id:'speed',       label:'Speed',             ph:'1.0',            engines:['kokoro'], type:'number', step:'0.1', min:'0.25', max:'4' },
+  { id:'exaggeration',label:'Exaggeration',      ph:'0.5',            engines:['csm','chatterbox'], type:'number', step:'0.1', min:'0', max:'2' },
+  { id:'accelerate',  label:'Accelerate',        ph:'1.0',            engines:['kokoro','qwen3','csm','chatterbox'], type:'number', step:'0.1', min:'0.25', max:'4' },
+  { id:'clone',       label:'Clone (audio path)',ph:'/path/to/ref.wav', engines:['qwen3','csm','chatterbox'],
+    hint:{chatterbox:'0-shot: reference audio only, no transcript'} },
+];
+let ENGINE = '';
+let HISTORY = [];
+
+const $ = id => document.getElementById(id);
+
+async function init() {
+  await loadEngines();
+  $('go').onclick = generate;
+  $('reload').onclick = loadEngines;
+  $('engine').onchange = () => { ENGINE = $('engine').value; renderParams(); };
+  renderPresets();
+  restoreForm();
+}
+
+async function loadEngines() {
+  const st = $('status');
+  st.textContent = 'Discovering engines…'; st.className = '';
+  try {
+    const r = await fetch('api/soundlab/engines');
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    const data = await r.json();
+    window._CFG = data.config || {};
+    $('engine').innerHTML = data.engines.map(e => `<option>${e}</option>`).join('');
+    const cfg = window._CFG[data.engines[0]] || {};
+    $('engineHS').textContent = 'default engine: ' + (window._CFG.default_engine || '?');
+    ENGINE = $('engine').value;
+    renderParams();
+    st.textContent = `${data.engines.length} engines available`;
+    st.className = 'ok';
+  } catch (e) {
+    st.textContent = 'Engine discovery failed: ' + e.message; st.className = 'err';
+  }
+}
+
+function renderParams() {
+  const cfg = window._CFG[ENGINE] || {};
+  $('params').innerHTML = FIELDS.map(f => {
+    if (!f.engines.includes(ENGINE)) return '';
+    const hint = f.hint && f.hint[ENGINE] ? `<span class="lang">${f.hint[ENGINE]}</span>` : (f.list ? `<span class="lang">${f.list.join(', ')}…</span>` : '');
+    const list = f.list ? `list="dl_${f.id}"` : '';
+    const dl = f.list ? `<datalist id="dl_${f.id}">${f.list.map(x => `<option>${x}</option>`).join('')}</datalist>` : '';
+    const val = cfg[f.id] != null ? cfg[f.id] : '';
+    return `<label>${f.label}
+      <input id="p_${f.id}" type="${f.type||'text'}" placeholder="${f.ph}" ${list}
+        ${f.step?`step="${f.step}"`:''} ${f.min?`min="${f.min}" max="${f.max}"`:''}
+        value="${String(val).includes('null') ? '' : val}">
+      ${hint}${dl}</label>`;
+  }).join('');
+}
+
+/* ── preset test phrases ────────────────────────────────────────────────── */
+const PRESETS = [
+  { id:'fr_1', label:'FR · phonetics', language:'fr', exaggeration:0.5,
+    text:'Bonjour à tous. Ceci est un test rapide du moteur de synthèse vocale, avec quelques liaisons : les arbres, les oiseaux, au-dessus.' },
+  { id:'fr_2', label:'FR · expressif', language:'fr', exaggeration:1.2,
+    text:'Incroyable ! Je ne m\'attendais vraiment pas à ça… mais franchement, c\'est plutôt une excellente nouvelle, vous ne trouvez pas ?' },
+  { id:'en_1', label:'EN · phonetics', language:'en', exaggeration:0.5,
+    text:'Hello everyone. This is a quick test of the speech engine, with a few tricky sounds: thought, through, rhythm, and intelligence.' },
+  { id:'en_2', label:'EN · expressive', language:'en', exaggeration:1.2,
+    text:'Wow! I honestly did not expect that at all — this is amazing news, and I think you are going to love what comes next.' },
+];
+
+function renderPresets() {
+  $('presets').innerHTML = PRESETS.map(p => `<button class="chip" data-id="${p.id}">${p.label}</button>`).join('');
+  $('presets').onclick = ev => {
+    const b = ev.target.closest('button[data-id]');
+    if (!b) return;
+    const p = PRESETS.find(x => x.id === b.dataset.id);
+    $('text').value = p.text;
+    applyEngine(p);
+    saveForm();
+  };
+}
+
+function applyEngine(p) {
+  if (p.language && $('p_language')) $('p_language').value = p.language;
+  if (p.exaggeration != null && $('p_exaggeration')) $('p_exaggeration').value = p.exaggeration;
+}
+
+/* ── generation ─────────────────────────────────────────────────────────── */
+async function generate() {
+  const st = $('status');
+  const text = $('text').value.trim();
+  if (!ENGINE) { st.textContent = 'No engine selected.'; st.className = 'err'; return; }
+  if (!text)   { st.textContent = 'Enter a test phrase or click a preset.'; st.className = 'err'; return; }
+
+  const body = { engine: ENGINE, text };
+  for (const f of FIELDS) {
+    const el = $('p_' + f.id);
+    if (!el || !el.value.trim()) continue;
+    body[f.id] = f.type === 'number' ? parseFloat(el.value) : el.value.trim();
+  }
+  $('go').disabled = true;
+  st.textContent = `Generating with ${ENGINE} — first run loads the model, this can take a while…`; st.className = '';
+  try {
+    const r = await fetch('api/soundlab/generate', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.status);
+    play(data.output, data.engine, data.text);
+    st.textContent = 'Done.'; st.className = 'ok';
+    saveForm();
+  } catch (e) {
+    st.textContent = 'Generation failed: ' + e.message; st.className = 'err';
+  } finally {
+    $('go').disabled = false;
+  }
+}
+
+function play(path, engine, text) {
+  $('playerBox').style.display = 'block';
+  $('genTitle').textContent = `${engine} — short test`;
+  $('genMeta').textContent = text.slice(0, 60) + (text.length > 60 ? '…' : '');
+  $('player').src = `api/soundlab/preview?path=${encodeURIComponent(path)}`;
+  $('player').play().catch(() => {});
+  const item = { path, engine, text, ts: Date.now() };
+  HISTORY = [item, ...HISTORY].slice(0, 12);
+  renderHistory();
+}
+
+function renderHistory() {
+  $('history').innerHTML = HISTORY.map(h =>
+    `<div class="row" style="margin-bottom:6px">
+       <button class="chip play" data-path="${h.path}">Play</button>
+       <span class="lang">${h.engine} · ${h.text.slice(0, 70)}${h.text.length > 70 ? '…' : ''}</span>
+     </div>`).join('') || '<span class="lang">none yet</span>';
+  $('history').onclick = ev => {
+    const b = ev.target.closest('button.play');
+    if (!b) return;
+    const h = HISTORY.find(x => x.path === b.dataset.path);
+    if (h) play(h.path, h.engine, h.text);
+  };
+}
+
+/* ── form persistence (localStorage; engine config is server-side anyway) ─ */
+function saveForm() {
+  const v = { engine: $('engine').value, text: $('text').value };
+  for (const f of FIELDS) { const el = $('p_'+f.id); if (el) v['p_'+f.id] = el.value; }
+  localStorage.setItem('soundlab_form', JSON.stringify(v));
+}
+function restoreForm() {
+  try {
+    const v = JSON.parse(localStorage.getItem('soundlab_form') || 'null');
+    if (!v) return;
+    $('text').value = v.text || '';
+    for (const f of FIELDS) { const el = $('p_'+f.id); if (el && v['p_'+f.id] != null) el.value = v['p_'+f.id]; }
+    if (v.engine && [...$('engine').options].some(o => o.value === v.engine)) { $('engine').value = v.engine; ENGINE = v.engine; renderParams(); }
+  } catch {}
+}
+
+init();
+</script>
+</body>
+</html>
