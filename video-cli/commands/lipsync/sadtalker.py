@@ -331,6 +331,47 @@ def find_newest_mp4(result_dir: Path) -> Path:
     return cands[-1]
 
 
+def video_codec(path: Path) -> str | None:
+    """Return the codec name of the first video stream, or None on failure."""
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return probe.stdout.strip().splitlines()[0].strip() if probe.returncode == 0 else None
+
+
+def ensure_browser_friendly(path: Path, progress_cb=None) -> None:
+    """Transcode to H.264/AAC in place when SadTalker wrote a mpeg4 stream.
+
+    SadTalker encodes with its own ffmpeg defaults (MPEG-4 Part 2), which no
+    browser <video> element can decode. Browsers only play H.264.
+    """
+    cb = progress_cb or (lambda _m: None)
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        cb("ffmpeg not found in PATH — leaving SadTalker raw output (may not play in browsers)")
+        return
+    if video_codec(path) == "h264":
+        return
+    tmp = path.with_name(path.stem + "_h264" + path.suffix)
+    cb("transcoding to H.264 for browser playback …")
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-i", str(path), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-movflags", "+faststart", str(tmp)],
+        capture_output=True, text=True, timeout=600,
+    )
+    if proc.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"ffmpeg transcode failed (exit {proc.returncode}): {proc.stderr.strip()[-500:]}"
+        )
+    shutil.move(str(tmp), str(path))
+
+
 def run_lipsync(
     *,
     photo: str,
@@ -371,4 +412,8 @@ def run_lipsync(
     if output.exists():
         output.unlink()
     shutil.move(str(raw), str(output))
+    try:
+        ensure_browser_friendly(output, cb)
+    except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
+        raise LipsyncError(f"output transcoding failed: {exc}") from exc
     return str(output)

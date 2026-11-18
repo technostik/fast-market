@@ -376,7 +376,7 @@ $('lipGo').onclick = async () => {
     showLog(d.log, `sadtalker · ok · ${new Date((d.ts || Date.now() / 1000) * 1000).toLocaleTimeString()}`);
     $('lipVideoBox').style.display = 'block';
     $('lipPlayer').src = `api/soundlab/preview?path=${encodeURIComponent(d.output)}`;
-    $('lipMeta').textContent = new Date(d.ts * 1000).toLocaleString();
+    $('lipMeta').textContent = `video: ${d.output}`;
     lipStatus('Done.');
   } catch (e) {
     lipStatus('Lipsync failed: ' + e.message, 'err');
@@ -388,6 +388,10 @@ $('lipGo').onclick = async () => {
 };
 
 $('lipLogBtn').onclick = () => { $('logCard').open = true; };
+
+$('lipPlayer').onerror = () => {
+  $('lipMeta').textContent += '  —  the browser could not decode this video; its codec may not be supported';
+};
 
 /* ── form persistence (localStorage; engine config is server-side anyway) ─ */
 function saveForm() {

@@ -148,3 +148,49 @@ if __name__ == "__main__":
     import pytest
 
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_video_codec_missing_file_returns_none(tmp_path):
+    assert st.video_codec(tmp_path / "absent.mp4") is None
+
+
+def test_ensure_browser_friendly_passthrough_h264(tmp_path):
+    import shutil
+
+    if not shutil.which("ffmpeg"):
+        import pytest
+
+        pytest.skip("ffmpeg not available")
+    out = tmp_path / "clip.mp4"
+    subprocess = __import__("subprocess")
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=0.3:size=64x64:rate=10",
+         "-c:v", "libx264", str(out)],
+        capture_output=True,
+    )
+    assert st.video_codec(out) == "h264"
+    before = out.stat().st_mtime
+    st.ensure_browser_friendly(out)
+    assert out.stat().st_mtime == before  # untouched when already H.264
+
+
+def test_ensure_browser_friendly_transcodes_mpeg4(tmp_path):
+    import shutil
+
+    if not shutil.which("ffmpeg"):
+        import pytest
+
+        pytest.skip("ffmpeg not available")
+    import subprocess
+
+    out = tmp_path / "clip.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=0.3:size=64x64:rate=10",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=0.3",
+         "-c:v", "mpeg4", "-q:v", "6", "-shortest", str(out)],
+        capture_output=True,
+    )
+    assert st.video_codec(out) == "mpeg4"
+    st.ensure_browser_friendly(out)
+    assert st.video_codec(out) == "h264"
+    assert not out.with_name("clip_h264.mp4").exists()
