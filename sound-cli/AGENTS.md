@@ -1,7 +1,7 @@
 # sound-agent
 
 ## Purpose
-AI sound generation CLI tool with TTS (Kokoro, Qwen3-TTS) and music generation (ACE-Step 1.5, MusicGen). Provides a modular plugin system for multiple sound generation engines with CLI commands.
+AI sound generation CLI tool with TTS (Kokoro, Qwen3-TTS, Sesame csm-1b, ResembleAI chatterbox) and music generation (ACE-Step 1.5, MusicGen). Provides a modular plugin system for multiple sound generation engines with CLI commands.
 
 ## Architecture Overview
 
@@ -10,7 +10,7 @@ sound-cli/
 ├── sound_entry/           # CLI entry point (NOT cli/!)
 │   └── __init__.py        # Imports main from cli.main
 ├── core/                  # Core logic (models, config)
-├── plugins/               # Engine plugins (kokoro, qwen3, acestep, musicgen)
+├── plugins/               # Engine plugins (kokoro, qwen3, csm, chatterbox, acestep, musicgen)
 ├── commands/              # CLI commands (speak, music, prosody, charisma, normalize-volume, segment, transcribe)
 └── common/                # Symlink to shared utilities
 ```
@@ -33,6 +33,10 @@ sound-cli/
 | `kokoro/register.py` | Declares kokoro plugin to the system |
 | `qwen3/plugin.py` | `Qwen3TTSPlugin` - dual-model voice design + cloning with stable reference caching |
 | `qwen3/register.py` | Declares qwen3 plugin to the system |
+| `csm/plugin.py` | `CsmPlugin` - Sesame csm-1b TTS, English-only, numeric speaker id voice |
+| `csm/register.py` | Declares csm plugin to the system |
+| `chatterbox/plugin.py` | `ChatterboxTTSPlugin` - ResembleAI chatterbox multilingual TTS, French default |
+| `chatterbox/register.py` | Declares chatterbox plugin to the system |
 | `acestep/plugin.py` | `AcestepPlugin` - ACE-Step 1.5 full songs via diffusers `AceStepPipeline` (in-process) |
 | `acestep/register.py` | Declares acestep plugin to the system |
 | `musicgen/plugin.py` | `MusicGenModelPlugin` - text-to-music generation |

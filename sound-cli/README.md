@@ -1,6 +1,6 @@
 # sound-agent
 
-AI sound generation CLI tool with TTS (Kokoro, Qwen3-TTS) and music generation (ACE-Step 1.5, MusicGen) support. Generate speech and music from text prompts using multiple engine plugins.
+AI sound generation CLI tool with TTS (Kokoro, Qwen3-TTS, Sesame csm-1b, ResembleAI chatterbox) and music generation (ACE-Step 1.5, MusicGen) support. Generate speech and music from text prompts using multiple engine plugins.
 
 ## Installation
 
@@ -10,7 +10,7 @@ cd sound-agent
 pip install -e .
 
 # Install with all engines
-pip install -e ".[kokoro,qwen3,acestep,musicgen,transcribe,dev]"
+pip install -e ".[kokoro,qwen3,csm,chatterbox,acestep,musicgen,transcribe,dev]"
 
 # Install with only specific engines
 pip install -e ".[kokoro]"       # just kokoro TTS
@@ -162,6 +162,8 @@ sound speak "こんにちは" -L ja
 | `sound speak "text"` | Synthesize speech from text |
 | `sound speak "text" -e qwen3 -v "description"` | TTS with voice design |
 | `sound speak "text" -e kokoro -v "am_michael" --speed 1.5` | Kokoro with options |
+| `sound speak "text" -e csm -v "0"` | Sesame csm-1b, English-only, numeric speaker id |
+| `sound speak "Salut" -e chatterbox -L fr` | Chatterbox multilingual (French default) |
 | `sound music "lofi piano track"` | Generate music from prompt (default engine: ACE-Step) |
 | `sound music "upbeat electronic" -d 10` | Music with custom duration |
 | `sound music "pop anthem" --lyrics "[Verse]\n..."` | Vocal track with lyrics |
@@ -185,7 +187,7 @@ Synthesize speech from text using a TTS engine. Text can come from three sources
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--file` | `-f` | Read text from a file |
-| `--engine` | `-e` | TTS engine: `kokoro` or `qwen3` (from config) |
+| `--engine` | `-e` | TTS engine: `kokoro`, `qwen3`, `csm` (English-only) or `chatterbox` (from config) |
 | `--voice` | `-v` | Voice spec (semantics depend on engine) |
 | `--speed` | `-s` | Playback speed, default 1.0 (kokoro only) |
 | `--output` | `-o` | Output path (default: workdir/speak\_\<timestamp\>.wav) |
@@ -196,6 +198,8 @@ Synthesize speech from text using a TTS engine. Text can come from three sources
 **Voice semantics by engine:**
 - **kokoro**: Weighted voice mix. Format: `name[*weight,...]`. Example: `am_michael*0.7,am_fenrir*0.3`. Weights are normalized to sum to 1.0. A single name like `am_michael` uses that voice directly. Use `--language` for multilingual TTS: `en`, `en-gb`, `es`, `fr`, `hi`, `it`, `pt`, `ja`, `zh`.
 - **qwen3**: Natural language voice description. Example: `"A soft, elegant French female voice"`. Use `--language` for multilingual generation: `en`, `zh`, `ja`, `ko`, `de`, `fr`, `ru`, `pt`, `es`, `it`.
+- **csm**: Numeric speaker id (csm-1b is English-only). Example: `0`. Optional `--clone` + `--ref-text` prepend a reference-voice context turn.
+- **chatterbox**: No named voices — voice identity comes from `--clone` (reference audio prompt); without one, the model default voice is used. `--language` defaults to `fr`; supports 23 `language_id`s (`fr`, `en`, `de`, `es`, ...). `--ref-text` is unused.
 
 **Examples:**
 ```bash

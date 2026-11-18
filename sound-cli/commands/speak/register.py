@@ -98,7 +98,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
             "For kokoro: voice name(s) with weights, "
             "e.g. 'am_michael*0.7,am_fenrir*0.3'. "
             "For qwen3: natural language voice description, "
-            "e.g. 'A warm, friendly male voice'."
+            "e.g. 'A warm, friendly male voice'. "
+            "For csm: numeric speaker id, e.g. '0'. "
+            "For chatterbox: unused (voice comes from the --clone audio prompt)."
         ),
     )
     @click.option(
@@ -119,7 +121,9 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help=(
             "Language for TTS (ISO 639-1 shorthand, e.g. en, fr, es, ja, zh). "
             "Supported: en, en-gb, es, fr, hi, it, pt, ja, zh (kokoro); "
-            "en, zh, ja, ko, de, fr, ru, pt, es, it (qwen3)"
+            "en, zh, ja, ko, de, fr, ru, pt, es, it (qwen3); "
+            "en only (csm); "
+            "fr, en, es, de, it, pt, ja, ko, zh, ru, and more (chatterbox)"
         ),
     )
     @click.option(
@@ -132,12 +136,12 @@ def register(plugin_manifests: dict) -> CommandManifest:
         "--clone",
         type=click.Path(exists=True, dir_okay=False),
         default=None,
-        help="Path to reference audio for voice cloning (qwen3 only, overrides config)",
+        help="Path to reference audio for voice cloning (qwen3, csm, chatterbox; overrides config)",
     )
     @click.option(
         "--ref-text",
         default=None,
-        help="Transcript of the reference audio (qwen3 only, overrides config)",
+        help="Transcript of the reference audio (qwen3, csm; unused by chatterbox, overrides config)",
     )
     @click.option(
         "--format", "-F", "fmt",

@@ -21,6 +21,23 @@ def _default_config() -> dict:
             "clone": None,
             "ref_text": None,
         },
+        "csm": {
+            "model": "sesame/csm-1b",
+            "voice": "0",
+            "language": "en",
+            "device": "auto",
+            "dtype": "auto",
+            "clone": None,
+            "ref_text": None,
+        },
+        "chatterbox": {
+            "language": "fr",
+            "exaggeration": 0.5,
+            "cfg_weight": 0.5,
+            "temperature": 0.8,
+            "device": "auto",
+            "clone": None,
+        },
         "acestep": {
             "model": "ACE-Step/acestep-v15-xl-turbo-diffusers",
             "duration": 30.0,
