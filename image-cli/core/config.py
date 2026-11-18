@@ -60,6 +60,10 @@ def get_default_config() -> dict:
                 "model_path": "black-forest-labs/flux-3-image-klein",
                 "torch_dtype": "bfloat16",
                 "local_files_only": False,
+                # Transformer weights: "nvfp4" (default, 5 GB, already cached),
+                # "fp8r" (6.4 GB, Ada+), "int8" (bitsandbytes, 5.6 GB) or
+                # "none" (bf16, 11 GB — streamed, very slow).
+                "quantization": "nvfp4",
             },
             "flux3cloud": {
                 "account_id": "",

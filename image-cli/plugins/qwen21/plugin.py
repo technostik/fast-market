@@ -11,6 +11,7 @@ from PIL import Image
 
 from core.models import EngineConfig, ImageGenRequest
 from plugins.base import ImageEnginePlugin
+from plugins.quant_utils import repair_bnb_meta_state
 
 if TYPE_CHECKING:
     from diffusers import QwenImage21Pipeline
@@ -233,54 +234,11 @@ class Qwen21EnginePlugin(ImageEnginePlugin):
     def _repair_bnb_meta_state(module: Any) -> int:
         """Reset poisoned bnb flags on CPU-resident fp params.
 
-        Standalone component loads propagate the ``init_empty_weights``
-        quant_state (meta tensors, ``bnb_quantized=True``) onto params whose
-        data is real fp on CPU. The offload hook's ``.to("cuda")`` then
-        tries to move the meta state and dies ("Cannot copy out of meta
-        tensor"). Clearing the flag/state makes ``Params4bit.to("cuda")``
-        take its other branch — quantize the block on the GPU on the fly —
-        which is exactly what sequential-offload streaming needs.
-
-        Only touches floating-point, non-meta data (real weights); already
-        quantized (uint8) or meta-data params are left alone and counted.
-        Returns the number of repaired params.
+        See :func:`plugins.quant_utils.repair_bnb_meta_state` for the why;
+        this thin wrapper only keeps the engine-specific logging and the
+        historical ``int`` return value.
         """
-        import torch
-
-        try:
-            import bitsandbytes as bnb
-        except ImportError:
-            return 0
-
-        repaired = 0
-        skipped = 0
-        for param in module.parameters():
-            if not isinstance(param, bnb.nn.Params4bit):
-                continue
-            state = param.__dict__.get("quant_state")
-            state_tensors = []
-            if state is not None:
-                for attr in ("absmax", "code", "state2"):
-                    tensor = getattr(state, attr, None)
-                    if isinstance(tensor, torch.Tensor):
-                        state_tensors.append(tensor)
-                    elif attr == "state2" and tensor is not None:
-                        for sub in ("absmax", "code"):
-                            sub_tensor = getattr(tensor, sub, None)
-                            if isinstance(sub_tensor, torch.Tensor):
-                                state_tensors.append(sub_tensor)
-            has_meta_state = any(t.is_meta for t in state_tensors)
-            if (
-                param.data is not None
-                and not param.data.is_meta
-                and param.data.is_floating_point()
-                and (param.__dict__.get("bnb_quantized") or has_meta_state)
-            ):
-                param.__dict__["bnb_quantized"] = False
-                param.__dict__["quant_state"] = None
-                repaired += 1
-            else:
-                skipped += 1
+        repaired, skipped = repair_bnb_meta_state(module)
         _log(
             f"repaired {repaired} bnb params with meta quant_state "
             f"(per-block GPU quantization); left {skipped} untouched"

@@ -15,8 +15,9 @@ _SUPPORTED_ENGINES = {"flux2", "qwen21", "qwen21turbo", "flux2cloud", "flux29bcl
 _CLOUD_ENGINES = {"flux2cloud", "flux29bcloud", "flux3cloud"}
 
 # Local engines whose config block carries a `quantization` key
-# (null/int8/int4). Preserved by add_engine instead of being dropped.
-_QUANTIZED_ENGINES = {"qwen21", "qwen21turbo"}
+# (null/int8/int4 for qwen21; nvfp4/fp8r/int8/none for flux3). Preserved by
+# add_engine instead of being dropped.
+_QUANTIZED_ENGINES = {"qwen21", "qwen21turbo", "flux3"}
 
 _FLUX2CLOUD_MODELS = (
     "@cf/black-forest-labs/flux-2-klein-4b",
