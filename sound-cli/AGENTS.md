@@ -384,6 +384,12 @@ command with no swappable engines, so its `register()` simply ignores
 `plugin_manifests` (matches the `music`/`speak` signature for consistency, but
 ignores unused arg instead of wiring an engine).
 
+### Environment pins per engine
+
+| Engine | Constraint | Handling |
+|--------|-----------|----------|
+| qwen3 | qwen-tts 0.1.1 pins `transformers==4.57.3`; breaks under transformers >= 5 (Mimi refactor loses speech-tokenizer weights) | `plugins/qwen3/plugin.py` delegates generation to the side venv `~/.venvs/fast-market-qwen3` (built with `--system-site-packages` + `transformers==4.57.3`) via `plugins/qwen3/runner.py`; override with the `venv_python` key of the qwen3 config section. In-process only under transformers 4.x. |
+
 ## Related Documentation
 
 - See `_doc/BUILD_NEW_AGENT_CLI.md` for the agent architecture pattern
