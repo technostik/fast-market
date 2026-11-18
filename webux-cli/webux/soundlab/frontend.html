@@ -31,6 +31,16 @@
     audio { width:100%; }
     .hidden { display:none !important; }
     .lang { color:var(--text-dim); font-size:11px; }
+    details.card summary { cursor:pointer; font-weight:600; user-select:none; }
+    #logConsole {
+      background:var(--bg); color:var(--text-dim); border:1px solid var(--border);
+      border-radius:4px; padding:10px; margin-top:10px; max-height:340px; overflow:auto;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:11px; line-height:1.45; white-space:pre-wrap; word-break:break-word;
+    }
+    .log-actions { margin-top:10px; gap:8px; }
+    .log-actions button { padding:5px 10px; font-size:12px; }
+    .log-actions label { flex-direction:row; align-items:center; gap:4px; font-size:12px; }
   </style>
 </head>
 <body>
@@ -64,6 +74,17 @@
     </div>
   </div>
 
+  <details class="card" id="logCard">
+    <summary>Log console <span id="logMeta" class="lang" style="font-weight:400"></span></summary>
+    <pre id="logConsole">No generation yet.</pre>
+    <div class="row log-actions">
+      <button id="logCopy">Copy</button>
+      <button id="logClear">Clear server history</button>
+      <label><input type="checkbox" id="logFollow" checked> follow</label>
+      <span class="lang">full `sound speak` stdout/stderr of each attempt — full output appears when it finishes</span>
+    </div>
+  </details>
+
   <div class="card">
     <strong>Recent tests</strong>
     <div id="history" style="margin-top:8px"></div>
@@ -94,6 +115,16 @@ async function init() {
   $('engine').onchange = () => { ENGINE = $('engine').value; renderParams(); };
   renderPresets();
   restoreForm();
+  try {
+    const r = await fetch('api/soundlab/logs');
+    if (r.ok) {
+      const d = await r.json();
+      if (d.entries && d.entries.length) {
+        const e0 = d.entries[0];
+        showLog(e0.log, `${e0.engine} · ${e0.ok ? 'ok' : 'failed'} · ${e0.ts}`);
+      }
+    }
+  } catch {}
 }
 
 async function loadEngines() {
@@ -182,40 +213,81 @@ async function generate() {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || r.status);
-    play(data.output, data.engine, data.text);
+    showLog(data.log, `${data.engine} · ok · ${new Date((data.ts||Date.now()/1000)*1000).toLocaleTimeString()}`);
+    play(data.output, data.engine, data.text, data.log);
     st.textContent = 'Done.'; st.className = 'ok';
     saveForm();
   } catch (e) {
     st.textContent = 'Generation failed: ' + e.message; st.className = 'err';
+    await refreshLogOnError();
   } finally {
     $('go').disabled = false;
   }
 }
 
-function play(path, engine, text) {
+/* ── log console ─────────────────────────────────────────────────────── */
+function showLog(log, meta) {
+  $('logConsole').textContent = log || '(empty)';
+  $('logMeta').textContent = meta ? ' · ' + meta : '';
+  if ($('logFollow').checked) {
+    const c = $('logConsole');
+    c.scrollTop = c.scrollHeight;
+  }
+}
+
+async function refreshLogOnError() {
+  try {
+    const r = await fetch('api/soundlab/logs');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.entries && d.entries.length) {
+      const e0 = d.entries[0];
+      showLog(e0.log, `${e0.engine} · failed · ${e0.ts}`);
+    }
+  } catch {}
+}
+
+function play(path, engine, text, log) {
   $('playerBox').style.display = 'block';
   $('genTitle').textContent = `${engine} — short test`;
   $('genMeta').textContent = text.slice(0, 60) + (text.length > 60 ? '…' : '');
   $('player').src = `api/soundlab/preview?path=${encodeURIComponent(path)}`;
   $('player').play().catch(() => {});
-  const item = { path, engine, text, ts: Date.now() };
+  const item = { path, engine, text, ts: Date.now(), log: log || '' };
   HISTORY = [item, ...HISTORY].slice(0, 12);
   renderHistory();
 }
 
 function renderHistory() {
-  $('history').innerHTML = HISTORY.map(h =>
+  $('history').innerHTML = HISTORY.map((h, i) =>
     `<div class="row" style="margin-bottom:6px">
        <button class="chip play" data-path="${h.path}">Play</button>
        <span class="lang">${h.engine} · ${h.text.slice(0, 70)}${h.text.length > 70 ? '…' : ''}</span>
+       <button class="chip logbtn" data-i="${i}" style="display:${h.log ? '' : 'none'}">Log</button>
      </div>`).join('') || '<span class="lang">none yet</span>';
   $('history').onclick = ev => {
-    const b = ev.target.closest('button.play');
+    const b = ev.target.closest('button');
     if (!b) return;
-    const h = HISTORY.find(x => x.path === b.dataset.path);
-    if (h) play(h.path, h.engine, h.text);
+    if (b.classList.contains('play')) {
+      const h = HISTORY.find(x => x.path === b.dataset.path);
+      if (h) play(h.path, h.engine, h.text, h.log);
+      return;
+    }
+    if (b.classList.contains('logbtn')) {
+      const h = HISTORY[Number(b.dataset.i)];
+      if (h) {
+        $('logCard').open = true;
+        showLog(h.log, `${h.engine} · ${new Date(h.ts).toLocaleTimeString()}`);
+      }
+    }
   };
 }
+
+$('logCopy').onclick = () => navigator.clipboard.writeText($('logConsole').textContent).catch(() => {});
+$('logClear').onclick = async () => {
+  await fetch('api/soundlab/logs', { method: 'DELETE' }).catch(() => {});
+  showLog('Server log history cleared.', '');
+};
 
 /* ── form persistence (localStorage; engine config is server-side anyway) ─ */
 function saveForm() {

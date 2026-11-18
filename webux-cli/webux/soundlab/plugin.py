@@ -48,6 +48,21 @@ def _workdir() -> Path:
 # VRAM exclusive — two TTS models loading simultaneously would OOM an 8 GB card).
 _jobs: set[str] = set()
 
+# Debug ring buffer: one entry per generation attempt with its CLI output.
+_LOGS: list[dict] = []
+_LOGS_MAX = 50
+_LOG_ENTRY_MAX_CHARS = 40000
+
+
+def _clip_log(log: str) -> str:
+    return log[-_LOG_ENTRY_MAX_CHARS:] if len(log) > _LOG_ENTRY_MAX_CHARS else log
+
+
+def _record_log(entry: dict, ok: bool, log: str) -> None:
+    entry.update(ok=ok, log=_clip_log(log), done_ts=time.time())
+    _LOGS.insert(0, entry)
+    del _LOGS[_LOGS_MAX:]
+
 
 def _is_busy() -> bool:
     return bool(_jobs)
@@ -130,7 +145,19 @@ async def generate(req: GenerateRequest):
 
     job_id = f"gen_{time.time()}"
     _jobs.add(job_id)
+    entry = {
+        "id": job_id,
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "engine": req.engine,
+        "text": req.text[:120],
+        "output": str(out_path),
+        "ok": False,
+        "done_ts": None,
+        "log": "",
+    }
     p: asyncio.subprocess.Process | None = None
+    stdout = b""
+    stderr = b""
     try:
         p = await asyncio.create_subprocess_exec(
             *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -140,30 +167,56 @@ async def generate(req: GenerateRequest):
         except asyncio.TimeoutError:
             p.kill()
             await p.wait()
-            raise HTTPException(
-                status_code=504,
-                detail=f"sound speak still running after {_SPAWN_TIMEOUT_S}s — engine too slow or hung",
-            )
+            log = f"sound speak killed after {_SPAWN_TIMEOUT_S}s — engine too slow or hung"
+            _record_log(entry, ok=False, log=log)
+            raise HTTPException(status_code=504, detail=log)
+        combined = (
+            "── stderr ──────────────────────────────\n"
+            + stderr.decode(errors="replace")
+            + ("\n── stdout ──────────────────────────────\n" if stdout else "")
+            + stdout.decode(errors="replace")
+        ).strip()
         if p.returncode != 0:
+            _record_log(entry, ok=False, log=combined)
             raise HTTPException(
                 status_code=500,
                 detail=(stderr.decode(errors="replace").strip() or f"sound speak exited {p.returncode}")[-1000:],
+            )
+        if not out_path.exists():
+            _record_log(entry, ok=False, log=combined)
+            raise HTTPException(
+                status_code=500,
+                detail=(stderr.decode(errors="replace").strip() or "no output file was produced")[-500:],
             )
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="sound CLI not found in PATH")
     finally:
         _jobs.discard(job_id)
 
-    if not out_path.exists():
-        detail = (stderr.decode(errors="replace").strip() or "no output file was produced")[-500:]
-        raise HTTPException(status_code=500, detail=detail)
-
+    _record_log(entry, ok=True, log=combined)
     return {
         "output": str(out_path),
         "engine": req.engine,
         "text": req.text,
         "ts": out_path.stat().st_mtime,
+        "job_id": job_id,
+        "log": entry["log"],
     }
+
+
+# ── Debug log API ────────────────────────────────────────────────────────────
+
+
+@router.get("/logs")
+async def logs():
+    """Recent generation attempts with their full `sound speak` output."""
+    return {"entries": _LOGS}
+
+
+@router.delete("/logs")
+async def clear_logs():
+    _LOGS.clear()
+    return {"ok": True}
 
 
 # ── Audio preview API ────────────────────────────────────────────────────────
