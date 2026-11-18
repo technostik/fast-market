@@ -178,6 +178,123 @@ class TestFlux2CloudCredentials:
             Flux2CloudEnginePlugin({"account_id": "", "api_token": ""}).generate(request)
 
 
+class TestFlux3CloudPlugin:
+    """FLUX.3 Klein goes through the Cloudflare Unified AI catalog (JSON API)."""
+
+    def _plugin(self, **overrides):
+        from plugins.flux3cloud.plugin import Flux3CloudEnginePlugin
+
+        config = {"account_id": "acct", "api_token": "tok",
+                  "cf_model": "black-forest-labs/flux-3-image-klein"}
+        config.update(overrides)
+        return Flux3CloudEnginePlugin(config)
+
+    def test_model_id_has_no_cf_prefix(self):
+        from plugins.flux3cloud.plugin import CF_MODEL
+
+        assert CF_MODEL == "black-forest-labs/flux-3-image-klein"
+        plugin = self._plugin()
+        assert plugin.config.cf_model == CF_MODEL
+
+    def test_model_is_pinned_even_when_config_has_a_workers_ai_default(self):
+        """No flux3cloud block => EngineConfig's @cf/flux-2 default must not leak."""
+        from core.models import EngineConfig
+
+        from plugins.flux3cloud.plugin import Flux3CloudEnginePlugin
+
+        plugin = Flux3CloudEnginePlugin(EngineConfig(account_id="acct", api_token="tok"))
+        assert plugin.config.cf_model == "black-forest-labs/flux-3-image-klein"
+
+    def test_resolution_bucket_tracks_the_long_edge(self):
+        from plugins.flux3cloud.plugin import resolution_for
+
+        assert resolution_for(1024, 1024) == "1k"
+        assert resolution_for(576, 768) == "768sq"
+        assert resolution_for(1280, 720) == "1.5k"
+        assert resolution_for(1920, 1080) == "2k"
+        assert resolution_for(3840, 2160) == "4k"
+
+    def test_aspect_ratio_is_the_closest_allowed_ratio(self):
+        from plugins.flux3cloud.plugin import aspect_ratio_for
+
+        assert aspect_ratio_for(1280, 720) == "16:9"
+        assert aspect_ratio_for(1024, 1024) == "1:1"
+        assert aspect_ratio_for(576, 1024) == "9:16"
+        assert aspect_ratio_for(1080, 1350) == "4:5"
+
+    def test_input_payload_uses_resolution_not_width(self):
+        from core.models import ImageGenRequest
+
+        plugin = self._plugin()
+        payload = plugin._input_payload(
+            ImageGenRequest(prompt="a duck", width=1280, height=720), seed=42
+        )
+        assert payload == {
+            "prompt": "a duck",
+            "resolution": "1.5k",
+            "aspect_ratio": "16:9",
+            "seed": 42,
+        }
+
+    def test_references_become_data_uris(self):
+        from PIL import Image
+
+        from core.models import ImageGenRequest
+
+        plugin = self._plugin()
+        request = ImageGenRequest(
+            prompt="keep the subject",
+            width=1024,
+            height=1024,
+            reference_images=[Image.new("RGB", (8, 8), "red")],
+        )
+        payload = plugin._input_payload(request, seed=1)
+        assert payload["images"][0].startswith("data:image/png;base64,")
+
+    def test_response_image_and_sample_keys(self):
+        from plugins.flux3cloud.plugin import Flux3CloudEnginePlugin
+
+        assert Flux3CloudEnginePlugin._image_source(
+            {"result": {"image": "https://x/1.png"}}
+        ) == "https://x/1.png"
+        assert Flux3CloudEnginePlugin._image_source(
+            {"status": "Ready", "result": {"sample": "https://x/2.png"}}
+        ) == "https://x/2.png"
+
+    def test_missing_credentials_name_the_engine(self, monkeypatch: pytest.MonkeyPatch):
+        from core.models import ImageGenRequest
+
+        monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID", raising=False)
+        monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+        plugin = self._plugin(account_id="", api_token="")
+        with pytest.raises(ValueError, match=r"engines\.flux3cloud"):
+            plugin.generate(ImageGenRequest(prompt="a scene"))
+
+    def test_payment_required_explains_unified_billing(self, monkeypatch: pytest.MonkeyPatch):
+        """402 from AI Gateway must say why, not just dump the JSON."""
+        import io
+        import urllib.error
+
+        from core.models import ImageGenRequest
+
+        body = (
+            b'{"errors":[{"message":"Insufficient balance; add money to your '
+            b'gateway or use BYOK","code":2021}],"success":false}'
+        )
+
+        def fake_urlopen(request, timeout=None):
+            raise urllib.error.HTTPError(
+                request.full_url, 402, "Payment Required", None, io.BytesIO(body)
+            )
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        plugin = self._plugin()
+        with pytest.raises(RuntimeError, match=r"third-party") as excinfo:
+            plugin.generate(ImageGenRequest(prompt="a duck", width=1280, height=720))
+        assert "BYOK" in str(excinfo.value)
+        assert "flux29bcloud" in str(excinfo.value)
+
+
 class TestQwen21Plugin:
     """Test Qwen-Image-2.1 plugin implementation."""
 

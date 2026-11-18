@@ -149,8 +149,8 @@ def add_engine(config_path: Path, config: dict, engine_name: str) -> None:
             cf_model = "@cf/black-forest-labs/flux-2-klein-9b"
             click.echo(f"Model pinned to: {cf_model} (fixed 4 steps).")
         elif normalized == "flux3cloud":
-            cf_model = "@cf/black-forest-labs/flux-3-image-klein"
-            click.echo(f"Model pinned to: {cf_model}.")
+            cf_model = "black-forest-labs/flux-3-image-klein"
+            click.echo(f"Model pinned to: {cf_model} (Unified AI catalog).")
         else:
             cf_model = click.prompt(
                 "Cloudflare model",

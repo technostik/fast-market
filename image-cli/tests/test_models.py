@@ -189,6 +189,21 @@ class TestImageGenConfig:
         })
         assert config.get_engine_config("flux2").account_id == ""
 
+    def test_shared_credentials_reach_an_engine_absent_from_the_profile(self):
+        """A profile that only has flux2cloud must still serve flux3cloud."""
+        config = ImageGenConfig.from_dict({
+            "engines": {
+                "flux2cloud": {"account_id": "acct", "api_token": "tok"},
+            }
+        })
+        flux3 = config.get_engine_config("flux3cloud")
+        assert flux3.account_id == "acct"
+        assert flux3.api_token == "tok"
+
+    def test_absent_cloud_engine_without_siblings_stays_blank(self):
+        config = ImageGenConfig.from_dict({"engines": {"flux2": {"model_path": "./m"}}})
+        assert config.get_engine_config("flux3cloud").account_id == ""
+
     def test_get_engine_config(self, mock_config):
         config = ImageGenConfig.from_dict(mock_config)
         engine_config = config.get_engine_config("flux2")

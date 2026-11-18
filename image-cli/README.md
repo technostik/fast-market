@@ -183,7 +183,7 @@ image generate "a serene mountain landscape at sunset" [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-e, --engine` | Engine to use (flux2/flux2cloud/flux29bcloud/qwen21/qwen21turbo) | from config |
+| `-e, --engine` | Engine to use (flux2/flux2cloud/flux29bcloud/flux3cloud/qwen21/qwen21turbo) | from config |
 | `-s, --size` | Size preset (square/portrait/landscape/youtube/wide/tall/custom) | from config (`default_width`/`default_height`) |
 | `-w, --width` | Image width (overrides size) | from config |
 | `-h, --height` | Image height (overrides size) | from config |

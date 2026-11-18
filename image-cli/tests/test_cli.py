@@ -170,4 +170,4 @@ class TestCloudCredentialReuse:
         saved = yaml.safe_load(config_path.read_text())
         assert saved["engines"]["flux3cloud"]["account_id"] == "acct"
         assert saved["engines"]["flux3cloud"]["api_token"] == "tok"
-        assert saved["engines"]["flux3cloud"]["cf_model"] == "@cf/black-forest-labs/flux-3-image-klein"
+        assert saved["engines"]["flux3cloud"]["cf_model"] == "black-forest-labs/flux-3-image-klein"

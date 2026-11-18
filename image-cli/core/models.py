@@ -303,4 +303,25 @@ class ImageGenConfig:
         return None
 
     def get_engine_config(self, engine_name: str) -> EngineConfig:
-        return self.engines.get(engine_name, EngineConfig())
+        engine = self.engines.get(engine_name)
+        if engine is not None:
+            return engine
+        engine = EngineConfig()
+        # A Cloudflare engine missing from the profile (only flux2cloud was
+        # ever added there) still knows the account: all Cloudflare engines
+        # share one account and token.
+        if engine_name in CLOUDFLARE_ENGINES:
+            shared = next(
+                (
+                    sibling
+                    for name, sibling in self.engines.items()
+                    if name in CLOUDFLARE_ENGINES
+                    and sibling.account_id
+                    and sibling.api_token
+                ),
+                None,
+            )
+            if shared is not None:
+                engine.account_id = shared.account_id
+                engine.api_token = shared.api_token
+        return engine

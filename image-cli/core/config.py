@@ -64,7 +64,9 @@ def get_default_config() -> dict:
             "flux3cloud": {
                 "account_id": "",
                 "api_token": "",
-                "cf_model": "@cf/black-forest-labs/flux-3-image-klein",
+                # Unified AI catalog id — no "@cf/" prefix. The plugin forces
+                # this value; kept here for visibility / credentials.
+                "cf_model": "black-forest-labs/flux-3-image-klein",
             },
         },
         "default_width": 1024,
