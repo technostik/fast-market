@@ -144,13 +144,19 @@ def register(plugin_manifests: dict) -> CommandManifest:
         help="Transcript of the reference audio (qwen3, csm; unused by chatterbox, overrides config)",
     )
     @click.option(
+        "--exaggeration",
+        type=click.FloatRange(min=0.0, max=2.0),
+        default=None,
+        help="Expressivity: 0.0 flat, 0.5 neutral, 1.0+ expressive (chatterbox; csm maps it to sampling temperature, overrides config)",
+    )
+    @click.option(
         "--format", "-F", "fmt",
         type=click.Choice(["json", "text"]),
         default="text",
         help="Output format",
     )
     @click.pass_context
-    def speak_cmd(ctx, text, file, engine, voice, speed, output, language, accelerate, clone, ref_text, fmt):
+    def speak_cmd(ctx, text, file, engine, voice, speed, output, language, accelerate, clone, ref_text, exaggeration, fmt):
         """Synthesize speech from TEXT.
 
         TEXT can be provided as a positional argument, read from a file
@@ -214,6 +220,11 @@ def register(plugin_manifests: dict) -> CommandManifest:
                 language=actual_language,
                 clone=clone if clone is not None else engine_config.get("clone"),
                 ref_text=ref_text if ref_text is not None else engine_config.get("ref_text"),
+                exaggeration=(
+                    exaggeration
+                    if exaggeration is not None
+                    else engine_config.get("exaggeration")
+                ),
             )
 
             actual_accelerate = (

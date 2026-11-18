@@ -76,6 +76,78 @@ class TestPluginManifests:
         assert chatterbox["language"] == "fr"
 
 
+# --- expressivity (exaggeration) -------------------------------------------
+
+
+class TestCsmExaggeration:
+    def test_default_is_neutral(self):
+        from plugins.csm.plugin import resolve_csm_exaggeration
+
+        assert resolve_csm_exaggeration(None) == 0.5
+
+    def test_out_of_range_fails_loudly(self):
+        from plugins.csm.plugin import resolve_csm_exaggeration
+
+        with pytest.raises(ValueError, match="within"):
+            resolve_csm_exaggeration(2.5)
+        with pytest.raises(ValueError, match="within"):
+            resolve_csm_exaggeration(-0.1)
+
+    def test_temperature_mapping(self):
+        from plugins.csm.plugin import csm_temperature_from_exaggeration
+
+        # exaggeration 0.5 == csm-1b's own default sampling temperature
+        assert csm_temperature_from_exaggeration(0.5) == pytest.approx(0.9)
+        assert csm_temperature_from_exaggeration(0.0) == pytest.approx(0.5)
+        assert csm_temperature_from_exaggeration(1.0) == pytest.approx(1.3)
+        assert csm_temperature_from_exaggeration(2.0) == pytest.approx(2.0)
+
+
+class TestChatterboxExaggeration:
+    def test_kwargs_override_config(self):
+        v = ChatterboxTTSPlugin._resolve_exaggeration(
+            {"exaggeration": 0.0}, {"exaggeration": 0.5}
+        )
+        assert v == 0.0
+
+    def test_config_fallback(self):
+        v = ChatterboxTTSPlugin._resolve_exaggeration({}, {"exaggeration": 1.2})
+        assert v == 1.2
+
+    def test_default_when_unconfigured(self):
+        assert ChatterboxTTSPlugin._resolve_exaggeration({}, {}) == 0.5
+
+    def test_zero_is_respected(self):
+        v = ChatterboxTTSPlugin._resolve_exaggeration({"exaggeration": 0}, {})
+        assert v == 0.0
+
+    def test_out_of_range_fails_loudly(self):
+        with pytest.raises(ValueError, match="within"):
+            ChatterboxTTSPlugin._resolve_exaggeration({"exaggeration": 3.0}, {})
+
+
+# --- chatterbox 0-shot clone cache -----------------------------------------
+
+
+class TestChatterboxCloneCache:
+    def test_cache_key_depends_on_file_content(self, tmp_path):
+        f1 = tmp_path / "a.wav"
+        f2 = tmp_path / "b.wav"
+        f1.write_bytes(b"same-content")
+        f2.write_bytes(b"same-content")
+        f3 = tmp_path / "c.wav"
+        f3.write_bytes(b"other-content")
+
+        p1 = ChatterboxTTSPlugin._conds_cache_path(f1)
+        p2 = ChatterboxTTSPlugin._conds_cache_path(f2)
+        p3 = ChatterboxTTSPlugin._conds_cache_path(f3)
+        assert p1 == p2
+        assert p1 != p3
+        assert p1.suffix == ".pt"
+        assert "chatterbox" in str(p1)
+        assert "ref_voices" in str(p1)
+
+
 # --- synthesis guards (no model download: errors raised before loading) ----
 
 

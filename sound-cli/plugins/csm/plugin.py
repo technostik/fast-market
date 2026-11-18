@@ -31,6 +31,30 @@ def resolve_csm_language(language: str | None) -> str:
     raise ValueError(msg)
 
 
+def resolve_csm_exaggeration(value: float | None) -> float:
+    """Normalise an ``exaggeration`` (expressivity) value.
+
+    Contained to [0.0, 2.0]; mapped to CSM sampling temperature afterwards.
+    """
+    if value is None:
+        return 0.5
+    value = float(value)
+    if not 0.0 <= value <= 2.0:
+        msg = f"exaggeration must be within [0.0, 2.0], got {value}"
+        raise ValueError(msg)
+    return value
+
+
+def csm_temperature_from_exaggeration(exaggeration: float) -> float:
+    """Map ``exaggeration`` [0, 2] to CSM sampling temperature.
+
+    0.0 (flat) -> 0.5, 0.5 (neutral, csm-1b's default behaviour) -> 0.9,
+    1.0 -> 1.3, clamped to 2.0 maximum. Same scale is applied to the depth
+    decoder so the audio codec stays in character.
+    """
+    return min(2.0, 0.5 + 0.8 * float(exaggeration))
+
+
 class CsmPlugin(TTSPlugin):
     """TTS engine using Sesame csm-1b (English-only).
 
@@ -97,6 +121,11 @@ class CsmPlugin(TTSPlugin):
         )
         clone = kwargs.get("clone") or self.config.get("clone")
         ref_text = kwargs.get("ref_text") or self.config.get("ref_text")
+        exaggeration = resolve_csm_exaggeration(
+            kwargs.get("exaggeration")
+            if kwargs.get("exaggeration") is not None
+            else self.config.get("exaggeration")
+        )
 
         if voice:
             try:
@@ -131,7 +160,12 @@ class CsmPlugin(TTSPlugin):
             conversation, tokenize=True, return_dict=True
         ).to(model.device)
 
-        audio = model.generate(**inputs, output_audio=True)
+        audio = model.generate(
+            **inputs,
+            output_audio=True,
+            temperature=csm_temperature_from_exaggeration(exaggeration),
+            depth_decoder_temperature=csm_temperature_from_exaggeration(exaggeration),
+        )
         if isinstance(audio, (list, tuple)):
             audio = audio[0]
         if audio.ndim > 1:

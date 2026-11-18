@@ -25,6 +25,7 @@ def _default_config() -> dict:
             "model": "sesame/csm-1b",
             "voice": "0",
             "language": "en",
+            "exaggeration": 0.5,
             "device": "auto",
             "dtype": "auto",
             "clone": None,

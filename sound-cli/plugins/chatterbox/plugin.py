@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import sys
+from pathlib import Path
 from typing import Any
 
 import torch
 
+from common.core.paths import get_tool_cache_dir
 from plugins.base import TTSPlugin
 
 _CHATTERBOX_SAMPLE_RATE = 24000
+_REF_VOICES_SUBDIR = "ref_voices"
+_CONDS_CACHE_SUBDIR = "chatterbox"
 
 # language_id values accepted by chatterbox-multilingual
 # (chatterbox.mtl_tts SUPPORTED_LANGUAGES, ResembleAI/chatterbox weights).
@@ -80,11 +85,18 @@ class ChatterboxTTSPlugin(TTSPlugin):
     """TTS engine using ResembleAI/chatterbox (multilingual).
 
     Uses the multilingual checkpoint so a single model serves ``fr``, ``en``
-    and all other supported ``language_id``s. Voice identity comes from a
-    reference audio prompt (``clone`` / ``audio_prompt_path``); without one
-    the model uses its built-in default voice. ``ref_text`` is not used by
-    chatterbox (its prompt encoder does not need a transcript) and is
-    absorbed for interface compatibility.
+    and all other supported ``language_id``s.
+
+    Cloning is 0-shot (like qwen's ``clone`` config key, but without a
+    transcript): voice identity comes from a reference audio prompt
+    (``clone`` config key or ``--clone``); ``ref_text`` is not used by
+    chatterbox and is absorbed for interface compatibility. The prepared
+    voice conditionals (speaker embedding + prompt tokens) are persisted in
+    the sound cache and reused across runs, keyed by the reference file
+    content. Without a clone the model uses its built-in default voice.
+
+    ``exaggeration`` controls expressivity (0.0 flat - 2.0 theatrical,
+    0.5 default).
     """
 
     name = "chatterbox"
@@ -92,6 +104,26 @@ class ChatterboxTTSPlugin(TTSPlugin):
     def __init__(self, config: dict):
         self.config = config
         self._model: Any = None
+
+    @staticmethod
+    def _resolve_exaggeration(kwargs: dict, config: dict) -> float:
+        value = kwargs.get("exaggeration")
+        if value is None:
+            value = config.get("exaggeration", 0.5)
+        value = float(value)
+        if not 0.0 <= value <= 2.0:
+            msg = f"exaggeration must be within [0.0, 2.0], got {value}"
+            raise ValueError(msg)
+        return value
+
+    @staticmethod
+    def _conds_cache_path(clone: str | Path) -> Path:
+        disk = Path(clone).read_bytes()
+        digest = hashlib.sha256(disk).hexdigest()[:16]
+        return (
+            get_tool_cache_dir("sound") / _REF_VOICES_SUBDIR / _CONDS_CACHE_SUBDIR
+            / f"{digest}.pt"
+        )
 
     def _resolve_device(self) -> str:
         device = self.config.get("device", "auto")
@@ -114,6 +146,27 @@ class ChatterboxTTSPlugin(TTSPlugin):
             )
         return self._model
 
+    def _load_or_prepare_conds(self, model: Any, clone: str | None, exaggeration: float) -> None:
+        """Point ``model.conds`` at the 0-shot clone reference (cached) or leave
+        the built-in default voice in place."""
+        if not clone:
+            return
+        try:
+            from chatterbox.mtl_tts import Conditionals
+        except ImportError:
+            from chatterbox.tts import Conditionals
+
+        cache_path = self._conds_cache_path(clone)
+        if cache_path.exists():
+            self._log(f"Using cached voice conditionals ({cache_path.name}).")
+            model.conds = Conditionals.load(cache_path).to(model.device)
+            return
+
+        self._log("Preparing 0-shot clone conditionals (cached for next runs)...")
+        model.prepare_conditionals(str(clone), exaggeration=exaggeration)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        model.conds.save(cache_path)
+
     @staticmethod
     def _log(message: str) -> None:
         print(message, file=sys.stderr)
@@ -125,13 +178,15 @@ class ChatterboxTTSPlugin(TTSPlugin):
             kwargs.get("language") or self.config.get("language", "fr")
         )
         clone = kwargs.get("clone") or self.config.get("clone")
+        exaggeration = self._resolve_exaggeration(kwargs, self.config)
 
         model = self._get_model()
+        self._load_or_prepare_conds(model, clone, exaggeration)
         wav = model.generate(
             text=text,
             language_id=language,
-            audio_prompt_path=str(clone) if clone else None,
-            exaggeration=float(self.config.get("exaggeration", 0.5)),
+            audio_prompt_path=None,
+            exaggeration=exaggeration,
             cfg_weight=float(self.config.get("cfg_weight", 0.5)),
             temperature=float(self.config.get("temperature", 0.8)),
         )

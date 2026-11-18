@@ -192,6 +192,7 @@ Synthesize speech from text using a TTS engine. Text can come from three sources
 | `--speed` | `-s` | Playback speed, default 1.0 (kokoro only) |
 | `--output` | `-o` | Output path (default: workdir/speak\_\<timestamp\>.wav) |
 | `--language` | `-L` | Language (ISO 639-1 shorthand like `en`, `fr`, `es`, `ja`, `zh`) |
+| `--exaggeration` | | Expressivity 0.0–2.0, default 0.5 (chatterbox native; csm maps it to sampling temperature; overrides config) |
 | `--accelerate` | `-a` | Post-processing time-stretch factor (0.25–4.0, e.g. 1.5 = 50% faster). Pitch-preserved phase vocoder, works with any engine. |
 | `--format` | `-F` | Output format: `json` or `text` |
 
@@ -199,7 +200,7 @@ Synthesize speech from text using a TTS engine. Text can come from three sources
 - **kokoro**: Weighted voice mix. Format: `name[*weight,...]`. Example: `am_michael*0.7,am_fenrir*0.3`. Weights are normalized to sum to 1.0. A single name like `am_michael` uses that voice directly. Use `--language` for multilingual TTS: `en`, `en-gb`, `es`, `fr`, `hi`, `it`, `pt`, `ja`, `zh`.
 - **qwen3**: Natural language voice description. Example: `"A soft, elegant French female voice"`. Use `--language` for multilingual generation: `en`, `zh`, `ja`, `ko`, `de`, `fr`, `ru`, `pt`, `es`, `it`.
 - **csm**: Numeric speaker id (csm-1b is English-only). Example: `0`. Optional `--clone` + `--ref-text` prepend a reference-voice context turn.
-- **chatterbox**: No named voices — voice identity comes from `--clone` (reference audio prompt); without one, the model default voice is used. `--language` defaults to `fr`; supports 23 `language_id`s (`fr`, `en`, `de`, `es`, ...). `--ref-text` is unused.
+- **chatterbox**: No named voices — voice identity comes from `--clone` (0-shot: reference audio only, no transcript; prepared conditionals are cached under the sound cache and reused across runs keyed by the reference file content). Without one, the model default voice is used. `--language` defaults to `fr`; supports 23 `language_id`s (`fr`, `en`, `de`, `es`, ...). `--exaggeration` controls expressivity (0.0 flat – 2.0 theatrical). `--ref-text` is unused.
 
 **Examples:**
 ```bash

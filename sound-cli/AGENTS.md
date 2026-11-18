@@ -141,6 +141,24 @@ qwen3:
   clone: null            # path to reference .wav for voice cloning
   ref_text: null         # transcript of clone audio (ICL mode)
 
+csm:
+  model: sesame/csm-1b   # English-only, gated on HF (or unsloth/csm-1b)
+  voice: "0"             # numeric speaker id
+  language: en
+  exaggeration: 0.5      # expressivity 0-2, mapped to sampling temperature (0.5 = csm default 0.9)
+  device: auto
+  dtype: auto
+  clone: null            # 0-shot reference audio prepended as context turn
+  ref_text: null         # transcript of the clone audio
+
+chatterbox:
+  language: fr           # language_id (23 supported: fr, en, es, de, ...)
+  exaggeration: 0.5      # expressivity 0-2
+  cfg_weight: 0.5
+  temperature: 0.8
+  device: auto
+  clone: null            # 0-shot: reference audio only (no transcript); conditionals cached in sound cache
+
 acestep:
   model: ACE-Step/acestep-v15-xl-turbo-diffusers
   duration: 30.0            # seconds (10-600)
