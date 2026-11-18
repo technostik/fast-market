@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+import os
 import hashlib
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
+import soundfile as sf
 import torch
 
 from common.core.paths import get_tool_cache_dir
@@ -13,6 +18,17 @@ from plugins.base import TTSPlugin
 _CHATTERBOX_SAMPLE_RATE = 24000
 _REF_VOICES_SUBDIR = "ref_voices"
 _CONDS_CACHE_SUBDIR = "chatterbox"
+# chatterbox-tts pins torch==2.6/transformers==5.2 on py<=3.12; when the host
+# environment differs, generation runs in an isolated side venv instead
+# (override with the `venv_python` key of the chatterbox config section).
+DEFAULT_VENV_PYTHON = "~/.venvs/fast-market-chatterbox/bin/python"
+_VENV_SETUP_HINT = (
+    "chatterbox-tts pins torch==2.6.0 / transformers==5.2.0: build the side venv with:\n"
+    "  python -m venv --system-site-packages ~/.venvs/fast-market-chatterbox\n"
+    "  ~/.venvs/fast-market-chatterbox/bin/pip install chatterbox-tts\n"
+    "Or point the 'venv_python' key of the chatterbox config section at another"
+    " interpreter that can import chatterbox."
+)
 
 # language_id values accepted by chatterbox-multilingual
 # (chatterbox.mtl_tts SUPPORTED_LANGUAGES, ResembleAI/chatterbox weights).
@@ -79,6 +95,12 @@ def resolve_chatterbox_language(language: str | None) -> str:
         f"Supported language_ids: {', '.join(sorted(_CHATTERBOX_LANGS))}"
     )
     raise ValueError(msg)
+
+
+def resolve_venv_python(config: dict) -> Path:
+    """Python interpreter of the chatterbox side venv."""
+    raw = config.get("venv_python") or DEFAULT_VENV_PYTHON
+    return Path(raw).expanduser()
 
 
 class ChatterboxTTSPlugin(TTSPlugin):
@@ -173,13 +195,64 @@ class ChatterboxTTSPlugin(TTSPlugin):
     def _log(message: str) -> None:
         print(message, file=sys.stderr)
 
+    # ------------------------------------------------------------------
+    # Out-of-process generation (host env cannot import chatterbox)
+    # ------------------------------------------------------------------
+
+    def _runner_path(self) -> Path:
+        return Path(__file__).resolve().parent / "runner.py"
+
+    def _synthesize_subprocess(
+        self, text: str, language: str, clone: str | None, venv_python: Path, **kwargs: Any
+    ) -> tuple[torch.Tensor, int]:
+        out_dir = get_tool_cache_dir("sound") / "chatterbox"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+        out_path = out_dir / f"out_{digest}_{os.getpid()}.wav"
+        payload = {
+            "text": text,
+            "language": language,
+            "clone": clone,
+            "exaggeration": kwargs.get("exaggeration"),
+            "ref_text": kwargs.get("ref_text"),
+            "speed": kwargs.get("speed", 1.0),
+            "output": str(out_path),
+        }
+        env = dict(os.environ)
+        env.pop("_SOUND_CHATTERBOX_RUNNER", None)
+        proc = subprocess.run(  # noqa: S603 — interpreter from trusted config
+            [str(venv_python), str(self._runner_path())],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=900,
+            env=env,
+        )
+        if proc.returncode != 0 or not out_path.exists():
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-5:]
+            raise RuntimeError(
+                "chatterbox side venv generation failed (see log console):\n" + "\n".join(tail)
+            )
+        if proc.stderr:
+            self._log(proc.stderr.strip())
+        audio, sr = sf.read(str(out_path), always_2d=False)
+        out_path.unlink(missing_ok=True)
+        return torch.from_numpy(audio).float(), int(sr)
+
     def synthesize(
         self, text: str, voice: str, speed: float, **kwargs
     ) -> tuple[torch.Tensor, int]:
         language = resolve_chatterbox_language(
-            kwargs.get("language") or self.config.get("language", "fr")
+            kwargs.pop("language", None) or self.config.get("language", "fr")
         )
-        clone = kwargs.get("clone") or self.config.get("clone")
+        clone = kwargs.pop("clone", None) or self.config.get("clone")
+
+        venv_python = resolve_venv_python(self.config)
+        if venv_python.exists() and not os.environ.get("_SOUND_CHATTERBOX_RUNNER"):
+            return self._synthesize_subprocess(
+                text, language, clone, venv_python, speed=speed, **kwargs
+            )
+
         exaggeration = self._resolve_exaggeration(kwargs, self.config)
 
         model = self._get_model()

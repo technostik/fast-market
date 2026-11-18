@@ -256,6 +256,8 @@ class Qwen3TTSPlugin(TTSPlugin):
                 "qwen3 side venv generation failed (see log console):\n"
                 + "\n".join(tail)
             )
+        if proc.stderr:
+            self._log(proc.stderr.strip())
 
         audio, sr = sf.read(str(out_path), always_2d=False)
         out_path.unlink(missing_ok=True)

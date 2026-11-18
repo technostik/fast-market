@@ -389,6 +389,7 @@ ignores unused arg instead of wiring an engine).
 | Engine | Constraint | Handling |
 |--------|-----------|----------|
 | qwen3 | qwen-tts 0.1.1 pins `transformers==4.57.3`; breaks under transformers >= 5 (Mimi refactor loses speech-tokenizer weights) | `plugins/qwen3/plugin.py` delegates generation to the side venv `~/.venvs/fast-market-qwen3` (built with `--system-site-packages` + `transformers==4.57.3`) via `plugins/qwen3/runner.py`; override with the `venv_python` key of the qwen3 config section. In-process only under transformers 4.x. |
+| chatterbox | chatterbox-tts pins `torch==2.6.0` / `transformers==5.2.0` on py<=3.12; never pip-install it into an env running other engines | `plugins/chatterbox/plugin.py` delegates to the side venv `~/.venvs/fast-market-chatterbox` (`--system-site-packages` + `pip install chatterbox-tts`) via `plugins/chatterbox/runner.py` whenever that venv python exists; override with the `venv_python` key of the chatterbox config section. In-process otherwise (no recursion: the runner sets `_SOUND_CHATTERBOX_RUNNER`). |
 
 ## Related Documentation
 
