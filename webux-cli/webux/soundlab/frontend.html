@@ -41,6 +41,13 @@
     .log-actions { margin-top:10px; gap:8px; }
     .log-actions button { padding:5px 10px; font-size:12px; }
     .log-actions label { flex-direction:row; align-items:center; gap:4px; font-size:12px; }
+    .file-input { display:none; }
+    .btn-file { flex-direction:row; align-items:center; gap:6px; cursor:pointer; display:inline-flex; padding:9px 16px; border:1px solid var(--border); border-radius:4px; background:var(--bg); font-size:14px; }
+    .btn-file:hover { border-color:var(--accent); }
+    #lipPlayer { width:100%; border-radius:4px; background:#000; }
+    #lipStatus { min-height:20px; font-size:13px; }
+    #lipStatus.err { color:var(--danger,#f66); }
+    #lipStatus.ok { color:var(--success,#7c7); }
   </style>
 </head>
 <body>
@@ -72,6 +79,31 @@
       </div>
       <audio id="player" controls preload="none"></audio>
     </div>
+  </div>
+
+  <div class="card" id="lipsyncCard">
+    <div class="row" style="justify-content:space-between">
+      <strong>Talking head (SadTalker lipsync)</strong>
+      <span id="lipAudioName" class="lang">no audio selected — generate a sound first</span>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label class="btn-file">Choose face image
+        <input type="file" id="lipImage" class="file-input" accept="image/png,image/jpeg,image/webp">
+      </label>
+      <span id="lipImageName" class="lang">no image selected</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="lipGo" disabled>Generate lipsync video</button>
+      <span id="lipStatus"></span>
+    </div>
+    <div id="lipVideoBox" style="display:none;margin-top:12px">
+      <video id="lipPlayer" controls preload="metadata"></video>
+      <div class="row" style="margin-top:6px;justify-content:space-between">
+        <span id="lipMeta" class="lang"></span>
+        <button class="chip" id="lipLogBtn">Log</button>
+      </div>
+    </div>
+    <div class="hint">Pick a photo with a clear visible face. The first run installs/loads the SadTalker backend and can take several minutes.</div>
   </div>
 
   <details class="card" id="logCard">
@@ -256,6 +288,7 @@ function play(path, engine, text, log) {
   const item = { path, engine, text, ts: Date.now(), log: log || '' };
   HISTORY = [item, ...HISTORY].slice(0, 12);
   renderHistory();
+  setLipAudio(path, engine, text);
 }
 
 function renderHistory() {
@@ -288,6 +321,73 @@ $('logClear').onclick = async () => {
   await fetch('api/soundlab/logs', { method: 'DELETE' }).catch(() => {});
   showLog('Server log history cleared.', '');
 };
+
+/* ── talking head (SadTalker lipsync) ────────────────────────────────── */
+let LIP_AUDIO = '';
+let LIP_IMAGE = '';
+
+function setLipAudio(path, engine, text) {
+  LIP_AUDIO = path;
+  $('lipAudioName').textContent = `audio: ${engine} · ${text.slice(0, 40)}${text.length > 40 ? '…' : ''}`;
+  updateLipGo();
+}
+
+function updateLipGo() {
+  $('lipGo').disabled = !(LIP_AUDIO && LIP_IMAGE);
+}
+
+function lipStatus(msg, cls) {
+  const s = $('lipStatus');
+  s.textContent = msg;
+  s.className = cls || '';
+}
+
+$('lipImage').onchange = async () => {
+  const f = $('lipImage').files[0];
+  if (!f) return;
+  const st = $('lipStatus');
+  st.textContent = `Uploading ${f.name}…`; st.className = '';
+  try {
+    const fd = new FormData();
+    fd.append('file', f);
+    const r = await fetch('api/soundlab/upload-image', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.status);
+    LIP_IMAGE = d.path;
+    $('lipImageName').textContent = d.path.replace(/^.*\/soundlab\/images\//, '');
+    lipStatus('Image ready.' + (LIP_AUDIO ? '' : ' Generate a sound first.'));
+    updateLipGo();
+  } catch (e) {
+    lipStatus('Upload failed: ' + e.message, 'err');
+  }
+};
+
+$('lipGo').onclick = async () => {
+  if (!LIP_AUDIO || !LIP_IMAGE) return;
+  lipStatus('Generating lipsync video — SadTalker can take a few minutes…', '');
+  $('lipGo').disabled = true;
+  try {
+    const r = await fetch('api/soundlab/lipsync', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photo: LIP_IMAGE, audio: LIP_AUDIO }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.status);
+    showLog(d.log, `sadtalker · ok · ${new Date((d.ts || Date.now() / 1000) * 1000).toLocaleTimeString()}`);
+    $('lipVideoBox').style.display = 'block';
+    $('lipPlayer').src = `api/soundlab/preview?path=${encodeURIComponent(d.output)}`;
+    $('lipMeta').textContent = new Date(d.ts * 1000).toLocaleString();
+    lipStatus('Done.');
+  } catch (e) {
+    lipStatus('Lipsync failed: ' + e.message, 'err');
+    await refreshLogOnError();
+  } finally {
+    $('lipGo').disabled = false;
+    updateLipGo();
+  }
+};
+
+$('lipLogBtn').onclick = () => { $('logCard').open = true; };
 
 /* ── form persistence (localStorage; engine config is server-side anyway) ─ */
 function saveForm() {

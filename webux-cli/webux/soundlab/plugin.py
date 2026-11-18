@@ -6,7 +6,7 @@ import shutil
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -27,7 +27,16 @@ _MIME = {
     ".ogg": "audio/ogg",
     ".m4a": "audio/mp4",
     ".aac": "audio/aac",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
+
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_IMAGE_MAX_BYTES = 20 * 1024 * 1024
 
 
 def _sound() -> str:
@@ -230,3 +239,116 @@ async def preview(path: str = Query(...)):
         raise HTTPException(status_code=404, detail="File not found")
     mime = _MIME.get(p.suffix.lower(), "application/octet-stream")
     return FileResponse(str(p), media_type=mime, headers={"Cache-Control": "no-store"})
+
+
+# ── Talking-head (SadTalker) API ─────────────────────────────────────────────
+
+
+class LipsyncRequest(BaseModel):
+    photo: str
+    audio: str
+
+
+def _video() -> str:
+    return shutil.which("video") or "video"
+
+
+@router.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Store a face image inside workdir/soundlab/images and return its path."""
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported image type {suffix!r} — use png, jpg, jpeg or webp",
+        )
+    data = await file.read()
+    if len(data) > _IMAGE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Image larger than 20 MB")
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    img_dir = _workdir() / "soundlab" / "images"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    out = img_dir / f"face_{time.strftime('%Y%m%d_%H%M%S')}{suffix}"
+    out.write_bytes(data)
+    return {"path": str(out), "size": len(data), "filename": file.filename}
+
+
+@router.post("/lipsync")
+async def lipsync(req: LipsyncRequest):
+    photo = Path(req.photo).expanduser().resolve()
+    audio = Path(req.audio).expanduser().resolve()
+    for label, p in (("photo", photo), ("audio", audio)):
+        _assert_path_safe(p, [_workdir()])
+        if not p.exists():
+            raise HTTPException(status_code=404, detail=f"{label} not found: {p}")
+
+    out_dir = _workdir() / "soundlab"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"talking_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
+
+    argv = [
+        _video(), "lipsync", str(photo), str(audio),
+        "--output", str(out_path), "--format", "json", "--verbose",
+    ]
+
+    job_id = f"lip_{time.time()}"
+    _jobs.add(job_id)  # shared with /generate: SadTalker and TTS models fight for the GPU
+    entry = {
+        "id": job_id,
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "engine": "sadtalker",
+        "text": f"{photo.name} + {audio.name}",
+        "output": str(out_path),
+        "ok": False,
+        "done_ts": None,
+        "log": "",
+    }
+    p: asyncio.subprocess.Process | None = None
+    stdout = b""
+    stderr = b""
+    try:
+        p = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(p.communicate(), timeout=_SPAWN_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            p.kill()
+            await p.wait()
+            log = f"video lipsync killed after {_SPAWN_TIMEOUT_S}s — too slow or hung"
+            _record_log(entry, ok=False, log=log)
+            raise HTTPException(status_code=504, detail=log)
+        combined = (
+            "── stderr ──────────────────────────────\n"
+            + stderr.decode(errors="replace")
+            + ("\n── stdout ──────────────────────────────\n" if stdout else "")
+            + stdout.decode(errors="replace")
+        ).strip()
+        if p.returncode != 0:
+            _record_log(entry, ok=False, log=combined)
+            raise HTTPException(
+                status_code=500,
+                detail=(stderr.decode(errors="replace").strip() or f"video lipsync exited {p.returncode}")[-1000:],
+            )
+        if not out_path.exists():
+            _record_log(entry, ok=False, log=combined)
+            raise HTTPException(
+                status_code=500,
+                detail=(stderr.decode(errors="replace").strip() or "no output video was produced")[-500:],
+            )
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="video CLI not found in PATH")
+    finally:
+        _jobs.discard(job_id)
+
+    _record_log(entry, ok=True, log=combined)
+    return {
+        "output": str(out_path),
+        "photo": str(photo),
+        "audio": str(audio),
+        "ts": out_path.stat().st_mtime,
+        "job_id": job_id,
+        "log": entry["log"],
+    }
