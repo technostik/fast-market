@@ -10,6 +10,7 @@ common/
 ├── structlog.py        # Logging shim — get_logger(name) → _Logger
 ├── rt_subprocess.py    # Real-time subprocess capture — rt_subprocess.run()
 ├── last_video.py       # get_last_video() — RSS + yt-dlp fallback, short/normal filter
+├── message_targets.py  # Named Telegram targets: validate, resolve, list (shared by message + webux)
 │
 ├── agent/              # Agentic loop, session model, executor, prompts, shared context
 ├── auth/               # AuthProvider ABC
@@ -18,7 +19,7 @@ common/
 ├── llm/                # LLM provider abstraction (Anthropic, OpenAI, Ollama, Groq, xAI…)
 ├── prompt/             # PromptManager — per-tool prompt overrides
 ├── storage/            # SQLAlchemy engine/session helpers
-├── webux/              # Webux hub plugin contract and discovery
+├── webux/              # Webux hub plugin contract, discovery, telegram target listing/discovery
 └── youtube/            # YouTube API client, auth, models, transport, quota
 ```
 

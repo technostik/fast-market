@@ -172,6 +172,13 @@
     <div class="row"><label>Modal usage URL</label><input id="cfgModalUrl" type="text"></div>
     <div class="checkrow"><input type="checkbox" id="cfgPinnedEnabled"><label style="margin:0">Auto-post pinned comment after upload (pin manually in Studio)</label></div>
     <div class="row"><label>Default pinned comment (long videos)</label><textarea id="cfgPinnedText" rows="2" placeholder="Posted automatically after each long upload"></textarea></div>
+    <div class="checkrow"><input type="checkbox" id="cfgTelegramAlertEnabled"><label style="margin:0" title="Seeds the run-form checkbox. The alert fires after a successful upload.">Telegram alert after upload</label></div>
+    <div class="row"><label title="Named target from this profile's message config. Discover reads the chats the bot has already seen.">Telegram alert target (per profile)</label>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <select id="cfgTelegramTarget" style="flex:1; min-width:0;"><option value="">— none —</option></select>
+        <button type="button" class="btn-sec" onclick="discoverTelegramTargets(this)" title="Read the chats the bot has seen and add them to this profile's config" style="padding:4px 8px; flex-shrink:0;">↻ Discover</button>
+      </div>
+    </div>
     <button class="btn-sec" id="cfgSave">Save config</button>
     <span id="cfgMsg" class="hint"></span>
   </div>
@@ -229,6 +236,7 @@
       <div class="row" id="overlaySubRow"><label>Thumbnail overlay subtitle (optional — same font, one third smaller, top, centered, no band)</label><input id="thumbOverlaySubtitle" type="text"></div>
       <div class="opt checkrow"><input type="checkbox" id="doPinnedComment"><label style="margin:0" title="Posts the comment right after upload (video still unlisted). Pin it manually in Studio via the comment link.">Post pinned comment after upload</label></div>
       <div class="row"><label>Pinned comment (overrides config default)</label><textarea id="pinnedCommentText" rows="2" placeholder="Leave empty to use the config default"></textarea></div>
+      <div class="opt checkrow"><input type="checkbox" id="telegramAlert"><label style="margin:0" title="Seeded from the selected profile's config. Sends a Telegram alert to the profile's target after a successful upload.">Telegram alert on publish</label></div>
 
       <div class="resume-box" id="resumeBox">
         <div id="resumeInfo" style="font-size:12px;color:var(--dim);margin-bottom:8px;"></div>
@@ -328,7 +336,10 @@ async function loadConfig(){
   el('cfgModalUrl').value = c.modal_usage_url||'';
   el('cfgPinnedEnabled').checked = !!c.long_pinned_comment_enabled;
   el('cfgPinnedText').value = c.long_pinned_comment_text||'';
+  el('cfgTelegramAlertEnabled').checked = !!c.long_telegram_alert_enabled;
+  await loadTelegramTargets(c.telegram_alert_target);
   applyPinnedDefaults(c);
+  applyTelegramAlertDefaults(c);
   el('cfgLang').value = c.transcript_language||'fr';
   el('cfgModel').value = c.transcript_model||'medium';
   el('cfgGroq').checked = (c.transcript_mode==='groq');
@@ -357,6 +368,46 @@ function applyPinnedDefaults(c){
   const text = c.long_pinned_comment_text || '';
   if (cb) cb.checked = !!(c.long_pinned_comment_enabled || text);
   if (tx) tx.value = text;
+}
+
+function applyTelegramAlertDefaults(c){
+  if (!c) return;
+  const cb = el('telegramAlert');
+  if (cb) cb.checked = !!c.long_telegram_alert_enabled;
+}
+
+async function loadTelegramTargets(selected){
+  const sel = el('cfgTelegramTarget');
+  if (!sel) return;
+  const prof = pageProfile();
+  const r = await fetch(API+'/telegram-targets'+(prof?'?profile='+encodeURIComponent(prof):'')).catch(()=>null);
+  if (!r || !r.ok){
+    // Never wipe a configured target just because the list failed to load.
+    if (selected && !Array.from(sel.options).some(o=>o.value===selected)) sel.add(new Option(selected, selected));
+    return;
+  }
+  const data = await r.json();
+  const targets = data.targets || [];
+  const wanted = selected || sel.value || '';
+  sel.innerHTML = '<option value="">— none —</option>' + targets.map(t=>{
+    const label = (t.label && t.label !== t.id) ? `${t.id} — ${t.label}` : t.id;
+    return `<option value="${t.id}">${label}</option>`;
+  }).join('');
+  sel.value = targets.some(t=>t.id===wanted) ? wanted : '';
+}
+
+async function discoverTelegramTargets(btn){
+  const prof = pageProfile();
+  if (btn){ btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await fetch(API+'/telegram-targets/discover'+(prof?'?profile='+encodeURIComponent(prof):''), { method:'POST' });
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok){ alert(data.detail || 'Discovery failed'); return; }
+    await loadTelegramTargets(el('cfgTelegramTarget').value);
+    alert(`Discovery done: ${(data.targets||[]).length} target(s) available.`);
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = '↻ Discover'; }
+  }
 }
 
 function updateSignatureAvailability() {
@@ -420,6 +471,8 @@ async function saveConfig(){
     thumbnail_overlay_offset: Number(el('cfgThumbOffset').value) || 0,
     long_pinned_comment_enabled: el('cfgPinnedEnabled').checked,
     long_pinned_comment_text: el('cfgPinnedText').value,
+    long_telegram_alert_enabled: el('cfgTelegramAlertEnabled').checked,
+    telegram_alert_target: el('cfgTelegramTarget').value,
     modal_usage_url: el('cfgModalUrl').value,
     transcript_mode: el('cfgGroq').checked ? 'groq' : 'normal',
     transcript_model: el('cfgModel').value,
@@ -445,6 +498,9 @@ async function saveConfig(){
     applyPinnedDefaults({
       long_pinned_comment_enabled: body.long_pinned_comment_enabled,
       long_pinned_comment_text: body.long_pinned_comment_text,
+    });
+    applyTelegramAlertDefaults({
+      long_telegram_alert_enabled: body.long_telegram_alert_enabled,
     });
   }
   await loadVideos();
@@ -626,6 +682,7 @@ function startBody(){
     description_override: el('forcedDesc').value,
     do_pinned_comment: el('doPinnedComment').checked,
     pinned_comment_text: el('pinnedCommentText').value,
+    do_telegram_alert: el('telegramAlert').checked,
     do_add_to_corpus: el('doAddCorpus').checked,
     thumbnail_overlay_title: el('thumbOverlayTitle').value,
     thumbnail_overlay_subtitle: el('thumbOverlaySubtitle').value,
@@ -654,6 +711,7 @@ el('retryBtn').addEventListener('click', async ()=>{
   body.profile = nextRetryProfile || body.profile;
   body.do_pinned_comment = null;
   body.pinned_comment_text = '';
+  body.do_telegram_alert = null;
   const r = await fetch(API+'/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await r.json().catch(()=>({}));
   if (!r.ok || !data.job_id){ alert(data.detail || 'Retry failed'); return; }
@@ -671,6 +729,7 @@ el('resumeBtn').addEventListener('click', async ()=>{
   // comment config instead of whatever the page box currently shows.
   body.do_pinned_comment = null;
   body.pinned_comment_text = '';
+  body.do_telegram_alert = null;
   const r = await fetch(API+'/resume', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await r.json();
   if (data.job_id){ currentJob = data.job_id; startPoll(); }

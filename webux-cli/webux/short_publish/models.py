@@ -95,6 +95,10 @@ class Job:
     # from the run form (an unticked box must really disable the comment).
     do_pinned_comment: bool | None = None
     pinned_comment_text: str = ""
+    # Telegram alert after a successful upload. Tri-state like the pinned
+    # comment: None = follow the profile's config, True/False = run-form choice.
+    do_telegram_alert: bool | None = None
+    telegram_alert_sent: bool = False
     # Index the uploaded video in the corpus (URL, title, description,
     # transcript) right after a successful upload. The run form checks it by
     # default; failures are warnings only.
@@ -147,6 +151,7 @@ class Job:
             "check_result": self.check_result,
             "do_add_to_corpus": self.do_add_to_corpus,
             "corpus_handle": self.corpus_handle,
+            "telegram_alert_sent": self.telegram_alert_sent,
             "files": self.files,
             "start_time": self.start_time,
             "elapsed_seconds": round(job_elapsed, 1),

@@ -258,6 +258,21 @@
       <textarea id="cfgPinnedText" rows="3" style="width:100%; min-height:60px;" placeholder="Posted automatically after each Short upload"></textarea>
     </div>
     <div class="row">
+      <div class="checkrow">
+        <input type="checkbox" id="cfgTelegramAlertEnabled">
+        <label for="cfgTelegramAlertEnabled" style="display:inline; margin:0;" title="Seeds the run-form checkbox. The alert fires after a successful upload.">Telegram alert after upload</label>
+      </div>
+    </div>
+    <div class="row">
+      <label title="Named target from this profile's message config. Discover reads the chats the bot has already seen.">Telegram alert target (per profile)</label>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <select id="cfgTelegramTarget" style="flex:1; width:auto; min-width:0;">
+          <option value="">— none —</option>
+        </select>
+        <button type="button" class="btn-sec" onclick="discoverTelegramTargets(this)" title="Read the chats the bot has seen and add them to this profile's config">↻ Discover</button>
+      </div>
+    </div>
+    <div class="row">
       <label>Transcript mode</label>
       <select id="cfgTranscriptMode" onchange="updateSubtitleDependency()">
         <option value="normal">Normal transcript</option>
@@ -443,6 +458,12 @@
         <div class="checkrow">
           <input type="checkbox" id="doPinnedComment">
           <label for="doPinnedComment" style="display:inline; margin:0;" title="Seeded from the selected profile's config. Uncheck to skip the comment for this job even if the profile enables it.">Post pinned comment after upload</label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="checkrow">
+          <input type="checkbox" id="telegramAlert">
+          <label for="telegramAlert" style="display:inline; margin:0;" title="Seeded from the selected profile's config. Sends a Telegram alert to the profile's target after a successful upload.">Telegram alert on publish</label>
         </div>
       </div>
       <div class="row">
@@ -905,6 +926,7 @@ async function startJob() {
     source_urls: (document.getElementById('sourceUrls').value || '').split('\n'),
     do_pinned_comment: document.getElementById('doPinnedComment').checked,
     pinned_comment_text: document.getElementById('pinnedCommentText').value,
+    do_telegram_alert: document.getElementById('telegramAlert').checked,
     do_add_to_corpus: document.getElementById('addToCorpus').checked,
     cut_time: document.getElementById('cutTime').value,
     profile: pageProfile()
@@ -1196,6 +1218,7 @@ async function doResume() {
     // which may now show another channel.
     do_pinned_comment: null,
     pinned_comment_text: '',
+    do_telegram_alert: null,
     do_add_to_corpus: document.getElementById('addToCorpus').checked,
     profile: area.dataset.profile || pageProfile()
   };
@@ -1258,6 +1281,9 @@ document.getElementById('cfgTrashPath').value = c.trash_path || '';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
       document.getElementById('cfgPinnedEnabled').checked = !!c.short_pinned_comment_enabled;
       document.getElementById('cfgPinnedText').value = c.short_pinned_comment_text || '';
+      document.getElementById('cfgTelegramAlertEnabled').checked = !!c.short_telegram_alert_enabled;
+      await loadTelegramTargets(c.telegram_alert_target);
+      applyTelegramAlertDefaults(c);
       document.getElementById('cfgLanguage').value = c.language || 'fr';
       document.getElementById('cfgModel').value = c.model || 'medium';
       updateSubtitleDependency();
@@ -1284,6 +1310,8 @@ async function saveConfig() {
     modal_usage_url: document.getElementById('cfgModalUsageUrl').value,
     short_pinned_comment_enabled: document.getElementById('cfgPinnedEnabled').checked,
     short_pinned_comment_text: document.getElementById('cfgPinnedText').value,
+    short_telegram_alert_enabled: document.getElementById('cfgTelegramAlertEnabled').checked,
+    telegram_alert_target: document.getElementById('cfgTelegramTarget').value,
     language: document.getElementById('cfgLanguage').value,
     model: document.getElementById('cfgModel').value
   };
@@ -1294,6 +1322,9 @@ async function saveConfig() {
     applyPinnedDefaults({
       short_pinned_comment_enabled: body.short_pinned_comment_enabled,
       short_pinned_comment_text: body.short_pinned_comment_text
+    });
+    applyTelegramAlertDefaults({
+      short_telegram_alert_enabled: body.short_telegram_alert_enabled
     });
     alert('Saved');
   } else alert('Save failed');
@@ -1324,6 +1355,9 @@ document.getElementById('cfgTrashPath').value = c.trash_path || '';
       document.getElementById('cfgModalUsageUrl').value = c.modal_usage_url || '';
       document.getElementById('cfgPinnedEnabled').checked = !!c.short_pinned_comment_enabled;
       document.getElementById('cfgPinnedText').value = c.short_pinned_comment_text || '';
+      document.getElementById('cfgTelegramAlertEnabled').checked = !!c.short_telegram_alert_enabled;
+      await loadTelegramTargets(c.telegram_alert_target);
+      applyTelegramAlertDefaults(c);
       document.getElementById('cfgLanguage').value = c.language || 'fr';
       document.getElementById('cfgModel').value = c.model || 'medium';
       updateSubtitleDependency();
@@ -2056,6 +2090,7 @@ async function addToPool() {
       ignore_post_publish: document.getElementById('ignorePostPublish').checked,
       do_pinned_comment: document.getElementById('doPinnedComment').checked,
       pinned_comment_text: document.getElementById('pinnedCommentText').value,
+      do_telegram_alert: document.getElementById('telegramAlert').checked,
       do_add_to_corpus: document.getElementById('addToCorpus').checked,
       cut_time: document.getElementById('cutTime').value,
       profile: pageProfile()
@@ -2181,13 +2216,56 @@ function applyPinnedDefaults(c) {
   if (tx) tx.value = cfgText;
 }
 
+function applyTelegramAlertDefaults(c) {
+  if (!c) return;
+  const cb = document.getElementById('telegramAlert');
+  if (cb) cb.checked = !!c.short_telegram_alert_enabled;
+}
+
+async function loadTelegramTargets(selected) {
+  const sel = document.getElementById('cfgTelegramTarget');
+  if (!sel) return;
+  const prof = pageProfile();
+  const r = await fetch('/api/short_publish/telegram-targets' + (prof ? '?profile=' + encodeURIComponent(prof) : '')).catch(() => null);
+  if (!r || !r.ok) {
+    // Never wipe a configured target just because the list failed to load.
+    if (selected && !Array.from(sel.options).some(o => o.value === selected)) {
+      sel.add(new Option(selected, selected));
+    }
+    return;
+  }
+  const data = await r.json();
+  const targets = data.targets || [];
+  const wanted = selected || sel.value || '';
+  sel.innerHTML = '<option value="">— none —</option>' + targets.map(t => {
+    const label = t.label && t.label !== t.id ? `${t.id} — ${t.label}` : t.id;
+    return `<option value="${t.id}">${label}</option>`;
+  }).join('');
+  sel.value = targets.some(t => t.id === wanted) ? wanted : '';
+}
+
+async function discoverTelegramTargets(btn) {
+  const prof = pageProfile();
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await fetch('/api/short_publish/telegram-targets/discover' + (prof ? '?profile=' + encodeURIComponent(prof) : ''), { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(data.detail || 'Discovery failed'); return; }
+    await loadTelegramTargets(document.getElementById('cfgTelegramTarget').value);
+    const added = (data.targets || []).length;
+    alert(`Discovery done: ${added} target(s) available.`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Discover'; }
+  }
+}
+
 async function init() {
   restoreUiState();
   await loadPageProfiles();
   applyProfileTone();
   loadVideos();
   loadPrompts();
-  fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : '')).then(r => r.ok ? r.json() : {}).then(applyPinnedDefaults).catch(() => {});
+  fetch('/api/short_publish/config' + (pageProfile() ? '?profile=' + encodeURIComponent(pageProfile()) : '')).then(r => r.ok ? r.json() : {}).then(c => { applyPinnedDefaults(c); applyTelegramAlertDefaults(c); loadTelegramTargets(c.telegram_alert_target); }).catch(() => {});
   initDropZone();
   initPool();
   updateSubtitleDependency();
@@ -2203,6 +2281,8 @@ async function init() {
     const c = await fetch('/api/short_publish/config' + (prof ? '?profile=' + encodeURIComponent(prof) : ''))
       .then(r => r.ok ? r.json() : {}).catch(() => ({}));
     applyPinnedDefaults(c);
+    applyTelegramAlertDefaults(c);
+    loadTelegramTargets(c.telegram_alert_target);
     loadVideos();
   });
   // Persist any UI choice change

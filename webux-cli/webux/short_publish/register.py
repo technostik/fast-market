@@ -14,6 +14,10 @@ from pydantic import BaseModel
 from common.core.profile import resolve_profile
 from common.core.paths import get_profiles_config_base
 from common.webux.base import WebuxPluginManifest
+from common.webux.telegram_targets import (
+    discover_telegram_targets,
+    load_telegram_targets,
+)
 
 from .models import (
     Job,
@@ -101,7 +105,7 @@ def _is_busy() -> bool:
 from .pipeline import _run_pipeline_from, _run_post_publish_step, _run_transcript_script, _run_job_safely  # noqa: E402
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True, do_remove_silence: bool = True, do_burn_subtitles: bool = True, use_modal: bool = True, subtitle_position: str = DEFAULT_SUBTITLE_POSITION) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True, do_remove_silence: bool = True, do_burn_subtitles: bool = True, use_modal: bool = True, subtitle_position: str = DEFAULT_SUBTITLE_POSITION, do_telegram_alert: bool | None = None) -> Job:
     """Create (but do not start) a publish Job. Used by pool worker.
     Respects publish config for default prompts etc.
 
@@ -147,6 +151,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_ignore_post_publish=do_ignore_post_publish,
         do_pinned_comment=do_pinned_comment if do_pinned_comment is not None else bool(pub.get("short_pinned_comment_enabled", False)),
         pinned_comment_text=pinned_comment_text if pinned_comment_text is not None else str(pub.get("short_pinned_comment_text", "") or ""),
+        do_telegram_alert=do_telegram_alert if do_telegram_alert is not None else bool(pub.get("short_telegram_alert_enabled", False)),
         do_add_to_corpus=do_add_to_corpus,
         cut_time=cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
@@ -196,6 +201,8 @@ async def get_config(profile: str | None = Query(default=None)):
         "modal_usage_url": pub.get("modal_usage_url", "https://modal.com/settings/usage"),
         "short_pinned_comment_enabled": pub.get("short_pinned_comment_enabled", False),
         "short_pinned_comment_text": pub.get("short_pinned_comment_text", ""),
+        "short_telegram_alert_enabled": pub.get("short_telegram_alert_enabled", False),
+        "telegram_alert_target": pub.get("telegram_alert_target", ""),
         "default_category": pub.get("default_category", ""),
         "language": pub.get("language", "fr"),
         "model": pub.get("model", "medium"),
@@ -219,6 +226,8 @@ class ConfigSaveRequest(BaseModel):
     modal_usage_url: str = "https://modal.com/settings/usage"
     short_pinned_comment_enabled: bool = False
     short_pinned_comment_text: str = ""
+    short_telegram_alert_enabled: bool = False
+    telegram_alert_target: str = ""
     default_category: str = ""
     language: str = ""
     model: str = ""
@@ -245,6 +254,8 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["modal_usage_url"] = req.modal_usage_url
         pub["short_pinned_comment_enabled"] = req.short_pinned_comment_enabled
         pub["short_pinned_comment_text"] = req.short_pinned_comment_text
+        pub["short_telegram_alert_enabled"] = req.short_telegram_alert_enabled
+        pub["telegram_alert_target"] = req.telegram_alert_target
         pub["default_category"] = req.default_category
         pub["language"] = req.language
         pub["model"] = req.model
@@ -252,6 +263,33 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["trash_path"] = req.trash_path
         _save_publish_cfg(pub)
     return {"ok": True}
+
+
+@router.get("/telegram-targets")
+async def telegram_targets(profile: str | None = Query(default=None)):
+    """List the Telegram targets of a profile (from its message config)."""
+    if not profile:
+        profile = resolve_profile()
+    try:
+        return load_telegram_targets(profile)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Could not read telegram targets: {exc}"
+        ) from exc
+
+
+@router.post("/telegram-targets/discover")
+async def telegram_targets_discover(profile: str | None = Query(default=None)):
+    """Ask message-cli to discover chats and refresh the target list."""
+    if not profile:
+        profile = resolve_profile()
+    try:
+        await discover_telegram_targets(profile)
+        return load_telegram_targets(profile)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Telegram discovery failed: {exc}"
+        ) from exc
 
 
 # ── Video list API ────────────────────────────────────────────────────────────
@@ -455,6 +493,7 @@ class StartRequest(BaseModel):
     ignore_post_publish: bool = False
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_telegram_alert: bool | None = None
     do_add_to_corpus: bool = True
     cut_time: str = ""
     profile: str = ""
@@ -479,6 +518,7 @@ class ResumeRequest(BaseModel):
     ignore_post_publish: bool = False
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_telegram_alert: bool | None = None
     # None = follow the meta log (retry of a run that already chose).
     do_add_to_corpus: bool | None = None
     language: str = ""
@@ -525,6 +565,7 @@ async def start(req: StartRequest):
         do_ignore_post_publish=req.ignore_post_publish,
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("short_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("short_pinned_comment_text", "") or ""),
+        do_telegram_alert=req.do_telegram_alert if req.do_telegram_alert is not None else bool(pub.get("short_telegram_alert_enabled", False)),
         do_add_to_corpus=req.do_add_to_corpus,
         cut_time=req.cut_time,
         steps=[Step(name=n) for n in STEP_NAMES],
@@ -613,6 +654,7 @@ async def resume(req: ResumeRequest):
         do_ignore_post_publish=req.ignore_post_publish,
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub_cfg.get("short_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub_cfg.get("short_pinned_comment_text", "") or ""),
+        do_telegram_alert=req.do_telegram_alert if req.do_telegram_alert is not None else bool(pub_cfg.get("short_telegram_alert_enabled", False)),
         do_add_to_corpus=(
             req.do_add_to_corpus
             if req.do_add_to_corpus is not None
@@ -1039,6 +1081,7 @@ class PoolAddRequest(BaseModel):
     ignore_post_publish: bool = False
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_telegram_alert: bool | None = None
     do_add_to_corpus: bool = True
     cut_time: str = ""
     profile: str = ""
@@ -1046,7 +1089,7 @@ class PoolAddRequest(BaseModel):
 
 @router.post("/pool/add")
 async def pool_add(req: PoolAddRequest):
-    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None, do_add_to_corpus=req.do_add_to_corpus, do_remove_silence=req.do_remove_silence, do_burn_subtitles=req.do_burn_subtitles, use_modal=req.use_modal, subtitle_position=_validated_subtitle_position(req.subtitle_position))
+    ok = add_to_pool(req.source, req.description_prefix, req.source_urls, req.skip_upload, req.transcript_mode, req.do_normalize_volume, req.do_charisma, req.do_add_signature, req.ignore_post_publish, title_override=req.title, cut_time=req.cut_time, do_pinned_comment=req.do_pinned_comment, pinned_comment_text=req.pinned_comment_text, profile=req.profile or None, do_add_to_corpus=req.do_add_to_corpus, do_remove_silence=req.do_remove_silence, do_burn_subtitles=req.do_burn_subtitles, use_modal=req.use_modal, subtitle_position=_validated_subtitle_position(req.subtitle_position), do_telegram_alert=req.do_telegram_alert)
     return {"ok": ok}
 
 

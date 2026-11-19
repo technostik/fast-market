@@ -12,6 +12,7 @@ from .utils import (
     _load_meta,
     _save_meta,
     _yt,
+    _message,
     _pr,
     _video,
     _sound,
@@ -124,6 +125,81 @@ def _pinned_comment_cfg(job: Job, pub_cfg: dict) -> tuple[bool, str]:
     if not text:
         text = str(pub_cfg.get("long_pinned_comment_text", "") or "").strip()
     return enabled, text
+
+
+def _telegram_alert_cfg(job: Job, pub_cfg: dict) -> tuple[bool, str]:
+    """Resolve the Telegram alert setting: per-job override wins, else config."""
+    choice = getattr(job, "do_telegram_alert", None)
+    enabled = (
+        bool(pub_cfg.get("long_telegram_alert_enabled", False))
+        if choice is None
+        else bool(choice)
+    )
+    target = str(pub_cfg.get("telegram_alert_target", "") or "").strip()
+    return enabled, target
+
+
+async def _maybe_send_telegram_alert(job: Job, video_id: str, step) -> None:
+    """Send a Telegram alert for the uploaded long video (warn-only)."""
+    if getattr(job, "skip_upload", False):
+        return
+    if not video_id:
+        return
+    if getattr(job, "telegram_alert_sent", False):
+        return
+
+    pub_cfg = _load_publish_cfg(getattr(job, "profile", None))
+    enabled, target = _telegram_alert_cfg(job, pub_cfg)
+    if not enabled:
+        return
+    if not target:
+        step.output += (
+            "\n⚠ Telegram alert skipped: no telegram_alert_target configured "
+            "for this profile."
+        )
+        _save_meta(job)
+        return
+
+    import html
+
+    title = html.escape((job.title or "").strip() or video_id)
+    video_url = job.video_url or f"https://www.youtube.com/watch?v={video_id}"
+    text = f"✅ Vidéo publiée : {title}\n{video_url}"
+
+    print(f"[telegram-alert] target={target}", flush=True)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _message(),
+            "alert",
+            text,
+            "--target",
+            target,
+            "--format",
+            "json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_job_env(job),
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), 90)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            raise TimeoutError("message alert timed out after 90s")
+        if proc.returncode != 0:
+            err = (stderr or b"").decode(errors="replace").strip()
+            step.output += (
+                "\n⚠ Telegram alert failed (non-blocking): "
+                f"{err or f'exit {proc.returncode}'}"
+            )
+            _save_meta(job)
+            return
+        job.telegram_alert_sent = True
+        step.output += f"\n📣 Telegram alert sent to '{target}'"
+        _save_meta(job)
+    except Exception as exc:
+        step.output += f"\n⚠ Telegram alert failed (non-blocking): {exc}"
+        _save_meta(job)
 
 
 async def _maybe_add_to_corpus(job: Job, video_id: str, step, final_video: str) -> None:
@@ -799,6 +875,7 @@ async def _run_pipeline_core(job: Job, from_step: int) -> None:
         _save_meta(job)
         await _maybe_add_to_corpus(job, video_id, s5, current_video)
         await _maybe_post_pinned_comment(job, video_id, s5)
+        await _maybe_send_telegram_alert(job, video_id, s5)
 
     job.status = "done"
     job.end_time = time.time()

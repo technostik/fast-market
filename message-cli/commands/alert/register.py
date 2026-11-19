@@ -51,14 +51,20 @@ def register(plugin_manifests: dict) -> CommandManifest:
             timeout = config.get("telegram", {}).get("default_timeout", 300)
 
         parse_mode = "Markdown" if mode == "markdown" else "HTML"
+        target = kwargs.get("target")
 
         try:
             result = plugin.send_alert(
-                message, wait_for_ack=wait, timeout=timeout, parse_mode=parse_mode
+                message,
+                wait_for_ack=wait,
+                timeout=timeout,
+                parse_mode=parse_mode,
+                target=target,
             )
             out(
                 {
                     "message_id": result["message_id"],
+                    "target": result.get("target", target),
                     "acknowledged": result["acknowledged"],
                     "status": "success",
                 },

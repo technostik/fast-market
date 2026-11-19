@@ -18,15 +18,19 @@ class MessagePlugin(ABC):
     name: str
 
     @abstractmethod
-    def send_message(self, text: str, parse_mode: str = "Markdown") -> int:
+    def send_message(
+        self, text: str, parse_mode: str = "Markdown", target: str | None = None
+    ) -> int:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_reply(self, timeout: int) -> str:
+    def wait_for_reply(self, timeout: int, target: str | None = None) -> str:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_any_update(self, timeout: int) -> str | None:
+    def wait_for_any_update(
+        self, timeout: int, target: str | None = None
+    ) -> str | None:
         raise NotImplementedError
 
     @abstractmethod
@@ -36,6 +40,7 @@ class MessagePlugin(ABC):
         wait_for_ack: bool = False,
         timeout: int = 300,
         parse_mode: str = "HTML",
+        target: str | None = None,
     ) -> dict:
         raise NotImplementedError
 

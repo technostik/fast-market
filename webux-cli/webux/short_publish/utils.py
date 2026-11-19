@@ -192,6 +192,10 @@ def _yt() -> str:
     return shutil.which("youtube") or "youtube"
 
 
+def _message() -> str:
+    return shutil.which("message") or "message"
+
+
 def _pr() -> str:
     return shutil.which("prompt") or "prompt"
 

@@ -51,12 +51,14 @@ def register(plugin_manifests: dict) -> CommandManifest:
 
         message_id = None
         parse_mode = "Markdown" if mode == "markdown" else "HTML"
+        target = kwargs.get("target")
         try:
-            message_id = plugin.send_message(message, parse_mode=parse_mode)
-            response = plugin.wait_for_reply(timeout)
+            message_id = plugin.send_message(message, parse_mode=parse_mode, target=target)
+            response = plugin.wait_for_reply(timeout, target=target)
             out(
                 {
                     "message_id": message_id,
+                    "target": target,
                     "response": response,
                     "status": "success",
                 },

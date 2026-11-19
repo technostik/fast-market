@@ -16,6 +16,7 @@ message-agent/
 ├── commands/            # CLI commands
 │   ├── ask/             # Ask question, wait for reply
 │   ├── alert/           # Send notification
+│   ├── targets/         # Named targets: list/add/remove/default/discover
 │   └── setup/           # Configuration wizard
 └── common -> ../common   # Shared utilities symlink
 ```
@@ -26,6 +27,13 @@ message-agent/
 
 - **ask**: Send message → Wait for reply (blocking) → Return response
 - **alert**: Send message → Optionally wait for acknowledgment → Return status
+- **targets**: Manage named chat ids in the profile's `telegram.targets`;
+  `targets add --profile NAME` writes to that profile without touching the
+  active-profile pointer. `discover` merges pending updates, `discover --chat @name|t.me/link` resolves
+  public channels via `getChat` (no prior post needed), and `discover --wait N`
+  listens for a fresh post in a channel where the bot is admin (private
+  channels). The Bot API has no list-chats call, so a private channel with no
+  pending update still needs a manual `targets add --chat-id`.
 
 ### Plugin Architecture
 

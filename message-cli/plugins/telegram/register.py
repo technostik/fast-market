@@ -12,6 +12,12 @@ def register(config: dict) -> PluginManifest:
         cli_options={
             "ask": [
                 click.Option(
+                    ["--target"],
+                    type=str,
+                    default=None,
+                    help="Named target id or raw Telegram chat id (default: telegram.default_target).",
+                ),
+                click.Option(
                     ["--timeout"],
                     type=int,
                     default=None,
@@ -19,6 +25,12 @@ def register(config: dict) -> PluginManifest:
                 ),
             ],
             "alert": [
+                click.Option(
+                    ["--target"],
+                    type=str,
+                    default=None,
+                    help="Named target id or raw Telegram chat id (default: telegram.default_target).",
+                ),
                 click.Option(
                     ["--wait"],
                     is_flag=True,

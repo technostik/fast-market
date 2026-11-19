@@ -42,6 +42,7 @@ class PoolItem:
     do_ignore_post_publish: bool = False
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_telegram_alert: bool | None = None
     do_add_to_corpus: bool = True
     cut_time: str = ""
     status: str = "queued"  # queued | processing | finished | skipped | error
@@ -104,6 +105,7 @@ def _load_pool_from_disk():
                 do_ignore_post_publish=item.get("do_ignore_post_publish", False),
                 do_pinned_comment=item.get("do_pinned_comment"),
                 pinned_comment_text=item.get("pinned_comment_text"),
+                do_telegram_alert=item.get("do_telegram_alert"),
                 do_add_to_corpus=item.get("do_add_to_corpus", True),
                 cut_time=item.get("cut_time", ""),
                 # processing items were interrupted by server restart — reset them
@@ -151,6 +153,7 @@ def _save_pool_to_disk():
                 "do_ignore_post_publish": it.do_ignore_post_publish,
                 "do_pinned_comment": it.do_pinned_comment,
                 "pinned_comment_text": it.pinned_comment_text,
+                "do_telegram_alert": it.do_telegram_alert,
                 "do_add_to_corpus": it.do_add_to_corpus,
                 "cut_time": it.cut_time,
                 "status": it.status,
@@ -205,7 +208,7 @@ def _update_meta_status(source: str, status: str):
         pass
 
 
-def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True, do_remove_silence: bool = True, do_burn_subtitles: bool = True, use_modal: bool = True, subtitle_position: str = DEFAULT_SUBTITLE_POSITION) -> bool:
+def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_charisma: bool = True, do_add_signature: bool = True, do_ignore_post_publish: bool = False, title_override: str = "", cut_time: str = "", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, profile: str | None = None, do_add_to_corpus: bool = True, do_remove_silence: bool = True, do_burn_subtitles: bool = True, use_modal: bool = True, subtitle_position: str = DEFAULT_SUBTITLE_POSITION, do_telegram_alert: bool | None = None) -> bool:
     src = str(Path(source).expanduser().resolve())
     if is_no_signature_source(Path(src)):
         return False
@@ -214,7 +217,7 @@ def add_to_pool(source: str, description_prefix: str = "", source_urls: list[str
     source_urls = source_urls or []
     if not profile:
         profile = resolve_profile()
-    item = PoolItem(source=src, profile=profile, title_override=title_override, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_remove_silence=do_remove_silence, do_burn_subtitles=do_burn_subtitles, subtitle_position=subtitle_position, use_modal=use_modal, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish, do_pinned_comment=do_pinned_comment, pinned_comment_text=pinned_comment_text, do_add_to_corpus=do_add_to_corpus, cut_time=cut_time, duration_seconds=_get_video_duration_cli_sync(src))
+    item = PoolItem(source=src, profile=profile, title_override=title_override, description_prefix=description_prefix, source_urls=source_urls, skip_upload=skip_upload, transcript_mode=transcript_mode, do_remove_silence=do_remove_silence, do_burn_subtitles=do_burn_subtitles, subtitle_position=subtitle_position, use_modal=use_modal, do_normalize_volume=do_normalize_volume, do_charisma=do_charisma, do_add_signature=do_add_signature, do_ignore_post_publish=do_ignore_post_publish, do_pinned_comment=do_pinned_comment, pinned_comment_text=pinned_comment_text, do_telegram_alert=do_telegram_alert, do_add_to_corpus=do_add_to_corpus, cut_time=cut_time, duration_seconds=_get_video_duration_cli_sync(src))
     _pool.append(item)
     _create_meta(src, description_prefix, source_urls)
     _save_pool_to_disk()
@@ -467,6 +470,7 @@ def get_pool_state() -> dict:
             "source_urls": it.source_urls,
             "skip_upload": it.skip_upload,
             "do_add_to_corpus": it.do_add_to_corpus,
+            "do_telegram_alert": it.do_telegram_alert,
             # Processing options the item was queued with (shown on the row so a
             # "no silence removal" / "local processing" run is visible).
             "do_remove_silence": it.do_remove_silence,
@@ -557,6 +561,7 @@ async def _pool_worker():
                 cut_time=next_item.cut_time,
                 do_pinned_comment=next_item.do_pinned_comment,
                 pinned_comment_text=next_item.pinned_comment_text,
+                do_telegram_alert=next_item.do_telegram_alert,
                 profile=next_item.profile,
                 do_add_to_corpus=next_item.do_add_to_corpus,
             )

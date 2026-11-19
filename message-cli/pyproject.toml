@@ -37,4 +37,5 @@ packages = [
     "commands.ask",
     "commands.alert",
     "commands.setup",
+    "commands.targets",
 ]

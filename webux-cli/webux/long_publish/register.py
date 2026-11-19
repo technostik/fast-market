@@ -15,6 +15,10 @@ from common import structlog
 from common.core.paths import get_profiles_config_base
 from common.core.profile import resolve_profile
 from common.webux.base import WebuxPluginManifest
+from common.webux.telegram_targets import (
+    discover_telegram_targets,
+    load_telegram_targets,
+)
 from common.webux.transcripts import find_transcript
 
 logger = structlog.get_logger(__name__)
@@ -104,7 +108,7 @@ def _validate_manual_title(title_override: str, rhythm_silence: bool) -> str:
     return title
 
 
-def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", thumbnail_overlay_subtitle: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, title_override: str = "", description_override: str = "", profile: str | None = None, do_add_to_corpus: bool = True) -> Job:
+def _create_publish_job(source: str, description_prefix: str = "", source_urls: list[str] | None = None, skip_upload: bool = False, transcript_mode: str = "normal", do_normalize_volume: bool = False, do_add_signature: bool = True, do_generate_thumbnail: bool = True, thumbnail_overlay_title: str = "", thumbnail_overlay_subtitle: str = "", use_modal: bool = True, do_remove_silence: bool = True, rhythm_silence: bool = False, language: str = "fr", model: str = "medium", privacy: str = "unlisted", do_pinned_comment: bool | None = None, pinned_comment_text: str | None = None, title_override: str = "", description_override: str = "", profile: str | None = None, do_add_to_corpus: bool = True, do_telegram_alert: bool | None = None) -> Job:
     """Create (but do not start) a publish Job. Respects publish config for
     default prompts etc."""
     if not profile:
@@ -135,6 +139,7 @@ def _create_publish_job(source: str, description_prefix: str = "", source_urls: 
         do_generate_thumbnail=do_generate_thumbnail,
         do_pinned_comment=do_pinned_comment if do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=pinned_comment_text if pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
+        do_telegram_alert=do_telegram_alert if do_telegram_alert is not None else bool(pub.get("long_telegram_alert_enabled", False)),
         do_add_to_corpus=do_add_to_corpus,
         thumbnail_overlay_title=thumbnail_overlay_title,
         thumbnail_overlay_subtitle=thumbnail_overlay_subtitle,
@@ -188,6 +193,8 @@ async def get_config(profile: str | None = Query(default=None)):
         "transcript_language": pub.get("transcript_language", "fr"),
         "long_pinned_comment_enabled": pub.get("long_pinned_comment_enabled", False),
         "long_pinned_comment_text": pub.get("long_pinned_comment_text", ""),
+        "long_telegram_alert_enabled": pub.get("long_telegram_alert_enabled", False),
+        "telegram_alert_target": pub.get("telegram_alert_target", ""),
         "default_category": pub.get("default_category", ""),
         "rhythm_transcript_tolerance": pub.get("rhythm_transcript_tolerance"),
         "rhythm_paragraph_threshold": pub.get("rhythm_paragraph_threshold"),
@@ -221,6 +228,8 @@ class ConfigSaveRequest(BaseModel):
     transcript_language: str = "fr"
     long_pinned_comment_enabled: bool = False
     long_pinned_comment_text: str = ""
+    long_telegram_alert_enabled: bool = False
+    telegram_alert_target: str = ""
     default_category: str = ""
     rhythm_transcript_tolerance: float | None = None
     rhythm_paragraph_threshold: float | None = None
@@ -272,6 +281,8 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["transcript_language"] = req.transcript_language
         pub["long_pinned_comment_enabled"] = req.long_pinned_comment_enabled
         pub["long_pinned_comment_text"] = req.long_pinned_comment_text
+        pub["long_telegram_alert_enabled"] = req.long_telegram_alert_enabled
+        pub["telegram_alert_target"] = req.telegram_alert_target
         pub["default_category"] = req.default_category
         rhythm_cfg = _rhythm_config_from_request(req)
         try:
@@ -286,6 +297,33 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["modal_usage_url"] = req.modal_usage_url
         _save_publish_cfg(pub)
     return {"ok": True}
+
+
+@router.get("/telegram-targets")
+async def telegram_targets(profile: str | None = Query(default=None)):
+    """List the Telegram targets of a profile (from its message config)."""
+    if not profile:
+        profile = resolve_profile()
+    try:
+        return load_telegram_targets(profile)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Could not read telegram targets: {exc}"
+        ) from exc
+
+
+@router.post("/telegram-targets/discover")
+async def telegram_targets_discover(profile: str | None = Query(default=None)):
+    """Ask message-cli to discover chats and refresh the target list."""
+    if not profile:
+        profile = resolve_profile()
+    try:
+        await discover_telegram_targets(profile)
+        return load_telegram_targets(profile)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Telegram discovery failed: {exc}"
+        ) from exc
 
 
 # ── Image engines API ────────────────────────────────────────────────────────
@@ -495,6 +533,7 @@ class StartRequest(BaseModel):
     do_generate_thumbnail: bool = True
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_telegram_alert: bool | None = None
     do_add_to_corpus: bool = True
     thumbnail_overlay_title: str = ""
     thumbnail_overlay_subtitle: str = ""
@@ -517,6 +556,7 @@ class ResumeRequest(BaseModel):
     do_generate_thumbnail: bool = True
     do_pinned_comment: bool | None = None
     pinned_comment_text: str | None = None
+    do_telegram_alert: bool | None = None
     # None = follow the meta log (retry of a run that already chose).
     do_add_to_corpus: bool | None = None
     do_remove_silence: bool = False
@@ -581,6 +621,7 @@ async def start(req: StartRequest):
         do_generate_thumbnail=req.do_generate_thumbnail,
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
+        do_telegram_alert=req.do_telegram_alert if req.do_telegram_alert is not None else bool(pub.get("long_telegram_alert_enabled", False)),
         do_add_to_corpus=req.do_add_to_corpus,
         thumbnail_overlay_title=req.thumbnail_overlay_title,
         thumbnail_overlay_subtitle=req.thumbnail_overlay_subtitle,
@@ -700,6 +741,7 @@ async def resume(req: ResumeRequest):
         do_generate_thumbnail=req.do_generate_thumbnail if not req.do_generate_thumbnail else meta.get("do_generate_thumbnail", True),
         do_pinned_comment=req.do_pinned_comment if req.do_pinned_comment is not None else bool(pub.get("long_pinned_comment_enabled", False)),
         pinned_comment_text=req.pinned_comment_text if req.pinned_comment_text is not None else str(pub.get("long_pinned_comment_text", "") or ""),
+        do_telegram_alert=req.do_telegram_alert if req.do_telegram_alert is not None else bool(pub.get("long_telegram_alert_enabled", False)),
         do_add_to_corpus=(
             req.do_add_to_corpus
             if req.do_add_to_corpus is not None
