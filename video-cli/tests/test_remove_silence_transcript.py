@@ -708,6 +708,36 @@ def test_reset_config_flag_needs_no_input_file(tmp_path, monkeypatch):
     assert raw["remove_silence"]["paragraph_threshold"] == 0
 
 
+def test_show_config_flag_needs_no_input_file(tmp_path, monkeypatch):
+    import yaml
+
+    from commands.remove_silence.register import register
+
+    target = _patch_config_path(monkeypatch, tmp_path)
+    target.write_text(yaml.safe_dump({
+        "remove_silence": {"threshold": -40.0, "min_silence_duration": 150},
+    }), encoding="utf-8")
+
+    result = CliRunner().invoke(register({}).click_command, ["--show-config"])
+    assert result.exit_code == 0, result.output
+    assert str(target) in result.output
+    assert "threshold: -40.0" in result.output
+    assert "min_silence_duration: 150" in result.output
+    # Effective params line also printed
+    assert "min_silence=150ms" in result.output
+
+
+def test_show_config_absent_file_is_reported(tmp_path, monkeypatch):
+    from commands.remove_silence.register import register
+
+    _patch_config_path(monkeypatch, tmp_path)  # never creates the file
+    result = CliRunner().invoke(register({}).click_command, ["--show-config"])
+    assert result.exit_code == 0, result.output
+    assert "(absent)" in result.output
+    # Falls back to code defaults
+    assert "min_silence=150ms" in result.output
+
+
 # ── End-to-end transcript cut on a synthetic clip ────────────────────────────
 
 def _make_tone_silence_tone(path: Path) -> None:

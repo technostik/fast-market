@@ -342,6 +342,35 @@ def _reset_config_callback(ctx, param, value):
     ctx.exit()
 
 
+def _show_config_callback(ctx, param, value):
+    if not value:
+        return
+    import yaml
+
+    from commands.remove_silence.config import config_file_paths, load_rhythm_config
+
+    for path in config_file_paths():
+        if not path.exists():
+            click.echo(f"{path}: (absent)")
+            continue
+        click.echo(f"{path}:")
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            click.echo(f"  <invalid YAML: {exc}>")
+            continue
+        section = raw.get("remove_silence")
+        if section is None:
+            click.echo("  <no remove_silence section in this file>")
+        else:
+            for key in section:
+                click.echo(f"  {key}: {section[key]}")
+    click.echo(_format_effective_params(
+        load_rhythm_config(), "effective (CLI > config files > code defaults)"
+    ))
+    ctx.exit()
+
+
 def _format_effective_params(params: dict, source: str) -> str:
     threshold = params["paragraph_threshold"]
     paragraph = "infinite" if threshold <= 0 else f"{threshold:.2f}s"
@@ -420,6 +449,10 @@ def register(plugin_manifests: dict) -> CommandManifest:
     @click.option("--reset-config", is_flag=True, default=False, is_eager=True,
                   expose_value=False, callback=_reset_config_callback,
                   help="Reset the rhythm-silence section of the video config file to defaults and exit.")
+    @click.option("--show-config", is_flag=True, default=False, is_eager=True,
+                  expose_value=False, callback=_show_config_callback,
+                  help="Print the searched config files, their remove_silence section and "
+                       "the effective parameters (CLI > config > defaults), then exit.")
     def remove_silence_cmd(
         input_file: str, output: str | None, threshold: float, modal: bool,
         use_transcript: str | None, transcript_tolerance: float | None,
