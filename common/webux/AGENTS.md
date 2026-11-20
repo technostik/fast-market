@@ -13,6 +13,10 @@ by declaring a `fast_market.webux_plugins` entry point.
   the YT Thumbnail tab (meta `transcript_txt` → meta ASS → `<stem>_transcript.txt`
   and `<stem>.transcript.txt` sidecars → meta `transcript_text`; placeholders
   such as `(transcript unavailable)` are ignored).
+- `telegram_targets.py` — Telegram target listing/discovery for the publish
+  plugins, plus `render_alert()`: per-profile alert templates with literal
+  `{title}` / `{url}` / `{video_id}` substitution and HTML escaping (the
+  `message` CLI runs with `parse_mode=HTML`).
 
 ## Entry Point Convention
 Each contributing package declares in its pyproject.toml:

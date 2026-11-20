@@ -273,6 +273,12 @@
       </div>
     </div>
     <div class="row">
+      <label title="Sent with parse_mode=HTML. Placeholders: {title}, {url}, {video_id}. The title and URL are HTML-escaped automatically; markup such as <b>…</b> is kept.">Alert message (placeholders: {title}, {url}, {video_id})</label>
+      <textarea id="cfgTelegramTemplate" rows="3" style="width:100%; min-height:60px;" placeholder="✅ Short publié : {title}
+{url}" oninput="updateTelegramPreview()"></textarea>
+      <div class="hint" id="cfgTelegramPreview" style="margin-top:4px; white-space:pre-wrap;"></div>
+    </div>
+    <div class="row">
       <label>Transcript mode</label>
       <select id="cfgTranscriptMode" onchange="updateSubtitleDependency()">
         <option value="normal">Normal transcript</option>
@@ -1282,6 +1288,8 @@ document.getElementById('cfgTrashPath').value = c.trash_path || '';
       document.getElementById('cfgPinnedEnabled').checked = !!c.short_pinned_comment_enabled;
       document.getElementById('cfgPinnedText').value = c.short_pinned_comment_text || '';
       document.getElementById('cfgTelegramAlertEnabled').checked = !!c.short_telegram_alert_enabled;
+      document.getElementById('cfgTelegramTemplate').value = c.short_telegram_alert_template || '';
+      updateTelegramPreview();
       await loadTelegramTargets(c.telegram_alert_target);
       applyTelegramAlertDefaults(c);
       document.getElementById('cfgLanguage').value = c.language || 'fr';
@@ -1312,6 +1320,7 @@ async function saveConfig() {
     short_pinned_comment_text: document.getElementById('cfgPinnedText').value,
     short_telegram_alert_enabled: document.getElementById('cfgTelegramAlertEnabled').checked,
     telegram_alert_target: document.getElementById('cfgTelegramTarget').value,
+    short_telegram_alert_template: document.getElementById('cfgTelegramTemplate').value,
     language: document.getElementById('cfgLanguage').value,
     model: document.getElementById('cfgModel').value
   };
@@ -1356,6 +1365,8 @@ document.getElementById('cfgTrashPath').value = c.trash_path || '';
       document.getElementById('cfgPinnedEnabled').checked = !!c.short_pinned_comment_enabled;
       document.getElementById('cfgPinnedText').value = c.short_pinned_comment_text || '';
       document.getElementById('cfgTelegramAlertEnabled').checked = !!c.short_telegram_alert_enabled;
+      document.getElementById('cfgTelegramTemplate').value = c.short_telegram_alert_template || '';
+      updateTelegramPreview();
       await loadTelegramTargets(c.telegram_alert_target);
       applyTelegramAlertDefaults(c);
       document.getElementById('cfgLanguage').value = c.language || 'fr';
@@ -2220,6 +2231,20 @@ function applyTelegramAlertDefaults(c) {
   if (!c) return;
   const cb = document.getElementById('telegramAlert');
   if (cb) cb.checked = !!c.short_telegram_alert_enabled;
+}
+
+// Show what the configured alert will look like with sample values. Rendered as
+// text (textContent): the user sees the exact markup that message-cli receives.
+function updateTelegramPreview() {
+  const ta = document.getElementById('cfgTelegramTemplate');
+  const box = document.getElementById('cfgTelegramPreview');
+  if (!ta || !box) return;
+  const custom = (ta.value || '').trim();
+  const tpl = custom || '✅ Short publié : {title}\n{url}';
+  const sample = { title: 'Mon titre de Short', url: 'https://www.youtube.com/shorts/xxxxxxxxxxx', video_id: 'xxxxxxxxxxx' };
+  let text = tpl;
+  for (const key of Object.keys(sample)) text = text.split('{' + key + '}').join(sample[key]);
+  box.textContent = (custom ? 'Preview:\n' : 'Preview (default template):\n') + text;
 }
 
 async function loadTelegramTargets(selected) {

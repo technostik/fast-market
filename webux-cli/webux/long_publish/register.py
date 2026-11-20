@@ -195,6 +195,7 @@ async def get_config(profile: str | None = Query(default=None)):
         "long_pinned_comment_text": pub.get("long_pinned_comment_text", ""),
         "long_telegram_alert_enabled": pub.get("long_telegram_alert_enabled", False),
         "telegram_alert_target": pub.get("telegram_alert_target", ""),
+        "long_telegram_alert_template": pub.get("long_telegram_alert_template", ""),
         "default_category": pub.get("default_category", ""),
         "rhythm_transcript_tolerance": pub.get("rhythm_transcript_tolerance"),
         "rhythm_paragraph_threshold": pub.get("rhythm_paragraph_threshold"),
@@ -230,6 +231,7 @@ class ConfigSaveRequest(BaseModel):
     long_pinned_comment_text: str = ""
     long_telegram_alert_enabled: bool = False
     telegram_alert_target: str = ""
+    long_telegram_alert_template: str = ""
     default_category: str = ""
     rhythm_transcript_tolerance: float | None = None
     rhythm_paragraph_threshold: float | None = None
@@ -283,6 +285,7 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["long_pinned_comment_text"] = req.long_pinned_comment_text
         pub["long_telegram_alert_enabled"] = req.long_telegram_alert_enabled
         pub["telegram_alert_target"] = req.telegram_alert_target
+        pub["long_telegram_alert_template"] = req.long_telegram_alert_template.strip()
         pub["default_category"] = req.default_category
         rhythm_cfg = _rhythm_config_from_request(req)
         try:

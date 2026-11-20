@@ -203,6 +203,7 @@ async def get_config(profile: str | None = Query(default=None)):
         "short_pinned_comment_text": pub.get("short_pinned_comment_text", ""),
         "short_telegram_alert_enabled": pub.get("short_telegram_alert_enabled", False),
         "telegram_alert_target": pub.get("telegram_alert_target", ""),
+        "short_telegram_alert_template": pub.get("short_telegram_alert_template", ""),
         "default_category": pub.get("default_category", ""),
         "language": pub.get("language", "fr"),
         "model": pub.get("model", "medium"),
@@ -228,6 +229,7 @@ class ConfigSaveRequest(BaseModel):
     short_pinned_comment_text: str = ""
     short_telegram_alert_enabled: bool = False
     telegram_alert_target: str = ""
+    short_telegram_alert_template: str = ""
     default_category: str = ""
     language: str = ""
     model: str = ""
@@ -256,6 +258,7 @@ async def save_config(req: ConfigSaveRequest, profile: str | None = Query(defaul
         pub["short_pinned_comment_text"] = req.short_pinned_comment_text
         pub["short_telegram_alert_enabled"] = req.short_telegram_alert_enabled
         pub["telegram_alert_target"] = req.telegram_alert_target
+        pub["short_telegram_alert_template"] = req.short_telegram_alert_template.strip()
         pub["default_category"] = req.default_category
         pub["language"] = req.language
         pub["model"] = req.model

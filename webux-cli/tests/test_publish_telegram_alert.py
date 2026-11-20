@@ -16,6 +16,11 @@ from webux.long_publish.models import Job as LongJob
 from webux.long_publish.models import Step as LongStep
 from webux.short_publish.models import Job as ShortJob
 from webux.short_publish.models import Step as ShortStep
+from common.webux.telegram_targets import (
+    DEFAULT_LONG_ALERT_TEMPLATE,
+    DEFAULT_SHORT_ALERT_TEMPLATE,
+    render_alert,
+)
 
 
 def _short_job(tmp_path: Path, **kw) -> ShortJob:
@@ -112,6 +117,90 @@ def test_short_alert_sends_with_target(monkeypatch, tmp_path):
     assert args[args.index("--target") + 1] == "technostik"
     assert job.telegram_alert_sent is True
     assert "Telegram alert sent" in step.output
+
+
+def test_render_alert_default_template_escapes_title():
+    text = render_alert(
+        "",
+        default=DEFAULT_SHORT_ALERT_TEMPLATE,
+        title="Mon <Short> & co",
+        url="https://youtu.be/abc",
+        video_id="abc",
+    )
+    assert text == "✅ Short publié : Mon &lt;Short&gt; &amp; co\nhttps://youtu.be/abc"
+
+
+def test_render_alert_custom_template_and_unknown_placeholders():
+    text = render_alert(
+        "<b>{title}</b>\n{url}\nid={video_id} {unknown} {",
+        default=DEFAULT_LONG_ALERT_TEMPLATE,
+        title="Titre",
+        url="https://youtu.be/abc",
+        video_id="abc",
+    )
+    # Unknown placeholders and stray braces stay literal (never a KeyError).
+    assert text == "<b>Titre</b>\nhttps://youtu.be/abc\nid=abc {unknown} {"
+
+
+def test_render_alert_falls_back_to_video_id_when_title_empty():
+    assert (
+        render_alert("{title}", default="d", title="  ", url="u", video_id="abc")
+        == "abc"
+    )
+    assert render_alert("   ", default="d", title="t", url="u") == "d"
+
+
+def test_short_alert_uses_configured_template(monkeypatch, tmp_path):
+    job = _short_job(
+        tmp_path,
+        do_telegram_alert=True,
+        title="Mon Short",
+        video_url="https://youtu.be/abc",
+    )
+    step = ShortStep(name="Upload to YouTube")
+    monkeypatch.setattr(
+        short_pipe,
+        "_load_publish_cfg",
+        lambda profile=None: {
+            "telegram_alert_target": "t1",
+            "short_telegram_alert_template": "<b>{title}</b>\n{url} ({video_id})",
+        },
+    )
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        short_pipe.asyncio, "create_subprocess_exec", _fake_exec(calls, _Proc())
+    )
+
+    asyncio.run(short_pipe._maybe_send_telegram_alert(job, "abc", step))
+
+    text = calls[0][calls[0].index("alert") + 1]
+    assert text == "<b>Mon Short</b>\nhttps://youtu.be/abc (abc)"
+
+
+def test_long_alert_uses_configured_template(monkeypatch, tmp_path):
+    job = _long_job(
+        tmp_path,
+        do_telegram_alert=True,
+        title="Ma vidéo",
+        video_url="https://youtu.be/x",
+    )
+    step = LongStep(name="Upload to YouTube")
+    monkeypatch.setattr(
+        long_pipe,
+        "_load_publish_cfg",
+        lambda profile=None: {
+            "telegram_alert_target": "t1",
+            "long_telegram_alert_template": "{title} → {url}",
+        },
+    )
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        long_pipe.asyncio, "create_subprocess_exec", _fake_exec(calls, _Proc())
+    )
+
+    asyncio.run(long_pipe._maybe_send_telegram_alert(job, "x", step))
+    text = calls[0][calls[0].index("alert") + 1]
+    assert text == "Ma vidéo → https://youtu.be/x"
 
 
 def test_short_alert_skips_when_disabled(monkeypatch, tmp_path):
@@ -297,13 +386,16 @@ def test_short_config_roundtrips_telegram_keys(monkeypatch):
             json={
                 "short_telegram_alert_enabled": True,
                 "telegram_alert_target": "technostik",
+                "short_telegram_alert_template": "  <b>{title}</b>\n{url}  ",
             },
         )
         assert r.status_code == 200
         cfg = client.get("/config?profile=joriel").json()
     assert pub["telegram_alert_target"] == "technostik"
+    assert pub["short_telegram_alert_template"] == "<b>{title}</b>\n{url}"
     assert cfg["short_telegram_alert_enabled"] is True
     assert cfg["telegram_alert_target"] == "technostik"
+    assert cfg["short_telegram_alert_template"] == "<b>{title}</b>\n{url}"
 
 
 def test_long_config_roundtrips_telegram_keys(monkeypatch):
@@ -324,10 +416,13 @@ def test_long_config_roundtrips_telegram_keys(monkeypatch):
             json={
                 "long_telegram_alert_enabled": True,
                 "telegram_alert_target": "joriel",
+                "long_telegram_alert_template": "Nouvelle vidéo : {title} {url}",
             },
         )
         assert r.status_code == 200
         cfg = client.get("/config?profile=joriel").json()
     assert pub["telegram_alert_target"] == "joriel"
+    assert pub["long_telegram_alert_template"] == "Nouvelle vidéo : {title} {url}"
     assert cfg["long_telegram_alert_enabled"] is True
     assert cfg["telegram_alert_target"] == "joriel"
+    assert cfg["long_telegram_alert_template"] == "Nouvelle vidéo : {title} {url}"

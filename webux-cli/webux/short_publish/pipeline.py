@@ -30,6 +30,10 @@ from .utils import (
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
 from ..video_corpus import maybe_add_to_corpus
 from .pool import clear_pool_cut_time, set_item_upload_duration, set_item_upload_result
+from common.webux.telegram_targets import (
+    DEFAULT_SHORT_ALERT_TEMPLATE,
+    render_alert,
+)
 
 
 async def _run_job_safely(coro, job: Job) -> None:
@@ -165,11 +169,14 @@ async def _maybe_send_telegram_alert(job: Job, video_id: str, step) -> None:
         _save_meta(job)
         return
 
-    import html
-
-    title = html.escape((job.title or "").strip() or video_id)
     video_url = job.video_url or f"https://www.youtube.com/shorts/{video_id}"
-    text = f"✅ Short publié : {title}\n{video_url}"
+    text = render_alert(
+        pub_cfg.get("short_telegram_alert_template", ""),
+        default=DEFAULT_SHORT_ALERT_TEMPLATE,
+        title=job.title or "",
+        url=video_url,
+        video_id=video_id,
+    )
 
     print(f"[telegram-alert] target={target}", flush=True)
     try:

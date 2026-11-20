@@ -30,6 +30,10 @@ from .utils import (
 )
 from ..video_corpus import maybe_add_to_corpus
 from common.webux.transcripts import find_transcript
+from common.webux.telegram_targets import (
+    DEFAULT_LONG_ALERT_TEMPLATE,
+    render_alert,
+)
 from .state import set_active_job, clear_active_job, set_active_proc, clear_active_proc
 
 
@@ -160,11 +164,14 @@ async def _maybe_send_telegram_alert(job: Job, video_id: str, step) -> None:
         _save_meta(job)
         return
 
-    import html
-
-    title = html.escape((job.title or "").strip() or video_id)
     video_url = job.video_url or f"https://www.youtube.com/watch?v={video_id}"
-    text = f"✅ Vidéo publiée : {title}\n{video_url}"
+    text = render_alert(
+        pub_cfg.get("long_telegram_alert_template", ""),
+        default=DEFAULT_LONG_ALERT_TEMPLATE,
+        title=job.title or "",
+        url=video_url,
+        video_id=video_id,
+    )
 
     print(f"[telegram-alert] target={target}", flush=True)
     try:

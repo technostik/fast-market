@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import json
 import os
 import shutil
@@ -16,6 +17,10 @@ from typing import Any
 
 from common.core.config import load_tool_config
 from common.message_targets import TargetError, list_targets
+
+#: Alert text used when a profile has no ``*_telegram_alert_template``.
+DEFAULT_SHORT_ALERT_TEMPLATE = "✅ Short publié : {title}\n{url}"
+DEFAULT_LONG_ALERT_TEMPLATE = "✅ Vidéo publiée : {title}\n{url}"
 
 
 @contextlib.contextmanager
@@ -92,3 +97,30 @@ async def discover_telegram_targets(
         return json.loads(raw[start : end + 1])
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Invalid discovery JSON: {exc}") from exc
+
+
+def render_alert(
+    template: str | None,
+    *,
+    default: str,
+    title: str = "",
+    url: str = "",
+    video_id: str = "",
+) -> str:
+    """Render a publish alert from a per-profile template.
+
+    Placeholders are replaced literally (``{title}``, ``{url}``, ``{video_id}``)
+    instead of through ``str.format``: a stray brace or an unknown placeholder
+    in a user-written message must never crash a publish. ``title`` and ``url``
+    are HTML-escaped because ``message alert`` runs with ``parse_mode=HTML``;
+    the template itself may contain markup (``<b>``, ``<a href>``…).
+
+    An empty/blank template falls back to ``default`` (the historical text).
+    """
+    tpl = (template or "").strip() or default
+    safe_title = html.escape((title or "").strip() or (video_id or ""))
+    return (
+        tpl.replace("{title}", safe_title)
+        .replace("{url}", html.escape(url or ""))
+        .replace("{video_id}", html.escape(video_id or ""))
+    )

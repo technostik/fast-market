@@ -179,6 +179,11 @@
         <button type="button" class="btn-sec" onclick="discoverTelegramTargets(this)" title="Read the chats the bot has seen and add them to this profile's config" style="padding:4px 8px; flex-shrink:0;">↻ Discover</button>
       </div>
     </div>
+    <div class="row"><label title="Sent with parse_mode=HTML. Placeholders: {title}, {url}, {video_id}. The title and URL are HTML-escaped automatically; markup such as <b>…</b> is kept.">Alert message (placeholders: {title}, {url}, {video_id})</label>
+      <textarea id="cfgTelegramTemplate" rows="3" placeholder="✅ Vidéo publiée : {title}
+{url}" oninput="updateTelegramPreview()"></textarea>
+      <div class="hint" id="cfgTelegramPreview" style="white-space:pre-wrap;"></div>
+    </div>
     <button class="btn-sec" id="cfgSave">Save config</button>
     <span id="cfgMsg" class="hint"></span>
   </div>
@@ -337,6 +342,8 @@ async function loadConfig(){
   el('cfgPinnedEnabled').checked = !!c.long_pinned_comment_enabled;
   el('cfgPinnedText').value = c.long_pinned_comment_text||'';
   el('cfgTelegramAlertEnabled').checked = !!c.long_telegram_alert_enabled;
+  el('cfgTelegramTemplate').value = c.long_telegram_alert_template||'';
+  updateTelegramPreview();
   await loadTelegramTargets(c.telegram_alert_target);
   applyPinnedDefaults(c);
   applyTelegramAlertDefaults(c);
@@ -374,6 +381,20 @@ function applyTelegramAlertDefaults(c){
   if (!c) return;
   const cb = el('telegramAlert');
   if (cb) cb.checked = !!c.long_telegram_alert_enabled;
+}
+
+// Show what the configured alert will look like with sample values. Rendered as
+// text (textContent): the user sees the exact markup that message-cli receives.
+function updateTelegramPreview(){
+  const ta = el('cfgTelegramTemplate');
+  const box = el('cfgTelegramPreview');
+  if (!ta || !box) return;
+  const custom = (ta.value || '').trim();
+  const tpl = custom || '✅ Vidéo publiée : {title}\n{url}';
+  const sample = { title: 'Mon titre de vidéo', url: 'https://www.youtube.com/watch?v=xxxxxxxxxxx', video_id: 'xxxxxxxxxxx' };
+  let text = tpl;
+  for (const key of Object.keys(sample)) text = text.split('{' + key + '}').join(sample[key]);
+  box.textContent = (custom ? 'Preview:\n' : 'Preview (default template):\n') + text;
 }
 
 async function loadTelegramTargets(selected){
@@ -473,6 +494,7 @@ async function saveConfig(){
     long_pinned_comment_text: el('cfgPinnedText').value,
     long_telegram_alert_enabled: el('cfgTelegramAlertEnabled').checked,
     telegram_alert_target: el('cfgTelegramTarget').value,
+    long_telegram_alert_template: el('cfgTelegramTemplate').value,
     modal_usage_url: el('cfgModalUrl').value,
     transcript_mode: el('cfgGroq').checked ? 'groq' : 'normal',
     transcript_model: el('cfgModel').value,
